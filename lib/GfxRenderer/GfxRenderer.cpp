@@ -1,6 +1,33 @@
 #include "GfxRenderer.h"
 
 #include <Utf8.h>
+#include <miniz.h>
+
+namespace {
+bool inflateOneShot(const uint8_t* inputBuf, const size_t deflatedSize, uint8_t* outputBuf, const size_t inflatedSize) {
+  // Setup inflator
+  const auto inflator = static_cast<tinfl_decompressor*>(malloc(sizeof(tinfl_decompressor)));
+  if (!inflator) {
+    Serial.printf("[%lu] [ZIP] Failed to allocate memory for inflator\n", millis());
+    return false;
+  }
+  memset(inflator, 0, sizeof(tinfl_decompressor));
+  tinfl_init(inflator);
+
+  size_t inBytes = deflatedSize;
+  size_t outBytes = inflatedSize;
+  const tinfl_status status = tinfl_decompress(inflator, inputBuf, &inBytes, nullptr, outputBuf, &outBytes,
+                                               TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+  free(inflator);
+
+  if (status != TINFL_STATUS_DONE) {
+    Serial.printf("[%lu] [ZIP] tinfl_decompress() failed with status %d\n", millis(), status);
+    return false;
+  }
+
+  return true;
+}
+}  // namespace
 
 void GfxRenderer::insertFont(const int fontId, EpdFontFamily font) { fontMap.insert({fontId, font}); }
 
@@ -616,50 +643,80 @@ void GfxRenderer::renderChar(const EpdFontFamily& fontFamily, const uint32_t cp,
   }
 
   const int is2Bit = fontFamily.getData(style)->is2Bit;
-  const uint32_t offset = glyph->dataOffset;
+  // const uint32_t offset = glyph->dataOffset;
+  // const uint32_t dataLength = glyph->dataLength;
   const uint8_t width = glyph->width;
   const uint8_t height = glyph->height;
   const int left = glyph->left;
+  const size_t outputDataSize = is2Bit ? ((width * height + 3) / 4) : ((width * height + 7) / 8);
 
-  const uint8_t* bitmap = nullptr;
-  bitmap = &fontFamily.getData(style)->bitmap[offset];
+  if (outputDataSize != glyph->dataLength && !glyph->compressed) {
+    Serial.printf("[%lu] [GFX] Glyph bitmap size mismatch for codepoint %d (expected %zu, got %d)\n", millis(), cp,
+                  outputDataSize, glyph->dataLength);
+  }
 
-  if (bitmap != nullptr) {
-    for (int glyphY = 0; glyphY < height; glyphY++) {
-      const int screenY = *y - glyph->top + glyphY;
-      for (int glyphX = 0; glyphX < width; glyphX++) {
-        const int pixelPosition = glyphY * width + glyphX;
-        const int screenX = *x + left + glyphX;
+  uint8_t* bitmapData = nullptr;
+  const uint8_t* bitmap;
 
-        if (is2Bit) {
-          const uint8_t byte = bitmap[pixelPosition / 4];
-          const uint8_t bit_index = (3 - pixelPosition % 4) * 2;
-          // the direct bit from the font is 0 -> white, 1 -> light gray, 2 -> dark gray, 3 -> black
-          // we swap this to better match the way images and screen think about colors:
-          // 0 -> black, 1 -> dark grey, 2 -> light grey, 3 -> white
-          const uint8_t bmpVal = 3 - (byte >> bit_index) & 0x3;
+  if (glyph->compressed) {
+    bitmapData = static_cast<uint8_t*>(malloc(outputDataSize));
+    if (!bitmapData) {
+      Serial.printf("[%lu] [GFX] Failed to allocate memory for glyph bitmap for codepoint %d\n", millis(), cp);
+      return;
+    }
 
-          if (renderMode == BW && bmpVal < 3) {
-            // Black (also paints over the grays in BW mode)
-            drawPixel(screenX, screenY, pixelState);
-          } else if (renderMode == GRAYSCALE_MSB && (bmpVal == 1 || bmpVal == 2)) {
-            // Light gray (also mark the MSB if it's going to be a dark gray too)
-            // We have to flag pixels in reverse for the gray buffers, as 0 leave alone, 1 update
-            drawPixel(screenX, screenY, false);
-          } else if (renderMode == GRAYSCALE_LSB && bmpVal == 1) {
-            // Dark gray
-            drawPixel(screenX, screenY, false);
-          }
-        } else {
-          const uint8_t byte = bitmap[pixelPosition / 8];
-          const uint8_t bit_index = 7 - (pixelPosition % 8);
+    const auto success = inflateOneShot(&fontFamily.getData(style)->bitmap[glyph->dataOffset], glyph->dataLength,
+                                        bitmapData, outputDataSize);
+    if (!success) {
+      Serial.printf("[%lu] [GFX] Failed to inflate glyph bitmap for codepoint %d\n", millis(), cp);
+      free(bitmapData);
+      *x += glyph->advanceX;
+      return;
+    }
 
-          if ((byte >> bit_index) & 1) {
-            drawPixel(screenX, screenY, pixelState);
-          }
+    bitmap = bitmapData;
+  } else {
+    bitmap = &fontFamily.getData(style)->bitmap[glyph->dataOffset];
+  }
+
+  for (int glyphY = 0; glyphY < height; glyphY++) {
+    const int screenY = *y - glyph->top + glyphY;
+    for (int glyphX = 0; glyphX < width; glyphX++) {
+      const int pixelPosition = glyphY * width + glyphX;
+      const int screenX = *x + left + glyphX;
+
+      if (is2Bit) {
+        const uint8_t byte = bitmap[pixelPosition / 4];
+        const uint8_t bit_index = (3 - pixelPosition % 4) * 2;
+        // the direct bit from the font is 0 -> white, 1 -> light gray, 2 -> dark gray, 3 -> black
+        // we swap this to better match the way images and screen think about colors:
+        // 0 -> black, 1 -> dark grey, 2 -> light grey, 3 -> white
+        const uint8_t bmpVal = 3 - (byte >> bit_index) & 0x3;
+
+        if (renderMode == BW && bmpVal < 3) {
+          // Black (also paints over the grays in BW mode)
+          drawPixel(screenX, screenY, pixelState);
+        } else if (renderMode == GRAYSCALE_MSB && (bmpVal == 1 || bmpVal == 2)) {
+          // Light gray (also mark the MSB if it's going to be a dark gray too)
+          // We have to flag pixels in reverse for the gray buffers, as 0 leave alone, 1 update
+          drawPixel(screenX, screenY, false);
+        } else if (renderMode == GRAYSCALE_LSB && bmpVal == 1) {
+          // Dark gray
+          drawPixel(screenX, screenY, false);
+        }
+      } else {
+        const uint8_t byte = bitmap[pixelPosition / 8];
+        const uint8_t bit_index = 7 - (pixelPosition % 8);
+
+        if ((byte >> bit_index) & 1) {
+          drawPixel(screenX, screenY, pixelState);
         }
       }
     }
+  }
+
+  if (bitmapData) {
+    free(bitmapData);
   }
 
   *x += glyph->advanceX;
