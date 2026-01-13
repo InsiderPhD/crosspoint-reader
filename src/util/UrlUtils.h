@@ -30,7 +30,7 @@ std::string urlEncode(const std::string& value);
  * If username and password are provided, adds them to the URL.
  * Example: https://username:password@example.com/path
  */
-std::string buildUrlWithAuth(const std::string& serverUrl, const std::string& path, 
-                              const std::string& username, const std::string& password);
+std::string buildUrlWithAuth(const std::string& serverUrl, const std::string& path, const std::string& username,
+                             const std::string& password);
 
 }  // namespace UrlUtils

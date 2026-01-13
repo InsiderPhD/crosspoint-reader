@@ -1,7 +1,7 @@
 #include "UrlUtils.h"
 
-#include <sstream>
 #include <iomanip>
+#include <sstream>
 
 namespace UrlUtils {
 
@@ -61,15 +61,15 @@ std::string urlEncode(const std::string& value) {
   return escaped.str();
 }
 
-std::string buildUrlWithAuth(const std::string& serverUrl, const std::string& path,
-                              const std::string& username, const std::string& password) {
+std::string buildUrlWithAuth(const std::string& serverUrl, const std::string& path, const std::string& username,
+                             const std::string& password) {
   // If no credentials, use regular buildUrl
   if (username.empty() && password.empty()) {
     return buildUrl(serverUrl, path);
   }
 
   std::string urlWithProtocol = ensureProtocol(serverUrl);
-  
+
   // Find protocol end
   const size_t protocolEnd = urlWithProtocol.find("://");
   if (protocolEnd == std::string::npos) {

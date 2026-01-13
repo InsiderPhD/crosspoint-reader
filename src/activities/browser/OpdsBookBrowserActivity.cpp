@@ -261,9 +261,7 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
     return;
   }
 
-  std::string url = UrlUtils::buildUrlWithAuth(serverUrl, path, 
-                                                SETTINGS.calibreUsername, 
-                                                SETTINGS.calibrePassword);
+  std::string url = UrlUtils::buildUrlWithAuth(serverUrl, path, SETTINGS.calibreUsername, SETTINGS.calibrePassword);
   Serial.printf("[%lu] [OPDS] Fetching: %s\n", millis(), url.c_str());
 
   std::string content;
@@ -337,9 +335,8 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   updateRequired = true;
 
   // Build full download URL
-  std::string downloadUrl = UrlUtils::buildUrlWithAuth(SETTINGS.opdsServerUrl, book.href,
-                                                        SETTINGS.calibreUsername,
-                                                        SETTINGS.calibrePassword);
+  std::string downloadUrl =
+      UrlUtils::buildUrlWithAuth(SETTINGS.opdsServerUrl, book.href, SETTINGS.calibreUsername, SETTINGS.calibrePassword);
 
   // Create Calibre-style folder structure: /Books/AuthorName/BookName/BookFile.epub
   std::string authorFolder = book.author.empty() ? "Unknown Author" : StringUtils::sanitizeFilename(book.author);
