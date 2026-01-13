@@ -51,7 +51,8 @@ struct SettingInfo {
     return {key, name, SettingType::VALUE, ptr, nullptr, 0, false, {}, valueRange};
   }
 
-  static SettingInfo String(const char* key, const char* name, char* ptr, size_t maxLen, bool hideFromDeviceUI = false) {
+  static SettingInfo String(const char* key, const char* name, char* ptr, size_t maxLen,
+                            bool hideFromDeviceUI = false) {
     return {key, name, SettingType::STRING, nullptr, ptr, maxLen, hideFromDeviceUI, {}, {}};
   }
 };
