@@ -20,6 +20,7 @@ class HomeActivity final : public Activity {
   uint8_t* coverBuffer = nullptr;  // HomeActivity's own buffer for cover image
   std::string lastBookTitle;
   std::string lastBookAuthor;
+  uint8_t lastBookProgress = 0;
   std::string coverBmpPath;
   const std::function<void()> onContinueReading;
   const std::function<void()> onReaderOpen;

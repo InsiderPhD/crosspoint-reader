@@ -20,7 +20,7 @@ class CrossPointSettings {
   enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1 };
 
   // Status bar display type enum
-  enum STATUS_BAR_MODE { NONE = 0, NO_PROGRESS = 1, FULL = 2 };
+  enum STATUS_BAR_MODE { NONE = 0, NO_PROGRESS = 1, FULL = 2, MIN = 3 };
 
   enum ORIENTATION {
     PORTRAIT = 0,      // 480x800 logical coordinates (current default)
@@ -88,6 +88,8 @@ class CrossPointSettings {
   uint8_t screenMargin = 5;
   // OPDS browser settings
   char opdsServerUrl[128] = "";
+  char calibreUsername[64] = "";
+  char calibrePassword[64] = "";
   // Hide battery percentage
   uint8_t hideBatteryPercentage = HIDE_NEVER;
 
