@@ -195,11 +195,52 @@ void FileSelectionActivity::render() const {
   const auto pageStartIndex = selectorIndex / PAGE_ITEMS * PAGE_ITEMS;
   renderer.fillRect(0, 60 + (selectorIndex % PAGE_ITEMS) * 30 - 2, pageWidth - 1, 30);
   for (size_t i = pageStartIndex; i < files.size() && i < pageStartIndex + PAGE_ITEMS; i++) {
-    auto item = renderer.truncatedText(UI_10_FONT_ID, files[i].c_str(), renderer.getScreenWidth() - 40);
-    renderer.drawText(UI_10_FONT_ID, 20, 60 + (i % PAGE_ITEMS) * 30, item.c_str(), i != selectorIndex);
+    const int yPos = 60 + (i % PAGE_ITEMS) * 30;
+    const bool isSelected = i == selectorIndex;
+    
+    // Get progress for epub files
+    uint8_t progress = 0;
+    if (StringUtils::checkFileExtension(files[i], ".epub")) {
+      progress = getBookProgress(basepath + "/" + files[i]);
+    }
+    
+    // Calculate available width for filename (leave space for progress)
+    const int progressWidth = progress > 0 ? 50 : 0;  // Reserve space for "XX%"
+    const int availableWidth = pageWidth - 40 - progressWidth;
+    
+    auto item = renderer.truncatedText(UI_10_FONT_ID, files[i].c_str(), availableWidth);
+    renderer.drawText(UI_10_FONT_ID, 20, yPos, item.c_str(), !isSelected);
+    
+    // Draw progress percentage
+    if (progress > 0) {
+      char progressText[8];
+      snprintf(progressText, sizeof(progressText), "%d%%", progress);
+      const int progressTextWidth = renderer.getTextWidth(SMALL_FONT_ID, progressText);
+      renderer.drawText(SMALL_FONT_ID, pageWidth - 20 - progressTextWidth, yPos + 2, progressText, !isSelected);
+    }
   }
 
   renderer.displayBuffer();
+}
+
+uint8_t FileSelectionActivity::getBookProgress(const std::string& filepath) const {
+  // Create cache path for this epub
+  const size_t filepathHash = std::hash<std::string>{}(filepath);
+  const std::string cachePath = "/.crosspoint/epub_" + std::to_string(filepathHash);
+  const std::string progressPath = cachePath + "/progress.bin";
+  
+  FsFile f;
+  if (SdMan.openFileForRead("FSA", progressPath.c_str(), f)) {
+    uint8_t data[5];
+    const size_t bytesRead = f.read(data, 5);
+    f.close();
+    
+    if (bytesRead >= 5) {
+      return data[4];  // Return cached progress percentage
+    }
+  }
+  
+  return 0;  // No progress found
 }
 
 size_t FileSelectionActivity::findEntry(const std::string& name) const {

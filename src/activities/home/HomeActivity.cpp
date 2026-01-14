@@ -46,7 +46,7 @@ void HomeActivity::onEnter() {
       lastBookTitle = lastBookTitle.substr(lastSlash + 1);
     }
 
-    // If epub, try to load the metadata for title/author
+    // If epub, try to load the metadata for title/author and progress
     if (StringUtils::checkFileExtension(lastBookTitle, ".epub")) {
       Epub epub(APP_STATE.openEpubPath, "/.crosspoint");
       epub.load(false);
@@ -55,6 +55,24 @@ void HomeActivity::onEnter() {
       }
       if (!epub.getAuthor().empty()) {
         lastBookAuthor = std::string(epub.getAuthor());
+      }
+
+      // Load progress from cache
+      FsFile f;
+      if (SdMan.openFileForRead("HOME", epub.getCachePath() + "/progress.bin", f)) {
+        uint8_t data[5];
+        const size_t bytesRead = f.read(data, 5);
+        
+        if (bytesRead >= 5) {
+          // New format: includes cached progress percentage
+          lastBookProgress = data[4];
+        } else if (bytesRead == 4) {
+          // Old format: calculate from spine index
+          const int savedSpineIndex = data[0] + (data[1] << 8);
+          const float estimatedChapterProgress = 0.5f;
+          lastBookProgress = epub.calculateProgress(savedSpineIndex, estimatedChapterProgress);
+        }
+        f.close();
       }
     } else if (StringUtils::checkFileExtension(lastBookTitle, ".xtch")) {
       lastBookTitle.resize(lastBookTitle.length() - 5);
@@ -257,6 +275,9 @@ void HomeActivity::render() const {
     if (!lastBookAuthor.empty()) {
       totalTextHeight += renderer.getLineHeight(UI_10_FONT_ID) * 3 / 2;
     }
+    if (lastBookProgress > 0) {
+      totalTextHeight += renderer.getLineHeight(SMALL_FONT_ID) * 3 / 2;
+    }
 
     // Vertically center the title block within the card
     int titleYStart = bookY + (bookHeight - totalTextHeight) / 2;
@@ -275,6 +296,14 @@ void HomeActivity::render() const {
         trimmedAuthor.append("...");
       }
       renderer.drawCenteredText(UI_10_FONT_ID, titleYStart, trimmedAuthor.c_str(), !bookSelected);
+      titleYStart += renderer.getLineHeight(UI_10_FONT_ID);
+    }
+
+    if (lastBookProgress > 0) {
+      titleYStart += renderer.getLineHeight(SMALL_FONT_ID) / 2;
+      char progressText[8];
+      snprintf(progressText, sizeof(progressText), "%d%%", lastBookProgress);
+      renderer.drawCenteredText(SMALL_FONT_ID, titleYStart, progressText, !bookSelected);
     }
 
     renderer.drawCenteredText(UI_10_FONT_ID, bookY + bookHeight - renderer.getLineHeight(UI_10_FONT_ID) * 3 / 2,

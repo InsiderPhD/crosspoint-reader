@@ -16,6 +16,7 @@ class HomeActivity final : public Activity {
   bool hasOpdsUrl = false;
   std::string lastBookTitle;
   std::string lastBookAuthor;
+  uint8_t lastBookProgress = 0;
   const std::function<void()> onContinueReading;
   const std::function<void()> onReaderOpen;
   const std::function<void()> onSettingsOpen;

@@ -137,15 +137,15 @@ void EpubReaderActivity::loop() {
     xSemaphoreGive(renderingMutex);
   }
 
-  // Long press BACK (1s+) goes directly to home
+  // Long press BACK (1s+) goes to file selection
   if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= goHomeMs) {
-    onGoHome();
+    onGoBack();
     return;
   }
 
-  // Short press BACK goes to file selection
+  // Short press BACK goes directly to home
   if (mappedInput.wasReleased(MappedInputManager::Button::Back) && mappedInput.getHeldTime() < goHomeMs) {
-    onGoBack();
+    onGoHome();
     return;
   }
 
@@ -360,14 +360,20 @@ void EpubReaderActivity::renderScreen() {
     Serial.printf("[%lu] [ERS] Rendered page in %dms\n", millis(), millis() - start);
   }
 
+  // Save progress with cached percentage
   FsFile f;
   if (SdMan.openFileForWrite("ERS", epub->getCachePath() + "/progress.bin", f)) {
-    uint8_t data[4];
+    // Calculate accurate progress
+    const float sectionChapterProg = static_cast<float>(section->currentPage) / section->pageCount;
+    const uint8_t bookProgress = epub->calculateProgress(currentSpineIndex, sectionChapterProg);
+    
+    uint8_t data[5];
     data[0] = currentSpineIndex & 0xFF;
     data[1] = (currentSpineIndex >> 8) & 0xFF;
     data[2] = section->currentPage & 0xFF;
     data[3] = (section->currentPage >> 8) & 0xFF;
-    f.write(data, 4);
+    data[4] = bookProgress;  // Cached progress percentage
+    f.write(data, 5);
     f.close();
   }
 }
@@ -419,6 +425,7 @@ void EpubReaderActivity::renderStatusBar(const int orientedMarginRight, const in
                            SETTINGS.statusBar == CrossPointSettings::STATUS_BAR_MODE::FULL;
   const bool showChapterTitle = SETTINGS.statusBar == CrossPointSettings::STATUS_BAR_MODE::NO_PROGRESS ||
                                 SETTINGS.statusBar == CrossPointSettings::STATUS_BAR_MODE::FULL;
+  const bool showMinimalBar = SETTINGS.statusBar == CrossPointSettings::STATUS_BAR_MODE::MIN;
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage == CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER;
 
@@ -468,5 +475,17 @@ void EpubReaderActivity::renderStatusBar(const int orientedMarginRight, const in
     }
 
     renderer.drawText(SMALL_FONT_ID, titleMarginLeft + (availableTextWidth - titleWidth) / 2, textY, title.c_str());
+  }
+
+  // Draw minimal progress bar at the very bottom (only in Min mode)
+  if (showMinimalBar) {
+    const float sectionChapterProg = static_cast<float>(section->currentPage) / section->pageCount;
+    const uint8_t bookProgress = epub->calculateProgress(currentSpineIndex, sectionChapterProg);
+    const int barHeight = 5;
+    const int barY = screenHeight - barHeight - 2;
+    const int barWidth = renderer.getScreenWidth() * bookProgress / 100;
+
+    // Draw the progress bar (filled rectangle)
+    renderer.fillRect(0, barY, barWidth, barHeight);
   }
 }
