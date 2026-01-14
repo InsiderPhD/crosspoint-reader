@@ -14,9 +14,14 @@ class HomeActivity final : public Activity {
   bool updateRequired = false;
   bool hasContinueReading = false;
   bool hasOpdsUrl = false;
+  bool hasCoverImage = false;
+  bool coverRendered = false;      // Track if cover has been rendered once
+  bool coverBufferStored = false;  // Track if cover buffer is stored
+  uint8_t* coverBuffer = nullptr;  // HomeActivity's own buffer for cover image
   std::string lastBookTitle;
   std::string lastBookAuthor;
   uint8_t lastBookProgress = 0;
+  std::string coverBmpPath;
   const std::function<void()> onContinueReading;
   const std::function<void()> onReaderOpen;
   const std::function<void()> onSettingsOpen;
@@ -25,8 +30,11 @@ class HomeActivity final : public Activity {
 
   static void taskTrampoline(void* param);
   [[noreturn]] void displayTaskLoop();
-  void render() const;
+  void render();
   int getMenuItemCount() const;
+  bool storeCoverBuffer();    // Store frame buffer for cover image
+  bool restoreCoverBuffer();  // Restore frame buffer from stored cover
+  void freeCoverBuffer();     // Free the stored cover buffer
 
  public:
   explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
