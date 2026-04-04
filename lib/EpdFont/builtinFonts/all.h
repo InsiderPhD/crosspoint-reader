@@ -1,5 +1,9 @@
 #pragma once
 
+#include <builtinFonts/bookerly_10_bold.h>
+#include <builtinFonts/bookerly_10_bolditalic.h>
+#include <builtinFonts/bookerly_10_italic.h>
+#include <builtinFonts/bookerly_10_regular.h>
 #include <builtinFonts/bookerly_12_bold.h>
 #include <builtinFonts/bookerly_12_bolditalic.h>
 #include <builtinFonts/bookerly_12_italic.h>

@@ -36,12 +36,14 @@ void ClearCacheActivity::render(RenderLock&&) {
 
     const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_CLEAR_BUTTON), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
 
   if (state == CLEARING) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_CLEARING_CACHE));
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -56,6 +58,7 @@ void ClearCacheActivity::render(RenderLock&&) {
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -67,6 +70,7 @@ void ClearCacheActivity::render(RenderLock&&) {
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }

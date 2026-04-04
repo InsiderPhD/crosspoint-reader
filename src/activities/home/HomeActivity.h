@@ -4,9 +4,9 @@
 
 #include "../Activity.h"
 #include "./FileBrowserActivity.h"
+#include "RecentBooksStore.h"
 #include "util/ButtonNavigator.h"
 
-struct RecentBook;
 struct Rect;
 
 class HomeActivity final : public Activity {
@@ -18,6 +18,11 @@ class HomeActivity final : public Activity {
   bool hasOpdsUrl = false;
   bool coverRendered = false;      // Track if cover has been rendered once
   bool coverBufferStored = false;  // Track if cover buffer is stored
+  bool longPressBookTriggered = false;
+  bool showingBookOptions = false;
+  bool awaitingBookOptionsRelease = false;
+  int bookOptionsIndex = 0;
+  static constexpr int BOOK_OPTIONS_COUNT = 2;
   uint8_t* coverBuffer = nullptr;  // HomeActivity's own buffer for cover image
   std::vector<RecentBook> recentBooks;
   void onSelectBook(const std::string& path);
@@ -26,6 +31,7 @@ class HomeActivity final : public Activity {
   void onSettingsOpen();
   void onFileTransferOpen();
   void onOpdsBrowserOpen();
+  void onStatsOpen();
 
   int getMenuItemCount() const;
   bool storeCoverBuffer();    // Store frame buffer for cover image

@@ -298,6 +298,8 @@ int CrossPointSettings::getReaderFontId() const {
     case BOOKERLY:
     default:
       switch (fontSize) {
+        case X_SMALL:
+          return BOOKERLY_10_FONT_ID;
         case SMALL:
           return BOOKERLY_12_FONT_ID;
         case MEDIUM:
@@ -310,6 +312,8 @@ int CrossPointSettings::getReaderFontId() const {
       }
     case NOTOSANS:
       switch (fontSize) {
+        case X_SMALL:
+          return SMALL_FONT_ID;  // NotoSans 8pt (no 10pt NotoSans available)
         case SMALL:
           return NOTOSANS_12_FONT_ID;
         case MEDIUM:
@@ -331,6 +335,8 @@ int CrossPointSettings::getReaderFontId() const {
           return OPENDYSLEXIC_12_FONT_ID;
         case EXTRA_LARGE:
           return OPENDYSLEXIC_14_FONT_ID;
+        case X_SMALL:
+          return OPENDYSLEXIC_8_FONT_ID;  // No smaller available; same as SMALL
       }
   }
 }

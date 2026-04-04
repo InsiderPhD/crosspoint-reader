@@ -135,6 +135,7 @@ void OtaUpdateActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, top + height + metrics.verticalSpacing, tr(STR_POWER_ON_HINT));
   }
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
 

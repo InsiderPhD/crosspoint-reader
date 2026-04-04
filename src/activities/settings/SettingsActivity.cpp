@@ -255,5 +255,6 @@ void SettingsActivity::render(RenderLock&&) {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   // Always use standard refresh for settings screen
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

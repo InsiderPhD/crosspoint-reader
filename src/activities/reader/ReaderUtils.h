@@ -49,6 +49,27 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   return {prev, next};
 }
 
+// Called on each user-initiated page turn to update the rolling reading speed estimate.
+// lastTurnMs should be a per-activity member initialised to 0.
+inline void updateReadingSpeed(unsigned long& lastTurnMs) {
+  const unsigned long now = millis();
+  if (lastTurnMs > 0) {
+    const unsigned long elapsed = now - lastTurnMs;
+    // Only count if between 2s and 5 minutes — ignores idle gaps and accidental taps
+    if (elapsed >= 2000UL && elapsed <= 300000UL) {
+      const uint16_t secsPerPage = static_cast<uint16_t>(elapsed / 1000UL);
+      if (SETTINGS.readingSpeedSecondsPerPage == 0) {
+        SETTINGS.readingSpeedSecondsPerPage = secsPerPage;
+      } else {
+        // Exponential moving average, alpha = 0.15
+        SETTINGS.readingSpeedSecondsPerPage = static_cast<uint16_t>(
+            0.85f * static_cast<float>(SETTINGS.readingSpeedSecondsPerPage) + 0.15f * static_cast<float>(secsPerPage));
+      }
+    }
+  }
+  lastTurnMs = now;
+}
+
 inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
   if (pagesUntilFullRefresh <= 1) {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);

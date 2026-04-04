@@ -12,6 +12,7 @@
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
+#include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -40,6 +41,9 @@ void TxtReaderActivity::onEnter() {
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(filePath, fileName, "", "");
 
+  readingSessionStartMs = millis();
+  sessionPageTurns = 0;
+
   // Trigger first update
   requestUpdate();
 }
@@ -54,6 +58,27 @@ void TxtReaderActivity::onExit() {
   currentPageLines.clear();
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();
+  if (SETTINGS.readingSpeedSecondsPerPage > 0) {
+    SETTINGS.saveToFile();
+  }
+
+  if (readingSessionStartMs > 0) {
+    const unsigned long elapsedMs = millis() - readingSessionStartMs;
+    if (elapsedMs >= 5000UL) {
+      READING_STATS.addReadingTime(elapsedMs / 1000UL);
+      READING_STATS.addSession();
+    }
+  }
+  if (sessionPageTurns > 0) {
+    READING_STATS.addPageTurns(sessionPageTurns);
+  }
+  if (currentPage >= totalPages - 1 && totalPages > 1) {
+    READING_STATS.addBookFinished();
+  }
+  if (readingSessionStartMs > 0 || sessionPageTurns > 0) {
+    READING_STATS.saveToFile();
+  }
+
   txt.reset();
 }
 
@@ -75,6 +100,9 @@ void TxtReaderActivity::loop() {
   if (!prevTriggered && !nextTriggered) {
     return;
   }
+
+  ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
+  sessionPageTurns++;
 
   if (prevTriggered && currentPage > 0) {
     currentPage--;
@@ -375,9 +403,11 @@ void TxtReaderActivity::renderPage() {
   renderLines();
   renderStatusBar();
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
-  if (SETTINGS.textAntiAliasing) {
+  // Skip anti-aliasing in dark mode (AA LUT was computed for black-on-white)
+  if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode) {
     ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
   }
   // scope destructor clears font cache via FontCacheManager
@@ -389,7 +419,14 @@ void TxtReaderActivity::renderStatusBar() const {
   if (SETTINGS.statusBarTitle != CrossPointSettings::STATUS_BAR_TITLE::HIDE_TITLE) {
     title = txt->getTitle();
   }
-  GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title);
+  uint32_t timeLeftSeconds = 0;
+  if (SETTINGS.statusBarTimeLeft != CrossPointSettings::TIME_LEFT_HIDE && SETTINGS.readingSpeedSecondsPerPage > 0) {
+    const int pagesLeft = totalPages - currentPage - 1;
+    if (pagesLeft > 0) {
+      timeLeftSeconds = static_cast<uint32_t>(pagesLeft) * SETTINGS.readingSpeedSecondsPerPage;
+    }
+  }
+  GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title, 0, 0, timeLeftSeconds);
 }
 
 void TxtReaderActivity::saveProgress() const {
@@ -402,6 +439,11 @@ void TxtReaderActivity::saveProgress() const {
     data[3] = 0;
     f.write(data, 4);
     f.close();
+  }
+
+  if (totalPages > 0) {
+    const auto progressPercent = static_cast<int8_t>(100 * currentPage / totalPages);
+    RECENT_BOOKS.updateProgress(txt->getPath(), progressPercent);
   }
 }
 

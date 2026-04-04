@@ -1,5 +1,6 @@
 #include "EpubReaderActivity.h"
 
+#include <algorithm>
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
@@ -21,6 +22,7 @@
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
+#include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ScreenshotUtil.h"
@@ -29,7 +31,8 @@ namespace {
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
 constexpr unsigned long skipChapterMs = 700;
 // pages per minute, first item is 1 to prevent division by zero if accessed
-const std::vector<int> PAGE_TURN_LABELS = {1, 1, 3, 6, 12};
+// Index 0 = Off, 1 = Auto (uses readingSpeedSecondsPerPage), 2-5 = fixed durations
+const std::vector<unsigned long> PAGE_TURN_DURATIONS_MS = {0, 0, 60000UL, 30000UL, 10000UL, 5000UL};
 
 int clampPercent(int percent) {
   if (percent < 0) {
@@ -42,6 +45,43 @@ int clampPercent(int percent) {
 }
 
 }  // namespace
+
+void EpubReaderActivity::buildBookPageCache() {
+  const int spineCount = epub->getSpineItemsCount();
+  spinePageCountCache.clear();
+  spinePageCountCache.reserve(spineCount);
+  cachedTotalBookPages = 0;
+
+  // First pass: read actual page counts from each cached section file header
+  int totalKnownPages = 0;
+  size_t totalKnownBytes = 0;
+  for (int i = 0; i < spineCount; i++) {
+    const std::string path = epub->getCachePath() + "/sections/" + std::to_string(i) + ".bin";
+    spinePageCountCache.push_back(Section::readCachedPageCount(path));
+    if (spinePageCountCache[i] > 0) {
+      const size_t prevSize = (i > 0) ? epub->getCumulativeSpineItemSize(i - 1) : 0;
+      totalKnownPages += spinePageCountCache[i];
+      totalKnownBytes += epub->getCumulativeSpineItemSize(i) - prevSize;
+    }
+  }
+
+  if (totalKnownBytes == 0) {
+    return;  // No rendered chapters yet; time-left will fall back to old method
+  }
+
+  // Second pass: estimate uncached spines using pages-per-byte from known spines, sum total
+  const float pagesPerByte = static_cast<float>(totalKnownPages) / static_cast<float>(totalKnownBytes);
+  for (int i = 0; i < spineCount; i++) {
+    if (spinePageCountCache[i] == 0) {
+      const size_t prevSize = (i > 0) ? epub->getCumulativeSpineItemSize(i - 1) : 0;
+      const size_t itemSize = epub->getCumulativeSpineItemSize(i) - prevSize;
+      spinePageCountCache[i] = std::max<uint16_t>(1, static_cast<uint16_t>(pagesPerByte * static_cast<float>(itemSize)));
+    }
+    cachedTotalBookPages += spinePageCountCache[i];
+  }
+  LOG_DBG("ERS", "Book page cache built: %d total pages across %d spines (%d known)", cachedTotalBookPages, spineCount,
+          totalKnownPages);
+}
 
 void EpubReaderActivity::onEnter() {
   Activity::onEnter();
@@ -86,6 +126,11 @@ void EpubReaderActivity::onEnter() {
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
 
+  readingSessionStartMs = millis();
+  sessionPageTurns = 0;
+
+  buildBookPageCache();
+
   // Trigger first update
   requestUpdate();
 }
@@ -98,6 +143,33 @@ void EpubReaderActivity::onExit() {
 
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();
+  if (SETTINGS.readingSpeedSecondsPerPage > 0) {
+    SETTINGS.saveToFile();
+  }
+
+  // Persist reading stats for this session
+  if (readingSessionStartMs > 0) {
+    const unsigned long elapsedMs = millis() - readingSessionStartMs;
+    if (elapsedMs >= 5000UL) {  // ignore sessions under 5s (accidental opens)
+      READING_STATS.addReadingTime(elapsedMs / 1000UL);
+      READING_STATS.addSession();
+    }
+  }
+  if (sessionPageTurns > 0) {
+    READING_STATS.addPageTurns(sessionPageTurns);
+  }
+  if (!bookFinishedRecorded && epub && epub->getBookSize() > 0 && section && section->pageCount > 0) {
+    const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
+    const int progress = static_cast<int>(epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f + 0.5f);
+    if (progress >= 90) {
+      bookFinishedRecorded = true;
+      READING_STATS.addBookFinished();
+    }
+  }
+  if (readingSessionStartMs > 0 || sessionPageTurns > 0 || bookFinishedRecorded) {
+    READING_STATS.saveToFile();
+  }
+
   section.reset();
   epub.reset();
 }
@@ -145,9 +217,40 @@ void EpubReaderActivity::loop() {
       bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
     }
     const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
+
+    uint32_t timeLeftChapter = 0;
+    uint32_t timeLeftBook = 0;
+    if (SETTINGS.readingSpeedSecondsPerPage > 0 && section) {
+      const int pagesLeftChapter = totalPages - currentPage;
+      if (pagesLeftChapter > 0) {
+        timeLeftChapter = static_cast<uint32_t>(pagesLeftChapter) * SETTINGS.readingSpeedSecondsPerPage;
+      }
+      if (!spinePageCountCache.empty() && cachedTotalBookPages > 0) {
+        int pagesBeforeChapter = 0;
+        for (int i = 0; i < currentSpineIndex && i < static_cast<int>(spinePageCountCache.size()); i++) {
+          pagesBeforeChapter += spinePageCountCache[i];
+        }
+        const int pagesLeftBook = cachedTotalBookPages - pagesBeforeChapter - currentPage;
+        if (pagesLeftBook > 0) {
+          timeLeftBook = static_cast<uint32_t>(pagesLeftBook) * SETTINGS.readingSpeedSecondsPerPage;
+        }
+      } else {
+        // Fallback: estimate from current chapter's byte fraction of the book
+        const float sectionStart = epub->calculateProgress(currentSpineIndex, 0.0f);
+        const float sectionEnd = epub->calculateProgress(currentSpineIndex, 1.0f);
+        const float sectionFraction = sectionEnd - sectionStart;
+        const int pagesLeftBook = (sectionFraction > 0.001f)
+                                      ? static_cast<int>((1.0f - bookProgress / 100.0f) / sectionFraction * totalPages)
+                                      : pagesLeftChapter;
+        if (pagesLeftBook > 0) {
+          timeLeftBook = static_cast<uint32_t>(pagesLeftBook) * SETTINGS.readingSpeedSecondsPerPage;
+        }
+      }
+    }
+
     startActivityForResult(std::make_unique<EpubReaderMenuActivity>(
                                renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent,
-                               SETTINGS.orientation, !currentPageFootnotes.empty()),
+                               SETTINGS.orientation, !currentPageFootnotes.empty(), timeLeftChapter, timeLeftBook),
                            [this](const ActivityResult& result) {
                              // Always apply orientation change even if the menu was cancelled
                              const auto& menu = std::get<MenuResult>(result.data);
@@ -352,6 +455,19 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       requestUpdate();
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::MARK_AS_COMPLETED: {
+      if (epub) {
+        RECENT_BOOKS.updateProgress(epub->getPath(), 100);
+        RECENT_BOOKS.saveToFile();
+      }
+      if (!bookFinishedRecorded) {
+        bookFinishedRecorded = true;
+        READING_STATS.addBookFinished();
+        READING_STATS.saveToFile();
+      }
+      onGoHome();
+      return;
+    }
     case EpubReaderMenuActivity::MenuAction::GO_HOME: {
       onGoHome();
       return;
@@ -432,14 +548,29 @@ void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
 }
 
 void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption) {
-  if (selectedPageTurnOption == 0 || selectedPageTurnOption >= PAGE_TURN_LABELS.size()) {
+  if (selectedPageTurnOption == 0 || selectedPageTurnOption >= PAGE_TURN_DURATIONS_MS.size()) {
     automaticPageTurnActive = false;
+    autoPageTurnMode = false;
     return;
   }
 
+  unsigned long duration;
+  if (selectedPageTurnOption == 1) {
+    // Auto mode: use calibrated reading speed; disable if uncalibrated
+    if (SETTINGS.readingSpeedSecondsPerPage == 0) {
+      automaticPageTurnActive = false;
+      autoPageTurnMode = false;
+      return;
+    }
+    duration = static_cast<unsigned long>(SETTINGS.readingSpeedSecondsPerPage) * 1000UL;
+    autoPageTurnMode = true;
+  } else {
+    duration = PAGE_TURN_DURATIONS_MS[selectedPageTurnOption];
+    autoPageTurnMode = false;
+  }
+
   lastPageTurnTime = millis();
-  // calculates page turn duration by dividing by number of pages
-  pageTurnDuration = (1UL * 60 * 1000) / PAGE_TURN_LABELS[selectedPageTurnOption];
+  pageTurnDuration = duration;
   automaticPageTurnActive = true;
 
   const uint8_t statusBarHeight = UITheme::getInstance().getStatusBarHeight();
@@ -457,6 +588,8 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
 }
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
+  ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
+  sessionPageTurns++;
   if (isForwardTurn) {
     if (section->currentPage < section->pageCount - 1) {
       section->currentPage++;
@@ -503,8 +636,14 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   // Show end of book screen
   if (currentSpineIndex == epub->getSpineItemsCount()) {
+    if (!bookFinishedRecorded) {
+      bookFinishedRecorded = true;
+      READING_STATS.addBookFinished();
+      READING_STATS.saveToFile();
+    }
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_END_OF_BOOK), true, EpdFontFamily::BOLD);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     automaticPageTurnActive = false;
     return;
@@ -564,6 +703,16 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       section->currentPage = nextPageNumber;
     }
 
+    // Update cache with the actual page count for this chapter now that it's loaded/rendered
+    if (section->pageCount > 0 && currentSpineIndex < static_cast<int>(spinePageCountCache.size())) {
+      const uint16_t oldEstimate = spinePageCountCache[currentSpineIndex];
+      const uint16_t actualCount = section->pageCount;
+      if (oldEstimate != actualCount) {
+        cachedTotalBookPages += static_cast<int>(actualCount) - static_cast<int>(oldEstimate);
+        spinePageCountCache[currentSpineIndex] = actualCount;
+      }
+    }
+
     if (!pendingAnchor.empty()) {
       if (const auto page = section->getPageForAnchor(pendingAnchor)) {
         section->currentPage = *page;
@@ -602,6 +751,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     LOG_DBG("ERS", "No pages to render");
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), true, EpdFontFamily::BOLD);
     renderStatusBar();
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     automaticPageTurnActive = false;
     return;
@@ -611,6 +761,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     LOG_DBG("ERS", "Page out of bounds: %d (max %d)", section->currentPage, section->pageCount);
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_OUT_OF_BOUNDS), true, EpdFontFamily::BOLD);
     renderStatusBar();
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     automaticPageTurnActive = false;
     return;
@@ -659,6 +810,10 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   } else {
     LOG_ERR("ERS", "Could not save progress!");
   }
+
+  const float chapterProgress = (pageCount > 0) ? static_cast<float>(currentPage) / static_cast<float>(pageCount) : 0.0f;
+  const auto progressPercent = static_cast<int8_t>(epub->calculateProgress(spineIndex, chapterProgress) * 100.0f);
+  RECENT_BOOKS.updateProgress(epub->getPath(), progressPercent);
 }
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
@@ -696,17 +851,21 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     int16_t imgX, imgY, imgW, imgH;
     if (page->getImageBoundingBox(imgX, imgY, imgW, imgH)) {
       renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
+      if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 
       // Re-render page content to restore images into the blanked area
       page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
       renderStatusBar();
+      if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     } else {
+      if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     }
     // Double FAST_REFRESH handles ghosting for image pages; don't count toward full refresh cadence
   } else {
+    if (SETTINGS.darkMode) renderer.invertScreen();
     ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
   }
   const auto tDisplay = millis();
@@ -715,9 +874,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   renderer.storeBwBuffer();
   const auto tBwStore = millis();
 
-  // grayscale rendering
+  // grayscale rendering — skipped in dark mode (AA LUT was computed for black-on-white)
   // TODO: Only do this if font supports it
-  if (SETTINGS.textAntiAliasing) {
+  if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode) {
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
     page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
@@ -772,7 +931,11 @@ void EpubReaderActivity::renderStatusBar() const {
   int textYOffset = 0;
 
   if (automaticPageTurnActive) {
-    title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(60 * 1000 / pageTurnDuration);
+    if (autoPageTurnMode) {
+      title = tr(STR_AUTO_TURN_ENABLED) + std::string("Auto");
+    } else {
+      title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(pageTurnDuration / 1000) + "s";
+    }
 
     // calculates textYOffset when rendering title in status bar
     const uint8_t statusBarHeight = UITheme::getInstance().getStatusBarHeight();
@@ -794,7 +957,33 @@ void EpubReaderActivity::renderStatusBar() const {
     title = epub->getTitle();
   }
 
-  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset);
+  uint32_t timeLeftSeconds = 0;
+  if (SETTINGS.statusBarTimeLeft != CrossPointSettings::TIME_LEFT_HIDE && SETTINGS.readingSpeedSecondsPerPage > 0) {
+    int pagesLeft = 0;
+    if (SETTINGS.statusBarTimeLeft == CrossPointSettings::TIME_LEFT_CHAPTER) {
+      pagesLeft = static_cast<int>(pageCount) - currentPage;
+    } else if (!spinePageCountCache.empty() && cachedTotalBookPages > 0) {
+      // Book: use actual per-chapter page counts from cache
+      int pagesBeforeChapter = 0;
+      for (int i = 0; i < currentSpineIndex && i < static_cast<int>(spinePageCountCache.size()); i++) {
+        pagesBeforeChapter += spinePageCountCache[i];
+      }
+      pagesLeft = cachedTotalBookPages - pagesBeforeChapter - currentPage;
+    } else {
+      // Fallback: estimate from current chapter's byte fraction of the book
+      const float sectionStart = epub->calculateProgress(currentSpineIndex, 0.0f);
+      const float sectionEnd = epub->calculateProgress(currentSpineIndex, 1.0f);
+      const float sectionFraction = sectionEnd - sectionStart;
+      pagesLeft = (sectionFraction > 0.001f)
+                      ? static_cast<int>((1.0f - bookProgress / 100.0f) / sectionFraction * pageCount)
+                      : static_cast<int>(pageCount) - currentPage;
+    }
+    if (pagesLeft > 0) {
+      timeLeftSeconds = static_cast<uint32_t>(pagesLeft) * SETTINGS.readingSpeedSecondsPerPage;
+    }
+  }
+
+  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, timeLeftSeconds);
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {

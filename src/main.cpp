@@ -20,6 +20,7 @@
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "ReadingStatsStore.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "components/UITheme.h"
@@ -43,6 +44,12 @@ EpdFont bookerly14BoldItalicFont(&bookerly_14_bolditalic);
 EpdFontFamily bookerly14FontFamily(&bookerly14RegularFont, &bookerly14BoldFont, &bookerly14ItalicFont,
                                    &bookerly14BoldItalicFont);
 #ifndef OMIT_FONTS
+EpdFont bookerly10RegularFont(&bookerly_10_regular);
+EpdFont bookerly10BoldFont(&bookerly_10_bold);
+EpdFont bookerly10ItalicFont(&bookerly_10_italic);
+EpdFont bookerly10BoldItalicFont(&bookerly_10_bolditalic);
+EpdFontFamily bookerly10FontFamily(&bookerly10RegularFont, &bookerly10BoldFont, &bookerly10ItalicFont,
+                                   &bookerly10BoldItalicFont);
 EpdFont bookerly12RegularFont(&bookerly_12_regular);
 EpdFont bookerly12BoldFont(&bookerly_12_bold);
 EpdFont bookerly12ItalicFont(&bookerly_12_italic);
@@ -209,6 +216,7 @@ void setupDisplayAndFonts() {
   renderer.setFontCacheManager(&fontCacheManager);
   renderer.insertFont(BOOKERLY_14_FONT_ID, bookerly14FontFamily);
 #ifndef OMIT_FONTS
+  renderer.insertFont(BOOKERLY_10_FONT_ID, bookerly10FontFamily);
   renderer.insertFont(BOOKERLY_12_FONT_ID, bookerly12FontFamily);
   renderer.insertFont(BOOKERLY_16_FONT_ID, bookerly16FontFamily);
   renderer.insertFont(BOOKERLY_18_FONT_ID, bookerly18FontFamily);
@@ -290,6 +298,7 @@ void setup() {
 
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
+  READING_STATS.loadFromFile();
 
   // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
   // crashed (indicated by readerActivityLoadCount > 0)

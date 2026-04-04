@@ -146,6 +146,7 @@ void ButtonRemapActivity::render(RenderLock&&) {
                       labelForHardware(CrossPointSettings::FRONT_HW_CONFIRM),
                       labelForHardware(CrossPointSettings::FRONT_HW_LEFT),
                       labelForHardware(CrossPointSettings::FRONT_HW_RIGHT));
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
 

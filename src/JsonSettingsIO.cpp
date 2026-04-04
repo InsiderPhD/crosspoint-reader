@@ -120,6 +120,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["frontButtonConfirm"] = s.frontButtonConfirm;
   doc["frontButtonLeft"] = s.frontButtonLeft;
   doc["frontButtonRight"] = s.frontButtonRight;
+  doc["readingSpeedSecondsPerPage"] = s.readingSpeedSecondsPerPage;
 
   String json;
   serializeJson(doc, json);
@@ -199,6 +200,7 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.frontButtonRight =
       clamp(doc["frontButtonRight"] | (uint8_t)S::FRONT_HW_RIGHT, S::FRONT_BUTTON_HARDWARE_COUNT, S::FRONT_HW_RIGHT);
   CrossPointSettings::validateFrontButtonMapping(s);
+  s.readingSpeedSecondsPerPage = doc["readingSpeedSecondsPerPage"] | (uint16_t)0;
 
   LOG_DBG("CPS", "Settings loaded from file");
 
@@ -302,6 +304,7 @@ bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* 
     obj["title"] = book.title;
     obj["author"] = book.author;
     obj["coverBmpPath"] = book.coverBmpPath;
+    obj["progressPercent"] = book.progressPercent;
   }
 
   String json;
@@ -326,6 +329,7 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
     book.title = obj["title"] | std::string("");
     book.author = obj["author"] | std::string("");
     book.coverBmpPath = obj["coverBmpPath"] | std::string("");
+    book.progressPercent = obj["progressPercent"] | int8_t(-1);
     store.recentBooks.push_back(book);
   }
 

@@ -311,3 +311,21 @@ std::optional<uint16_t> Section::getPageForAnchor(const std::string& anchor) con
   f.close();
   return std::nullopt;
 }
+
+uint16_t Section::readCachedPageCount(const std::string& path) {
+  FsFile f;
+  if (!Storage.openFileForRead("SCT", path, f)) {
+    return 0;
+  }
+  uint8_t version = 0;
+  if (f.read(&version, sizeof(version)) != sizeof(version) || version != SECTION_FILE_VERSION) {
+    f.close();
+    return 0;
+  }
+  // pageCount is stored at HEADER_SIZE - sizeof(uint32_t)*2 - sizeof(uint16_t) from the start
+  f.seek(HEADER_SIZE - sizeof(uint32_t) * 2 - sizeof(uint16_t));
+  uint16_t pc = 0;
+  f.read(&pc, sizeof(pc));
+  f.close();
+  return pc;
+}

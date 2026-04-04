@@ -20,7 +20,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 4;  // File Browser, Recents, File transfer, Settings
+  int count = 5;  // File Browser, Recents, File transfer, Stats, Settings
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -174,6 +174,67 @@ void HomeActivity::freeCoverBuffer() {
 void HomeActivity::loop() {
   const int menuCount = getMenuItemCount();
 
+  // Long-press Confirm on a book: show options modal
+  if (selectorIndex < static_cast<int>(recentBooks.size()) &&
+      mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= 700UL &&
+      !longPressBookTriggered) {
+    longPressBookTriggered = true;
+    showingBookOptions = true;
+    awaitingBookOptionsRelease = true;
+    bookOptionsIndex = 0;
+    requestUpdate();
+    return;
+  }
+
+  if (showingBookOptions) {
+    buttonNavigator.onNext([this] {
+      bookOptionsIndex = (bookOptionsIndex + 1) % BOOK_OPTIONS_COUNT;
+      requestUpdate();
+    });
+    buttonNavigator.onPrevious([this] {
+      bookOptionsIndex = (bookOptionsIndex - 1 + BOOK_OPTIONS_COUNT) % BOOK_OPTIONS_COUNT;
+      requestUpdate();
+    });
+
+    if (awaitingBookOptionsRelease) {
+      if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
+        awaitingBookOptionsRelease = false;
+      }
+      return;
+    }
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      showingBookOptions = false;
+      longPressBookTriggered = false;
+      const std::string path = recentBooks[selectorIndex].path;
+      if (bookOptionsIndex == 0) {
+        RECENT_BOOKS.updateProgress(path, 100);
+      } else {
+        RECENT_BOOKS.removeBook(path);
+      }
+      RECENT_BOOKS.saveToFile();
+      const auto& m = UITheme::getInstance().getMetrics();
+      recentBooks.clear();
+      loadRecentBooks(m.homeRecentBooksCount);
+      selectorIndex = 0;
+      recentsLoaded = false;
+      recentsLoading = false;
+      coverRendered = false;
+      coverBufferStored = false;
+      requestUpdate();
+      return;
+    }
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      showingBookOptions = false;
+      longPressBookTriggered = false;
+      requestUpdate();
+      return;
+    }
+
+    return;  // Block main menu input while modal is open
+  }
+
   buttonNavigator.onNext([this, menuCount] {
     selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
     requestUpdate();
@@ -185,6 +246,10 @@ void HomeActivity::loop() {
   });
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    const bool wasLongPress = longPressBookTriggered;
+    longPressBookTriggered = false;
+    if (wasLongPress) return;  // Long-press already handled above
+
     // Calculate dynamic indices based on which options are available
     int idx = 0;
     int menuSelectedIndex = selectorIndex - static_cast<int>(recentBooks.size());
@@ -192,6 +257,7 @@ void HomeActivity::loop() {
     const int recentsIdx = idx++;
     const int opdsLibraryIdx = hasOpdsUrl ? idx++ : -1;
     const int fileTransferIdx = idx++;
+    const int statsIdx = idx++;
     const int settingsIdx = idx;
 
     if (selectorIndex < recentBooks.size()) {
@@ -204,6 +270,8 @@ void HomeActivity::loop() {
       onOpdsBrowserOpen();
     } else if (menuSelectedIndex == fileTransferIdx) {
       onFileTransferOpen();
+    } else if (menuSelectedIndex == statsIdx) {
+      onStatsOpen();
     } else if (menuSelectedIndex == settingsIdx) {
       onSettingsOpen();
     }
@@ -226,8 +294,8 @@ void HomeActivity::render(RenderLock&&) {
 
   // Build menu items dynamically
   std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
-                                        tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Settings};
+                                        tr(STR_READING_STATS), tr(STR_SETTINGS_TITLE)};
+  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Book, Settings};
 
   if (hasOpdsUrl) {
     // Insert OPDS Browser after File Browser
@@ -247,6 +315,43 @@ void HomeActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
+  if (showingBookOptions && !recentBooks.empty()) {
+    const int pageWidth = renderer.getScreenWidth();
+    const int pageHeight = renderer.getScreenHeight();
+    constexpr int POPUP_W = 420;
+    constexpr int BORDER = 2;
+    constexpr int H_PAD = 14;
+    constexpr int TITLE_H = 42;
+    constexpr int OPTION_H = 34;
+    const int POPUP_H = TITLE_H + BOOK_OPTIONS_COUNT * OPTION_H + H_PAD;
+    const int px = (pageWidth - POPUP_W) / 2;
+    const int py = (pageHeight - POPUP_H) / 2;
+
+    // White fill then border
+    renderer.fillRect(px, py, POPUP_W, POPUP_H, false);
+    renderer.drawRect(px, py, POPUP_W, POPUP_H, BORDER, true);
+
+    // Book title, truncated
+    const std::string& bookTitle = recentBooks[selectorIndex].title;
+    const std::string trunc = renderer.truncatedText(UI_10_FONT_ID, bookTitle.c_str(), POPUP_W - H_PAD * 2);
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + H_PAD, trunc.c_str(), true);
+
+    // Divider
+    renderer.drawLine(px + BORDER, py + TITLE_H, px + POPUP_W - BORDER - 1, py + TITLE_H);
+
+    // Options
+    const char* options[BOOK_OPTIONS_COUNT] = {tr(STR_MARK_AS_READ), tr(STR_REMOVE_FROM_RECENTS)};
+    for (int i = 0; i < BOOK_OPTIONS_COUNT; i++) {
+      const int optY = py + TITLE_H + i * OPTION_H;
+      if (i == bookOptionsIndex) {
+        renderer.fillRect(px + BORDER, optY, POPUP_W - BORDER * 2, OPTION_H, true);
+      }
+      renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - renderer.getLineHeight(UI_10_FONT_ID)) / 2,
+                        options[i], i != bookOptionsIndex);
+    }
+  }
+
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 
   if (!firstRenderDone) {
@@ -260,6 +365,7 @@ void HomeActivity::render(RenderLock&&) {
 
 void HomeActivity::onSelectBook(const std::string& path) { activityManager.goToReader(path); }
 
+
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 
 void HomeActivity::onRecentsOpen() { activityManager.goToRecentBooks(); }
@@ -267,5 +373,7 @@ void HomeActivity::onRecentsOpen() { activityManager.goToRecentBooks(); }
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
+
+void HomeActivity::onStatsOpen() { activityManager.goToStats(); }
 
 void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }

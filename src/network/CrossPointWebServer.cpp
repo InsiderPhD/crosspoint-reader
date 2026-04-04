@@ -155,6 +155,7 @@ void CrossPointWebServer::begin() {
   server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
   server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
   server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
+  server->on("/api/clear-library-data", HTTP_POST, [this] { handleClearLibraryData(); });
 
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
@@ -991,17 +992,8 @@ void CrossPointWebServer::handleDelete() const {
     bool success = false;
     FsFile f = Storage.open(itemPath.c_str());
     if (f && f.isDirectory()) {
-      // For folders, ensure empty before removing
-      FsFile entry = f.openNextFile();
-      if (entry) {
-        entry.close();
-        f.close();
-        failedItems += itemPath + " (folder not empty); ";
-        allSuccess = false;
-        continue;
-      }
       f.close();
-      success = Storage.rmdir(itemPath.c_str());
+      success = Storage.removeDir(itemPath.c_str());
     } else {
       // It's a file (or couldn't open as dir) — remove file
       if (f) f.close();
@@ -1183,6 +1175,62 @@ void CrossPointWebServer::handlePostSettings() {
 
   LOG_DBG("WEB", "Applied %d setting(s)", applied);
   server->send(200, "text/plain", String("Applied ") + String(applied) + " setting(s)");
+}
+
+void CrossPointWebServer::handleClearLibraryData() const {
+  LOG_DBG("WEB", "Clearing library data (recent books + metadata caches)");
+
+  int clearedCount = 0;
+  int failedCount = 0;
+
+  // Delete recent books list
+  if (Storage.exists("/.crosspoint/recent.json")) {
+    if (Storage.remove("/.crosspoint/recent.json")) {
+      clearedCount++;
+      LOG_DBG("WEB", "Removed recent.json");
+    } else {
+      LOG_ERR("WEB", "Failed to remove recent.json");
+      failedCount++;
+    }
+  }
+
+  // Delete all epub_* and xtc_* cache directories (contain chapter/spine/TOC metadata)
+  auto root = Storage.open("/.crosspoint");
+  if (root && root.isDirectory()) {
+    char name[128];
+    for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
+      file.getName(name, sizeof(name));
+      String itemName(name);
+      if (file.isDirectory() && (itemName.startsWith("epub_") || itemName.startsWith("xtc_"))) {
+        String fullPath = String("/.crosspoint/") + itemName;
+        file.close();
+        if (Storage.removeDir(fullPath.c_str())) {
+          clearedCount++;
+          LOG_DBG("WEB", "Removed cache dir: %s", fullPath.c_str());
+        } else {
+          LOG_ERR("WEB", "Failed to remove cache dir: %s", fullPath.c_str());
+          failedCount++;
+        }
+      } else {
+        file.close();
+      }
+    }
+    root.close();
+  } else {
+    if (root) root.close();
+    LOG_ERR("WEB", "Failed to open /.crosspoint directory");
+    server->send(500, "text/plain", "Failed to open library data directory");
+    return;
+  }
+
+  LOG_DBG("WEB", "Library data cleared: %d removed, %d failed", clearedCount, failedCount);
+
+  if (failedCount == 0) {
+    server->send(200, "text/plain", String(clearedCount) + " item(s) cleared");
+  } else {
+    server->send(500, "text/plain",
+                 String(clearedCount) + " cleared, " + String(failedCount) + " failed");
+  }
 }
 
 // WebSocket callback trampoline

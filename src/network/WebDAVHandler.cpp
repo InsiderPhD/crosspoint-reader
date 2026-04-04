@@ -418,16 +418,8 @@ void WebDAVHandler::handleDelete(WebServer& s) {
   }
 
   if (file.isDirectory()) {
-    // Check if directory is empty
-    FsFile entry = file.openNextFile();
-    if (entry) {
-      entry.close();
-      file.close();
-      s.send(409, "text/plain", "Directory not empty");
-      return;
-    }
     file.close();
-    if (Storage.rmdir(path.c_str())) {
+    if (Storage.removeDir(path.c_str())) {
       s.send(204);
     } else {
       s.send(500, "text/plain", "Failed to remove directory");

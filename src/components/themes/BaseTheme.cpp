@@ -226,7 +226,18 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   const auto pageStartIndex = selectedIndex / pageItems * pageItems;
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
-    int textWidth = contentWidth - BaseMetrics::values.contentSidePadding * 2 - (rowValue != nullptr ? 60 : 0);
+
+    // Compute value width first so the title gets all remaining space
+    std::string valueText;
+    int valueTextWidth = 0;
+    if (rowValue != nullptr) {
+      valueText = rowValue(i);
+      if (!valueText.empty()) {
+        valueTextWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str());
+      }
+    }
+    const int valueReservation = valueTextWidth > 0 ? valueTextWidth + BaseMetrics::values.contentSidePadding : 0;
+    const int textWidth = contentWidth - BaseMetrics::values.contentSidePadding * 2 - valueReservation;
 
     // Draw name
     auto itemName = rowTitle(i);
@@ -242,12 +253,12 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                         i != selectedIndex);
     }
 
-    if (rowValue != nullptr) {
-      // Draw value
-      std::string valueText = rowValue(i);
-      const auto valueTextWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str());
+    if (valueTextWidth > 0) {
+      // Draw value right-aligned, vertically centred in the row
+      const int valueY = rowSubtitle != nullptr ? itemY + (rowHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2
+                                                : itemY;
       renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - BaseMetrics::values.contentSidePadding - valueTextWidth,
-                        itemY, valueText.c_str(), i != selectedIndex);
+                        valueY, valueText.c_str(), i != selectedIndex);
     }
   }
 }
@@ -541,11 +552,18 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
       renderer.drawCenteredText(UI_10_FONT_ID, titleYStart, truncatedAuthor.c_str(), !bookSelected);
     }
 
-    // "Continue Reading" label at the bottom
+    // "Continue Reading" label at the bottom, with progress percentage if known
+    char continueLabel[48];
+    if (recentBooks[0].progressPercent >= 0) {
+      snprintf(continueLabel, sizeof(continueLabel), "%s  %d%%", tr(STR_CONTINUE_READING),
+               static_cast<int>(recentBooks[0].progressPercent));
+    } else {
+      snprintf(continueLabel, sizeof(continueLabel), "%s", tr(STR_CONTINUE_READING));
+    }
     const int continueY = bookY + bookHeight - renderer.getLineHeight(UI_10_FONT_ID) * 3 / 2;
     if (coverRendered) {
       // Draw box behind "Continue Reading" text (inverted when selected: black box instead of white)
-      const char* continueText = tr(STR_CONTINUE_READING);
+      const char* continueText = continueLabel;
       const int continueTextWidth = renderer.getTextWidth(UI_10_FONT_ID, continueText);
       constexpr int continuePadding = 6;
       const int continueBoxWidth = continueTextWidth + continuePadding * 2;
@@ -556,7 +574,7 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
       renderer.drawRect(continueBoxX, continueBoxY, continueBoxWidth, continueBoxHeight, !bookSelected);
       renderer.drawCenteredText(UI_10_FONT_ID, continueY, continueText, !bookSelected);
     } else {
-      renderer.drawCenteredText(UI_10_FONT_ID, continueY, tr(STR_CONTINUE_READING), !bookSelected);
+      renderer.drawCenteredText(UI_10_FONT_ID, continueY, continueLabel, !bookSelected);
     }
   } else {
     // No book to continue reading
@@ -611,6 +629,7 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message) cons
   const int textX = x + (w - textWidth) / 2;
   const int textY = y + margin - 2;
   renderer.drawText(UI_12_FONT_ID, textX, textY, message, true, EpdFontFamily::BOLD);
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
   return Rect{x, y, w, h};
 }
@@ -625,12 +644,31 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
 
   renderer.fillRect(barX, barY, fillWidth, barHeight, true);
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+}
+
+static std::string formatTimeLeft(uint32_t totalSeconds) {
+  if (totalSeconds < 60) return "~1m";
+  const uint32_t minutes = (totalSeconds + 30) / 60;
+  char buf[12];
+  if (minutes < 60) {
+    snprintf(buf, sizeof(buf), "~%um", static_cast<unsigned>(minutes));
+  } else {
+    const uint32_t hours = minutes / 60;
+    const uint32_t mins = minutes % 60;
+    if (mins == 0) {
+      snprintf(buf, sizeof(buf), "~%uh", static_cast<unsigned>(hours));
+    } else {
+      snprintf(buf, sizeof(buf), "~%uh%um", static_cast<unsigned>(hours), static_cast<unsigned>(mins));
+    }
+  }
+  return std::string(buf);
 }
 
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
                               const int pageCount, std::string title, const int paddingBottom,
-                              const int textYOffset) const {
+                              const int textYOffset, const uint32_t timeLeftSeconds) const {
   auto metrics = UITheme::getInstance().getMetrics();
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
@@ -641,16 +679,32 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom - 4;
   int progressTextWidth = 0;
 
-  if (SETTINGS.statusBarBookProgressPercentage || SETTINGS.statusBarChapterPageCount) {
+  const std::string timeLeftStr =
+      (timeLeftSeconds > 0 && SETTINGS.statusBarTimeLeft != CrossPointSettings::TIME_LEFT_HIDE)
+          ? formatTimeLeft(timeLeftSeconds)
+          : std::string();
+
+  if (SETTINGS.statusBarBookProgressPercentage || SETTINGS.statusBarChapterPageCount || !timeLeftStr.empty()) {
     // Right aligned text for progress counter
-    char progressStr[32];
+    char progressStr[40];
 
     if (SETTINGS.statusBarBookProgressPercentage && SETTINGS.statusBarChapterPageCount) {
       snprintf(progressStr, sizeof(progressStr), "%d/%d  %.0f%%", currentPage, pageCount, bookProgress);
     } else if (SETTINGS.statusBarBookProgressPercentage) {
       snprintf(progressStr, sizeof(progressStr), "%.0f%%", bookProgress);
-    } else {
+    } else if (SETTINGS.statusBarChapterPageCount) {
       snprintf(progressStr, sizeof(progressStr), "%d/%d", currentPage, pageCount);
+    } else {
+      progressStr[0] = '\0';
+    }
+
+    if (!timeLeftStr.empty()) {
+      const size_t len = strlen(progressStr);
+      if (len > 0) {
+        snprintf(progressStr + len, sizeof(progressStr) - len, "  %s", timeLeftStr.c_str());
+      } else {
+        snprintf(progressStr, sizeof(progressStr), "%s", timeLeftStr.c_str());
+      }
     }
 
     progressTextWidth = renderer.getTextWidth(SMALL_FONT_ID, progressStr);

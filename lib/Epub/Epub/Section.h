@@ -42,4 +42,8 @@ class Section {
 
   // Look up the page number for an anchor id from the section cache file.
   std::optional<uint16_t> getPageForAnchor(const std::string& anchor) const;
+
+  // Read only the page count from a cached section file header without loading the full section.
+  // Returns 0 if the file doesn't exist, is corrupt, or has a mismatched version.
+  static uint16_t readCachedPageCount(const std::string& path);
 };

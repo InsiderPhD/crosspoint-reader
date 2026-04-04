@@ -10,6 +10,7 @@
 
 #include "../util/ConfirmationActivity.h"
 #include "MappedInputManager.h"
+#include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -262,7 +263,21 @@ void FileBrowserActivity::render(RenderLock&&) {
     GUI.drawList(
         renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), selectorIndex,
         [this](int index) { return getFileName(files[index]); }, nullptr,
-        [this](int index) { return UITheme::getFileIcon(files[index]); });
+        [this](int index) { return UITheme::getFileIcon(files[index]); },
+        [this](int index) -> std::string {
+          const std::string& entry = files[index];
+          if (entry.back() == '/') return "";  // Directory
+          const std::string fullPath = (basepath.back() == '/') ? basepath + entry : basepath + "/" + entry;
+          for (const auto& book : RECENT_BOOKS.getBooks()) {
+            if (book.path == fullPath && book.progressPercent > 0) {
+              if (book.progressPercent >= 90) return "X";
+              char buf[6];
+              snprintf(buf, sizeof(buf), "%d%%", static_cast<int>(book.progressPercent));
+              return std::string(buf);
+            }
+          }
+          return "";
+        });
   }
 
   // Help text
@@ -271,6 +286,7 @@ void FileBrowserActivity::render(RenderLock&&) {
                             files.empty() ? "" : tr(STR_DIR_UP), files.empty() ? "" : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
 

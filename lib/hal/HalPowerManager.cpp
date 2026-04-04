@@ -2,11 +2,18 @@
 
 #include <Logging.h>
 #include <WiFi.h>
+#include <driver/gpio.h>
 #include <esp_sleep.h>
+#include <soc/gpio_num.h>
 
 #include <cassert>
 
 #include "HalGPIO.h"
+
+// GPIO13 (SPIWP) drives a battery-protection MOSFET on the X4 hardware.
+// HIGH (default) = battery connected; LOW = battery disconnected.
+// Pulling it LOW before deep sleep cuts quiescent draw from ~3-4mA to near zero.
+static constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
 
 HalPowerManager powerManager;  // Singleton instance
 
@@ -58,7 +65,19 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
     delay(50);
     gpio.update();
   }
-  // Arm the wakeup trigger *after* the button is released
+
+  // Drive GPIO13 (SPIWP) LOW to disconnect the battery via the hardware protection circuit.
+  // On battery power this triggers a full MCU shutdown; the power button is a hardware wake trigger.
+  // On USB power, the software GPIO wakeup below still applies.
+  gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
+  gpio_set_level(GPIO_SPIWP, 0);
+
+  // Isolate GPIOs and latch GPIO13 LOW through the deep sleep cycle so the battery stays disconnected.
+  esp_sleep_config_gpio_isolate();
+  gpio_deep_sleep_hold_en();
+  gpio_hold_en(GPIO_SPIWP);
+
+  // Arm the wakeup trigger *after* the button is released (effective on USB power)
   esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
   // Enter Deep Sleep
   esp_deep_sleep_start();

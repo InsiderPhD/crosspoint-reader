@@ -16,9 +16,11 @@ class EpubReaderMenuActivity final : public Activity {
     FOOTNOTES,
     GO_TO_PERCENT,
     AUTO_PAGE_TURN,
+    READING_SPEED,
     ROTATE_SCREEN,
     SCREENSHOT,
     DISPLAY_QR,
+    MARK_AS_COMPLETED,
     GO_HOME,
     SYNC,
     DELETE_CACHE
@@ -26,7 +28,9 @@ class EpubReaderMenuActivity final : public Activity {
 
   explicit EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title,
                                   const int currentPage, const int totalPages, const int bookProgressPercent,
-                                  const uint8_t currentOrientation, const bool hasFootnotes);
+                                  const uint8_t currentOrientation, const bool hasFootnotes,
+                                  const uint32_t timeLeftChapterSeconds = 0,
+                                  const uint32_t timeLeftBookSeconds = 0);
 
   void onEnter() override;
   void onExit() override;
@@ -52,8 +56,10 @@ class EpubReaderMenuActivity final : public Activity {
   uint8_t selectedPageTurnOption = 0;
   const std::vector<StrId> orientationLabels = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
                                                 StrId::STR_LANDSCAPE_CCW};
-  const std::vector<const char*> pageTurnLabels = {I18N.get(StrId::STR_STATE_OFF), "1", "3", "6", "12"};
+  const std::vector<const char*> pageTurnLabels = {I18N.get(StrId::STR_STATE_OFF), "Auto", "60s", "30s", "10s", "5s"};
   int currentPage = 0;
   int totalPages = 0;
   int bookProgressPercent = 0;
+  uint32_t timeLeftChapterSeconds = 0;
+  uint32_t timeLeftBookSeconds = 0;
 };

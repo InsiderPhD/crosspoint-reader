@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "../util/ConfirmationActivity.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
@@ -13,6 +14,7 @@
 
 namespace {
 constexpr unsigned long GO_HOME_MS = 1000;
+constexpr unsigned long LONG_PRESS_MS = 1000;
 }  // namespace
 
 void RecentBooksActivity::loadRecentBooks() {
@@ -49,6 +51,27 @@ void RecentBooksActivity::loop() {
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (!recentBooks.empty() && selectorIndex < static_cast<int>(recentBooks.size())) {
+      if (mappedInput.getHeldTime() >= LONG_PRESS_MS) {
+        // Long press: offer to remove from recent books
+        const std::string bookPath = recentBooks[selectorIndex].path;
+        const std::string bookTitle = recentBooks[selectorIndex].title;
+        auto handler = [this, bookPath](const ActivityResult& res) {
+          if (!res.isCancelled) {
+            RECENT_BOOKS.removeBook(bookPath);
+            loadRecentBooks();
+            if (!recentBooks.empty() && selectorIndex >= static_cast<int>(recentBooks.size())) {
+              selectorIndex = recentBooks.size() - 1;
+            } else if (recentBooks.empty()) {
+              selectorIndex = 0;
+            }
+            requestUpdate(true);
+          }
+        };
+        startActivityForResult(
+            std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_REMOVE_FROM_RECENTS), bookTitle),
+            handler);
+        return;
+      }
       LOG_DBG("RBA", "Selected recent book: %s", recentBooks[selectorIndex].path.c_str());
       onSelectBook(recentBooks[selectorIndex].path);
       return;
@@ -101,12 +124,22 @@ void RecentBooksActivity::render(RenderLock&&) {
     GUI.drawList(
         renderer, Rect{0, contentTop, pageWidth, contentHeight}, recentBooks.size(), selectorIndex,
         [this](int index) { return recentBooks[index].title; }, [this](int index) { return recentBooks[index].author; },
-        [this](int index) { return UITheme::getFileIcon(recentBooks[index].path); });
+        [this](int index) { return UITheme::getFileIcon(recentBooks[index].path); },
+        [this](int index) -> std::string {
+          if (recentBooks[index].progressPercent >= 0) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d%%", static_cast<int>(recentBooks[index].progressPercent));
+            return std::string(buf);
+          }
+          return "";
+        },
+        false);
   }
 
   // Help text
   const auto labels = mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

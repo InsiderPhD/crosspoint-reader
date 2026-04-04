@@ -105,4 +105,5 @@ class CrossPointWebServer {
   void handleSettingsPage() const;
   void handleGetSettings() const;
   void handlePostSettings();
+  void handleClearLibraryData() const;
 };

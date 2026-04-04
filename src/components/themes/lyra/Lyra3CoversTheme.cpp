@@ -91,7 +91,9 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
       auto titleLines = renderer.wrappedText(SMALL_FONT_ID, recentBooks[i].title.c_str(), maxLineWidth, 3);
 
       const int titleLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-      const int dynamicBlockHeight = static_cast<int>(titleLines.size()) * titleLineHeight;
+      const bool hasProgress = recentBooks[i].progressPercent >= 0;
+      const int dynamicBlockHeight =
+          (static_cast<int>(titleLines.size()) + (hasProgress ? 1 : 0)) * titleLineHeight;
       // Add a little padding below the text inside the selection box just like the top padding (5 + hPaddingSelection)
       const int dynamicTitleBoxHeight = dynamicBlockHeight + hPaddingInSelection + 5;
 
@@ -112,6 +114,11 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
       for (const auto& line : titleLines) {
         renderer.drawText(SMALL_FONT_ID, tileX + hPaddingInSelection, currentY, line.c_str(), true);
         currentY += titleLineHeight;
+      }
+      if (hasProgress) {
+        char progressBuf[8];
+        snprintf(progressBuf, sizeof(progressBuf), "%d%%", static_cast<int>(recentBooks[i].progressPercent));
+        renderer.drawText(SMALL_FONT_ID, tileX + hPaddingInSelection, currentY, progressBuf, true);
       }
     }
   } else {

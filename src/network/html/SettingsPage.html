@@ -170,6 +170,28 @@
       background-color: #95a5a6;
       cursor: not-allowed;
     }
+    .danger-btn {
+      background-color: #e74c3c;
+      color: white;
+      padding: 10px 24px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1em;
+      font-weight: 600;
+    }
+    .danger-btn:hover {
+      background-color: #c0392b;
+    }
+    .danger-btn:disabled {
+      background-color: #95a5a6;
+      cursor: not-allowed;
+    }
+    .danger-description {
+      color: var(--label-color);
+      font-size: 0.9em;
+      margin: 0 0 12px 0;
+    }
     .message {
       padding: 12px;
       border-radius: 4px;
@@ -255,6 +277,15 @@
 
   <div class="save-container" id="save-container" style="display:none;">
     <button class="save-btn" id="saveBtn" onclick="saveSettings()">Save Settings</button>
+  </div>
+
+  <div class="card">
+    <h2>Library Data</h2>
+    <p class="danger-description">
+      Clears the recent books list and all cached book metadata (chapters, spine, table of contents).
+      Your reading preferences and settings are not affected. Books on the SD card are not deleted.
+    </p>
+    <button class="danger-btn" id="clearLibraryBtn" onclick="confirmClearLibrary()">Clear Library Data</button>
   </div>
 
   <div class="card">
@@ -432,6 +463,28 @@
     }
 
     btn.textContent = 'Save Settings';
+  }
+
+  async function confirmClearLibrary() {
+    if (!confirm('Clear all recent books and cached metadata (chapters, spine, TOC)?\n\nYour settings and books on the SD card will not be affected.')) {
+      return;
+    }
+    const btn = document.getElementById('clearLibraryBtn');
+    btn.disabled = true;
+    btn.textContent = 'Clearing...';
+    try {
+      const response = await fetch('/api/clear-library-data', { method: 'POST' });
+      const text = await response.text();
+      if (response.ok) {
+        showMessage('Library data cleared: ' + text, false);
+      } else {
+        showMessage('Error: ' + text, true);
+      }
+    } catch (e) {
+      showMessage('Error: ' + e.message, true);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Clear Library Data';
   }
 
   loadSettings();

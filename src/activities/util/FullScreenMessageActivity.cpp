@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 
+#include "CrossPointSettings.h"
 #include "fontIds.h"
 
 void FullScreenMessageActivity::onEnter() {
@@ -12,5 +13,6 @@ void FullScreenMessageActivity::onEnter() {
 
   renderer.clearScreen();
   renderer.drawCenteredText(UI_10_FONT_ID, top, text.c_str(), true, style);
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer(refreshMode);
 }

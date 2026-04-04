@@ -300,8 +300,10 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     if (rowValue != nullptr) {
       valueText = rowValue(i);
       valueText = renderer.truncatedText(UI_10_FONT_ID, valueText.c_str(), maxListValueWidth);
-      valueWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str()) + hPaddingInSelection;
-      rowTextWidth -= valueWidth;
+      if (!valueText.empty()) {
+        valueWidth = renderer.getTextWidth(UI_10_FONT_ID, valueText.c_str()) + hPaddingInSelection;
+        rowTextWidth -= valueWidth;
+      }
     }
 
     auto itemName = rowTitle(i);
@@ -326,14 +328,15 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
     // Draw value
     if (!valueText.empty()) {
+      const int valueY = itemY + (rowHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
       if (i == selectedIndex && highlightValue) {
         renderer.fillRoundedRect(
-            contentWidth - LyraMetrics::values.contentSidePadding - hPaddingInSelection - valueWidth, itemY,
+            rect.x + contentWidth - LyraMetrics::values.contentSidePadding - hPaddingInSelection - valueWidth, itemY,
             valueWidth + hPaddingInSelection, rowHeight, cornerRadius, Color::Black);
       }
 
       renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - LyraMetrics::values.contentSidePadding - valueWidth,
-                        itemY + 6, valueText.c_str(), !(i == selectedIndex && highlightValue));
+                        valueY, valueText.c_str(), !(i == selectedIndex && highlightValue));
     }
   }
 }
@@ -488,9 +491,11 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 
     auto author = renderer.truncatedText(UI_10_FONT_ID, book.author.c_str(), textWidth);
     const int titleLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
+    const int lineHeight10 = renderer.getLineHeight(UI_10_FONT_ID);
     const int titleBlockHeight = titleLineHeight * static_cast<int>(titleLines.size());
-    const int authorHeight = book.author.empty() ? 0 : (renderer.getLineHeight(UI_10_FONT_ID) * 3 / 2);
-    const int totalBlockHeight = titleBlockHeight + authorHeight;
+    const int authorHeight = book.author.empty() ? 0 : (lineHeight10 * 3 / 2);
+    const int progressHeight = (book.progressPercent >= 0) ? (lineHeight10 * 3 / 2) : 0;
+    const int totalBlockHeight = titleBlockHeight + authorHeight + progressHeight;
     int titleY = tileY + tileHeight / 2 - totalBlockHeight / 2;
     const int textX = tileX + hPaddingInSelection + coverWidth + LyraMetrics::values.verticalSpacing;
     for (const auto& line : titleLines) {
@@ -498,8 +503,14 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
       titleY += titleLineHeight;
     }
     if (!book.author.empty()) {
-      titleY += renderer.getLineHeight(UI_10_FONT_ID) / 2;
+      titleY += lineHeight10 / 2;
       renderer.drawText(UI_10_FONT_ID, textX, titleY, author.c_str(), true);
+    }
+    if (book.progressPercent >= 0) {
+      titleY += lineHeight10 * 3 / 2;
+      char progressBuf[8];
+      snprintf(progressBuf, sizeof(progressBuf), "%d%%", static_cast<int>(book.progressPercent));
+      renderer.drawText(UI_10_FONT_ID, textX, titleY, progressBuf, true);
     }
   } else {
     drawEmptyRecents(renderer, rect);
@@ -564,6 +575,7 @@ Rect LyraTheme::drawPopup(const GfxRenderer& renderer, const char* message) cons
   const int textX = x + (w - textWidth) / 2;
   const int textY = y + popupMarginY - 2;
   renderer.drawText(UI_12_FONT_ID, textX, textY, message, false, EpdFontFamily::REGULAR);
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 
   return Rect{x, y, w, h};
@@ -582,6 +594,7 @@ void LyraTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
 
   renderer.fillRect(barX, barY, fillWidth, barHeight, false);
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
 

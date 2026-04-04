@@ -50,8 +50,12 @@ struct FootnoteResult {
   std::string href;
 };
 
+struct BookContextResult {
+  enum class Action { MarkAsRead, RemoveFromRecents } action;
+};
+
 using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult,
-                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult>;
+                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult, BookContextResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

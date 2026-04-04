@@ -13,6 +13,8 @@
 #include <I18n.h>
 
 #include "CrossPointSettings.h"
+#include "ReaderUtils.h"
+#include "ReadingStatsStore.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
@@ -42,6 +44,9 @@ void XtcReaderActivity::onEnter() {
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
 
+  readingSessionStartMs = millis();
+  sessionPageTurns = 0;
+
   // Trigger first update
   requestUpdate();
 }
@@ -51,6 +56,26 @@ void XtcReaderActivity::onExit() {
 
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();
+  if (SETTINGS.readingSpeedSecondsPerPage > 0) {
+    SETTINGS.saveToFile();
+  }
+  if (readingSessionStartMs > 0) {
+    const unsigned long elapsedMs = millis() - readingSessionStartMs;
+    if (elapsedMs >= 5000UL) {
+      READING_STATS.addReadingTime(elapsedMs / 1000UL);
+      READING_STATS.addSession();
+    }
+  }
+  if (sessionPageTurns > 0) {
+    READING_STATS.addPageTurns(sessionPageTurns);
+  }
+  if (xtc && currentPage >= xtc->getPageCount() - 1 && xtc->getPageCount() > 1) {
+    READING_STATS.addBookFinished();
+  }
+  if (readingSessionStartMs > 0 || sessionPageTurns > 0) {
+    READING_STATS.saveToFile();
+  }
+
   xtc.reset();
 }
 
@@ -97,6 +122,9 @@ void XtcReaderActivity::loop() {
   if (!prevTriggered && !nextTriggered) {
     return;
   }
+
+  ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
+  sessionPageTurns++;
 
   // Handle end of book
   if (currentPage >= xtc->getPageCount()) {
@@ -332,6 +360,12 @@ void XtcReaderActivity::saveProgress() const {
     data[3] = (currentPage >> 24) & 0xFF;
     f.write(data, 4);
     f.close();
+  }
+
+  const uint32_t pageCount = xtc->getPageCount();
+  if (pageCount > 0) {
+    const auto progressPercent = static_cast<int8_t>(100u * currentPage / pageCount);
+    RECENT_BOOKS.updateProgress(xtc->getPath(), progressPercent);
   }
 }
 

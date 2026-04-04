@@ -16,6 +16,9 @@ class XtcReaderActivity final : public Activity {
 
   uint32_t currentPage = 0;
   int pagesUntilFullRefresh = 0;
+  unsigned long readingSpeedLastTurnMs = 0UL;
+  unsigned long readingSessionStartMs = 0UL;
+  uint32_t sessionPageTurns = 0;
 
   void renderPage();
   void saveProgress() const;

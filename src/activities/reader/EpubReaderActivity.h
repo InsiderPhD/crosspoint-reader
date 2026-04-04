@@ -18,6 +18,10 @@ class EpubReaderActivity final : public Activity {
   int cachedSpineIndex = 0;
   int cachedChapterTotalPageCount = 0;
   unsigned long lastPageTurnTime = 0UL;
+  unsigned long readingSpeedLastTurnMs = 0UL;
+  unsigned long readingSessionStartMs = 0UL;
+  uint32_t sessionPageTurns = 0;
+  bool bookFinishedRecorded = false;
   unsigned long pageTurnDuration = 0UL;
   // Signals that the next render should reposition within the newly loaded section
   // based on a cross-book percentage jump.
@@ -27,6 +31,7 @@ class EpubReaderActivity final : public Activity {
   bool pendingScreenshot = false;
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool automaticPageTurnActive = false;
+  bool autoPageTurnMode = false;  // True when using calibrated reading speed
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
@@ -37,6 +42,13 @@ class EpubReaderActivity final : public Activity {
   static constexpr int MAX_FOOTNOTE_DEPTH = 3;
   SavedPosition savedPositions[MAX_FOOTNOTE_DEPTH] = {};
   int footnoteDepth = 0;
+
+  // Per-spine estimated page counts, built once on onEnter from cached section files.
+  // Uncached spines are estimated via pages-per-byte from known spines.
+  std::vector<uint16_t> spinePageCountCache;
+  int cachedTotalBookPages = 0;
+
+  void buildBookPageCache();
 
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);

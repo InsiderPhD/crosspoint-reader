@@ -148,6 +148,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, statusMessage.c_str());
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -156,6 +157,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, statusMessage.c_str());
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -165,6 +167,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 10, errorMessage.c_str());
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -182,6 +185,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
       const int barY = pageHeight / 2 + 20;
       GUI.drawProgressBar(renderer, Rect{barX, barY, barWidth, barHeight}, downloadProgress, downloadTotal);
     }
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -197,6 +201,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
 
   if (entries.empty()) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_NO_ENTRIES));
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -224,6 +229,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
                       i != static_cast<size_t>(selectorIndex));
   }
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
 

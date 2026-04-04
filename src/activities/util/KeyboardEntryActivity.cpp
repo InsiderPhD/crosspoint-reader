@@ -318,6 +318,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   // Draw side button hints for Up/Down navigation
   GUI.drawSideButtonHints(renderer, ">", "<");
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
 
