@@ -37,6 +37,10 @@
 #include <builtinFonts/notosans_18_bolditalic.h>
 #include <builtinFonts/notosans_18_italic.h>
 #include <builtinFonts/notosans_18_regular.h>
+#include <builtinFonts/opendyslexic_6_bold.h>
+#include <builtinFonts/opendyslexic_6_bolditalic.h>
+#include <builtinFonts/opendyslexic_6_italic.h>
+#include <builtinFonts/opendyslexic_6_regular.h>
 #include <builtinFonts/opendyslexic_10_bold.h>
 #include <builtinFonts/opendyslexic_10_bolditalic.h>
 #include <builtinFonts/opendyslexic_10_italic.h>

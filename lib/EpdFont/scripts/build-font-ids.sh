@@ -89,6 +89,15 @@ ruby -rdigest -e 'puts [
 ].map{|f| Digest::SHA256.hexdigest(File.read(f)).to_i(16) }.sum % (2 ** 32) - (2 ** 31)'
 ))"
 
+echo "#define OPENDYSLEXIC_6_FONT_ID ($(
+ruby -rdigest -e 'puts [
+  "./opendyslexic_6_regular.h",
+  "./opendyslexic_6_bold.h",
+  "./opendyslexic_6_bolditalic.h",
+  "./opendyslexic_6_italic.h",
+].map{|f| Digest::SHA256.hexdigest(File.read(f)).to_i(16) }.sum % (2 ** 32) - (2 ** 31)'
+))"
+
 echo "#define OPENDYSLEXIC_8_FONT_ID ($(
 ruby -rdigest -e 'puts [
   "./opendyslexic_8_regular.h",

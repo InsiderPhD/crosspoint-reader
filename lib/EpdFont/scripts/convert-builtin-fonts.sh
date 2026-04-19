@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 READER_FONT_STYLES=("Regular" "Italic" "Bold" "BoldItalic")
 BOOKERLY_FONT_SIZES=(10 12 14 16 18)
 NOTOSANS_FONT_SIZES=(12 14 16 18)
-OPENDYSLEXIC_FONT_SIZES=(8 10 12 14)
+OPENDYSLEXIC_FONT_SIZES=(6 8 10 12 14)
 
 for size in ${BOOKERLY_FONT_SIZES[@]}; do
   for style in ${READER_FONT_STYLES[@]}; do
@@ -34,7 +34,12 @@ for size in ${OPENDYSLEXIC_FONT_SIZES[@]}; do
     font_name="opendyslexic_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
     font_path="../builtinFonts/source/OpenDyslexic/OpenDyslexic-${style}.otf"
     output_path="../builtinFonts/${font_name}.h"
-    python3 fontconvert.py $font_name $size $font_path --2bit --compress > $output_path
+    # 6pt uses --force-autohint and --width-scale 0.8 to condense the naturally wide glyphs
+    if [ "$size" = "6" ]; then
+      python3 fontconvert.py $font_name $size $font_path --2bit --compress --force-autohint --width-scale 0.8 > $output_path
+    else
+      python3 fontconvert.py $font_name $size $font_path --2bit --compress > $output_path
+    fi
     echo "Generated $output_path"
   done
 done

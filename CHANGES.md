@@ -96,8 +96,8 @@ Previously only EPUB tracked sessions.
 A new **X-Small** font size option is available under Reader settings, adding a smaller size below the existing Small option.
 
 - **Bookerly**: 10pt
-- **NotoSans**: 8pt (no 10pt variant available; falls back to the existing 8pt UI font)
-- **OpenDyslexic**: 8pt (no smaller variant available; same as Small)
+- **NotoSans**: 8pt (falls back to the existing small UI font)
+- **OpenDyslexic**: 6pt (new dedicated variant)
 
 **Files changed**: `CrossPointSettings.h`, `CrossPointSettings.cpp`, `main.cpp`, `fontIds.h`, `SettingsList.h`
 

@@ -334,7 +334,7 @@ int CrossPointSettings::getReaderFontId() const {
         case EXTRA_LARGE:
           return OPENDYSLEXIC_14_FONT_ID;
         case X_SMALL:
-          return OPENDYSLEXIC_8_FONT_ID;  // No smaller available; same as SMALL
+          return OPENDYSLEXIC_6_FONT_ID;
       }
   }
 }

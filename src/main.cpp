@@ -92,6 +92,12 @@ EpdFont notosans18BoldItalicFont(&notosans_18_bolditalic);
 EpdFontFamily notosans18FontFamily(&notosans18RegularFont, &notosans18BoldFont, &notosans18ItalicFont,
                                    &notosans18BoldItalicFont);
 
+EpdFont opendyslexic6RegularFont(&opendyslexic_6_regular);
+EpdFont opendyslexic6BoldFont(&opendyslexic_6_bold);
+EpdFont opendyslexic6ItalicFont(&opendyslexic_6_italic);
+EpdFont opendyslexic6BoldItalicFont(&opendyslexic_6_bolditalic);
+EpdFontFamily opendyslexic6FontFamily(&opendyslexic6RegularFont, &opendyslexic6BoldFont, &opendyslexic6ItalicFont,
+                                      &opendyslexic6BoldItalicFont);
 EpdFont opendyslexic8RegularFont(&opendyslexic_8_regular);
 EpdFont opendyslexic8BoldFont(&opendyslexic_8_bold);
 EpdFont opendyslexic8ItalicFont(&opendyslexic_8_italic);
@@ -221,6 +227,7 @@ void setupDisplayAndFonts() {
   renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
   renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily);
   renderer.insertFont(NOTOSANS_18_FONT_ID, notosans18FontFamily);
+  renderer.insertFont(OPENDYSLEXIC_6_FONT_ID, opendyslexic6FontFamily);
   renderer.insertFont(OPENDYSLEXIC_8_FONT_ID, opendyslexic8FontFamily);
   renderer.insertFont(OPENDYSLEXIC_10_FONT_ID, opendyslexic10FontFamily);
   renderer.insertFont(OPENDYSLEXIC_12_FONT_ID, opendyslexic12FontFamily);

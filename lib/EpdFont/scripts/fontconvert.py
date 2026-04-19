@@ -19,6 +19,7 @@ parser.add_argument("--additional-intervals", dest="additional_intervals", actio
 parser.add_argument("--compress", dest="compress", action="store_true", help="Compress glyph bitmaps using DEFLATE with group-based compression.")
 parser.add_argument("--force-autohint", dest="force_autohint", action="store_true", help="Force FreeType auto-hinter instead of native font hinting. Improves stem width consistency for fonts with weak or no native TrueType hints.")
 parser.add_argument("--pnum", dest="pnum", action="store_true", help="Use proportional numerals (pnum OpenType feature) instead of default tabular figures. Reduces visual gaps between digits in running prose.")
+parser.add_argument("--width-scale", dest="width_scale", type=float, default=1.0, help="Horizontal scale factor applied to glyph bitmaps and advance widths (e.g. 0.75 = 75%% width). Useful for condensing wide fonts.")
 args = parser.parse_args()
 
 GlyphProps = namedtuple("GlyphProps", ["width", "height", "advance_x", "left", "top", "data_length", "data_offset", "code_point"])
@@ -259,6 +260,11 @@ for i_start, i_end in unvalidated_intervals:
 
 for face in font_stack:
     face.set_char_size(size << 6, size << 6, 150, 150)
+    if args.width_scale != 1.0:
+        # Apply horizontal compression via FreeType 16.16 fixed-point transform matrix.
+        # Matrix is [ xx xy ; yx yy ] where values are 16.16 fixed-point (1.0 = 0x10000).
+        scale_fixed = int(args.width_scale * 0x10000)
+        face.set_transform(freetype.Matrix(scale_fixed, 0, 0, 0x10000), freetype.Vector(0, 0))
 
 total_size = 0
 all_glyphs = []
@@ -357,7 +363,7 @@ for i_start, i_end in intervals:
             height = bitmap.rows,
             # We use linearHoriAdvance (16.16 fixed-point, unhinted) instead of
             # advance.x (26.6 fixed-point, grid-fitted to whole pixels by hinter)
-            advance_x = fp4_from_ft16_16(face.glyph.linearHoriAdvance),
+            advance_x = fp4_from_ft16_16(int(face.glyph.linearHoriAdvance * args.width_scale)),
             left = face.glyph.bitmap_left,
             top = face.glyph.bitmap_top,
             data_length = len(packed),
