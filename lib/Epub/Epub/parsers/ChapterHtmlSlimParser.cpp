@@ -1155,6 +1155,20 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   footnoteBodyEntries = std::make_unique<FootnoteBodyEntry[]>(MAX_FOOTNOTE_BODY_ENTRIES);
   footnoteBodyEntryCount = 0;
 
+  // Trigger indexing popup early so it's visible during pre-scan phases too.
+  // Open the file briefly to check size, then close — main parse re-opens below.
+  bool popupShown = false;
+  if (popupFn) {
+    FsFile sizeCheck;
+    if (Storage.openFileForRead("EHP", filepath, sizeCheck)) {
+      if (sizeCheck.size() >= MIN_SIZE_FOR_POPUP) {
+        popupFn();
+        popupShown = true;
+      }
+      sizeCheck.close();
+    }
+  }
+
   if (footnoteDisplayOnPage) {
     // Phase 1: collect all href fragment IDs and cross-file filenames — no id→text capture.
     // Heap-allocate fragment buffer to stay within stack budget (32 × 64 = 2KB).
@@ -1225,8 +1239,8 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
     return false;
   }
 
-  // Get file size to decide whether to show indexing popup.
-  if (popupFn && file.size() >= MIN_SIZE_FOR_POPUP) {
+  // Show indexing popup if not already shown before pre-scan.
+  if (!popupShown && popupFn && file.size() >= MIN_SIZE_FOR_POPUP) {
     popupFn();
   }
 
