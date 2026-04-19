@@ -92,6 +92,19 @@ Previously only EPUB tracked sessions.
 
 ---
 
+### Inline Footnotes ("On page" mode)
+Footnote text can now be rendered at the bottom of the page that references it, beneath a short horizontal rule — no need to open a menu.
+
+A new **Footnotes** setting under Reader controls the behaviour:
+- **On page** — footnote text appears inline at the bottom of the page it's referenced on
+- **In menu** — existing 1.2 behaviour, footnotes accessible via the reader menu
+
+Footnote body text is collected during EPUB indexing via a multi-phase scan of the chapter HTML (including cross-file footnote targets). Space is reserved during layout so the footnote block never overlaps page text, and a reference line is always kept on the same page as its footnote. Long footnote text wraps across multiple lines.
+
+**Files changed**: `Page.cpp`, `Page.h`, `Section.cpp`, `Section.h`, `ChapterHtmlSlimParser.cpp`, `ChapterHtmlSlimParser.h`, `EpubReaderActivity.cpp`, `CrossPointSettings.h`, `SettingsList.h`, `english.yaml`
+
+---
+
 ## Bug Fixes
 
 ### Shelving a Book Cleared All Recents
@@ -143,3 +156,5 @@ Previously only EPUB tracked sessions.
 | `STR_STATS_READING_SPEED` | *(new)* | `"Reading Speed"` |
 | `STR_STATS_BOOKS_IN_PROGRESS` | *(new)* | `"In Progress"` |
 | `STR_READING_SPEED` | *(new)* | `"Your Reading Speed"` |
+| `STR_FOOTNOTE_ON_PAGE` | *(new)* | `"On page"` |
+| `STR_FOOTNOTE_IN_MENU` | *(new)* | `"In menu"` |
