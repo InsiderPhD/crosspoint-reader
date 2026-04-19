@@ -45,6 +45,12 @@ class HalStorage {
   bool openFileForWrite(const char* moduleName, const String& path, HalFile& file);
   bool removeDir(const char* path);
 
+  // Returns total SD card capacity in bytes (0 if unavailable)
+  uint64_t totalBytes() const;
+  // Returns free (unused) SD card capacity in bytes (-1 if unavailable).
+  // Non-const: freeClusterCount() scans the FAT and mutates SdFat internal state.
+  int64_t freeBytes();
+
   static HalStorage& getInstance() { return instance; }
 
   class StorageLock;  // private class, used internally

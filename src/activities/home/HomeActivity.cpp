@@ -12,6 +12,7 @@
 #include <cstring>
 #include <vector>
 
+#include "../util/ConfirmationActivity.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
@@ -207,21 +208,47 @@ void HomeActivity::loop() {
       showingBookOptions = false;
       longPressBookTriggered = false;
       const std::string path = recentBooks[selectorIndex].path;
-      if (bookOptionsIndex == 0) {
+      const std::string title = recentBooks[selectorIndex].title;
+
+      auto reloadRecents = [this] {
+        const auto& m = UITheme::getInstance().getMetrics();
+        recentBooks.clear();
+        loadRecentBooks(m.homeRecentBooksCount);
+        selectorIndex = 0;
+        recentsLoaded = false;
+        recentsLoading = false;
+        coverRendered = false;
+        coverBufferStored = false;
+        requestUpdate();
+      };
+
+      if (bookOptionsIndex == BOOK_OPT_MARK_READ) {
         RECENT_BOOKS.updateProgress(path, 100);
-      } else {
+        RECENT_BOOKS.saveToFile();
+        reloadRecents();
+      } else if (bookOptionsIndex == BOOK_OPT_RESET_PROGRESS) {
+        RECENT_BOOKS.updateProgress(path, -1);
+        RECENT_BOOKS.saveToFile();
+        reloadRecents();
+      } else if (bookOptionsIndex == BOOK_OPT_SHELVE) {
         RECENT_BOOKS.removeBook(path);
+        RECENT_BOOKS.saveToFile();
+        reloadRecents();
+      } else if (bookOptionsIndex == BOOK_OPT_DELETE) {
+        startActivityForResult(
+            std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
+            [this, path, reloadRecents](const ActivityResult& res) mutable {
+              if (!res.isCancelled) {
+                if (FsHelpers::hasEpubExtension(path)) {
+                  Epub(path, "/.crosspoint").clearCache();
+                }
+                Storage.remove(path.c_str());
+                RECENT_BOOKS.removeBook(path);
+                RECENT_BOOKS.saveToFile();
+                reloadRecents();
+              }
+            });
       }
-      RECENT_BOOKS.saveToFile();
-      const auto& m = UITheme::getInstance().getMetrics();
-      recentBooks.clear();
-      loadRecentBooks(m.homeRecentBooksCount);
-      selectorIndex = 0;
-      recentsLoaded = false;
-      recentsLoading = false;
-      coverRendered = false;
-      coverBufferStored = false;
-      requestUpdate();
       return;
     }
 
@@ -312,7 +339,9 @@ void HomeActivity::render(RenderLock&&) {
       [&menuItems](int index) { return std::string(menuItems[index]); },
       [&menuIcons](int index) { return menuIcons[index]; });
 
-  const auto labels = mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels = showingBookOptions
+                          ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                          : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   if (showingBookOptions && !recentBooks.empty()) {
@@ -321,9 +350,18 @@ void HomeActivity::render(RenderLock&&) {
     constexpr int POPUP_W = 420;
     constexpr int BORDER = 2;
     constexpr int H_PAD = 14;
-    constexpr int TITLE_H = 42;
+    constexpr int INFO_H = 28;
+    constexpr int INFO_COUNT = 2;  // author + progress
     constexpr int OPTION_H = 34;
-    const int POPUP_H = TITLE_H + BOOK_OPTIONS_COUNT * OPTION_H + H_PAD;
+    constexpr int LINE_V_PAD = 6;
+
+    // Wrap title to up to 2 lines and measure actual title block height
+    const std::string& bookTitle = recentBooks[selectorIndex].title;
+    const auto titleLines = renderer.wrappedText(UI_10_FONT_ID, bookTitle.c_str(), POPUP_W - H_PAD * 2, 2);
+    const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
+    const int TITLE_H = LINE_V_PAD + static_cast<int>(titleLines.size()) * lineH + LINE_V_PAD;
+
+    const int POPUP_H = TITLE_H + INFO_COUNT * INFO_H + BOOK_OPTIONS_COUNT * OPTION_H + H_PAD;
     const int px = (pageWidth - POPUP_W) / 2;
     const int py = (pageHeight - POPUP_H) / 2;
 
@@ -331,22 +369,43 @@ void HomeActivity::render(RenderLock&&) {
     renderer.fillRect(px, py, POPUP_W, POPUP_H, false);
     renderer.drawRect(px, py, POPUP_W, POPUP_H, BORDER, true);
 
-    // Book title, truncated
-    const std::string& bookTitle = recentBooks[selectorIndex].title;
-    const std::string trunc = renderer.truncatedText(UI_10_FONT_ID, bookTitle.c_str(), POPUP_W - H_PAD * 2);
-    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + H_PAD, trunc.c_str(), true);
+    // Book title (up to 2 lines)
+    for (int i = 0; i < static_cast<int>(titleLines.size()); i++) {
+      renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + LINE_V_PAD + i * lineH, titleLines[i].c_str(), true);
+    }
 
     // Divider
     renderer.drawLine(px + BORDER, py + TITLE_H, px + POPUP_W - BORDER - 1, py + TITLE_H);
 
+    // Info rows (non-selectable)
+    char infoBuf[80];
+
+    const auto& author = recentBooks[selectorIndex].author;
+    snprintf(infoBuf, sizeof(infoBuf), "%s: %s", tr(STR_BOOK_INFO_AUTHOR),
+             author.empty() ? "--" : author.c_str());
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + TITLE_H + (INFO_H - lineH) / 2, infoBuf);
+
+    const int8_t pct = recentBooks[selectorIndex].progressPercent;
+    if (pct < 0) {
+      snprintf(infoBuf, sizeof(infoBuf), "%s: %s", tr(STR_BOOK_INFO_PROGRESS), tr(STR_BOOK_INFO_NOT_STARTED));
+    } else {
+      snprintf(infoBuf, sizeof(infoBuf), "%s: %d%%", tr(STR_BOOK_INFO_PROGRESS), static_cast<int>(pct));
+    }
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + TITLE_H + INFO_H + (INFO_H - lineH) / 2, infoBuf);
+
+    // Divider before options
+    renderer.drawLine(px + BORDER, py + TITLE_H + INFO_COUNT * INFO_H,
+                      px + POPUP_W - BORDER - 1, py + TITLE_H + INFO_COUNT * INFO_H);
+
     // Options
-    const char* options[BOOK_OPTIONS_COUNT] = {tr(STR_MARK_AS_READ), tr(STR_REMOVE_FROM_RECENTS)};
+    const char* options[BOOK_OPTIONS_COUNT] = {tr(STR_MARK_AS_READ), tr(STR_RESET_PROGRESS),
+                                               tr(STR_REMOVE_FROM_RECENTS), tr(STR_DELETE_FROM_DEVICE)};
     for (int i = 0; i < BOOK_OPTIONS_COUNT; i++) {
-      const int optY = py + TITLE_H + i * OPTION_H;
+      const int optY = py + TITLE_H + INFO_COUNT * INFO_H + i * OPTION_H;
       if (i == bookOptionsIndex) {
         renderer.fillRect(px + BORDER, optY, POPUP_W - BORDER * 2, OPTION_H, true);
       }
-      renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - renderer.getLineHeight(UI_10_FONT_ID)) / 2,
+      renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - lineH) / 2,
                         options[i], i != bookOptionsIndex);
     }
   }

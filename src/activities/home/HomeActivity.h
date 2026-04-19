@@ -22,7 +22,11 @@ class HomeActivity final : public Activity {
   bool showingBookOptions = false;
   bool awaitingBookOptionsRelease = false;
   int bookOptionsIndex = 0;
-  static constexpr int BOOK_OPTIONS_COUNT = 2;
+  static constexpr int BOOK_OPTIONS_COUNT = 4;
+  static constexpr int BOOK_OPT_MARK_READ = 0;
+  static constexpr int BOOK_OPT_RESET_PROGRESS = 1;
+  static constexpr int BOOK_OPT_SHELVE = 2;
+  static constexpr int BOOK_OPT_DELETE = 3;
   uint8_t* coverBuffer = nullptr;  // HomeActivity's own buffer for cover image
   std::vector<RecentBook> recentBooks;
   void onSelectBook(const std::string& path);
