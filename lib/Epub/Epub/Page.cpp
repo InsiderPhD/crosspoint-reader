@@ -160,12 +160,10 @@ void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xO
   const int lineH = renderer.getLineHeight(fontId);
   const int effectiveBottom = viewportBottom - lineH / 2;
 
-  char buf[160];
   int totalLines = 0;
   for (const auto& fn : footnotes) {
     if (fn.text[0] == '\0') continue;
-    snprintf(buf, sizeof(buf), "%s %s", fn.number, fn.text);
-    totalLines += countWrappedLines(renderer, fontId, buf, viewportWidth);
+    totalLines += countWrappedLines(renderer, fontId, fn.text, viewportWidth);
   }
   if (totalLines == 0) return;
 
@@ -175,8 +173,7 @@ void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xO
   int y = ruleY + 4;
   for (const auto& fn : footnotes) {
     if (fn.text[0] == '\0') continue;
-    snprintf(buf, sizeof(buf), "%s %s", fn.number, fn.text);
-    drawWrappedText(renderer, fontId, buf, xOffset, y, viewportWidth, lineH);
+    drawWrappedText(renderer, fontId, fn.text, xOffset, y, viewportWidth, lineH);
   }
 }
 

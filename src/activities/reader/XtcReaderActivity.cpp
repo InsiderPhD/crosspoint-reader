@@ -126,10 +126,14 @@ void XtcReaderActivity::loop() {
   ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
   sessionPageTurns++;
 
-  // Handle end of book
+  // At end of the book, forward button goes home and back button returns to last page
   if (currentPage >= xtc->getPageCount()) {
-    currentPage = xtc->getPageCount() - 1;
-    requestUpdate();
+    if (nextTriggered) {
+      onGoHome();
+    } else {
+      currentPage = xtc->getPageCount() - 1;
+      requestUpdate();
+    }
     return;
   }
 
