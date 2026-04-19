@@ -1074,7 +1074,8 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
 
   // Closing a footnote link — create entry from collected text and href
   if (self->insideFootnoteLink && self->depth == self->footnoteLinkDepth) {
-    if (self->currentFootnoteLinkText[0] != '\0' && self->currentFootnoteLinkHref[0] != '\0') {
+    if (self->currentFootnoteLinkText[0] != '\0' && self->currentFootnoteLinkHref[0] != '\0' &&
+        strstr(self->currentFootnoteLinkText, "hapter") == nullptr) {
       FootnoteEntry entry;
       strncpy(entry.number, self->currentFootnoteLinkText, sizeof(entry.number) - 1);
       entry.number[sizeof(entry.number) - 1] = '\0';
@@ -1154,44 +1155,47 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   footnoteBodyEntries = std::make_unique<FootnoteBodyEntry[]>(MAX_FOOTNOTE_BODY_ENTRIES);
   footnoteBodyEntryCount = 0;
 
-  // Phase 1: collect all href fragment IDs and cross-file filenames — no id→text capture.
-  // Heap-allocate fragment buffer to stay within stack budget (32 × 64 = 2KB).
-  struct FragBuf { char ids[MAX_TARGET_FRAGMENTS][64]; };
-  auto fragBuf = std::make_unique<FragBuf>();
-  int fragCount = 0;
-  char crossFiles[MAX_CROSS_FILES][MAX_CROSS_FILE_NAME_LEN] = {};
-  int crossFileCount = 0;
-  preScanAnchors(filepath, footnoteBodyEntries.get(), 0,
-                 crossFiles, &crossFileCount, MAX_CROSS_FILES,
-                 fragBuf->ids, &fragCount, MAX_TARGET_FRAGMENTS);
-  // Phase 2: scan cross-files, filtering to only capture the target fragment IDs.
-  if (crossFileCount > 0 && epub) {
-    const std::string cfTmpPath = filepath + ".cf.html";
-    for (int i = 0; i < crossFileCount && footnoteBodyEntryCount < MAX_FOOTNOTE_BODY_ENTRIES; i++) {
-      const std::string epubPath = contentBase + crossFiles[i];
-      FsFile cfFile;
-      if (!Storage.openFileForWrite("EHP", cfTmpPath, cfFile)) continue;
-      const bool ok = epub->readItemContentsToStream(epubPath, cfFile, 512);
-      cfFile.close();
-      if (ok) {
-        const int before = footnoteBodyEntryCount;
-        const int extra = preScanAnchors(cfTmpPath, footnoteBodyEntries.get() + footnoteBodyEntryCount,
-                                         MAX_FOOTNOTE_BODY_ENTRIES - footnoteBodyEntryCount,
-                                         nullptr, nullptr, 0, nullptr, nullptr, 0,
-                                         fragBuf->ids, fragCount);
-        footnoteBodyEntryCount += extra;
-      }
-      Storage.remove(cfTmpPath.c_str());
-    }
-  }
+  if (footnoteDisplayOnPage) {
+    // Phase 1: collect all href fragment IDs and cross-file filenames — no id→text capture.
+    // Heap-allocate fragment buffer to stay within stack budget (32 × 64 = 2KB).
+    struct FragBuf { char ids[MAX_TARGET_FRAGMENTS][64]; };
+    auto fragBuf = std::make_unique<FragBuf>();
+    int fragCount = 0;
+    char crossFiles[MAX_CROSS_FILES][MAX_CROSS_FILE_NAME_LEN] = {};
+    int crossFileCount = 0;
+    preScanAnchors(filepath, footnoteBodyEntries.get(), 0,
+                   crossFiles, &crossFileCount, MAX_CROSS_FILES,
+                   fragBuf->ids, &fragCount, MAX_TARGET_FRAGMENTS);
 
-  // Phase 3: scan current file with the same target filter (handles same-file footnotes).
-  if (footnoteBodyEntryCount < MAX_FOOTNOTE_BODY_ENTRIES) {
-    const int extra = preScanAnchors(filepath, footnoteBodyEntries.get() + footnoteBodyEntryCount,
-                                     MAX_FOOTNOTE_BODY_ENTRIES - footnoteBodyEntryCount,
-                                     nullptr, nullptr, 0, nullptr, nullptr, 0,
-                                     fragBuf->ids, fragCount);
-    footnoteBodyEntryCount += extra;
+    // Phase 2: scan cross-files, filtering to only the target fragment IDs.
+    if (crossFileCount > 0 && epub) {
+      const std::string cfTmpPath = filepath + ".cf.html";
+      for (int i = 0; i < crossFileCount && footnoteBodyEntryCount < MAX_FOOTNOTE_BODY_ENTRIES; i++) {
+        const std::string epubPath = contentBase + crossFiles[i];
+        FsFile cfFile;
+        if (!Storage.openFileForWrite("EHP", cfTmpPath, cfFile)) continue;
+        const bool ok = epub->readItemContentsToStream(epubPath, cfFile, 512);
+        cfFile.close();
+        if (ok) {
+          const int extra = preScanAnchors(cfTmpPath, footnoteBodyEntries.get() + footnoteBodyEntryCount,
+                                           MAX_FOOTNOTE_BODY_ENTRIES - footnoteBodyEntryCount,
+                                           nullptr, nullptr, 0, nullptr, nullptr, 0,
+                                           fragBuf->ids, fragCount);
+          footnoteBodyEntryCount += extra;
+        }
+        Storage.remove(cfTmpPath.c_str());
+      }
+    }
+
+    // Phase 3: scan current file with the fragment filter (handles same-file footnotes).
+    // Must be a separate pass because Phase 1 needs to collect all fragment IDs first.
+    if (fragCount > 0 && footnoteBodyEntryCount < MAX_FOOTNOTE_BODY_ENTRIES) {
+      const int extra = preScanAnchors(filepath, footnoteBodyEntries.get() + footnoteBodyEntryCount,
+                                       MAX_FOOTNOTE_BODY_ENTRIES - footnoteBodyEntryCount,
+                                       nullptr, nullptr, 0, nullptr, nullptr, 0,
+                                       fragBuf->ids, fragCount);
+      footnoteBodyEntryCount += extra;
+    }
   }
 
   auto paragraphAlignmentBlockStyle = BlockStyle();
@@ -1347,6 +1351,24 @@ const char* ChapterHtmlSlimParser::lookupFootnoteText(const char* href) const {
   return nullptr;
 }
 
+int ChapterHtmlSlimParser::lookupFootnoteLineCount(const char* href, const int width) const {
+  if (!footnoteBodyEntries || !href || href[0] == '\0') return 0;
+  const char* fragment = strchr(href, '#');
+  if (!fragment || fragment[1] == '\0') return 0;
+  fragment++;
+  for (int i = 0; i < footnoteBodyEntryCount; i++) {
+    if (strcmp(footnoteBodyEntries[i].id, fragment) == 0) {
+      if (footnoteBodyEntries[i].text[0] == '\0') return 0;
+      if (footnoteBodyEntries[i].cachedLineCount < 0) {
+        footnoteBodyEntries[i].cachedLineCount =
+            static_cast<int16_t>(Page::countWrappedLines(renderer, fontId, footnoteBodyEntries[i].text, width));
+      }
+      return footnoteBodyEntries[i].cachedLineCount;
+    }
+  }
+  return 0;
+}
+
 void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
   const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
 
@@ -1370,13 +1392,12 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
     {
       for (const auto& fn : currentPage->footnotes) {
         if (fn.text[0] == '\0') continue;
-        totalFnLines += Page::countWrappedLines(renderer, fontId, fn.text, viewportWidth);
+        totalFnLines += lookupFootnoteLineCount(fn.href, viewportWidth);
       }
       for (const auto& [idx, entry] : pendingFootnotes) {
         if (idx > newWordTotal) break;
-        const char* text = lookupFootnoteText(entry.href);
-        if (!text || text[0] == '\0') continue;
-        totalFnLines += Page::countWrappedLines(renderer, fontId, text, viewportWidth);
+        int lines = lookupFootnoteLineCount(entry.href, viewportWidth);
+        if (lines > 0) totalFnLines += lines;
       }
     }
     footnoteBlockH = totalFnLines > 0 ? 4 + totalFnLines * footnoteLineH + footnoteLineH / 2 : 0;

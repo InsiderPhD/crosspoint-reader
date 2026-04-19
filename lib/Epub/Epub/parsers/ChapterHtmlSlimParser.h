@@ -14,6 +14,7 @@
 struct FootnoteBodyEntry {
   char id[64];
   char text[128];
+  mutable int16_t cachedLineCount = -1;  // -1 = not yet computed
 };
 #include "../ParsedText.h"
 #include "../blocks/ImageBlock.h"
@@ -103,6 +104,7 @@ class ChapterHtmlSlimParser {
   std::unique_ptr<FootnoteBodyEntry[]> footnoteBodyEntries;
   int footnoteBodyEntryCount = 0;
   const char* lookupFootnoteText(const char* href) const;
+  int lookupFootnoteLineCount(const char* href, int width) const;
   static constexpr int MAX_TARGET_FRAGMENTS = 32;
   static int preScanAnchors(const std::string& filepath, FootnoteBodyEntry* entries, int maxEntries,
                              char (*crossFiles)[MAX_CROSS_FILE_NAME_LEN] = nullptr,
