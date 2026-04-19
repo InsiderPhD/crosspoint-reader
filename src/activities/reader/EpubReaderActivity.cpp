@@ -680,7 +680,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     if (!section->loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
                                   SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                   viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                  SETTINGS.imageRendering)) {
+                                  SETTINGS.imageRendering, SETTINGS.footnoteDisplay)) {
       LOG_DBG("ERS", "Cache not found, building...");
 
       const auto popupFn = [this]() { GUI.drawPopup(renderer, tr(STR_INDEXING)); };
@@ -688,7 +688,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       if (!section->createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
                                       SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                       viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                      SETTINGS.imageRendering, popupFn)) {
+                                      SETTINGS.imageRendering, SETTINGS.footnoteDisplay, popupFn)) {
         LOG_ERR("ERS", "Failed to persist page data to SD");
         section.reset();
         return;
@@ -779,8 +779,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       return;
     }
 
-    // Collect footnotes from the loaded page
-    currentPageFootnotes = std::move(p->footnotes);
+    currentPageFootnotes = p->footnotes;
 
     const auto start = millis();
     renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
@@ -814,7 +813,7 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   if (nextSection.loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
                                   SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                   viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                  SETTINGS.imageRendering)) {
+                                  SETTINGS.imageRendering, SETTINGS.footnoteDisplay)) {
     return;
   }
 
@@ -822,7 +821,7 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   if (!nextSection.createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
                                      SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                      viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                     SETTINGS.imageRendering)) {
+                                     SETTINGS.imageRendering, SETTINGS.footnoteDisplay)) {
     LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
   }
 }
@@ -855,10 +854,15 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   auto* fcm = renderer.getFontCacheManager();
   fcm->resetStats();
 
+  const int viewportBottom = renderer.getScreenHeight() - orientedMarginBottom;
+  const int viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
+
   // Font prewarm: scan pass accumulates text, then prewarm, then real render
   const uint32_t heapBefore = esp_get_free_heap_size();
   auto scope = fcm->createPrewarmScope();
   page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);  // scan pass
+  if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+    page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
   scope.endScanAndPrewarm();
   const uint32_t heapAfter = esp_get_free_heap_size();
   fcm->logStats("prewarm");
@@ -871,6 +875,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   bool imagePageWithAA = page->hasImages() && SETTINGS.textAntiAliasing;
 
   page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+  if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+    page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
   renderStatusBar();
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
@@ -890,6 +896,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       // Re-render page content to restore images into the blanked area
       // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
       page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+      if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+        page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
       renderStatusBar();
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
@@ -914,6 +922,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
     page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+    if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+      page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
     renderer.copyGrayscaleLsbBuffers();
     const auto tGrayLsb = millis();
 
@@ -921,6 +931,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
     page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+    if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+      page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
     renderer.copyGrayscaleMsbBuffers();
     const auto tGrayMsb = millis();
 

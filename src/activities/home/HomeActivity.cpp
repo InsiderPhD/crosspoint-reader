@@ -187,6 +187,7 @@ void HomeActivity::loop() {
     return;
   }
 
+
   if (showingBookOptions) {
     buttonNavigator.onNext([this] {
       bookOptionsIndex = (bookOptionsIndex + 1) % BOOK_OPTIONS_COUNT;
@@ -233,6 +234,15 @@ void HomeActivity::loop() {
       } else if (bookOptionsIndex == BOOK_OPT_SHELVE) {
         RECENT_BOOKS.removeBook(path);
         RECENT_BOOKS.saveToFile();
+        reloadRecents();
+      } else if (bookOptionsIndex == BOOK_OPT_REINDEX) {
+        if (FsHelpers::hasEpubExtension(path)) {
+          // Delete only rendered sections — preserves progress, covers, and metadata
+          const std::string sectionsPath = Epub(path, "/.crosspoint").getCachePath() + "/sections";
+          Storage.removeDir(sectionsPath.c_str());
+        } else if (FsHelpers::hasXtcExtension(path)) {
+          Xtc(path, "/.crosspoint").clearCache();
+        }
         reloadRecents();
       } else if (bookOptionsIndex == BOOK_OPT_DELETE) {
         startActivityForResult(
@@ -399,7 +409,8 @@ void HomeActivity::render(RenderLock&&) {
 
     // Options
     const char* options[BOOK_OPTIONS_COUNT] = {tr(STR_MARK_AS_READ), tr(STR_RESET_PROGRESS),
-                                               tr(STR_REMOVE_FROM_RECENTS), tr(STR_DELETE_FROM_DEVICE)};
+                                               tr(STR_REMOVE_FROM_RECENTS), tr(STR_DELETE_FROM_DEVICE),
+                                               tr(STR_DELETE_CACHE)};
     for (int i = 0; i < BOOK_OPTIONS_COUNT; i++) {
       const int optY = py + TITLE_H + INFO_COUNT * INFO_H + i * OPTION_H;
       if (i == bookOptionsIndex) {

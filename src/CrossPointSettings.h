@@ -142,6 +142,7 @@ class CrossPointSettings {
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
+  enum FOOTNOTE_DISPLAY { FOOTNOTE_ON_PAGE = 0, FOOTNOTE_IN_MENU = 1, FOOTNOTE_DISPLAY_COUNT };
 
   // Dark mode (inverts entire UI except images)
   enum DARK_MODE { DARK_MODE_OFF = 0, DARK_MODE_ON = 1, DARK_MODE_COUNT };
@@ -210,6 +211,8 @@ class CrossPointSettings {
   uint8_t showHiddenFiles = 0;
   // Image rendering mode in EPUB reader
   uint8_t imageRendering = IMAGES_DISPLAY;
+  // Footnote display mode (0 = render at bottom of page, 1 = show in popup menu)
+  uint8_t footnoteDisplay = FOOTNOTE_ON_PAGE;
   // Dark mode (inverts entire UI except images)
   uint8_t darkMode = DARK_MODE_OFF;
 

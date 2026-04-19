@@ -9,6 +9,12 @@
 #include <vector>
 
 #include "../FootnoteEntry.h"
+
+// Anchor id → body text pair collected during pre-scan
+struct FootnoteBodyEntry {
+  char id[64];
+  char text[128];
+};
 #include "../ParsedText.h"
 #include "../blocks/ImageBlock.h"
 #include "../blocks/TextBlock.h"
@@ -50,6 +56,7 @@ class ChapterHtmlSlimParser {
   const CssParser* cssParser;
   bool embeddedStyle;
   uint8_t imageRendering;
+  bool footnoteDisplayOnPage;
   std::string contentBase;
   std::string imageBasePath;
   int imageCounter = 0;
@@ -75,6 +82,11 @@ class ChapterHtmlSlimParser {
   std::vector<std::pair<std::string, uint16_t>> anchorData;
   std::string pendingAnchorId;  // deferred until after previous text block is flushed
 
+  // First-body-element tracking: <a> links inside the first direct child of <body>
+  // are treated as navigation (TOC), not footnote references.
+  int bodyChildDepth = -1;      // depth of first direct child of <body>; -1 = not yet seen
+  bool inFirstBodyElement = false;
+
   // Footnote link tracking
   bool insideFootnoteLink = false;
   int footnoteLinkDepth = -1;
@@ -83,6 +95,21 @@ class ChapterHtmlSlimParser {
   char currentFootnoteLinkHref[64] = {};
   std::vector<std::pair<int, FootnoteEntry>> pendingFootnotes;  // <wordIndex, entry>
   int wordsExtractedInBlock = 0;
+
+  // Pre-scanned anchor id → body text (heap-allocated, freed after main parse)
+  static constexpr int MAX_FOOTNOTE_BODY_ENTRIES = 32;
+  static constexpr int MAX_CROSS_FILES = 4;
+  static constexpr int MAX_CROSS_FILE_NAME_LEN = 80;
+  std::unique_ptr<FootnoteBodyEntry[]> footnoteBodyEntries;
+  int footnoteBodyEntryCount = 0;
+  const char* lookupFootnoteText(const char* href) const;
+  static constexpr int MAX_TARGET_FRAGMENTS = 32;
+  static int preScanAnchors(const std::string& filepath, FootnoteBodyEntry* entries, int maxEntries,
+                             char (*crossFiles)[MAX_CROSS_FILE_NAME_LEN] = nullptr,
+                             int* crossFileCount = nullptr, int maxCrossFiles = 0,
+                             char (*collectFragments)[64] = nullptr,
+                             int* collectFragmentCount = nullptr, int maxCollectFragments = 0,
+                             char (*filterFragments)[64] = nullptr, int filterFragmentCount = 0);
 
   void updateEffectiveInlineStyle();
   void startNewTextBlock(const BlockStyle& blockStyle);
@@ -102,7 +129,8 @@ class ChapterHtmlSlimParser {
                                  const std::function<void(std::unique_ptr<Page>)>& completePageFn,
                                  const bool embeddedStyle, const std::string& contentBase,
                                  const std::string& imageBasePath, const uint8_t imageRendering = 0,
-                                 const std::function<void()>& popupFn = nullptr, const CssParser* cssParser = nullptr)
+                                 const std::function<void()>& popupFn = nullptr, const CssParser* cssParser = nullptr,
+                                 const bool footnoteDisplayOnPage = true)
 
       : epub(epub),
         filepath(filepath),
@@ -119,6 +147,7 @@ class ChapterHtmlSlimParser {
         cssParser(cssParser),
         embeddedStyle(embeddedStyle),
         imageRendering(imageRendering),
+        footnoteDisplayOnPage(footnoteDisplayOnPage),
         contentBase(contentBase),
         imageBasePath(imageBasePath) {}
 

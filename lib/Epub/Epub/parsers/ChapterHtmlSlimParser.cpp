@@ -13,6 +13,150 @@
 #include "../converters/ImageToFramebufferDecoder.h"
 #include "../htmlEntities.h"
 
+// ---------------------------------------------------------------------------
+// Pre-scanner: lightweight first pass to collect id → text pairs so footnote
+// body text is available when we build pages in the main parse pass.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct PreScanState {
+  FootnoteBodyEntry* entries;
+  int maxEntries;
+  int count = 0;
+  int depth = 0;
+  bool capturing = false;
+  int captureDepth = -1;
+  char currentId[64] = {};
+  char currentText[128] = {};
+  int currentTextLen = 0;
+  // Cross-file href collection (optional — nullptr means disabled)
+  char (*crossFiles)[80] = nullptr;
+  int* crossFileCount = nullptr;
+  int maxCrossFiles = 0;
+  // Target fragment filter: when set, only capture id elements in this list
+  char (*targetFragments)[64] = nullptr;
+  int targetFragmentCount = 0;
+  // Target fragment collection: when set, append any href fragments found here
+  char (*collectFragments)[64] = nullptr;
+  int* collectFragmentCount = nullptr;
+  int maxCollectFragments = 0;
+
+  static void XMLCALL onStart(void* ud, const XML_Char* name, const XML_Char** atts) {
+    auto* self = static_cast<PreScanState*>(ud);
+    self->depth++;
+    if (!atts) return;
+    // Collect cross-file hrefs and fragment IDs from <a href="...#fragment">
+    if (strcmp(name, "a") == 0) {
+      for (int i = 0; atts[i]; i += 2) {
+        if (strcmp(atts[i], "href") == 0) {
+          const char* href = atts[i + 1];
+          if (!href || href[0] == '\0') break;
+          const char* hash = strchr(href, '#');
+          // Collect fragment (same-file or cross-file) into target list
+          if (hash && hash[1] != '\0' && self->collectFragments && self->collectFragmentCount) {
+            const char* frag = hash + 1;
+            bool found = false;
+            for (int j = 0; j < *self->collectFragmentCount; j++) {
+              if (strcmp(self->collectFragments[j], frag) == 0) { found = true; break; }
+            }
+            if (!found && *self->collectFragmentCount < self->maxCollectFragments) {
+              strncpy(self->collectFragments[*self->collectFragmentCount], frag, 63);
+              self->collectFragments[*self->collectFragmentCount][63] = '\0';
+              (*self->collectFragmentCount)++;
+            }
+          }
+          // Collect cross-file filename
+          if (self->crossFiles && href[0] != '#' && hash && hash > href) {
+            const size_t fnameLen = static_cast<size_t>(hash - href);
+            if (fnameLen > 0 && fnameLen < 80 && *self->crossFileCount < self->maxCrossFiles) {
+              bool found = false;
+              for (int j = 0; j < *self->crossFileCount; j++) {
+                if (strncmp(self->crossFiles[j], href, fnameLen) == 0 &&
+                    self->crossFiles[j][fnameLen] == '\0') {
+                  found = true;
+                  break;
+                }
+              }
+              if (!found) {
+                strncpy(self->crossFiles[*self->crossFileCount], href, fnameLen);
+                self->crossFiles[*self->crossFileCount][fnameLen] = '\0';
+                (*self->crossFileCount)++;
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
+    // Start or reset capture for each element with an id.
+    // If targetFragments is set, only capture elements whose id is in the list.
+    // Never capture heading elements (h1–h6) — they are chapter/section titles, not footnote bodies.
+    if (self->count >= self->maxEntries) return;
+    if (name[0] == 'h' && name[1] >= '1' && name[1] <= '6' && name[2] == '\0') return;
+    for (int i = 0; atts[i]; i += 2) {
+      if (strcmp(atts[i], "id") == 0 && atts[i + 1][0] != '\0') {
+        const char* id = atts[i + 1];
+        if (self->targetFragments) {
+          bool isTarget = false;
+          for (int j = 0; j < self->targetFragmentCount; j++) {
+            if (strcmp(self->targetFragments[j], id) == 0) { isTarget = true; break; }
+          }
+          if (!isTarget) break;  // not a target — skip without resetting capture
+        }
+        strncpy(self->currentId, id, sizeof(self->currentId) - 1);
+        self->currentId[sizeof(self->currentId) - 1] = '\0';
+        self->capturing = true;
+        self->captureDepth = self->depth;
+        self->currentText[0] = '\0';
+        self->currentTextLen = 0;
+        break;
+      }
+    }
+  }
+
+  static void XMLCALL onChars(void* ud, const XML_Char* s, int len) {
+    auto* self = static_cast<PreScanState*>(ud);
+    if (!self->capturing) return;
+    for (int i = 0; i < len && self->currentTextLen < (int)sizeof(self->currentText) - 1; i++) {
+      char c = s[i];
+      // Skip leading whitespace
+      if (self->currentTextLen == 0 && (c == ' ' || c == '\n' || c == '\r' || c == '\t')) continue;
+      self->currentText[self->currentTextLen++] = c;
+    }
+    self->currentText[self->currentTextLen] = '\0';
+  }
+
+  // No-op handler so expat does not error on HTML entities (&nbsp; etc.)
+  static void XMLCALL onDefaultExpand(void* /*ud*/, const XML_Char* /*s*/, int /*len*/) {}
+
+  static void XMLCALL onEnd(void* ud, const XML_Char* name) {
+    auto* self = static_cast<PreScanState*>(ud);
+    if (self->capturing && self->depth == self->captureDepth) {
+      // Trim trailing whitespace
+      while (self->currentTextLen > 0) {
+        char last = self->currentText[self->currentTextLen - 1];
+        if (last == ' ' || last == '\n' || last == '\r' || last == '\t') {
+          self->currentText[--self->currentTextLen] = '\0';
+        } else {
+          break;
+        }
+      }
+      if (self->currentTextLen > 0 && self->count < self->maxEntries) {
+        strncpy(self->entries[self->count].id, self->currentId, sizeof(self->entries[0].id) - 1);
+        self->entries[self->count].id[sizeof(self->entries[0].id) - 1] = '\0';
+        strncpy(self->entries[self->count].text, self->currentText, sizeof(self->entries[0].text) - 1);
+        self->entries[self->count].text[sizeof(self->entries[0].text) - 1] = '\0';
+        self->count++;
+      }
+      self->capturing = false;
+      self->captureDepth = -1;
+    }
+    self->depth--;
+  }
+};
+
+}  // namespace
+
 const char* HEADER_TAGS[] = {"h1", "h2", "h3", "h4", "h5", "h6"};
 constexpr int NUM_HEADER_TAGS = sizeof(HEADER_TAGS) / sizeof(HEADER_TAGS[0]);
 
@@ -155,6 +299,19 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
 
 void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+
+  // Track the first non-div text element after <body>.
+  // <div> wrappers (e.g. class="MAIN_PAGE") are treated as transparent — we step inside them
+  // to find the first real text element (p, h1-h6, etc.), which often holds TOC/nav links.
+  if (strcmp(name, "body") == 0) {
+    self->bodyChildDepth = self->depth + 1;
+  } else if (self->bodyChildDepth >= 0 && !self->inFirstBodyElement && self->depth == self->bodyChildDepth) {
+    if (strcmp(name, "div") == 0) {
+      self->bodyChildDepth = self->depth + 1;  // step inside the div wrapper
+    } else {
+      self->inFirstBodyElement = true;
+    }
+  }
 
   // Middle of skip
   if (self->skipUntilDepth < self->depth) {
@@ -526,7 +683,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       // TODO: Parse data-* attributes to extract actual href
     }
 
-    if (isInternalLink) {
+    if (isInternalLink && !self->inFirstBodyElement) {
       // Flush buffer before style change
       if (self->partWordBufferIndex > 0) {
         self->flushPartWordBuffer();
@@ -893,6 +1050,12 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
 
   self->depth -= 1;
 
+  // Clear first-body-element flag when its closing tag is reached
+  if (self->inFirstBodyElement && self->depth == self->bodyChildDepth) {
+    self->inFirstBodyElement = false;
+    self->bodyChildDepth = -1;
+  }
+
   // Closing a footnote link — create entry from collected text and href
   if (self->insideFootnoteLink && self->depth == self->footnoteLinkDepth) {
     if (self->currentFootnoteLinkText[0] != '\0' && self->currentFootnoteLinkHref[0] != '\0') {
@@ -972,6 +1135,49 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
 }
 
 bool ChapterHtmlSlimParser::parseAndBuildPages() {
+  footnoteBodyEntries = std::make_unique<FootnoteBodyEntry[]>(MAX_FOOTNOTE_BODY_ENTRIES);
+  footnoteBodyEntryCount = 0;
+
+  // Phase 1: collect all href fragment IDs and cross-file filenames — no id→text capture.
+  // Heap-allocate fragment buffer to stay within stack budget (32 × 64 = 2KB).
+  struct FragBuf { char ids[MAX_TARGET_FRAGMENTS][64]; };
+  auto fragBuf = std::make_unique<FragBuf>();
+  int fragCount = 0;
+  char crossFiles[MAX_CROSS_FILES][MAX_CROSS_FILE_NAME_LEN] = {};
+  int crossFileCount = 0;
+  preScanAnchors(filepath, footnoteBodyEntries.get(), 0,
+                 crossFiles, &crossFileCount, MAX_CROSS_FILES,
+                 fragBuf->ids, &fragCount, MAX_TARGET_FRAGMENTS);
+  // Phase 2: scan cross-files, filtering to only capture the target fragment IDs.
+  if (crossFileCount > 0 && epub) {
+    const std::string cfTmpPath = filepath + ".cf.html";
+    for (int i = 0; i < crossFileCount && footnoteBodyEntryCount < MAX_FOOTNOTE_BODY_ENTRIES; i++) {
+      const std::string epubPath = contentBase + crossFiles[i];
+      FsFile cfFile;
+      if (!Storage.openFileForWrite("EHP", cfTmpPath, cfFile)) continue;
+      const bool ok = epub->readItemContentsToStream(epubPath, cfFile, 512);
+      cfFile.close();
+      if (ok) {
+        const int before = footnoteBodyEntryCount;
+        const int extra = preScanAnchors(cfTmpPath, footnoteBodyEntries.get() + footnoteBodyEntryCount,
+                                         MAX_FOOTNOTE_BODY_ENTRIES - footnoteBodyEntryCount,
+                                         nullptr, nullptr, 0, nullptr, nullptr, 0,
+                                         fragBuf->ids, fragCount);
+        footnoteBodyEntryCount += extra;
+      }
+      Storage.remove(cfTmpPath.c_str());
+    }
+  }
+
+  // Phase 3: scan current file with the same target filter (handles same-file footnotes).
+  if (footnoteBodyEntryCount < MAX_FOOTNOTE_BODY_ENTRIES) {
+    const int extra = preScanAnchors(filepath, footnoteBodyEntries.get() + footnoteBodyEntryCount,
+                                     MAX_FOOTNOTE_BODY_ENTRIES - footnoteBodyEntryCount,
+                                     nullptr, nullptr, 0, nullptr, nullptr, 0,
+                                     fragBuf->ids, fragCount);
+    footnoteBodyEntryCount += extra;
+  }
+
   auto paragraphAlignmentBlockStyle = BlockStyle();
   paragraphAlignmentBlockStyle.textAlignDefined = true;
   // Resolve None sentinel to Justify for initial block (no CSS context yet)
@@ -1068,7 +1274,73 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
     currentTextBlock.reset();
   }
 
+  // Free pre-scan data — no longer needed once all pages are serialized
+  footnoteBodyEntries.reset();
+
   return true;
+}
+
+int ChapterHtmlSlimParser::preScanAnchors(const std::string& filepath, FootnoteBodyEntry* entries,
+                                          int maxEntries, char (*crossFiles)[MAX_CROSS_FILE_NAME_LEN],
+                                          int* crossFileCount, int maxCrossFiles,
+                                          char (*collectFragments)[64], int* collectFragmentCount,
+                                          int maxCollectFragments, char (*filterFragments)[64],
+                                          int filterFragmentCount) {
+  PreScanState state;
+  state.entries = entries;
+  state.maxEntries = maxEntries;
+  state.crossFiles = crossFiles;
+  state.crossFileCount = crossFileCount;
+  state.maxCrossFiles = maxCrossFiles;
+  state.collectFragments = collectFragments;
+  state.collectFragmentCount = collectFragmentCount;
+  state.maxCollectFragments = maxCollectFragments;
+  state.targetFragments = filterFragments;
+  state.targetFragmentCount = filterFragmentCount;
+
+  const XML_Parser parser = XML_ParserCreate(nullptr);
+  if (!parser) return 0;
+
+  XML_SetUserData(parser, &state);
+  XML_SetElementHandler(parser, PreScanState::onStart, PreScanState::onEnd);
+  XML_SetCharacterDataHandler(parser, PreScanState::onChars);
+  XML_SetDefaultHandlerExpand(parser, PreScanState::onDefaultExpand);
+
+  FsFile file;
+  if (!Storage.openFileForRead("EHP", filepath, file)) {
+    XML_ParserFree(parser);
+    return 0;
+  }
+
+  bool done = false;
+  do {
+    void* const buf = XML_GetBuffer(parser, PARSE_BUFFER_SIZE);
+    if (!buf) break;
+    const size_t len = file.read(buf, PARSE_BUFFER_SIZE);
+    done = file.available() == 0;
+    if (XML_ParseBuffer(parser, static_cast<int>(len), done) == XML_STATUS_ERROR) break;
+  } while (!done);
+
+  XML_SetElementHandler(parser, nullptr, nullptr);
+  XML_SetCharacterDataHandler(parser, nullptr);
+  XML_ParserFree(parser);
+  file.close();
+
+  return state.count;
+}
+
+const char* ChapterHtmlSlimParser::lookupFootnoteText(const char* href) const {
+  if (!footnoteBodyEntries || !href || href[0] == '\0') return nullptr;
+  // Find the fragment: "#fn1" or "chapter.xhtml#fn1" → "fn1"
+  const char* fragment = strchr(href, '#');
+  if (!fragment || fragment[1] == '\0') return nullptr;
+  fragment++;  // skip '#'
+  for (int i = 0; i < footnoteBodyEntryCount; i++) {
+    if (strcmp(footnoteBodyEntries[i].id, fragment) == 0) {
+      return footnoteBodyEntries[i].text[0] != '\0' ? footnoteBodyEntries[i].text : nullptr;
+    }
+  }
+  return nullptr;
 }
 
 void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
@@ -1079,7 +1351,38 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
     currentPageNextY = 0;
   }
 
-  if (currentPageNextY + lineHeight > viewportHeight) {
+  // Compute word total including this line to know which pending footnotes arrive with it.
+  const int newWordTotal = wordsExtractedInBlock + line->wordCount();
+
+  // Reserve space for footnotes already on the page PLUS any pending footnotes that will
+  // be assigned by this line. This ensures the reference line itself is never placed where
+  // it would overlap its own footnote block — if it doesn't fit, a page break fires first
+  // and both the reference and its footnote land together on the next page.
+  // Use the same effective width and bottom padding as renderFootnotes so the reservation matches.
+  int footnoteBlockH = 0;
+  if (footnoteDisplayOnPage) {
+    const int footnoteLineH = renderer.getLineHeight(fontId);
+    int totalFnLines = 0;
+    {
+      char fnBuf[160];
+      for (const auto& fn : currentPage->footnotes) {
+        if (fn.text[0] == '\0') continue;
+        snprintf(fnBuf, sizeof(fnBuf), "%s %s", fn.number, fn.text);
+        totalFnLines += Page::countWrappedLines(renderer, fontId, fnBuf, viewportWidth);
+      }
+      for (const auto& [idx, entry] : pendingFootnotes) {
+        if (idx > newWordTotal) break;
+        const char* text = lookupFootnoteText(entry.href);
+        if (!text || text[0] == '\0') continue;
+        snprintf(fnBuf, sizeof(fnBuf), "%s %s", entry.number, text);
+        totalFnLines += Page::countWrappedLines(renderer, fontId, fnBuf, viewportWidth);
+      }
+    }
+    footnoteBlockH = totalFnLines > 0 ? 4 + totalFnLines * footnoteLineH + footnoteLineH / 2 : 0;
+  }
+  const int effectiveViewportH = viewportHeight - footnoteBlockH;
+
+  if (currentPageNextY + lineHeight > effectiveViewportH) {
     completePageFn(std::move(currentPage));
     completedPageCount++;
     currentPage.reset(new Page());
@@ -1087,10 +1390,11 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
   }
 
   // Track cumulative words to assign footnotes to the page containing their anchor
-  wordsExtractedInBlock += line->wordCount();
+  wordsExtractedInBlock = newWordTotal;
   auto footnoteIt = pendingFootnotes.begin();
   while (footnoteIt != pendingFootnotes.end() && footnoteIt->first <= wordsExtractedInBlock) {
-    currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href);
+    const char* text = lookupFootnoteText(footnoteIt->second.href);
+    currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href, text);
     ++footnoteIt;
   }
   pendingFootnotes.erase(pendingFootnotes.begin(), footnoteIt);

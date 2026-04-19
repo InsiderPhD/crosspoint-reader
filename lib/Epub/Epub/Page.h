@@ -62,17 +62,25 @@ class Page {
   std::vector<FootnoteEntry> footnotes;
   static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = 16;
 
-  void addFootnote(const char* number, const char* href) {
+  void addFootnote(const char* number, const char* href, const char* text = nullptr) {
     if (footnotes.size() >= MAX_FOOTNOTES_PER_PAGE) return;  // Cap per-page footnotes
     FootnoteEntry entry;
     strncpy(entry.number, number, sizeof(entry.number) - 1);
     entry.number[sizeof(entry.number) - 1] = '\0';
     strncpy(entry.href, href, sizeof(entry.href) - 1);
     entry.href[sizeof(entry.href) - 1] = '\0';
+    if (text) {
+      strncpy(entry.text, text, sizeof(entry.text) - 1);
+      entry.text[sizeof(entry.text) - 1] = '\0';
+    }
     footnotes.push_back(entry);
   }
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
+  // Renders footnote rule + text at the bottom of the viewport (no-op if no footnotes have text)
+  void renderFootnotes(GfxRenderer& renderer, int fontId, int xOffset, int viewportBottom, int viewportWidth) const;
+  // Returns the number of display lines needed to word-wrap `text` into `maxWidth` pixels
+  static int countWrappedLines(GfxRenderer& renderer, int fontId, const char* text, int maxWidth);
   bool serialize(FsFile& file) const;
   static std::unique_ptr<Page> deserialize(FsFile& file);
 

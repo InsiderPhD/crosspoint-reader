@@ -80,12 +80,15 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
       renderer.fillRect(0, y, screenWidth, lineHeight, true);
     }
 
-    // Show footnote number and abbreviated href
-    std::string label = footnotes[i].number;
-    if (label.empty()) {
-      label = tr(STR_LINK);
+    // Show footnote number + body text if available, otherwise fall back to number only
+    const auto& fn = footnotes[i];
+    char buf[160];
+    if (fn.text[0] != '\0') {
+      snprintf(buf, sizeof(buf), "%s %s", fn.number[0] != '\0' ? fn.number : tr(STR_LINK), fn.text);
+    } else {
+      snprintf(buf, sizeof(buf), "%s", fn.number[0] != '\0' ? fn.number : tr(STR_LINK));
     }
-    renderer.drawText(UI_10_FONT_ID, marginLeft, y + 4, label.c_str(), !isSelected);
+    renderer.drawText(UI_10_FONT_ID, marginLeft, y + 4, buf, !isSelected);
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "", "");
