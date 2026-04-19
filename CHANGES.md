@@ -92,6 +92,17 @@ Previously only EPUB tracked sessions.
 
 ---
 
+### Extra Small Font Size
+A new **X-Small** font size option is available under Reader settings, adding a smaller size below the existing Small option.
+
+- **Bookerly**: 10pt
+- **NotoSans**: 8pt (no 10pt variant available; falls back to the existing 8pt UI font)
+- **OpenDyslexic**: 8pt (no smaller variant available; same as Small)
+
+**Files changed**: `CrossPointSettings.h`, `CrossPointSettings.cpp`, `main.cpp`, `fontIds.h`, `SettingsList.h`
+
+---
+
 ### Inline Footnotes ("On page" mode)
 Footnote text can now be rendered at the bottom of the page that references it, beneath a short horizontal rule — no need to open a menu.
 
