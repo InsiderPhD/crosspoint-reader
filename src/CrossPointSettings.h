@@ -63,6 +63,12 @@ class CrossPointSettings {
     TIME_LEFT_BOOK = 2,
     STATUS_BAR_TIME_LEFT_COUNT
   };
+  enum XTC_STATUS_BAR_MODE {
+    XTC_STATUS_BAR_HIDE = 0,
+    XTC_STATUS_BAR_BOTTOM = 1,
+    XTC_STATUS_BAR_TOP = 2,
+    XTC_STATUS_BAR_MODE_COUNT
+  };
 
   enum ORIENTATION {
     PORTRAIT = 0,       // 480x800 logical coordinates (current default)
@@ -168,6 +174,7 @@ class CrossPointSettings {
   uint8_t statusBarTitle = CHAPTER_TITLE;
   uint8_t statusBarBattery = 1;
   uint8_t statusBarTimeLeft = TIME_LEFT_HIDE;
+  uint8_t xtcStatusBarMode = XTC_STATUS_BAR_HIDE;
   uint16_t readingSpeedSecondsPerPage = 0;  // 0 = uncalibrated; updated by EMA on each page turn
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
