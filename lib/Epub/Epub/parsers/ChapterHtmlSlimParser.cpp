@@ -387,6 +387,9 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   if (strcmp(name, "p") == 0) {
     self->xpathParagraphIndex++;
   }
+  if (strcmp(name, "li") == 0) {
+    self->xpathListItemIndex++;
+  }
 
   // Extract class, style, and id attributes
   std::string classAttr;
@@ -679,7 +682,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 if (self->currentPage && !self->currentPage->elements.empty() &&
                     (self->currentPageNextY + imageMarginTop + displayHeight + imageMarginBottom >
                      self->viewportHeight)) {
-                  self->completePageFn(std::move(self->currentPage), self->xpathParagraphIndex);
+                  self->completePageFn(std::move(self->currentPage), self->xpathParagraphIndex,
+                                       self->xpathListItemIndex);
                   self->completedPageCount++;
                   self->currentPage.reset(new Page());
                   if (!self->currentPage) {
@@ -1411,7 +1415,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
       anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
       pendingAnchorId.clear();
     }
-    completePageFn(std::move(currentPage), xpathParagraphIndex);
+    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
     completedPageCount++;
     currentPage.reset();
     currentTextBlock.reset();
@@ -1556,7 +1560,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
   const int effectiveViewportH = viewportHeight - footnoteBlockH;
 
   if (currentPageNextY + lineHeight > effectiveViewportH || forceBreakForAnchorAlignment) {
-    completePageFn(std::move(currentPage), xpathParagraphIndex);
+    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
     completedPageCount++;
     currentPage.reset(new Page());
     currentPageNextY = 0;
