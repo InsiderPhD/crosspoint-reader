@@ -22,6 +22,9 @@ RecentBooksStore RecentBooksStore::instance;
 
 void RecentBooksStore::addBook(const std::string& path, const std::string& title, const std::string& author,
                                const std::string& coverBmpPath) {
+  // Drop stale entries first so a new add can't evict a valid book in their stead.
+  pruneMissing();
+
   // Preserve existing progress percentage if the book was already in the list
   int8_t existingProgress = -1;
   auto it =
@@ -71,6 +74,14 @@ void RecentBooksStore::updateProgress(const std::string& path, int8_t progressPe
     it->progressPercent = progressPercent;
     saveToFile();
   }
+}
+
+bool RecentBooksStore::isMissing(const RecentBook& book) { return !Storage.exists(book.path.c_str()); }
+
+bool RecentBooksStore::pruneMissing() {
+  const size_t before = recentBooks.size();
+  recentBooks.erase(std::remove_if(recentBooks.begin(), recentBooks.end(), &isMissing), recentBooks.end());
+  return recentBooks.size() != before;
 }
 
 bool RecentBooksStore::saveToFile() const {

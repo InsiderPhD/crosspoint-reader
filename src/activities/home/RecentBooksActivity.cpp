@@ -29,7 +29,7 @@ void RecentBooksActivity::loadRecentBooks() {
   std::vector<std::string> bookPaths;
   for (const auto& book : books) {
     // Skip if file no longer exists
-    if (!Storage.exists(book.path.c_str())) {
+    if (RecentBooksStore::isMissing(book)) {
       continue;
     }
     recentBooks.push_back(book);
@@ -41,6 +41,12 @@ void RecentBooksActivity::loadRecentBooks() {
 
 void RecentBooksActivity::onEnter() {
   Activity::onEnter();
+
+  // Prune entries whose backing files are gone; this is one of two interaction
+  // points where the persistent store gets cleaned (the other is addBook).
+  if (RECENT_BOOKS.pruneMissing()) {
+    RECENT_BOOKS.saveToFile();
+  }
 
   // Load data
   loadRecentBooks();
