@@ -77,13 +77,15 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
         renderer.drawIcon(CoverIcon, coverX + 24, coverY + 24, 32, 32);
       }
 
-      // BookFusion badge on the cover's bottom-left corner.
+      // BookFusion badge on the cover's bottom-left corner. badgeY aligned to
+      // a multiple of 8 — drawImageTransparent truncates display.x =
+      // renderer.y to a byte boundary.
       if (i < static_cast<int>(recentBooks.size()) &&
           BookFusionBookIdStore::loadBookId(recentBooks[i].path.c_str()) != 0) {
         constexpr int BF_BADGE_SIZE = 24;
         constexpr int BF_BADGE_INSET = 2;
         const int badgeX = coverX + BF_BADGE_INSET;
-        const int badgeY = coverY + coverHeight - BF_BADGE_SIZE - BF_BADGE_INSET;
+        const int badgeY = ((coverY + coverHeight - BF_BADGE_SIZE - BF_BADGE_INSET) / 8) * 8;
         renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
         renderer.drawIcon(BookFusion24Icon, badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE);
       }

@@ -499,13 +499,16 @@ void LibraryActivity::renderPageFromScratch() {
       renderer.drawIcon(CoverIcon, coverX + 24, coverY + 24, 32, 32);
     }
 
-    // BookFusion badge on the cover's bottom-left corner.
+    // BookFusion badge on the cover's bottom-left corner. badgeY is snapped
+    // to a multiple of 8 because drawImageTransparent truncates the display-X
+    // coordinate (= renderer.y) via integer divide by 8 — non-aligned values
+    // shift the icon up to 7 px relative to the white fillRect underneath.
     const size_t pageStart = currentPage() * pageSize();
     if (BookFusionBookIdStore::loadBookId(pathAtLogicalIndex(pageStart + slot).c_str()) != 0) {
       constexpr int BF_BADGE_SIZE = 24;
       constexpr int BF_BADGE_INSET = 2;
       const int badgeX = coverX + BF_BADGE_INSET;
-      const int badgeY = coverY + L.coverDrawH - BF_BADGE_SIZE - BF_BADGE_INSET;
+      const int badgeY = ((coverY + L.coverDrawH - BF_BADGE_SIZE - BF_BADGE_INSET) / 8) * 8;
       renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
       renderer.drawIcon(BookFusion24Icon, badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE);
     }

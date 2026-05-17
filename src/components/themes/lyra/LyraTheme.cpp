@@ -464,14 +464,18 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
         renderer.drawIcon(CoverIcon, tileX + hPaddingInSelection + 24, tileY + hPaddingInSelection + 24, 32, 32);
       }
 
-      // BookFusion badge on the cover's bottom-left corner. White backing so
-      // the glyph stays visible regardless of the cover image underneath.
+      // BookFusion badge on the cover's bottom-left corner. badgeY snapped to
+      // a multiple of 8 because drawImageTransparent truncates display.x =
+      // renderer.y to a byte boundary; mismatched alignment shifts the icon
+      // away from its white fillRect backing.
       if (BookFusionBookIdStore::loadBookId(book.path.c_str()) != 0) {
         constexpr int BF_BADGE_SIZE = 24;
         constexpr int BF_BADGE_INSET = 2;
         const int badgeX = tileX + hPaddingInSelection + BF_BADGE_INSET;
-        const int badgeY = tileY + hPaddingInSelection + LyraMetrics::values.homeCoverHeight - BF_BADGE_SIZE -
-                           BF_BADGE_INSET;
+        const int badgeY = ((tileY + hPaddingInSelection + LyraMetrics::values.homeCoverHeight - BF_BADGE_SIZE -
+                             BF_BADGE_INSET) /
+                            8) *
+                           8;
         renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
         renderer.drawIcon(BookFusion24Icon, badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE);
       }
