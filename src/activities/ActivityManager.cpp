@@ -8,6 +8,7 @@
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
+#include "home/LibraryActivity.h"
 #include "home/ReadingStatsActivity.h"
 #include "home/RecentBooksActivity.h"
 #include "network/CrossPointWebServerActivity.h"
@@ -171,9 +172,7 @@ void ActivityManager::goToFileTransfer() {
 
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
 
-void ActivityManager::goToStats() {
-  replaceActivity(std::make_unique<ReadingStatsActivity>(renderer, mappedInput));
-}
+void ActivityManager::goToStats() { replaceActivity(std::make_unique<ReadingStatsActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
@@ -181,6 +180,10 @@ void ActivityManager::goToFileBrowser(std::string path) {
 
 void ActivityManager::goToRecentBooks() {
   replaceActivity(std::make_unique<RecentBooksActivity>(renderer, mappedInput));
+}
+
+void ActivityManager::goToLibrary() {
+  replaceActivity(std::make_unique<LibraryActivity>(renderer, mappedInput));
 }
 
 void ActivityManager::goToBrowser() {

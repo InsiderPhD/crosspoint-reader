@@ -158,6 +158,11 @@ class BaseTheme {
                                bool inactiveSelection = false) const;
   virtual bool showsFileIcons() const { return false; }
 
+  // Returns the home-screen slot index that should launch the library view
+  // when activated, or -1 if this theme does not surface a library tile.
+  // Themes opt in by overriding (e.g. LyraLibraryTheme returns 2 — third tile).
+  virtual int getLibrarySlotIndex() const { return -1; }
+
   // Shared constants and helpers for battery drawing (used by all themes)
   static constexpr int batteryPercentSpacing = 4;
   static void drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight);

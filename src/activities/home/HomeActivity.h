@@ -5,6 +5,7 @@
 #include "../Activity.h"
 #include "./FileBrowserActivity.h"
 #include "RecentBooksStore.h"
+#include "components/BookContextMenu.h"
 #include "util/ButtonNavigator.h"
 
 struct Rect;
@@ -18,18 +19,13 @@ class HomeActivity final : public Activity {
   bool hasOpdsUrl = false;
   bool coverRendered = false;      // Track if cover has been rendered once
   bool coverBufferStored = false;  // Track if cover buffer is stored
-  bool longPressBookTriggered = false;
-  bool showingBookOptions = false;
-  bool awaitingBookOptionsRelease = false;
-  int bookOptionsIndex = 0;
-  static constexpr int BOOK_OPTIONS_COUNT = 5;
-  static constexpr int BOOK_OPT_MARK_READ = 0;
-  static constexpr int BOOK_OPT_RESET_PROGRESS = 1;
-  static constexpr int BOOK_OPT_SHELVE = 2;
-  static constexpr int BOOK_OPT_DELETE = 3;
-  static constexpr int BOOK_OPT_REINDEX = 4;
+  BookContextMenu contextMenu;
   uint8_t* coverBuffer = nullptr;  // HomeActivity's own buffer for cover image
   std::vector<RecentBook> recentBooks;
+
+  // Apply a chosen book-options action to `path`. Used by both this activity
+  // and (via BookContextMenu's action enum) any future caller.
+  void dispatchBookAction(BookContextMenu::Action action, const std::string& path, const std::string& title);
   void onSelectBook(const std::string& path);
   void onFileBrowserOpen();
   void onRecentsOpen();
@@ -39,6 +35,10 @@ class HomeActivity final : public Activity {
   void onStatsOpen();
 
   int getMenuItemCount() const;
+  // Number of cover-area slots on the home screen. Equals recentBooks.size()
+  // for themes without a library tile; for LyraLibraryTheme it's at least
+  // librarySlot+1 so the library tile is always reachable even with no recents.
+  int getCoverSlotsUsed() const;
   bool storeCoverBuffer();    // Store frame buffer for cover image
   bool restoreCoverBuffer();  // Restore frame buffer from stored cover
   void freeCoverBuffer();     // Free the stored cover buffer
