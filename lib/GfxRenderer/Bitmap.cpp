@@ -1,5 +1,6 @@
 #include "Bitmap.h"
 
+#include <Logging.h>
 #include <cstdlib>
 #include <cstring>
 
@@ -130,6 +131,7 @@ BmpReaderError Bitmap::parseHeaders() {
 
   // Pre-calculate Row Bytes to avoid doing this every row
   rowBytes = (width * bpp + 31) / 32 * 4;
+  LOG_DBG("BMP", "Parsed BMP: %dx%d, bpp=%d, rowBytes=%d", width, height, bpp, rowBytes);
 
   for (int i = 0; i < 256; i++) paletteLum[i] = static_cast<uint8_t>(i);
   if (colorsUsed > 0) {
@@ -142,6 +144,16 @@ BmpReaderError Bitmap::parseHeaders() {
 
   if (!file.seek(bfOffBits)) {
     return BmpReaderError::SeekPixelDataFailed;
+  }
+
+  // Validate file size to detect truncated BMPs
+  const uint32_t expectedImageSize = rowBytes * height;
+  const uint32_t expectedFileSize = bfOffBits + expectedImageSize;
+  const uint32_t actualFileSize = file.size();
+  if (actualFileSize < expectedFileSize) {
+    LOG_ERR("BMP", "Truncated file: expected %u bytes, got %u bytes (image: %u, header: %u)",
+            expectedFileSize, actualFileSize, expectedImageSize, bfOffBits);
+    return BmpReaderError::FileInvalid;
   }
 
   // Check if palette luminances map cleanly to the display's 4 native gray levels.
@@ -180,7 +192,11 @@ BmpReaderError Bitmap::parseHeaders() {
 // packed 2bpp output, 0 = black, 1 = dark gray, 2 = light gray, 3 = white
 BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
   // Note: rowBuffer should be pre-allocated by the caller to size 'rowBytes'
-  if (file.read(rowBuffer, rowBytes) != rowBytes) return BmpReaderError::ShortReadRow;
+  int bytesRead = file.read(rowBuffer, rowBytes);
+  if (bytesRead != rowBytes) {
+    LOG_ERR("BMP", "ShortReadRow: expected %d bytes, got %d bytes, row %d", rowBytes, bytesRead, prevRowY);
+    return BmpReaderError::ShortReadRow;
+  }
 
   prevRowY += 1;
 

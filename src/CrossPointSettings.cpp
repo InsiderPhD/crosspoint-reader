@@ -249,6 +249,16 @@ float CrossPointSettings::getReaderLineCompression() const {
     case OPENDYSLEXIC:
       switch (lineSpacing) {
         case TIGHT:
+          return 0.82f;
+        case NORMAL:
+        default:
+          return 0.87f;
+        case WIDE:
+          return 0.95f;
+      }
+    case MONOSPACE:
+      switch (lineSpacing) {
+        case TIGHT:
           return 0.90f;
         case NORMAL:
         default:
@@ -291,6 +301,20 @@ int CrossPointSettings::getRefreshFrequency() const {
   }
 }
 
+int CrossPointSettings::getCodeFontId() const {
+  switch (fontSize) {
+    case X_SMALL:
+      return MONO_6_FONT_ID;
+    case SMALL:
+      return MONO_8_FONT_ID;
+    case MEDIUM:
+      return MONO_10_FONT_ID;
+    case LARGE:
+    default:
+      return MONO_12_FONT_ID;
+  }
+}
+
 int CrossPointSettings::getReaderFontId() const {
   switch (fontFamily) {
     case BOOKERLY:
@@ -305,8 +329,6 @@ int CrossPointSettings::getReaderFontId() const {
           return BOOKERLY_14_FONT_ID;
         case LARGE:
           return BOOKERLY_16_FONT_ID;
-        case EXTRA_LARGE:
-          return BOOKERLY_18_FONT_ID;
       }
     case NOTOSANS:
       switch (fontSize) {
@@ -319,8 +341,6 @@ int CrossPointSettings::getReaderFontId() const {
           return NOTOSANS_14_FONT_ID;
         case LARGE:
           return NOTOSANS_16_FONT_ID;
-        case EXTRA_LARGE:
-          return NOTOSANS_18_FONT_ID;
       }
     case OPENDYSLEXIC:
       switch (fontSize) {
@@ -331,10 +351,20 @@ int CrossPointSettings::getReaderFontId() const {
           return OPENDYSLEXIC_10_FONT_ID;
         case LARGE:
           return OPENDYSLEXIC_12_FONT_ID;
-        case EXTRA_LARGE:
-          return OPENDYSLEXIC_14_FONT_ID;
         case X_SMALL:
           return OPENDYSLEXIC_6_FONT_ID;
+      }
+    case MONOSPACE:
+      switch (fontSize) {
+        case X_SMALL:
+          return MONO_6_FONT_ID;
+        case SMALL:
+          return MONO_8_FONT_ID;
+        case MEDIUM:
+          return MONO_10_FONT_ID;
+        case LARGE:
+        default:
+          return MONO_12_FONT_ID;
       }
   }
 }

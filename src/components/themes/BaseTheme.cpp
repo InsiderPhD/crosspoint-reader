@@ -307,8 +307,8 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
     if (valueTextWidth > 0) {
       // Draw value right-aligned, vertically centred in the row
-      const int valueY = rowSubtitle != nullptr ? itemY + (rowHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2
-                                                : itemY;
+      const int valueY =
+          rowSubtitle != nullptr ? itemY + (rowHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2 : itemY;
       renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - BaseMetrics::values.contentSidePadding - valueTextWidth,
                         valueY, valueText.c_str(), i != selectedIndex);
     }
@@ -718,8 +718,8 @@ static std::string formatTimeLeft(uint32_t totalSeconds) {
 }
 
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
-                              const int pageCount, std::string title, const int paddingBottom,
-                              const int textYOffset, const uint32_t timeLeftSeconds) const {
+                              const int pageCount, std::string title, const int paddingBottom, const int textYOffset,
+                              const uint32_t timeLeftSeconds) const {
   auto metrics = UITheme::getInstance().getMetrics();
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,

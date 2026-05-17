@@ -651,14 +651,18 @@ bool Epub::generateThumbBmp(int height) const {
       return false;
     }
     // Use smaller target size for Continue Reading card (half of screen: 240x400)
-    // Generate 1-bit BMP for fast home screen rendering (no gray passes needed)
+    // Use regular grayscale BMP instead of 1-bit BMP to avoid reading issues
     int THUMB_TARGET_WIDTH = height * 0.6;
     int THUMB_TARGET_HEIGHT = height;
-    const bool success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(coverJpg, thumbBmp, THUMB_TARGET_WIDTH,
-                                                                             THUMB_TARGET_HEIGHT);
-    // Explicitly close() files before calling Storage.remove()
+    const bool success = JpegToBmpConverter::jpegFileToBmpStreamWithSize(coverJpg, thumbBmp, THUMB_TARGET_WIDTH,
+                                                                         THUMB_TARGET_HEIGHT);
+    // Explicitly flush and close() files before calling Storage.remove()
     coverJpg.close();
+    LOG_DBG("EBP", "Flushing BMP data to disk...");
+    thumbBmp.flush();  // Force buffered data to disk
+    const auto fileSize = thumbBmp.size();
     thumbBmp.close();
+    LOG_DBG("EBP", "BMP file size after flush: %lu bytes", static_cast<unsigned long>(fileSize));
     Storage.remove(coverJpgTempPath.c_str());
 
     if (!success) {
@@ -703,12 +707,14 @@ bool Epub::generateThumbBmp(int height) const {
     LOG_DBG("EBP", "Generated thumb BMP from PNG cover image, success: %s", success ? "yes" : "no");
     return success;
   } else {
-    LOG_ERR("EBP", "Cover image is not a supported format, skipping thumbnail");
+    LOG_ERR("EBP", "Cover image format not supported for thumbnail: %s", coverImageHref.c_str());
   }
 
   // Write an empty bmp file to avoid generation attempts in the future
   FsFile thumbBmp;
   Storage.openFileForWrite("EBP", getThumbBmpPath(height), thumbBmp);
+  thumbBmp.close();
+
   return false;
 }
 

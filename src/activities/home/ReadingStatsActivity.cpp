@@ -9,8 +9,8 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
-#include "RecentBooksStore.h"
 #include "ReadingStatsStore.h"
+#include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -137,8 +137,8 @@ void ReadingStatsActivity::computeTaskFunc(void* param) {
     freeB = Storage.freeBytes();
     epubs = countEpubsOnDevice();
     saveFileCache(total, freeB, epubs);
-    LOG_DBG("Stats", "Computed fresh: total=%llu free=%lld epubs=%d",
-            static_cast<unsigned long long>(total), static_cast<long long>(freeB), epubs);
+    LOG_DBG("Stats", "Computed fresh: total=%llu free=%lld epubs=%d", static_cast<unsigned long long>(total),
+            static_cast<long long>(freeB), epubs);
   } else {
     LOG_DBG("Stats", "Loaded stats from file cache");
   }
@@ -257,26 +257,25 @@ void ReadingStatsActivity::render(RenderLock&&) {
 
   if (isLoading) {
     snprintf(storageTotalBuf, sizeof(storageTotalBuf), "---");
-    snprintf(storageUsedBuf,  sizeof(storageUsedBuf),  "---");
-    snprintf(storageFreeBuf,  sizeof(storageFreeBuf),  "---");
-    snprintf(epubCountBuf,    sizeof(epubCountBuf),    "---");
+    snprintf(storageUsedBuf, sizeof(storageUsedBuf), "---");
+    snprintf(storageFreeBuf, sizeof(storageFreeBuf), "---");
+    snprintf(epubCountBuf, sizeof(epubCountBuf), "---");
   } else {
     const int64_t usedBytes = (sCachedFreeBytes >= 0 && sCachedTotalBytes > 0)
                                   ? static_cast<int64_t>(sCachedTotalBytes) - sCachedFreeBytes
                                   : -1;
     formatStorageSize(static_cast<int64_t>(sCachedTotalBytes), storageTotalBuf, sizeof(storageTotalBuf));
-    formatStorageSize(usedBytes,            storageUsedBuf,  sizeof(storageUsedBuf));
-    formatStorageSize(sCachedFreeBytes,     storageFreeBuf,  sizeof(storageFreeBuf));
+    formatStorageSize(usedBytes, storageUsedBuf, sizeof(storageUsedBuf));
+    formatStorageSize(sCachedFreeBytes, storageFreeBuf, sizeof(storageFreeBuf));
     snprintf(epubCountBuf, sizeof(epubCountBuf), "%d", sCachedEpubCount);
   }
 
-  const char* labels[] = {tr(STR_STATS_READING_TIME),     tr(STR_STATS_PAGES_READ),      tr(STR_STATS_BOOKS_FINISHED),
-                          tr(STR_STATS_SESSIONS),          tr(STR_STATS_AVG_SESSION),     tr(STR_STATS_READING_SPEED),
-                          tr(STR_STATS_BOOKS_IN_PROGRESS), tr(STR_STATS_EPUB_COUNT),
-                          tr(STR_STATS_STORAGE_TOTAL),     tr(STR_STATS_STORAGE_USED),    tr(STR_STATS_STORAGE_FREE)};
-  const char* values[] = {timeBuf,        pagesBuf,       finishedBuf,    sessionsBuf,   avgSessionBuf,
-                          speedBuf,        inProgressBuf,  epubCountBuf,
-                          storageTotalBuf, storageUsedBuf, storageFreeBuf};
+  const char* labels[] = {tr(STR_STATS_READING_TIME),      tr(STR_STATS_PAGES_READ),  tr(STR_STATS_BOOKS_FINISHED),
+                          tr(STR_STATS_SESSIONS),          tr(STR_STATS_AVG_SESSION), tr(STR_STATS_READING_SPEED),
+                          tr(STR_STATS_BOOKS_IN_PROGRESS), tr(STR_STATS_EPUB_COUNT),  tr(STR_STATS_STORAGE_TOTAL),
+                          tr(STR_STATS_STORAGE_USED),      tr(STR_STATS_STORAGE_FREE)};
+  const char* values[] = {timeBuf,       pagesBuf,     finishedBuf,     sessionsBuf,    avgSessionBuf, speedBuf,
+                          inProgressBuf, epubCountBuf, storageTotalBuf, storageUsedBuf, storageFreeBuf};
   constexpr int ROW_COUNT = 11;
 
   GUI.drawList(
