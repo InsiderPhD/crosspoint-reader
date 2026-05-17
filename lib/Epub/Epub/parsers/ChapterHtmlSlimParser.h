@@ -13,7 +13,7 @@
 // Anchor id → body text pair collected during pre-scan
 struct FootnoteBodyEntry {
   char id[64];
-  char text[128];
+  char text[1024];
   mutable int16_t cachedLineCount = -1;  // -1 = not yet computed
 };
 #include "../ParsedText.h"
@@ -95,6 +95,7 @@ class ChapterHtmlSlimParser {
   int currentFootnoteLinkTextLen = 0;
   char currentFootnoteLinkHref[64] = {};
   std::vector<std::pair<int, FootnoteEntry>> pendingFootnotes;  // <wordIndex, entry>
+  std::vector<FootnoteEntry> deferredFootnotes;  // overflow from previous page (half-device cap)
   int wordsExtractedInBlock = 0;
 
   // Pre-scanned anchor id → body text (heap-allocated, freed after main parse)

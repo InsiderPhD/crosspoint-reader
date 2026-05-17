@@ -28,7 +28,7 @@ struct PreScanState {
   bool capturing = false;
   int captureDepth = -1;
   char currentId[64] = {};
-  char currentText[128] = {};
+  char currentText[1024] = {};
   int currentTextLen = 0;
   // Cross-file href collection (optional — nullptr means disabled)
   char (*crossFiles)[80] = nullptr;
@@ -120,8 +120,12 @@ struct PreScanState {
     if (!self->capturing) return;
     for (int i = 0; i < len && self->currentTextLen < (int)sizeof(self->currentText) - 1; i++) {
       char c = s[i];
+      // Normalize HTML whitespace: newlines/tabs (used for source formatting) become spaces.
+      if (c == '\n' || c == '\r' || c == '\t') c = ' ';
       // Skip leading whitespace
-      if (self->currentTextLen == 0 && (c == ' ' || c == '\n' || c == '\r' || c == '\t')) continue;
+      if (self->currentTextLen == 0 && c == ' ') continue;
+      // Collapse consecutive whitespace
+      if (c == ' ' && self->currentTextLen > 0 && self->currentText[self->currentTextLen - 1] == ' ') continue;
       self->currentText[self->currentTextLen++] = c;
     }
     self->currentText[self->currentTextLen] = '\0';
@@ -130,10 +134,59 @@ struct PreScanState {
   // No-op handler so expat does not error on HTML entities (&nbsp; etc.)
   static void XMLCALL onDefaultExpand(void* /*ud*/, const XML_Char* /*s*/, int /*len*/) {}
 
+  // Returns the byte offset after leading whitespace (ASCII + common UTF-8 whitespace
+  // sequences such as NBSP U+00A0, ZWSP U+200B, BOM U+FEFF, etc.) — these don't have
+  // glyphs in the reader fonts and would render as the missing-glyph indicator.
+  static int skipLeadingWhitespace(const char* s, int len) {
+    int i = 0;
+    while (i < len) {
+      const unsigned char c = static_cast<unsigned char>(s[i]);
+      if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == 0x0B || c == 0x0C) {
+        i++;
+        continue;
+      }
+      // U+00A0 NO-BREAK SPACE: 0xC2 0xA0
+      if (c == 0xC2 && i + 1 < len && static_cast<unsigned char>(s[i + 1]) == 0xA0) {
+        i += 2;
+        continue;
+      }
+      // U+FEFF BOM / U+FFF9-U+FFFB interlinear: 0xEF 0xBB 0xBF / 0xEF 0xBF ...
+      if (c == 0xEF && i + 2 < len) {
+        const unsigned char b1 = static_cast<unsigned char>(s[i + 1]);
+        const unsigned char b2 = static_cast<unsigned char>(s[i + 2]);
+        if (b1 == 0xBB && b2 == 0xBF) {
+          i += 3;
+          continue;
+        }
+        if (b1 == 0xBF && (b2 == 0xB9 || b2 == 0xBA || b2 == 0xBB)) {
+          i += 3;
+          continue;
+        }
+      }
+      // U+2000–U+200F (general punctuation spaces, ZWSP, joiners): 0xE2 0x80 0x80–0x8F
+      // U+2028–U+202F (line/para sep, narrow nbsp): 0xE2 0x80 0xA8–0xAF
+      if (c == 0xE2 && i + 2 < len && static_cast<unsigned char>(s[i + 1]) == 0x80) {
+        const unsigned char b2 = static_cast<unsigned char>(s[i + 2]);
+        if ((b2 >= 0x80 && b2 <= 0x8F) || (b2 >= 0xA8 && b2 <= 0xAF)) {
+          i += 3;
+          continue;
+        }
+      }
+      // U+3000 IDEOGRAPHIC SPACE: 0xE3 0x80 0x80
+      if (c == 0xE3 && i + 2 < len && static_cast<unsigned char>(s[i + 1]) == 0x80 &&
+          static_cast<unsigned char>(s[i + 2]) == 0x80) {
+        i += 3;
+        continue;
+      }
+      break;
+    }
+    return i;
+  }
+
   static void XMLCALL onEnd(void* ud, const XML_Char* name) {
     auto* self = static_cast<PreScanState*>(ud);
     if (self->capturing && self->depth == self->captureDepth) {
-      // Trim trailing whitespace
+      // Trim trailing whitespace (ASCII)
       while (self->currentTextLen > 0) {
         char last = self->currentText[self->currentTextLen - 1];
         if (last == ' ' || last == '\n' || last == '\r' || last == '\t') {
@@ -141,6 +194,14 @@ struct PreScanState {
         } else {
           break;
         }
+      }
+      // Strip leading Unicode whitespace (NBSP, BOM, etc. that have no glyph in reader fonts)
+      const int leadOffset = skipLeadingWhitespace(self->currentText, self->currentTextLen);
+      if (leadOffset > 0) {
+        const int newLen = self->currentTextLen - leadOffset;
+        memmove(self->currentText, self->currentText + leadOffset, newLen);
+        self->currentText[newLen] = '\0';
+        self->currentTextLen = newLen;
       }
       if (self->currentTextLen > 0 && self->count < self->maxEntries) {
         strncpy(self->entries[self->count].id, self->currentId, sizeof(self->entries[0].id) - 1);
@@ -1400,25 +1461,41 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
   // and both the reference and its footnote land together on the next page.
   // Use the same effective width and bottom padding as renderFootnotes so the reservation matches.
   int footnoteBlockH = 0;
+  bool forceBreakForAnchorAlignment = false;
   if (footnoteDisplayOnPage) {
     const int footnoteLineH = renderer.getLineHeight(fontId);
-    int totalFnLines = 0;
-    {
-      for (const auto& fn : currentPage->footnotes) {
-        if (fn.text[0] == '\0') continue;
-        totalFnLines += lookupFootnoteLineCount(fn.href, viewportWidth);
-      }
-      for (const auto& [idx, entry] : pendingFootnotes) {
-        if (idx > newWordTotal) break;
-        int lines = lookupFootnoteLineCount(entry.href, viewportWidth);
-        if (lines > 0) totalFnLines += lines;
-      }
+    int existingLines = 0;
+    int deferredLines = 0;
+    int pendingLines = 0;
+    bool hasNewPending = false;
+    for (const auto& fn : currentPage->footnotes) {
+      if (fn.text[0] == '\0') continue;
+      existingLines += Page::countWrappedLines(renderer, fontId, fn.text, viewportWidth);
     }
+    for (const auto& fn : deferredFootnotes) {
+      if (fn.text[0] == '\0') continue;
+      deferredLines += Page::countWrappedLines(renderer, fontId, fn.text, viewportWidth);
+    }
+    for (const auto& [idx, entry] : pendingFootnotes) {
+      if (idx > newWordTotal) break;
+      const int lines = lookupFootnoteLineCount(entry.href, viewportWidth);
+      if (lines > 0) pendingLines += lines;
+      if (idx > wordsExtractedInBlock) hasNewPending = true;
+    }
+    const int totalFnLines = existingLines + deferredLines + pendingLines;
     footnoteBlockH = totalFnLines > 0 ? 4 + totalFnLines * footnoteLineH + footnoteLineH / 2 : 0;
+    const int maxFnLinesForCap = (viewportHeight / 2 - 4) / footnoteLineH;
+    const int maxFootnoteBlockH = 4 + maxFnLinesForCap * footnoteLineH + footnoteLineH / 2;
+    if (footnoteBlockH > maxFootnoteBlockH) footnoteBlockH = maxFootnoteBlockH;
+    // Keep anchor and body on the same page: if footnote area is already full of carry-over,
+    // defer this line (and its anchor) along with its body to the next page.
+    if (hasNewPending && existingLines + deferredLines >= maxFnLinesForCap) {
+      forceBreakForAnchorAlignment = true;
+    }
   }
   const int effectiveViewportH = viewportHeight - footnoteBlockH;
 
-  if (currentPageNextY + lineHeight > effectiveViewportH) {
+  if (currentPageNextY + lineHeight > effectiveViewportH || forceBreakForAnchorAlignment) {
     completePageFn(std::move(currentPage));
     completedPageCount++;
     currentPage.reset(new Page());
@@ -1427,10 +1504,60 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
 
   // Track cumulative words to assign footnotes to the page containing their anchor
   wordsExtractedInBlock = newWordTotal;
+  const int footnoteLineH = renderer.getLineHeight(fontId);
+  const int maxFnLines = (viewportHeight / 2 - 4) / footnoteLineH;
+
+  // Fit a footnote entry onto the current page; if it doesn't fit fully, split text
+  // mid-stream and push the remainder to deferredFootnotes for the next page.
+  auto fitOrDeferFootnote = [&](const FootnoteEntry& src) {
+    if (!footnoteDisplayOnPage || src.text[0] == '\0') {
+      currentPage->addFootnote(src.number, src.href, src.text);
+      return;
+    }
+    int currentFnLines = 0;
+    for (const auto& fn : currentPage->footnotes) {
+      if (fn.text[0] == '\0') continue;
+      currentFnLines += Page::countWrappedLines(renderer, fontId, fn.text, viewportWidth);
+    }
+    const int availableLines = maxFnLines - currentFnLines;
+    const int textLines = Page::countWrappedLines(renderer, fontId, src.text, viewportWidth);
+    if (availableLines <= 0) {
+      deferredFootnotes.push_back(src);
+    } else if (textLines <= availableLines) {
+      currentPage->addFootnote(src.number, src.href, src.text);
+    } else {
+      const size_t splitAt = Page::splitWrappedAtLine(renderer, fontId, src.text, availableLines, viewportWidth);
+      char firstPart[sizeof(FootnoteEntry::text)];
+      const size_t firstLen = std::min(splitAt, sizeof(firstPart) - 1);
+      memcpy(firstPart, src.text, firstLen);
+      firstPart[firstLen] = '\0';
+      currentPage->addFootnote(src.number, src.href, firstPart);
+
+      const char* remainder = src.text + splitAt;
+      while (*remainder == ' ') remainder++;
+      FootnoteEntry deferEntry;
+      strncpy(deferEntry.number, src.number, sizeof(deferEntry.number) - 1);
+      strncpy(deferEntry.href, src.href, sizeof(deferEntry.href) - 1);
+      strncpy(deferEntry.text, remainder, sizeof(deferEntry.text) - 1);
+      deferredFootnotes.push_back(deferEntry);
+    }
+  };
+
+  // Process any deferred footnotes from the previous page first (they wrap before new ones)
+  std::vector<FootnoteEntry> carryOver;
+  carryOver.swap(deferredFootnotes);
+  for (const auto& fn : carryOver) {
+    fitOrDeferFootnote(fn);
+  }
+
   auto footnoteIt = pendingFootnotes.begin();
   while (footnoteIt != pendingFootnotes.end() && footnoteIt->first <= wordsExtractedInBlock) {
     const char* text = lookupFootnoteText(footnoteIt->second.href);
-    currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href, text);
+    FootnoteEntry srcEntry;
+    strncpy(srcEntry.number, footnoteIt->second.number, sizeof(srcEntry.number) - 1);
+    strncpy(srcEntry.href, footnoteIt->second.href, sizeof(srcEntry.href) - 1);
+    if (text) strncpy(srcEntry.text, text, sizeof(srcEntry.text) - 1);
+    fitOrDeferFootnote(srcEntry);
     ++footnoteIt;
   }
   pendingFootnotes.erase(pendingFootnotes.begin(), footnoteIt);

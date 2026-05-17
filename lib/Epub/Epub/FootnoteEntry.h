@@ -5,7 +5,7 @@
 struct FootnoteEntry {
   char number[24];
   char href[64];
-  char text[128];  // Footnote body text (empty if not resolved)
+  char text[1024];  // Footnote body text (empty if not resolved)
 
   FootnoteEntry() {
     number[0] = '\0';

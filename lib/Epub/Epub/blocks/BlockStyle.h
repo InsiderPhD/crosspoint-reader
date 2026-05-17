@@ -22,6 +22,7 @@ struct BlockStyle {
   int16_t textIndent = 0;
   bool textIndentDefined = false;  // true if text-indent was explicitly set in CSS
   bool textAlignDefined = false;   // true if text-align was explicitly set in CSS
+  int fontOverride = 0;            // 0 = use default reader font; non-zero overrides fontId for this block
 
   // Combined horizontal insets (margin + padding)
   [[nodiscard]] int16_t leftInset() const { return marginLeft + paddingLeft; }

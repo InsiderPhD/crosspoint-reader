@@ -4521,7 +4521,11 @@ function getWsUrl() {
 // Upload file via WebSocket (faster, binary protocol)
 function uploadFileWebSocket(file, onProgress, onComplete, onError) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(getWsUrl());
+    const wsUrl = getWsUrl();
+    console.log('[WS] Opening connection to:', wsUrl);
+    console.log('[WS] File:', file.name, '| Size:', file.size, 'bytes | Path:', currentPath);
+
+    const ws = new WebSocket(wsUrl);
     currentUploadWs = ws;
     let uploadStarted = false;
     let sendingChunks = false;
@@ -4529,19 +4533,32 @@ function uploadFileWebSocket(file, onProgress, onComplete, onError) {
 
     ws.binaryType = 'arraybuffer';
 
+    // Connection timeout: if onopen hasn't fired after 5s, the server isn't responding
+    const connectTimeout = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        console.error('[WS] Connection timeout after 5s - readyState:', ws.readyState, '(0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)');
+        console.error('[WS] Port 81 is not responding. Check device serial log for "WebSocket server started".');
+        ws.close();
+        reject(new Error('WebSocket connection failed'));
+      }
+    }, 5000);
+
     ws.onopen = function() {
-      console.log('[WS] Connected, starting upload:', file.name);
-      // Send start message: START:<filename>:<size>:<path>
-      ws.send(`START:${file.name}:${file.size}:${currentPath}`);
+      clearTimeout(connectTimeout);
+      const startMsg = `START:${file.name}:${file.size}:${currentPath}`;
+      console.log('[WS] Connected (readyState=' + ws.readyState + '), sending:', startMsg);
+      ws.send(startMsg);
+      console.log('[WS] START sent, waiting for READY...');
     };
 
     ws.onmessage = async function(event) {
       const msg = event.data;
-      console.log('[WS] Message:', msg);
+      console.log('[WS] Message received:', typeof msg === 'string' ? msg : '[binary ' + msg.byteLength + ' bytes]');
 
       if (msg === 'READY') {
         uploadStarted = true;
         sendingChunks = true;
+        console.log('[WS] Got READY, starting chunk transfer');
 
         // Small delay to let connection stabilize
         await new Promise(r => setTimeout(r, 50));
@@ -4550,6 +4567,7 @@ function uploadFileWebSocket(file, onProgress, onComplete, onError) {
           // Send file in chunks
           const totalSize = file.size;
           let offset = 0;
+          let chunkCount = 0;
 
           while (offset < totalSize && ws.readyState === WebSocket.OPEN) {
             const chunkSize = Math.min(WS_CHUNK_SIZE, totalSize - offset);
@@ -4557,16 +4575,27 @@ function uploadFileWebSocket(file, onProgress, onComplete, onError) {
             const buffer = await chunk.arrayBuffer();
 
             // Wait for buffer to clear - more aggressive backpressure
+            let backpressureWaits = 0;
             while (ws.bufferedAmount > WS_CHUNK_SIZE * 2 && ws.readyState === WebSocket.OPEN) {
               await new Promise(r => setTimeout(r, 5));
+              backpressureWaits++;
+            }
+            if (backpressureWaits > 0) {
+              console.log('[WS] Backpressure wait:', backpressureWaits, 'x 5ms for chunk', chunkCount);
             }
 
             if (ws.readyState !== WebSocket.OPEN) {
+              console.error('[WS] WebSocket not open before chunk', chunkCount, '- readyState:', ws.readyState);
               throw new Error('WebSocket closed during upload');
             }
 
             ws.send(buffer);
             offset += chunkSize;
+            chunkCount++;
+
+            if (chunkCount <= 3 || chunkCount % 10 === 0) {
+              console.log('[WS] Chunk', chunkCount, '| offset:', offset, '/', totalSize, '| bufferedAmount:', ws.bufferedAmount);
+            }
 
             // Update local progress with real transfer progress
             // Server will confirm 100% with DONE message
@@ -4576,7 +4605,7 @@ function uploadFileWebSocket(file, onProgress, onComplete, onError) {
           }
 
           sendingChunks = false;
-          console.log('[WS] All chunks sent, waiting for DONE');
+          console.log('[WS] All', chunkCount, 'chunk(s) sent (' + totalSize + ' bytes), waiting for DONE');
         } catch (err) {
           console.error('[WS] Error sending chunks:', err);
           sendingChunks = false;
@@ -4588,6 +4617,7 @@ function uploadFileWebSocket(file, onProgress, onComplete, onError) {
         // (local progress is smoother, server progress causes jumping)
         console.log('[WS] Server progress:', msg);
       } else if (msg === 'DONE') {
+        console.log('[WS] Got DONE - upload complete');
         // Show 100% when server confirms completion
         if (onProgress) onProgress(file.size, file.size);
         uploadComplete = true;
@@ -4597,14 +4627,18 @@ function uploadFileWebSocket(file, onProgress, onComplete, onError) {
         resolve();
       } else if (msg.startsWith('ERROR:')) {
         const error = msg.substring(6);
+        console.error('[WS] Server error:', error);
         ws.close();
         if (onError) onError(error);
         reject(new Error(error));
+      } else {
+        console.warn('[WS] Unexpected message:', msg);
       }
     };
 
     ws.onerror = function(event) {
-      console.error('[WS] Error:', event);
+      clearTimeout(connectTimeout);
+      console.error('[WS] onerror fired | uploadStarted:', uploadStarted, '| sendingChunks:', sendingChunks, '| readyState:', ws.readyState, '| event:', event);
       currentUploadWs = null;
       if (!uploadStarted) {
         reject(new Error('WebSocket connection failed'));
@@ -4617,7 +4651,8 @@ function uploadFileWebSocket(file, onProgress, onComplete, onError) {
     };
 
     ws.onclose = function(event) {
-      console.log('[WS] Connection closed, code:', event.code, 'reason:', event.reason);
+      clearTimeout(connectTimeout);
+      console.log('[WS] onclose | code:', event.code, '| reason:', event.reason || '(none)', '| wasClean:', event.wasClean, '| uploadComplete:', uploadComplete, '| uploadStarted:', uploadStarted);
       // Reject for any close before upload was confirmed complete (covers both
       // mid-chunk-send closes and the "all chunks sent, waiting for DONE" window)
       if (!uploadComplete) {
@@ -4806,7 +4841,7 @@ function uploadFile() {
 
       // If network error, mark all remaining files as failed and show retry banner
       if (error.includes('connection failed') || error.includes('Network error') ||
-          error.includes('timeout') || error.includes('disconnected')) {
+          error.includes('timeout') || error.includes('timed out') || error.includes('disconnected')) {
         console.log(`[Network] Network error detected: ${error}`);
 
         // Add all remaining files to failed list

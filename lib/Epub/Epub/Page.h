@@ -81,6 +81,9 @@ class Page {
   void renderFootnotes(GfxRenderer& renderer, int fontId, int xOffset, int viewportBottom, int viewportWidth) const;
   // Returns the number of display lines needed to word-wrap `text` into `maxWidth` pixels
   static int countWrappedLines(GfxRenderer& renderer, int fontId, const char* text, int maxWidth);
+  // Returns the byte offset in `text` where the (maxLines+1)-th wrapped line would begin.
+  // Returns strlen(text) if the text fits in maxLines.
+  static size_t splitWrappedAtLine(GfxRenderer& renderer, int fontId, const char* text, int maxLines, int maxWidth);
   bool serialize(FsFile& file) const;
   static std::unique_ptr<Page> deserialize(FsFile& file);
 

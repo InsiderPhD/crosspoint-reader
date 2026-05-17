@@ -57,6 +57,54 @@ void Page::render(GfxRenderer& renderer, const int fontId, const int xOffset, co
   }
 }
 
+size_t Page::splitWrappedAtLine(GfxRenderer& renderer, const int fontId, const char* text, const int maxLines,
+                                const int maxWidth) {
+  if (!text || text[0] == '\0' || maxLines <= 0 || maxWidth <= 0) return 0;
+  char lineBuf[120];
+  char wordBuf[48];
+  int lineLen = 0;
+  int lines = 1;
+  const char* p = text;
+  while (*p) {
+    while (*p == ' ') p++;
+    if (!*p) break;
+    const char* wStart = p;
+    int wLen = 0;
+    while (*p && *p != ' ') {
+      p++;
+      wLen++;
+    }
+    int wCopy = wLen < (int)sizeof(wordBuf) - 1 ? wLen : (int)sizeof(wordBuf) - 1;
+    memcpy(wordBuf, wStart, wCopy);
+    wordBuf[wCopy] = '\0';
+    if (lineLen == 0) {
+      memcpy(lineBuf, wordBuf, wCopy + 1);
+      lineLen = wCopy;
+    } else {
+      const int space = (lineLen + 1 + wCopy < (int)sizeof(lineBuf)) ? 1 : 0;
+      if (space) {
+        lineBuf[lineLen] = ' ';
+        memcpy(lineBuf + lineLen + 1, wordBuf, wCopy);
+        lineBuf[lineLen + 1 + wCopy] = '\0';
+        if (renderer.getTextWidth(fontId, lineBuf) > maxWidth) {
+          if (lines >= maxLines) return static_cast<size_t>(wStart - text);
+          lines++;
+          memcpy(lineBuf, wordBuf, wCopy + 1);
+          lineLen = wCopy;
+        } else {
+          lineLen += 1 + wCopy;
+        }
+      } else {
+        if (lines >= maxLines) return static_cast<size_t>(wStart - text);
+        lines++;
+        memcpy(lineBuf, wordBuf, wCopy + 1);
+        lineLen = wCopy;
+      }
+    }
+  }
+  return strlen(text);
+}
+
 int Page::countWrappedLines(GfxRenderer& renderer, const int fontId, const char* text, const int maxWidth) {
   if (!text || text[0] == '\0' || maxWidth <= 0) return 0;
   char lineBuf[120];
@@ -160,10 +208,18 @@ void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xO
   const int lineH = renderer.getLineHeight(fontId);
   const int effectiveBottom = viewportBottom - lineH / 2;
 
+  // Cap total footnote area at half the screen so it can never overlap main content
+  const int maxFootnoteAreaH = renderer.getScreenHeight() / 2;
+  const int maxLines = (maxFootnoteAreaH - 4) / lineH;
+
   int totalLines = 0;
+  int includedFootnotes = 0;
   for (const auto& fn : footnotes) {
     if (fn.text[0] == '\0') continue;
-    totalLines += countWrappedLines(renderer, fontId, fn.text, viewportWidth);
+    const int fnLines = countWrappedLines(renderer, fontId, fn.text, viewportWidth);
+    if (totalLines + fnLines > maxLines) break;
+    totalLines += fnLines;
+    includedFootnotes++;
   }
   if (totalLines == 0) return;
 
@@ -171,9 +227,12 @@ void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xO
   renderer.drawLine(xOffset, ruleY, xOffset + viewportWidth / 3, ruleY);
 
   int y = ruleY + 4;
+  int drawn = 0;
   for (const auto& fn : footnotes) {
     if (fn.text[0] == '\0') continue;
+    if (drawn >= includedFootnotes) break;
     drawWrappedText(renderer, fontId, fn.text, xOffset, y, viewportWidth, lineH);
+    drawn++;
   }
 }
 
