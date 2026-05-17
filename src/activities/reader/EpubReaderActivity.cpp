@@ -1,6 +1,5 @@
 #include "EpubReaderActivity.h"
 
-#include <algorithm>
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
@@ -9,7 +8,10 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <WiFi.h>
 #include <esp_system.h>
+
+#include <algorithm>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -19,10 +21,16 @@
 #include "KOReaderCredentialStore.h"
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
+#include "BookFusionBookIdStore.h"
+#include "BookFusionSyncClient.h"
+#include "BookFusionTokenStore.h"
+#include "ProgressMapper.h"
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
-#include "RecentBooksStore.h"
 #include "ReadingStatsStore.h"
+#include "RecentBooksStore.h"
+#include "WifiCredentialStore.h"
+#include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ScreenshotUtil.h"
@@ -31,8 +39,9 @@ namespace {
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
 constexpr unsigned long skipChapterMs = 700;
 // pages per minute, first item is 1 to prevent division by zero if accessed
-// Index 0 = Off, 1 = Auto (uses readingSpeedSecondsPerPage), 2-5 = fixed durations
-const std::vector<unsigned long> PAGE_TURN_DURATIONS_MS = {0, 0, 60000UL, 30000UL, 10000UL, 5000UL};
+// Index 0 = Off, 1 = Auto (uses readingSpeedSecondsPerPage), 2+ = fixed durations
+const std::vector<unsigned long> PAGE_TURN_DURATIONS_MS = {0,       0,       60000UL, 50000UL, 40000UL,
+                                                           35000UL, 30000UL, 25000UL, 20000UL};
 
 int clampPercent(int percent) {
   if (percent < 0) {
@@ -75,7 +84,8 @@ void EpubReaderActivity::buildBookPageCache() {
     if (spinePageCountCache[i] == 0) {
       const size_t prevSize = (i > 0) ? epub->getCumulativeSpineItemSize(i - 1) : 0;
       const size_t itemSize = epub->getCumulativeSpineItemSize(i) - prevSize;
-      spinePageCountCache[i] = std::max<uint16_t>(1, static_cast<uint16_t>(pagesPerByte * static_cast<float>(itemSize)));
+      spinePageCountCache[i] =
+          std::max<uint16_t>(1, static_cast<uint16_t>(pagesPerByte * static_cast<float>(itemSize)));
     }
     cachedTotalBookPages += spinePageCountCache[i];
   }
@@ -206,8 +216,41 @@ void EpubReaderActivity::loop() {
     }
   }
 
-  // Enter reader menu activity.
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+  // Long-press Confirm: immediate action when threshold is reached (hold-based, not release-based)
+  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
+      mappedInput.getHeldTime() >= skipChapterMs &&
+      !longPressFeedbackShown) {
+
+    longPressFeedbackShown = true;  // Prevent action spam
+
+    if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_SYNC) {
+      // Try BookFusion sync if this is a BookFusion book
+      // WiFi connection and sync will show their own popup feedback
+      connectWifiForSyncWithPopup([this]() {
+        // WiFi connected, perform BookFusion sync
+        performBookFusionSync();
+      });
+    } else {
+      // Default: full e-ink refresh to clear ghosting
+      RenderLock lock;
+      renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+    }
+    return;
+  }
+
+  // Snapshot before the reset below so we can tell whether the upcoming release
+  // event terminates a long-press action (sync / refresh) — in that case the
+  // release should NOT also open the reader menu; the user wants to stay on the
+  // text and keep reading.
+  const bool longPressActionConsumedRelease = longPressFeedbackShown;
+
+  // Reset action flag when button is not pressed
+  if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
+    longPressFeedbackShown = false;
+  }
+
+  // Enter reader menu activity (only on a short-press release).
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && !longPressActionConsumedRelease) {
     const int currentPage = section ? section->currentPage + 1 : 0;
     const int totalPages = section ? section->pageCount : 0;
     float bookProgress = 0.0f;
@@ -505,7 +548,19 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::SYNC: {
-      if (KOREADER_STORE.hasCredentials()) {
+      // Check if this is a BookFusion book and we have BookFusion credentials
+      std::string epubPath = epub->getPath();
+      uint32_t bookId = BookFusionBookIdStore::loadBookId(epubPath.c_str());
+
+      if (bookId != 0 && BF_TOKEN_STORE.hasToken()) {
+        // BookFusion book with valid account - use BookFusion sync
+        // First ensure WiFi is connected with popup feedback
+        connectWifiForSyncWithPopup([this]() {
+          // WiFi connected, perform BookFusion sync
+          performBookFusionSync();
+        });
+      } else if (KOREADER_STORE.hasCredentials()) {
+        // Fall back to KOReader sync if not BookFusion book but have KOReader credentials
         const int currentPage = section ? section->currentPage : 0;
         const int totalPages = section ? section->pageCount : 0;
         startActivityForResult(
@@ -850,7 +905,8 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
     LOG_ERR("ERS", "Could not save progress!");
   }
 
-  const float chapterProgress = (pageCount > 0) ? static_cast<float>(currentPage) / static_cast<float>(pageCount) : 0.0f;
+  const float chapterProgress =
+      (pageCount > 0) ? static_cast<float>(currentPage) / static_cast<float>(pageCount) : 0.0f;
   const auto progressPercent = static_cast<int8_t>(epub->calculateProgress(spineIndex, chapterProgress) * 100.0f);
   RECENT_BOOKS.updateProgress(epub->getPath(), progressPercent);
 }
@@ -1096,4 +1152,228 @@ void EpubReaderActivity::restoreSavedPosition() {
     section.reset();
   }
   requestUpdate();
+}
+
+void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuccess) {
+  // Show connecting popup
+  {
+    RenderLock lock(*this);
+    UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Connecting to WiFi...");
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+  }
+
+  // Load WiFi credentials
+  WIFI_STORE.loadFromFile();
+
+  // Try to auto-connect to the last known network
+  const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
+  if (lastSsid.empty()) {
+    // No saved networks, show error popup
+    {
+      RenderLock lock(*this);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "No WiFi networks configured.\nPlease set up WiFi in Settings first.");
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    return;
+  }
+
+  const auto* cred = WIFI_STORE.findCredential(lastSsid);
+  if (!cred) {
+    // Network found but no credentials
+    {
+      RenderLock lock(*this);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "WiFi credentials not found.\nPlease reconnect in Settings.");
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    return;
+  }
+
+  // Attempt connection
+  LOG_DBG("BFS", "Attempting to connect to WiFi: %s", lastSsid.c_str());
+
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+
+  if (cred->password.empty()) {
+    WiFi.begin(cred->ssid.c_str());
+  } else {
+    WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
+  }
+
+  // Wait for connection with timeout
+  int attempts = 0;
+  const int maxAttempts = 100; // 10 seconds
+
+  while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    attempts++;
+
+    // Update popup every second
+    if (attempts % 10 == 0) {
+      RenderLock lock(*this);
+      char statusMsg[64];
+      snprintf(statusMsg, sizeof(statusMsg), "Connecting to WiFi...\n(%d/%d)", attempts/10, maxAttempts/10);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", statusMsg);
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    LOG_DBG("BFS", "WiFi connected successfully");
+
+    // Show success popup briefly
+    {
+      RenderLock lock(*this);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "WiFi connected!");
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+
+    // Proceed with sync
+    onSuccess();
+  } else {
+    LOG_DBG("BFS", "WiFi connection failed");
+
+    // Show failure popup
+    {
+      RenderLock lock(*this);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "WiFi connection failed.\nPlease check your settings.");
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+  }
+}
+
+void EpubReaderActivity::performBookFusionSync() {
+  // Check if this is a BookFusion book
+  std::string epubPath = APP_STATE.openEpubPath;
+  uint32_t bookId = BookFusionBookIdStore::loadBookId(epubPath.c_str());
+
+  if (bookId == 0) {
+    // Not a BookFusion book, fall back to refresh
+    LOG_DBG("BFS", "Not a BookFusion book, performing refresh instead");
+    RenderLock lock;
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+    return;
+  }
+
+  // Check if we have a BookFusion token
+  if (!BF_TOKEN_STORE.hasToken()) {
+    // No token, fall back to refresh
+    LOG_DBG("BFS", "No BookFusion token, performing refresh instead");
+    RenderLock lock;
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+    return;
+  }
+
+  // Perform bi-directional sync
+  LOG_DBG("BFS", "Starting BookFusion sync for book %u", bookId);
+
+  // Show initial sync popup
+  {
+    RenderLock lock(*this);
+    UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Fetching remote progress...");
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+  }
+
+  // Get current local position
+  const int currentPage = section ? section->currentPage + 1 : 0;
+  const int totalPages = section ? section->pageCount : 0;
+
+  CrossPointPosition localPos;
+  localPos.spineIndex = currentSpineIndex;
+  localPos.pageNumber = currentPage;
+  localPos.totalPages = totalPages;
+
+  // Convert local position to BookFusion format
+  KOReaderPosition localKoPos = ProgressMapper::toKOReader(epub, localPos);
+  BookFusionPosition localBfPos;
+  localBfPos.percentage = localKoPos.percentage * 100.0f;  // BookFusion uses 0-100
+  localBfPos.chapterIndex = currentSpineIndex;
+  localBfPos.pagePositionInBook = localKoPos.percentage;
+
+  // First, try to fetch remote progress from BookFusion
+  BookFusionPosition remoteBfPos;
+  auto downloadResult = BookFusionSyncClient::getProgress(bookId, remoteBfPos);
+
+  bool shouldUpdateLocal = false;
+  if (downloadResult == BookFusionSyncClient::OK) {
+    LOG_DBG("BFS", "Remote progress: %.2f%%, Local progress: %.2f%%", remoteBfPos.percentage, localBfPos.percentage);
+
+    // If remote progress is significantly ahead (more than 1%), update local position
+    if (remoteBfPos.percentage > localBfPos.percentage + 1.0f) {
+      LOG_DBG("BFS", "Remote progress ahead, updating local position");
+
+      // Convert remote BookFusion position back to CrossPoint format
+      KOReaderPosition remoteKoPos;
+      remoteKoPos.percentage = remoteBfPos.pagePositionInBook;
+      remoteKoPos.xpath = ""; // Will be generated by ProgressMapper
+
+      CrossPointPosition remotePos = ProgressMapper::toCrossPoint(epub, remoteKoPos, currentSpineIndex,
+                                                                  section ? section->pageCount : 0);
+
+      // Update local position if valid
+      if (remotePos.spineIndex >= 0 && remotePos.spineIndex < epub->getSpineItemsCount()) {
+        currentSpineIndex = remotePos.spineIndex;
+        // Reset section to force reload with new spine index
+        section.reset();
+        // Set pending page number for when section loads
+        if (remotePos.pageNumber > 0) {
+          nextPageNumber = remotePos.pageNumber;
+          shouldUpdateLocal = true;
+        }
+      }
+    }
+  } else if (downloadResult == BookFusionSyncClient::NOT_FOUND) {
+    LOG_DBG("BFS", "No remote progress found, will upload current position");
+  } else {
+    LOG_DBG("BFS", "Failed to fetch remote progress: %s", BookFusionSyncClient::errorString(downloadResult));
+  }
+
+  // Show upload popup
+  {
+    RenderLock lock(*this);
+    UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Uploading progress...");
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+  }
+
+  // Upload current position to BookFusion (whether updated from remote or not)
+  auto uploadResult = BookFusionSyncClient::setProgress(bookId, localBfPos);
+
+  // Show completion popup
+  {
+    RenderLock lock(*this);
+    if (uploadResult == BookFusionSyncClient::OK) {
+      LOG_DBG("BFS", "Progress uploaded successfully");
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Sync completed successfully!");
+    } else {
+      LOG_DBG("BFS", "Upload failed: %s", BookFusionSyncClient::errorString(uploadResult));
+      char errorMsg[128];
+      snprintf(errorMsg, sizeof(errorMsg), "Sync failed:\n%s", BookFusionSyncClient::errorString(uploadResult));
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", errorMsg);
+    }
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+  }
+
+  // Wait briefly to show the completion message
+  vTaskDelay(1500 / portTICK_PERIOD_MS);
+
+  // Always do a full refresh afterward as visual feedback
+  {
+    RenderLock lock;
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  }
 }

@@ -68,10 +68,19 @@ bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent) {
 
   http.begin(*client, url.c_str());
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.addHeader("User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
 
-  // Add Basic HTTP auth if credentials are configured
-  if (strlen(SETTINGS.opdsUsername) > 0 && strlen(SETTINGS.opdsPassword) > 0) {
+  // Use standard browser user agent for BookFusion compatibility
+  bool isBookFusion = url.find("bookfusion.com") != std::string::npos;
+  if (isBookFusion) {
+    http.addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36");
+    http.addHeader("Accept", "*/*");
+    http.addHeader("Referer", "https://www.bookfusion.com/");
+  } else {
+    http.addHeader("User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
+  }
+
+  // Add Basic HTTP auth if credentials are configured (but not for BookFusion URLs which use token auth)
+  if (!isBookFusion && strlen(SETTINGS.opdsUsername) > 0 && strlen(SETTINGS.opdsPassword) > 0) {
     std::string credentials = std::string(SETTINGS.opdsUsername) + ":" + SETTINGS.opdsPassword;
     String encoded = base64::encode(credentials.c_str());
     http.addHeader("Authorization", "Basic " + encoded);
@@ -119,10 +128,19 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
 
   http.begin(*client, url.c_str());
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.addHeader("User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
 
-  // Add Basic HTTP auth if credentials are configured
-  if (strlen(SETTINGS.opdsUsername) > 0 && strlen(SETTINGS.opdsPassword) > 0) {
+  // Use standard browser user agent for BookFusion compatibility
+  bool isBookFusion = url.find("bookfusion.com") != std::string::npos;
+  if (isBookFusion) {
+    http.addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36");
+    http.addHeader("Accept", "*/*");
+    http.addHeader("Referer", "https://www.bookfusion.com/");
+  } else {
+    http.addHeader("User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
+  }
+
+  // Add Basic HTTP auth if credentials are configured (but not for BookFusion URLs which use token auth)
+  if (!isBookFusion && strlen(SETTINGS.opdsUsername) > 0 && strlen(SETTINGS.opdsPassword) > 0) {
     std::string credentials = std::string(SETTINGS.opdsUsername) + ":" + SETTINGS.opdsPassword;
     String encoded = base64::encode(credentials.c_str());
     http.addHeader("Authorization", "Basic " + encoded);

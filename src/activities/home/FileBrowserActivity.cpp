@@ -2,6 +2,7 @@
 
 #include <Epub.h>
 #include <FsHelpers.h>
+#include <Xtc.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -9,6 +10,7 @@
 #include <algorithm>
 
 #include "../util/ConfirmationActivity.h"
+#include "BookFusionBookIdStore.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
@@ -99,7 +101,7 @@ void FileBrowserActivity::loadFiles() {
       }
     }
   }
-  sortFileList(files);
+
 }
 
 void FileBrowserActivity::onEnter() {
@@ -142,11 +144,12 @@ void FileBrowserActivity::clearFileMetadata(const std::string& fullPath) {
 }
 
 void FileBrowserActivity::loop() {
+
   // Long press BACK (1s+) goes to root folder
   // but Long press BACK (1s+) from ReaderActivity sends us here with the MappedInput already set.
   // So ignore it the first time.
   if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= GO_HOME_MS &&
-      basepath != "/" && !lockLongPressBack) {
+      basepath != "/" && !lockLongPressBack && !showingBookOptions) {
     basepath = "/";
     loadFiles();
     selectorIndex = 0;
@@ -157,6 +160,107 @@ void FileBrowserActivity::loop() {
   if (lockLongPressBack && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     lockLongPressBack = false;
     return;
+  }
+
+  // Long press on a book file → context menu
+  if (!showingBookOptions && !longPressBookTriggered && !files.empty() && selectorIndex < files.size()) {
+    const std::string& entry = files[selectorIndex];
+    const bool isBook = entry.back() != '/' &&
+                        (FsHelpers::hasEpubExtension(entry) || FsHelpers::hasXtcExtension(entry));
+    if (isBook && mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
+        mappedInput.getHeldTime() >= 700UL) {
+      longPressBookTriggered = true;
+      showingBookOptions = true;
+      awaitingBookOptionsRelease = true;
+      bookOptionsIndex = 0;
+      std::string cleanBase = basepath;
+      if (cleanBase.back() != '/') cleanBase += '/';
+      bookOptionsPath = cleanBase + entry;
+      const auto dotPos = entry.rfind('.');
+      bookOptionsTitle = (dotPos != std::string::npos) ? entry.substr(0, dotPos) : std::string(entry);
+      const auto& recentList = RECENT_BOOKS.getBooks();
+      auto it = std::find_if(recentList.begin(), recentList.end(),
+                             [this](const RecentBook& rb) { return rb.path == bookOptionsPath; });
+      if (it != recentList.end()) {
+        bookOptionsAuthor = it->author;
+        bookOptionsProgress = it->progressPercent;
+      } else {
+        bookOptionsAuthor.clear();
+        bookOptionsProgress = -1;
+      }
+      requestUpdate();
+      return;
+    }
+  }
+
+  if (showingBookOptions) {
+    buttonNavigator.onNext([this] {
+      bookOptionsIndex = (bookOptionsIndex + 1) % UITheme::BOOK_OPTIONS_COUNT;
+      requestUpdate();
+    });
+    buttonNavigator.onPrevious([this] {
+      bookOptionsIndex = (bookOptionsIndex - 1 + UITheme::BOOK_OPTIONS_COUNT) % UITheme::BOOK_OPTIONS_COUNT;
+      requestUpdate();
+    });
+
+    if (awaitingBookOptionsRelease) {
+      if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) awaitingBookOptionsRelease = false;
+      return;
+    }
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      showingBookOptions = false;
+      longPressBookTriggered = false;
+      const std::string path = bookOptionsPath;
+      const std::string title = bookOptionsTitle;
+      auto reload = [this] {
+        loadFiles();
+        if (selectorIndex >= files.size()) selectorIndex = files.empty() ? 0 : files.size() - 1;
+        requestUpdate(true);
+      };
+      if (bookOptionsIndex == UITheme::BOOK_OPT_MARK_READ) {
+        RECENT_BOOKS.updateProgress(path, 100);
+        RECENT_BOOKS.saveToFile();
+        reload();
+      } else if (bookOptionsIndex == UITheme::BOOK_OPT_RESET_PROGRESS) {
+        RECENT_BOOKS.updateProgress(path, -1);
+        RECENT_BOOKS.saveToFile();
+        reload();
+      } else if (bookOptionsIndex == UITheme::BOOK_OPT_SHELVE) {
+        RECENT_BOOKS.removeBook(path);
+        RECENT_BOOKS.saveToFile();
+        reload();
+      } else if (bookOptionsIndex == UITheme::BOOK_OPT_REINDEX) {
+        if (FsHelpers::hasEpubExtension(path)) {
+          Storage.removeDir((Epub(path, "/.crosspoint").getCachePath() + "/sections").c_str());
+        } else if (FsHelpers::hasXtcExtension(path)) {
+          Xtc(path, "/.crosspoint").clearCache();
+        }
+        reload();
+      } else if (bookOptionsIndex == UITheme::BOOK_OPT_DELETE) {
+        startActivityForResult(
+            std::make_unique<ConfirmationActivity>(renderer, mappedInput,
+                                                   tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
+            [this, path, reload](const ActivityResult& res) mutable {
+              if (!res.isCancelled) {
+                if (FsHelpers::hasEpubExtension(path)) Epub(path, "/.crosspoint").clearCache();
+                Storage.remove(path.c_str());
+                RECENT_BOOKS.removeBook(path);
+                RECENT_BOOKS.saveToFile();
+                reload();
+              }
+            });
+      }
+      return;
+    }
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      showingBookOptions = false;
+      longPressBookTriggered = false;
+      requestUpdate();
+      return;
+    }
+    return;  // Block main input while modal is open
   }
 
   const int pathReserved = renderer.getLineHeight(SMALL_FONT_ID) + UITheme::getInstance().getMetrics().verticalSpacing;
@@ -238,26 +342,27 @@ void FileBrowserActivity::loop() {
     }
   }
 
-  int listSize = static_cast<int>(files.size());
-  buttonNavigator.onNextRelease([this, listSize] {
-    selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), listSize);
-    requestUpdate();
-  });
+  // Process normal navigation
+    int listSize = static_cast<int>(files.size());
+    buttonNavigator.onNextRelease([this, listSize] {
+      selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), listSize);
+      requestUpdate();
+    });
 
-  buttonNavigator.onPreviousRelease([this, listSize] {
-    selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), listSize);
-    requestUpdate();
-  });
+    buttonNavigator.onPreviousRelease([this, listSize] {
+      selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), listSize);
+      requestUpdate();
+    });
 
-  buttonNavigator.onNextContinuous([this, listSize, pageItems] {
-    selectorIndex = ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
-    requestUpdate();
-  });
+    buttonNavigator.onNextContinuous([this, listSize, pageItems] {
+      selectorIndex = ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
+      requestUpdate();
+    });
 
-  buttonNavigator.onPreviousContinuous([this, listSize, pageItems] {
-    selectorIndex = ButtonNavigator::previousPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
-    requestUpdate();
-  });
+    buttonNavigator.onPreviousContinuous([this, listSize, pageItems] {
+      selectorIndex = ButtonNavigator::previousPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
+      requestUpdate();
+    });
 }
 
 std::string getFileName(std::string filename) {
@@ -288,6 +393,8 @@ void FileBrowserActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   std::string folderName = (basepath == "/") ? tr(STR_SD_CARD) : basepath.substr(basepath.rfind('/') + 1);
+
+  // Show folder name in header
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str());
 
   const int pathLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
@@ -300,7 +407,18 @@ void FileBrowserActivity::render(RenderLock&&) {
   } else {
     GUI.drawList(
         renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), selectorIndex,
-        [this](int index) { return getFileName(files[index]); }, nullptr,
+        [this](int index) {
+          std::string filename = getFileName(files[index]);
+          // Mark BookFusion-linked books with an "&" prefix — a visual cue that this
+          // entry "references" a cloud-side BookFusion book and will sync to it.
+          if (files[index].back() != '/') { // Not a directory
+            const std::string fullPath = (basepath.back() == '/') ? basepath + files[index] : basepath + "/" + files[index];
+            if (BookFusionBookIdStore::loadBookId(fullPath.c_str()) != 0) {
+              return "& " + filename;
+            }
+          }
+          return filename;
+        }, nullptr,
         [this](int index) { return UITheme::getFileIcon(files[index]); },
         [this](int index) -> std::string {
           const std::string& entry = files[index];
@@ -315,7 +433,8 @@ void FileBrowserActivity::render(RenderLock&&) {
             }
           }
           return "";
-        }, false);
+        },
+        false);
   }
 
   // Full path display
@@ -346,10 +465,19 @@ void FileBrowserActivity::render(RenderLock&&) {
   }
 
   // Help text
-  const auto labels =
-      mappedInput.mapLabels(basepath == "/" ? tr(STR_HOME) : tr(STR_BACK), files.empty() ? "" : tr(STR_OPEN),
-                            files.empty() ? "" : tr(STR_DIR_UP), files.empty() ? "" : tr(STR_DIR_DOWN));
+  const auto labels = showingBookOptions
+      ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+      : mappedInput.mapLabels(basepath == "/" ? tr(STR_HOME) : tr(STR_BACK), files.empty() ? "" : tr(STR_OPEN),
+                              files.empty() ? "" : tr(STR_DIR_UP), files.empty() ? "" : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+
+  if (showingBookOptions) {
+    const auto lastSlash = bookOptionsPath.rfind('/');
+    const std::string folder =
+        (lastSlash != std::string::npos) ? bookOptionsPath.substr(0, lastSlash) : bookOptionsPath;
+    UITheme::drawBookOptionsPopup(renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(), folder.c_str(),
+                                  bookOptionsProgress, bookOptionsIndex);
+  }
 
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();

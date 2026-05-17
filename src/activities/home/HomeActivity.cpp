@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "../util/ConfirmationActivity.h"
+#include "BookFusionBookIdStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
@@ -22,13 +23,18 @@
 
 int HomeActivity::getMenuItemCount() const {
   int count = 5;  // File Browser, Recents, File transfer, Stats, Settings
-  if (!recentBooks.empty()) {
-    count += recentBooks.size();
-  }
+  count += getCoverSlotsUsed();
   if (hasOpdsUrl) {
     count++;
   }
   return count;
+}
+
+int HomeActivity::getCoverSlotsUsed() const {
+  const int librarySlot = UITheme::getInstance().getTheme().getLibrarySlotIndex();
+  const int recents = static_cast<int>(recentBooks.size());
+  // Library tile is always reachable: at minimum we expose librarySlot+1 slots.
+  return librarySlot >= 0 ? std::max(recents, librarySlot + 1) : recents;
 }
 
 void HomeActivity::loadRecentBooks(int maxBooks) {
@@ -117,7 +123,11 @@ void HomeActivity::onEnter() {
   selectorIndex = 0;
 
   const auto& metrics = UITheme::getInstance().getMetrics();
-  loadRecentBooks(metrics.homeRecentBooksCount);
+  // When the active theme reserves a library tile, only load enough recents
+  // to fill the slots before it — slots at/after librarySlot are not books.
+  const int librarySlot = UITheme::getInstance().getTheme().getLibrarySlotIndex();
+  const int maxRecents = librarySlot >= 0 ? librarySlot : metrics.homeRecentBooksCount;
+  loadRecentBooks(maxRecents);
 
   // Trigger first update
   requestUpdate();
@@ -172,104 +182,137 @@ void HomeActivity::freeCoverBuffer() {
   coverBufferStored = false;
 }
 
+void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std::string& path,
+                                      const std::string& title) {
+  // Reload the recent-books vector after any mutation, keeping selector + cover
+  // cache state in sync. Captures `this` to access members.
+  auto reloadRecents = [this] {
+    const auto& m = UITheme::getInstance().getMetrics();
+    const int librarySlot = UITheme::getInstance().getTheme().getLibrarySlotIndex();
+    const int maxRecents = librarySlot >= 0 ? librarySlot : m.homeRecentBooksCount;
+    recentBooks.clear();
+    loadRecentBooks(maxRecents);
+    selectorIndex = 0;
+    recentsLoaded = false;
+    recentsLoading = false;
+    coverRendered = false;
+    coverBufferStored = false;
+    requestUpdate();
+  };
+
+  switch (action) {
+    case BookContextMenu::Action::MarkRead:
+      RECENT_BOOKS.updateProgress(path, 100);
+      RECENT_BOOKS.saveToFile();
+      reloadRecents();
+      break;
+    case BookContextMenu::Action::ResetProgress:
+      RECENT_BOOKS.updateProgress(path, -1);
+      RECENT_BOOKS.saveToFile();
+      reloadRecents();
+      break;
+    case BookContextMenu::Action::Shelve:
+      RECENT_BOOKS.removeBook(path);
+      RECENT_BOOKS.saveToFile();
+      reloadRecents();
+      break;
+    case BookContextMenu::Action::Reindex:
+      if (FsHelpers::hasEpubExtension(path)) {
+        // Delete only rendered sections — preserves progress, covers, and metadata.
+        const std::string sectionsPath = Epub(path, "/.crosspoint").getCachePath() + "/sections";
+        Storage.removeDir(sectionsPath.c_str());
+      } else if (FsHelpers::hasXtcExtension(path)) {
+        Xtc(path, "/.crosspoint").clearCache();
+      }
+      reloadRecents();
+      break;
+    case BookContextMenu::Action::Delete:
+      startActivityForResult(std::make_unique<ConfirmationActivity>(
+                                 renderer, mappedInput, tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
+                             [this, path, reloadRecents](const ActivityResult& res) mutable {
+                               if (!res.isCancelled) {
+                                 if (FsHelpers::hasEpubExtension(path)) {
+                                   Epub(path, "/.crosspoint").clearCache();
+                                 }
+                                 Storage.remove(path.c_str());
+                                 RECENT_BOOKS.removeBook(path);
+                                 RECENT_BOOKS.saveToFile();
+                                 reloadRecents();
+                               }
+                             });
+      break;
+    case BookContextMenu::Action::RegenerateCover:
+      LOG_DBG("HAC", "Manual cover regeneration requested for: %s", path.c_str());
+      if (FsHelpers::hasEpubExtension(path)) {
+        Epub epub(path, "/.crosspoint");
+        if (epub.load(false, true)) {  // buildIfMissing=false, skipLoadingCss=true
+          const auto& metrics = UITheme::getInstance().getMetrics();
+          const int coverHeight = metrics.homeCoverHeight;
+          std::string coverPath226 = epub.getThumbBmpPath(coverHeight);
+          if (Storage.exists(coverPath226.c_str())) {
+            Storage.remove(coverPath226.c_str());
+            LOG_DBG("HAC", "Removed existing cover: %s", coverPath226.c_str());
+          }
+          if (epub.generateThumbBmp(coverHeight)) {
+            RECENT_BOOKS.updateBook(path, epub.getTitle(), epub.getAuthor(), coverPath226);
+            LOG_DBG("HAC", "Cover regeneration successful: %s", coverPath226.c_str());
+          } else {
+            LOG_ERR("HAC", "Cover regeneration failed for: %s", path.c_str());
+          }
+        } else {
+          LOG_ERR("HAC", "Failed to load EPUB metadata for cover regeneration: %s", path.c_str());
+        }
+      } else if (FsHelpers::hasXtcExtension(path)) {
+        Xtc xtc(path, "/.crosspoint");
+        if (xtc.load()) {
+          const auto& metrics = UITheme::getInstance().getMetrics();
+          const int coverHeight = metrics.homeCoverHeight;
+          std::string coverPath = xtc.getThumbBmpPath(coverHeight);
+          if (Storage.exists(coverPath.c_str())) {
+            Storage.remove(coverPath.c_str());
+            LOG_DBG("HAC", "Removed existing XTC cover: %s", coverPath.c_str());
+          }
+          if (xtc.generateThumbBmp(coverHeight)) {
+            RECENT_BOOKS.updateBook(path, xtc.getTitle(), xtc.getAuthor(), coverPath);
+            LOG_DBG("HAC", "XTC cover regeneration successful: %s", coverPath.c_str());
+          } else {
+            LOG_ERR("HAC", "XTC cover regeneration failed for: %s", path.c_str());
+          }
+        }
+      }
+      RECENT_BOOKS.saveToFile();
+      reloadRecents();
+      break;
+  }
+}
+
 void HomeActivity::loop() {
   const int menuCount = getMenuItemCount();
 
-  // Long-press Confirm on a book: show options modal
-  if (selectorIndex < static_cast<int>(recentBooks.size()) &&
-      mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= 700UL &&
-      !longPressBookTriggered) {
-    longPressBookTriggered = true;
-    showingBookOptions = true;
-    awaitingBookOptionsRelease = true;
-    bookOptionsIndex = 0;
-    requestUpdate();
+  // Active modal — drive it and dispatch the chosen action (if any) on a terminal event.
+  if (contextMenu.isOpen()) {
+    BookContextMenu::Action action;
+    bool cancelled = false;
+    if (contextMenu.handleInput(buttonNavigator, mappedInput, &action, &cancelled)) {
+      if (!cancelled) {
+        dispatchBookAction(action, contextMenu.path(), contextMenu.title());
+      } else {
+        requestUpdate();
+      }
+    } else {
+      // Modal still up — selection navigation might have changed; redraw.
+      requestUpdate();
+    }
     return;
   }
 
-
-  if (showingBookOptions) {
-    buttonNavigator.onNext([this] {
-      bookOptionsIndex = (bookOptionsIndex + 1) % BOOK_OPTIONS_COUNT;
-      requestUpdate();
-    });
-    buttonNavigator.onPrevious([this] {
-      bookOptionsIndex = (bookOptionsIndex - 1 + BOOK_OPTIONS_COUNT) % BOOK_OPTIONS_COUNT;
-      requestUpdate();
-    });
-
-    if (awaitingBookOptionsRelease) {
-      if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
-        awaitingBookOptionsRelease = false;
-      }
-      return;
-    }
-
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      showingBookOptions = false;
-      longPressBookTriggered = false;
-      const std::string path = recentBooks[selectorIndex].path;
-      const std::string title = recentBooks[selectorIndex].title;
-
-      auto reloadRecents = [this] {
-        const auto& m = UITheme::getInstance().getMetrics();
-        recentBooks.clear();
-        loadRecentBooks(m.homeRecentBooksCount);
-        selectorIndex = 0;
-        recentsLoaded = false;
-        recentsLoading = false;
-        coverRendered = false;
-        coverBufferStored = false;
-        requestUpdate();
-      };
-
-      if (bookOptionsIndex == BOOK_OPT_MARK_READ) {
-        RECENT_BOOKS.updateProgress(path, 100);
-        RECENT_BOOKS.saveToFile();
-        reloadRecents();
-      } else if (bookOptionsIndex == BOOK_OPT_RESET_PROGRESS) {
-        RECENT_BOOKS.updateProgress(path, -1);
-        RECENT_BOOKS.saveToFile();
-        reloadRecents();
-      } else if (bookOptionsIndex == BOOK_OPT_SHELVE) {
-        RECENT_BOOKS.removeBook(path);
-        RECENT_BOOKS.saveToFile();
-        reloadRecents();
-      } else if (bookOptionsIndex == BOOK_OPT_REINDEX) {
-        if (FsHelpers::hasEpubExtension(path)) {
-          // Delete only rendered sections — preserves progress, covers, and metadata
-          const std::string sectionsPath = Epub(path, "/.crosspoint").getCachePath() + "/sections";
-          Storage.removeDir(sectionsPath.c_str());
-        } else if (FsHelpers::hasXtcExtension(path)) {
-          Xtc(path, "/.crosspoint").clearCache();
-        }
-        reloadRecents();
-      } else if (bookOptionsIndex == BOOK_OPT_DELETE) {
-        startActivityForResult(
-            std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
-            [this, path, reloadRecents](const ActivityResult& res) mutable {
-              if (!res.isCancelled) {
-                if (FsHelpers::hasEpubExtension(path)) {
-                  Epub(path, "/.crosspoint").clearCache();
-                }
-                Storage.remove(path.c_str());
-                RECENT_BOOKS.removeBook(path);
-                RECENT_BOOKS.saveToFile();
-                reloadRecents();
-              }
-            });
-      }
-      return;
-    }
-
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      showingBookOptions = false;
-      longPressBookTriggered = false;
+  // Long-press Confirm on a recent-book tile opens the book options modal.
+  if (selectorIndex < static_cast<int>(recentBooks.size())) {
+    const auto& book = recentBooks[selectorIndex];
+    if (contextMenu.checkLongPress(mappedInput, book.path, book.title, book.author, book.progressPercent)) {
       requestUpdate();
       return;
     }
-
-    return;  // Block main menu input while modal is open
   }
 
   buttonNavigator.onNext([this, menuCount] {
@@ -283,13 +326,23 @@ void HomeActivity::loop() {
   });
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    const bool wasLongPress = longPressBookTriggered;
-    longPressBookTriggered = false;
-    if (wasLongPress) return;  // Long-press already handled above
+    // If this release was the menu's confirmation/dismissal, the helper has
+    // already handled it — skip short-press handling.
+    if (contextMenu.consumeLongPressFlag()) return;
+
+    // Library slot is checked first so a theme-provided library tile beats
+    // both the recent-book lookup and the menu fallthrough.
+    const int librarySlotIdx = UITheme::getInstance().getTheme().getLibrarySlotIndex();
+    if (librarySlotIdx >= 0 && selectorIndex == librarySlotIdx) {
+      activityManager.goToLibrary();
+      return;
+    }
+
+    const int coverSlotsUsed = getCoverSlotsUsed();
 
     // Calculate dynamic indices based on which options are available
     int idx = 0;
-    int menuSelectedIndex = selectorIndex - static_cast<int>(recentBooks.size());
+    int menuSelectedIndex = selectorIndex - coverSlotsUsed;
     const int fileBrowserIdx = idx++;
     const int recentsIdx = idx++;
     const int opdsLibraryIdx = hasOpdsUrl ? idx++ : -1;
@@ -297,7 +350,7 @@ void HomeActivity::loop() {
     const int statsIdx = idx++;
     const int settingsIdx = idx;
 
-    if (selectorIndex < recentBooks.size()) {
+    if (selectorIndex < static_cast<int>(recentBooks.size())) {
       onSelectBook(recentBooks[selectorIndex].path);
     } else if (menuSelectedIndex == fileBrowserIdx) {
       onFileBrowserOpen();
@@ -340,86 +393,22 @@ void HomeActivity::render(RenderLock&&) {
     menuIcons.insert(menuIcons.begin() + 2, Library);
   }
 
+  const int menuOffset = getCoverSlotsUsed();
   GUI.drawButtonMenu(
       renderer,
       Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing, pageWidth,
            pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing * 2 +
                          metrics.buttonHintsHeight)},
-      static_cast<int>(menuItems.size()), selectorIndex - recentBooks.size(),
+      static_cast<int>(menuItems.size()), selectorIndex - menuOffset,
       [&menuItems](int index) { return std::string(menuItems[index]); },
       [&menuIcons](int index) { return menuIcons[index]; });
 
-  const auto labels = showingBookOptions
+  const auto labels = contextMenu.isOpen()
                           ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
                           : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
-  if (showingBookOptions && !recentBooks.empty()) {
-    const int pageWidth = renderer.getScreenWidth();
-    const int pageHeight = renderer.getScreenHeight();
-    constexpr int POPUP_W = 420;
-    constexpr int BORDER = 2;
-    constexpr int H_PAD = 14;
-    constexpr int INFO_H = 28;
-    constexpr int INFO_COUNT = 2;  // author + progress
-    constexpr int OPTION_H = 34;
-    constexpr int LINE_V_PAD = 6;
-
-    // Wrap title to up to 2 lines and measure actual title block height
-    const std::string& bookTitle = recentBooks[selectorIndex].title;
-    const auto titleLines = renderer.wrappedText(UI_10_FONT_ID, bookTitle.c_str(), POPUP_W - H_PAD * 2, 2);
-    const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
-    const int TITLE_H = LINE_V_PAD + static_cast<int>(titleLines.size()) * lineH + LINE_V_PAD;
-
-    const int POPUP_H = TITLE_H + INFO_COUNT * INFO_H + BOOK_OPTIONS_COUNT * OPTION_H + H_PAD;
-    const int px = (pageWidth - POPUP_W) / 2;
-    const int py = (pageHeight - POPUP_H) / 2;
-
-    // White fill then border
-    renderer.fillRect(px, py, POPUP_W, POPUP_H, false);
-    renderer.drawRect(px, py, POPUP_W, POPUP_H, BORDER, true);
-
-    // Book title (up to 2 lines)
-    for (int i = 0; i < static_cast<int>(titleLines.size()); i++) {
-      renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + LINE_V_PAD + i * lineH, titleLines[i].c_str(), true);
-    }
-
-    // Divider
-    renderer.drawLine(px + BORDER, py + TITLE_H, px + POPUP_W - BORDER - 1, py + TITLE_H);
-
-    // Info rows (non-selectable)
-    char infoBuf[80];
-
-    const auto& author = recentBooks[selectorIndex].author;
-    snprintf(infoBuf, sizeof(infoBuf), "%s: %s", tr(STR_BOOK_INFO_AUTHOR),
-             author.empty() ? "--" : author.c_str());
-    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + TITLE_H + (INFO_H - lineH) / 2, infoBuf);
-
-    const int8_t pct = recentBooks[selectorIndex].progressPercent;
-    if (pct < 0) {
-      snprintf(infoBuf, sizeof(infoBuf), "%s: %s", tr(STR_BOOK_INFO_PROGRESS), tr(STR_BOOK_INFO_NOT_STARTED));
-    } else {
-      snprintf(infoBuf, sizeof(infoBuf), "%s: %d%%", tr(STR_BOOK_INFO_PROGRESS), static_cast<int>(pct));
-    }
-    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + TITLE_H + INFO_H + (INFO_H - lineH) / 2, infoBuf);
-
-    // Divider before options
-    renderer.drawLine(px + BORDER, py + TITLE_H + INFO_COUNT * INFO_H,
-                      px + POPUP_W - BORDER - 1, py + TITLE_H + INFO_COUNT * INFO_H);
-
-    // Options
-    const char* options[BOOK_OPTIONS_COUNT] = {tr(STR_MARK_AS_READ), tr(STR_RESET_PROGRESS),
-                                               tr(STR_REMOVE_FROM_RECENTS), tr(STR_DELETE_FROM_DEVICE),
-                                               tr(STR_DELETE_CACHE)};
-    for (int i = 0; i < BOOK_OPTIONS_COUNT; i++) {
-      const int optY = py + TITLE_H + INFO_COUNT * INFO_H + i * OPTION_H;
-      if (i == bookOptionsIndex) {
-        renderer.fillRect(px + BORDER, optY, POPUP_W - BORDER * 2, OPTION_H, true);
-      }
-      renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - lineH) / 2,
-                        options[i], i != bookOptionsIndex);
-    }
-  }
+  contextMenu.render(renderer);
 
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
@@ -434,7 +423,6 @@ void HomeActivity::render(RenderLock&&) {
 }
 
 void HomeActivity::onSelectBook(const std::string& path) { activityManager.goToReader(path); }
-
 
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 

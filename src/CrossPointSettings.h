@@ -98,9 +98,9 @@ class CrossPointSettings {
   enum SIDE_BUTTON_LAYOUT { PREV_NEXT = 0, NEXT_PREV = 1, SIDE_BUTTON_LAYOUT_COUNT };
 
   // Font family options
-  enum FONT_FAMILY { BOOKERLY = 0, NOTOSANS = 1, OPENDYSLEXIC = 2, FONT_FAMILY_COUNT };
+  enum FONT_FAMILY { BOOKERLY = 0, NOTOSANS = 1, OPENDYSLEXIC = 2, MONOSPACE = 3, FONT_FAMILY_COUNT };
   // Font size options
-  enum FONT_SIZE { SMALL = 0, MEDIUM = 1, LARGE = 2, EXTRA_LARGE = 3, X_SMALL = 4, FONT_SIZE_COUNT };
+  enum FONT_SIZE { SMALL = 0, MEDIUM = 1, LARGE = 2, X_SMALL = 3, FONT_SIZE_COUNT };
   enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, LINE_COMPRESSION_COUNT };
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,
@@ -138,7 +138,7 @@ class CrossPointSettings {
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2 };
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, LYRA_LIBRARY = 3 };
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
@@ -146,6 +146,10 @@ class CrossPointSettings {
 
   // Dark mode (inverts entire UI except images)
   enum DARK_MODE { DARK_MODE_OFF = 0, DARK_MODE_ON = 1, DARK_MODE_COUNT };
+
+  // Long press confirm button action
+  enum LONG_PRESS_ACTION { LONG_PRESS_REFRESH = 0, LONG_PRESS_SYNC = 1, LONG_PRESS_ACTION_COUNT };
+
 
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
@@ -213,9 +217,10 @@ class CrossPointSettings {
   uint8_t imageRendering = IMAGES_DISPLAY;
   // Footnote display mode (0 = render at bottom of page, 1 = show in popup menu)
   uint8_t footnoteDisplay = FOOTNOTE_ON_PAGE;
+  // Long press confirm button action (0 = refresh screen, 1 = BookFusion sync)
+  uint8_t longPressAction = LONG_PRESS_REFRESH;
   // Dark mode (inverts entire UI except images)
   uint8_t darkMode = DARK_MODE_OFF;
-
   ~CrossPointSettings() = default;
 
   // Get singleton instance
@@ -225,6 +230,7 @@ class CrossPointSettings {
     return (shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP) ? 10 : 400;
   }
   int getReaderFontId() const;
+  int getCodeFontId() const;
 
   // If count_only is true, returns the number of settings items that would be written.
   uint8_t writeSettings(FsFile& file, bool count_only = false) const;

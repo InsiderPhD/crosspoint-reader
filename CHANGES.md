@@ -169,3 +169,130 @@ Footnote body text is collected during EPUB indexing via a multi-phase scan of t
 | `STR_READING_SPEED` | *(new)* | `"Your Reading Speed"` |
 | `STR_FOOTNOTE_ON_PAGE` | *(new)* | `"On page"` |
 | `STR_FOOTNOTE_IN_MENU` | *(new)* | `"In menu"` |
+| `STR_THEME_LYRA_LIBRARY` | *(new)* | `"Lyra Library"` |
+| `STR_VIEW_LIBRARY` | *(new)* | `"View Library"` |
+| `STR_LIBRARY` | *(new)* | `"Library"` |
+| `STR_NO_BOOKS_IN_LIBRARY` | *(new)* | `"No books found"` |
+| `STR_LONG_PRESS_ACTION` | *(new)* | `"Long-press Confirm Action"` |
+| `STR_REFRESH_SCREEN` | *(new)* | `"Refresh Screen"` |
+| `STR_SYNC_WITH_BOOKFUSION` | *(new)* | `"Sync with BookFusion"` |
+| `STR_BF_*` (30+ keys) | *(new)* | BookFusion UI strings — see `english.yaml` |
+
+---
+
+### BookFusion Integration
+
+CrossPoint Reader now syncs with [BookFusion](https://www.bookfusion.com), a cloud reading platform. Users can link their BookFusion account, browse and download their library directly to the device, and sync reading progress bidirectionally.
+
+**Account linking**:
+- OAuth 2.0 device code flow — device displays a verification URL plus a short user code, the user authorises on bookfusion.com
+- QR code rendered alongside the URL on the auth screen for easy mobile linking
+- Encrypted access token persisted at `/.crosspoint/bookfusion.json`
+- Settings → BookFusion Sync → Link Account / Unlink Account
+
+**Library browsing & download**:
+- Browse by category: Currently Reading / Favorites / Plan to Read / Completed / All Books (5 tabs)
+- Paginated list (8 books per page) with a "Load next page…" sentinel
+- Selecting a book streams the EPUB to the SD card root as a sanitised `Title - Author.epub`
+- A sidecar `/.crosspoint/bookfusion_<md5>.json` maps the local file → BookFusion book_id
+- Cover thumbnail is pre-generated **during** the "Downloading…" screen (after the network transfer, before the "Download Complete" popup) so the home screen shows the cover with no first-render lag
+- "Download Complete" popup shows the freshly-generated cover thumbnail above the title
+
+**Reading progress sync**:
+- Long-press Confirm inside a book triggers a bidirectional sync (fetch remote position, push current position) when the **Long-press Confirm Action** setting is set to BookFusion sync
+- Default setting remains a full e-ink refresh; sync is opt-in
+- After a long-press action, the release event no longer opens the reader menu (previously every long-press also fired the menu on release)
+- Auto-link: uploading an EPUB via the web server attempts to match it to a BookFusion book by title+author across the first 5 pages of the user's library, and writes the sidecar automatically on a hit
+
+**Visual indicators**:
+- `& ` prefix in book lists (Recent Books on Home, File Browser, Library) for any book whose local file has a BookFusion sidecar — a visual cue that this book syncs with the cloud
+
+**Image / cover work to support iPad-sized art**:
+- BookFusion covers are typically 1200×1800 to 3000×4500 (iPad-class); the JPEG converter now uses JPEGDEC's native scaled-decode flags (`JPEG_SCALE_HALF/_QUARTER/_EIGHTH`) to cut decode time and MCU buffer size by up to 16×
+- Memory-budget bound moved post-scale, so large covers that previously hit the 2048×3072 raw bound are scaled down first and accepted
+- Sleep-screen Cover mode now renders the open book's cover for BookFusion EPUBs the same as any local EPUB; added diagnostic logs along the cover path for easier debugging when it falls back
+
+**Files added**:
+- `lib/BookFusionSync/` — `BookFusionSyncClient` (HTTP + OAuth + progress + search + download URL), `BookFusionTokenStore` (encrypted token), `BookFusionBookIdStore` (per-EPUB sidecars). Reuses `lib/KOReaderSync/ProgressMapper` for the BookFusion ↔ CrossPoint position conversion.
+- `src/activities/settings/BookFusionAuthActivity.{h,cpp}` — device code flow UI
+- `src/activities/settings/BookFusionBrowserActivity.{h,cpp}` — library browser + download
+- `src/activities/settings/BookFusionSettingsActivity.{h,cpp}` — settings panel
+
+**Files changed**:
+- `CrossPointSettings.h`, `SettingsList.h`, `JsonSettingsIO.{h,cpp}` — `longPressAction` setting; token persistence
+- `SettingsActivity.{h,cpp}` — BookFusion Sync entry in settings menu
+- `EpubReaderActivity.{h,cpp}` — long-press sync; release-after-long-press no longer opens the menu
+- `HomeActivity.cpp`, `FileBrowserActivity.cpp`, `Lyra3CoversTheme.cpp`, `LyraTheme.cpp` — `& ` prefix on BF-linked titles
+- `SleepActivity.cpp` — diagnostic logs along the cover sleep fallback paths
+- `JpegToBmpConverter.cpp` — native scaled-decode + post-scale memory bound
+- `CrossPointWebServer.cpp`, `CrossPointWebServerActivity.cpp` — auto-link uploaded EPUBs to BookFusion library
+- `HttpDownloader.cpp` — used for downloading BF EPUBs from presigned URLs
+- `main.cpp` — load BookFusion token at boot
+- `english.yaml` — 30+ new `STR_BF_*` keys + the long-press action strings
+
+---
+
+### Lyra Library Theme + Library View
+
+A new **Lyra Library** UI theme adds a "View Library" tile to the home screen, and a full library grid activity showing all books on the SD card.
+
+**Home screen (`Lyra Library` theme)**:
+- Shows up to 2 recent books as cover tiles (same as Lyra Extended)
+- The 3rd tile is always a "View Library" shortcut with a library icon
+- Selecting it navigates to the Library activity
+- Same cover rendering and selection highlight style as Lyra Extended
+
+**Library activity**:
+- Scans the SD card root for all EPUB and XTC files (up to 60 books)
+- Displays 6 books per page in a 3×2 grid
+- Cover thumbnails loaded from SD cache; books with no cached cover show a placeholder
+- After first render, missing thumbnails for the current page are generated in the background (same popup mechanic as the home screen)
+- Cover buffer (48 KB) is stored after rendering a page, so within-page navigation (no SD re-reads) is fast
+- Page navigation via Up/Down side buttons; book selection via Left/Right front buttons; Confirm to open; Back to return home
+- Page indicator shown when more than one page of books exists
+- Cover height adapts to orientation: 180 px portrait, 100 px landscape
+
+**Architecture changes**:
+- `ThemeMetrics` gains a `hasLibraryTile` bool field (zero-initialised → `false` for all existing themes)
+- `HomeActivity` respects `hasLibraryTile`: loads `homeRecentBooksCount` books (2 for Lyra Library), adds the library tile as a selectable item, and routes Confirm to `goToLibrary()` when that tile is active
+- `CrossPointSettings::UI_THEME` gains `LYRA_LIBRARY = 3`
+- `ActivityManager` gains `goToLibrary()`
+
+**Files changed**: `BaseTheme.h`, `CrossPointSettings.h`, `UITheme.cpp`, `HomeActivity.cpp`, `HomeActivity.h`, `ActivityManager.h`, `ActivityManager.cpp`, `SettingsList.h`, `english.yaml`
+
+**Files added**: `LyraLibraryTheme.h`, `LyraLibraryTheme.cpp`, `LibraryActivity.h`, `LibraryActivity.cpp`
+
+---
+
+## Performance Improvements
+
+### Footnote Processing Optimization
+Footnote processing performance has been significantly improved when the **Footnotes** setting is set to "In menu" mode:
+
+- **Conditional Processing**: Cross-file footnote scanning now only runs when footnotes are set to "On page" mode
+- **Skip Heavy Operations**: When footnotes are in menu mode, the expensive multi-phase scan of linked files is bypassed entirely
+- **Faster Chapter Loading**: Books with extensive footnote cross-references load noticeably faster in menu mode
+- **Better Link Detection**: Improved filtering to exclude chapter navigation links that were incorrectly detected as footnotes
+
+This optimization particularly benefits books with many footnotes or complex cross-file footnote structures.
+
+**Files changed**: `ChapterHtmlSlimParser.cpp`, `ChapterHtmlSlimParser.h`
+
+---
+
+### Font Memory Optimization
+The built-in font library has been streamlined to reduce memory usage and binary size:
+
+**Removed font variants**:
+- **Bold-Italic styles**: All bold-italic combinations removed from Bookerly, NotoSans, and OpenDyslexic
+- **Large sizes**: 18pt variants removed for Bookerly and NotoSans families
+- **Style reduction**: Font styles limited to Regular, Italic, and Bold only
+
+**Current font sizes**:
+- **Bookerly**: 10pt (X-Small), 12pt (Small), 14pt (Medium), 16pt (Large)  
+- **NotoSans**: 12pt (Small), 14pt (Medium), 16pt (Large)
+- **OpenDyslexic**: 6pt (X-Small), 8pt, 10pt, 12pt (Small), 14pt (Medium+)
+
+This optimization saves significant flash storage and reduces the risk of memory fragmentation during font loading.
+
+**Files changed**: `convert-builtin-fonts.sh`, `all.h`, various `*_bolditalic.h` files (deleted), font size arrays in build scripts

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "BookFusionBookIdStore.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
@@ -88,12 +89,14 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
 
       const int maxLineWidth = tileWidth - 2 * hPaddingInSelection;
 
-      auto titleLines = renderer.wrappedText(SMALL_FONT_ID, recentBooks[i].title.c_str(), maxLineWidth, 3);
+      const bool isBookFusionBook = BookFusionBookIdStore::loadBookId(recentBooks[i].path.c_str()) != 0;
+      const std::string displayTitle =
+          isBookFusionBook ? std::string("& ") + recentBooks[i].title : recentBooks[i].title;
+      auto titleLines = renderer.wrappedText(SMALL_FONT_ID, displayTitle.c_str(), maxLineWidth, 3);
 
       const int titleLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
       const bool hasProgress = recentBooks[i].progressPercent >= 0;
-      const int dynamicBlockHeight =
-          (static_cast<int>(titleLines.size()) + (hasProgress ? 1 : 0)) * titleLineHeight;
+      const int dynamicBlockHeight = (static_cast<int>(titleLines.size()) + (hasProgress ? 1 : 0)) * titleLineHeight;
       // Add a little padding below the text inside the selection box just like the top padding (5 + hPaddingSelection)
       const int dynamicTitleBoxHeight = dynamicBlockHeight + hPaddingInSelection + 5;
 

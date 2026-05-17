@@ -224,7 +224,10 @@ void SleepActivity::renderCoverSleepScreen() const {
       break;
   }
 
+  LOG_DBG("SLP", "renderCoverSleepScreen: openEpubPath='%s'", APP_STATE.openEpubPath.c_str());
+
   if (APP_STATE.openEpubPath.empty()) {
+    LOG_DBG("SLP", "Falling back: openEpubPath is empty");
     return (this->*renderNoCoverSleepScreen)();
   }
 
@@ -262,6 +265,7 @@ void SleepActivity::renderCoverSleepScreen() const {
     coverBmpPath = lastTxt.getCoverBmpPath();
   } else if (FsHelpers::hasEpubExtension(APP_STATE.openEpubPath)) {
     // Handle EPUB file
+    LOG_DBG("SLP", "EPUB path; loading metadata + ensuring cover bmp (cropped=%d)", cropped);
     Epub lastEpub(APP_STATE.openEpubPath, "/.crosspoint");
     // Skip loading css since we only need metadata here
     if (!lastEpub.load(true, true)) {
@@ -275,21 +279,26 @@ void SleepActivity::renderCoverSleepScreen() const {
     }
 
     coverBmpPath = lastEpub.getCoverBmpPath(cropped);
+    LOG_DBG("SLP", "Cover bmp ready at: %s", coverBmpPath.c_str());
   } else {
+    LOG_DBG("SLP", "Falling back: unsupported file extension for %s", APP_STATE.openEpubPath.c_str());
     return (this->*renderNoCoverSleepScreen)();
   }
 
   FsFile file;
-  if (Storage.openFileForRead("SLP", coverBmpPath, file)) {
-    Bitmap bitmap(file);
-    if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-      LOG_DBG("SLP", "Rendering sleep cover: %s", coverBmpPath.c_str());
-      renderBitmapSleepScreen(bitmap);
-      return;
-    }
+  if (!Storage.openFileForRead("SLP", coverBmpPath, file)) {
+    LOG_ERR("SLP", "Falling back: could not open cover bmp for reading: %s", coverBmpPath.c_str());
+    return (this->*renderNoCoverSleepScreen)();
   }
-
-  return (this->*renderNoCoverSleepScreen)();
+  Bitmap bitmap(file);
+  const auto parseErr = bitmap.parseHeaders();
+  if (parseErr != BmpReaderError::Ok) {
+    LOG_ERR("SLP", "Falling back: cover bmp parseHeaders failed (err=%d) for: %s", static_cast<int>(parseErr),
+            coverBmpPath.c_str());
+    return (this->*renderNoCoverSleepScreen)();
+  }
+  LOG_DBG("SLP", "Rendering sleep cover: %s", coverBmpPath.c_str());
+  renderBitmapSleepScreen(bitmap);
 }
 
 void SleepActivity::renderBlankSleepScreen() const {

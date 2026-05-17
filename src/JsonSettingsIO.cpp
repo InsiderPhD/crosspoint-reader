@@ -14,6 +14,7 @@
 #include "RecentBooksStore.h"
 #include "SettingsList.h"
 #include "WifiCredentialStore.h"
+#include "../lib/BookFusionSync/BookFusionTokenStore.h"
 
 // Convert legacy settings.
 void applyLegacyStatusBarSettings(CrossPointSettings& settings) {
@@ -353,5 +354,37 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
   }
 
   LOG_DBG("RBS", "Recent books loaded from file (%d entries)", store.getCount());
+  return true;
+}
+
+// ---- BookFusionTokenStore ----
+
+bool JsonSettingsIO::saveBookFusion(const BookFusionTokenStore& store, const char* path) {
+  JsonDocument doc;
+  doc["access_token_obf"] = obfuscation::obfuscateToBase64(store.getToken());
+
+  String json;
+  serializeJson(doc, json);
+  return Storage.writeFile(path, json);
+}
+
+bool JsonSettingsIO::loadBookFusion(BookFusionTokenStore& store, const char* json) {
+  JsonDocument doc;
+  auto error = deserializeJson(doc, json);
+  if (error) {
+    LOG_ERR("BFS", "JSON parse error: %s", error.c_str());
+    return false;
+  }
+
+  bool ok = false;
+  std::string token = obfuscation::deobfuscateFromBase64(doc["access_token_obf"] | "", &ok);
+  if (ok && !token.empty()) {
+    store.setToken(token);
+    LOG_DBG("BFS", "Loaded BookFusion token (%zu chars)", token.size());
+  } else {
+    LOG_DBG("BFS", "No valid BookFusion token found");
+    store.clearToken();
+  }
+
   return true;
 }

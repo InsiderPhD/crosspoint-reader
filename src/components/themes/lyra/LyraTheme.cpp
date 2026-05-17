@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "BookFusionBookIdStore.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "components/icons/book.h"
@@ -479,7 +480,10 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
                                hPaddingInSelection, cornerRadius, false, false, true, true, Color::LightGray);
     }
 
-    auto titleLines = renderer.wrappedText(UI_12_FONT_ID, book.title.c_str(), textWidth, 3, EpdFontFamily::BOLD);
+    const bool isBookFusionBook = BookFusionBookIdStore::loadBookId(book.path.c_str()) != 0;
+    const std::string displayTitle =
+        isBookFusionBook ? std::string("& ") + book.title : book.title;
+    auto titleLines = renderer.wrappedText(UI_12_FONT_ID, displayTitle.c_str(), textWidth, 3, EpdFontFamily::BOLD);
 
     auto author = renderer.truncatedText(UI_10_FONT_ID, book.author.c_str(), textWidth);
     const int titleLineHeight = renderer.getLineHeight(UI_12_FONT_ID);

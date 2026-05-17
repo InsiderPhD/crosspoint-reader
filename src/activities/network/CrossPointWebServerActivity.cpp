@@ -13,6 +13,7 @@
 #include "NetworkModeSelectionActivity.h"
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
+#include "activities/settings/BookFusionBrowserActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/QrUtils.h"
@@ -105,8 +106,16 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "Connect to Calibre";
   } else if (mode == NetworkMode::CREATE_HOTSPOT) {
     modeName = "Create Hotspot";
+  } else if (mode == NetworkMode::BOOKFUSION) {
+    modeName = "BookFusion";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
+
+  if (mode == NetworkMode::BOOKFUSION) {
+    // Launch BookFusion browser directly
+    activityManager.replaceActivity(std::make_unique<BookFusionBrowserActivity>(renderer, mappedInput));
+    return;
+  }
 
   networkMode = mode;
   isApMode = (mode == NetworkMode::CREATE_HOTSPOT);
@@ -127,6 +136,7 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
         });
     return;
   }
+
 
   if (mode == NetworkMode::JOIN_NETWORK) {
     // STA mode - launch WiFi selection

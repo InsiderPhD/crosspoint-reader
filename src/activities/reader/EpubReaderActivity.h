@@ -32,6 +32,7 @@ class EpubReaderActivity final : public Activity {
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool automaticPageTurnActive = false;
   bool autoPageTurnMode = false;  // True when using calibrated reading speed
+  bool longPressFeedbackShown = false;  // Track if long press visual feedback has been shown
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
@@ -65,6 +66,10 @@ class EpubReaderActivity final : public Activity {
   // Footnote navigation
   void navigateToHref(const std::string& href, bool savePosition = false);
   void restoreSavedPosition();
+
+  // BookFusion sync
+  void performBookFusionSync();
+  void connectWifiForSyncWithPopup(std::function<void()> onSuccess);
 
  public:
   explicit EpubReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Epub> epub)

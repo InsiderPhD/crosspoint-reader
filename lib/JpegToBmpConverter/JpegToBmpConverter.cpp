@@ -23,23 +23,22 @@ constexpr bool USE_NOISE_DITHERING = false;  // Hash-based noise dithering (good
 constexpr bool USE_PRESCALE = true;  // true: scale image to target size before dithering
 // ============================================================================
 
-inline void write16(Print& out, const uint16_t value) {
-  out.write(value & 0xFF);
-  out.write((value >> 8) & 0xFF);
+inline bool write16(Print& out, const uint16_t value) {
+  return (out.write(value & 0xFF) == 1) && (out.write((value >> 8) & 0xFF) == 1);
 }
 
-inline void write32(Print& out, const uint32_t value) {
-  out.write(value & 0xFF);
-  out.write((value >> 8) & 0xFF);
-  out.write((value >> 16) & 0xFF);
-  out.write((value >> 24) & 0xFF);
+inline bool write32(Print& out, const uint32_t value) {
+  return (out.write(value & 0xFF) == 1) &&
+         (out.write((value >> 8) & 0xFF) == 1) &&
+         (out.write((value >> 16) & 0xFF) == 1) &&
+         (out.write((value >> 24) & 0xFF) == 1);
 }
 
-inline void write32Signed(Print& out, const int32_t value) {
-  out.write(value & 0xFF);
-  out.write((value >> 8) & 0xFF);
-  out.write((value >> 16) & 0xFF);
-  out.write((value >> 24) & 0xFF);
+inline bool write32Signed(Print& out, const int32_t value) {
+  return (out.write(value & 0xFF) == 1) &&
+         (out.write((value >> 8) & 0xFF) == 1) &&
+         (out.write((value >> 16) & 0xFF) == 1) &&
+         (out.write((value >> 24) & 0xFF) == 1);
 }
 
 // Helper function: Write BMP header with 8-bit grayscale (256 levels)
@@ -119,31 +118,30 @@ static void writeBmpHeader1bit(Print& bmpOut, const int width, const int height)
 }
 
 // Helper function: Write BMP header with 2-bit color depth
-static void writeBmpHeader2bit(Print& bmpOut, const int width, const int height) {
+static bool writeBmpHeader2bit(Print& bmpOut, const int width, const int height) {
   // Calculate row padding (each row must be multiple of 4 bytes)
   const int bytesPerRow = (width * 2 + 31) / 32 * 4;  // 2 bits per pixel, round up
   const int imageSize = bytesPerRow * height;
   const uint32_t fileSize = 70 + imageSize;  // 14 (file header) + 40 (DIB header) + 16 (palette) + image
 
   // BMP File Header (14 bytes)
-  bmpOut.write('B');
-  bmpOut.write('M');
-  write32(bmpOut, fileSize);  // File size
-  write32(bmpOut, 0);         // Reserved
-  write32(bmpOut, 70);        // Offset to pixel data
+  if (bmpOut.write('B') != 1 || bmpOut.write('M') != 1) {
+    LOG_ERR("JPG", "Failed to write BMP signature");
+    return false;
+  }
+
+  if (!write32(bmpOut, fileSize) || !write32(bmpOut, 0) || !write32(bmpOut, 70)) {
+    LOG_ERR("JPG", "Failed to write BMP file header");
+    return false;
+  }
 
   // DIB Header (BITMAPINFOHEADER - 40 bytes)
-  write32(bmpOut, 40);
-  write32Signed(bmpOut, width);
-  write32Signed(bmpOut, -height);  // Negative height = top-down bitmap
-  write16(bmpOut, 1);              // Color planes
-  write16(bmpOut, 2);              // Bits per pixel (2 bits)
-  write32(bmpOut, 0);              // BI_RGB (no compression)
-  write32(bmpOut, imageSize);
-  write32(bmpOut, 2835);  // xPixelsPerMeter (72 DPI)
-  write32(bmpOut, 2835);  // yPixelsPerMeter (72 DPI)
-  write32(bmpOut, 4);     // colorsUsed
-  write32(bmpOut, 4);     // colorsImportant
+  if (!write32(bmpOut, 40) || !write32Signed(bmpOut, width) || !write32Signed(bmpOut, -height) ||
+      !write16(bmpOut, 1) || !write16(bmpOut, 2) || !write32(bmpOut, 0) || !write32(bmpOut, imageSize) ||
+      !write32(bmpOut, 2835) || !write32(bmpOut, 2835) || !write32(bmpOut, 4) || !write32(bmpOut, 4)) {
+    LOG_ERR("JPG", "Failed to write BMP DIB header");
+    return false;
+  }
 
   // Color Palette (4 colors x 4 bytes = 16 bytes)
   // Format: Blue, Green, Red, Reserved (BGRA)
@@ -154,8 +152,14 @@ static void writeBmpHeader2bit(Print& bmpOut, const int width, const int height)
       0xFF, 0xFF, 0xFF, 0x00   // Color 3: White
   };
   for (const uint8_t i : palette) {
-    bmpOut.write(i);
+    if (bmpOut.write(i) != 1) {
+      LOG_ERR("JPG", "Failed to write BMP palette");
+      return false;
+    }
   }
+
+  LOG_DBG("JPG", "Successfully wrote BMP header and palette (%d bytes)", 70);
+  return true;
 }
 
 namespace {
@@ -262,7 +266,11 @@ static void writeOutputRow(BmpConvertCtx* ctx, const uint8_t* srcRow, int outY) 
       ctx->fsDitherer->nextRow();
   }
 
-  ctx->bmpOut->write(ctx->bmpRow, ctx->bytesPerRow);
+  int bytesWritten = ctx->bmpOut->write(ctx->bmpRow, ctx->bytesPerRow);
+  if (bytesWritten != ctx->bytesPerRow) {
+    LOG_ERR("JPG", "Row write failed: expected %d bytes, wrote %d bytes, freeHeap=%d", ctx->bytesPerRow, bytesWritten, ESP.getFreeHeap());
+    ctx->error = true;
+  }
 }
 
 // Flush one scaled output row from Y-axis accumulators and advance currentOutY
@@ -301,7 +309,11 @@ static void flushScaledRow(BmpConvertCtx* ctx) {
       ctx->fsDitherer->nextRow();
   }
 
-  ctx->bmpOut->write(ctx->bmpRow, ctx->bytesPerRow);
+  int bytesWritten = ctx->bmpOut->write(ctx->bmpRow, ctx->bytesPerRow);
+  if (bytesWritten != ctx->bytesPerRow) {
+    LOG_ERR("JPG", "Row write failed: expected %d bytes, wrote %d bytes, freeHeap=%d", ctx->bytesPerRow, bytesWritten, ESP.getFreeHeap());
+    ctx->error = true;
+  }
   ctx->currentOutY++;
 }
 
@@ -311,7 +323,15 @@ static void flushScaledRow(BmpConvertCtx* ctx) {
 // row), applies scaling + dithering and writes packed BMP rows to bmpOut.
 int bmpDrawCallback(JPEGDRAW* pDraw) {
   auto* ctx = reinterpret_cast<BmpConvertCtx*>(pDraw->pUser);
-  if (!ctx || ctx->error) return 0;
+  if (!ctx || ctx->error) {
+    LOG_ERR("JPG", "Draw callback: ctx=%p, error=%d", ctx, ctx ? ctx->error : -1);
+    return 0;
+  }
+
+  static int callbackCount = 0;
+  if (callbackCount++ < 3) {
+    LOG_DBG("JPG", "Draw callback %d: %dx%d block at (%d,%d)", callbackCount, pDraw->iWidth, pDraw->iHeight, pDraw->x, pDraw->y);
+  }
 
   const uint8_t* pixels = reinterpret_cast<uint8_t*>(pDraw->pPixels);
   const int stride = pDraw->iWidth;
@@ -400,17 +420,57 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
 
-  const int srcWidth = jpeg->getWidth();
-  const int srcHeight = jpeg->getHeight();
+  int srcWidth = jpeg->getWidth();
+  int srcHeight = jpeg->getHeight();
 
   LOG_DBG("JPG", "JPEG dimensions: %dx%d", srcWidth, srcHeight);
 
-  constexpr int MAX_IMAGE_WIDTH = 2048;
-  constexpr int MAX_IMAGE_HEIGHT = 3072;
+  // Sanity bound to reject malformed JPEGs / overflow-prone headers up front.
+  // The real memory-budget bound is applied after native scaled-decode below, since
+  // 1/8-scale decode can bring an iPad-class 6000x9000 cover down to 750x1125 well
+  // within budget. BookFusion covers in particular routinely exceed the old
+  // 2048x3072 raw bound, which would otherwise reject them before scaling rescues them.
+  constexpr int RAW_SANITY_WIDTH = 16384;
+  constexpr int RAW_SANITY_HEIGHT = 24576;
+  if (srcWidth <= 0 || srcHeight <= 0 || srcWidth > RAW_SANITY_WIDTH || srcHeight > RAW_SANITY_HEIGHT) {
+    LOG_DBG("JPG", "Image invalid or insanely large (%dx%d)", srcWidth, srcHeight);
+    jpeg->close();
+    delete jpeg;
+    return false;
+  }
 
-  if (srcWidth <= 0 || srcHeight <= 0 || srcWidth > MAX_IMAGE_WIDTH || srcHeight > MAX_IMAGE_HEIGHT) {
-    LOG_DBG("JPG", "Image too large or invalid (%dx%d), max supported: %dx%d", srcWidth, srcHeight, MAX_IMAGE_WIDTH,
-            MAX_IMAGE_HEIGHT);
+  // Native scaled-decode: pick the largest 1/N (N=2,4,8) that still produces an image
+  // at least as wide and tall as the target. JPEGDEC's _HALF/_QUARTER/_EIGHTH flags
+  // skip DCT coefficients during decode — both decode time and the MCU buffer scale
+  // down with N². Existing area-averaging downstream polishes to exact target dims.
+  int scaleFlag = 0;
+  int scaleShift = 0;
+  if (targetWidth > 0 && targetHeight > 0) {
+    if ((srcWidth >> 3) >= targetWidth && (srcHeight >> 3) >= targetHeight) {
+      scaleFlag = JPEG_SCALE_EIGHTH;
+      scaleShift = 3;
+    } else if ((srcWidth >> 2) >= targetWidth && (srcHeight >> 2) >= targetHeight) {
+      scaleFlag = JPEG_SCALE_QUARTER;
+      scaleShift = 2;
+    } else if ((srcWidth >> 1) >= targetWidth && (srcHeight >> 1) >= targetHeight) {
+      scaleFlag = JPEG_SCALE_HALF;
+      scaleShift = 1;
+    }
+  }
+  if (scaleShift > 0) {
+    LOG_DBG("JPG", "Native scaled decode 1/%d: %dx%d -> %dx%d effective",
+            1 << scaleShift, srcWidth, srcHeight, srcWidth >> scaleShift, srcHeight >> scaleShift);
+    srcWidth >>= scaleShift;
+    srcHeight >>= scaleShift;
+  }
+
+  // Memory-budget bound on the *post-scale* dimensions — these drive the MCU
+  // buffer alloc (MAX_MCU_HEIGHT * srcWidth) and the per-row scaling buffers below.
+  constexpr int MAX_EFFECTIVE_WIDTH = 2048;
+  constexpr int MAX_EFFECTIVE_HEIGHT = 3072;
+  if (srcWidth > MAX_EFFECTIVE_WIDTH || srcHeight > MAX_EFFECTIVE_HEIGHT) {
+    LOG_DBG("JPG", "Image still too large after 1/%d scale (%dx%d effective, max %dx%d)",
+            1 << scaleShift, srcWidth, srcHeight, MAX_EFFECTIVE_WIDTH, MAX_EFFECTIVE_HEIGHT);
     jpeg->close();
     delete jpeg;
     return false;
@@ -455,8 +515,16 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     writeBmpHeader1bit(bmpOut, outWidth, outHeight);
     bytesPerRow = (outWidth + 31) / 32 * 4;
   } else {
-    writeBmpHeader2bit(bmpOut, outWidth, outHeight);
     bytesPerRow = (outWidth * 2 + 31) / 32 * 4;
+    const int expectedImageSize = bytesPerRow * outHeight;
+    const int expectedFileSize = 70 + expectedImageSize;
+    LOG_DBG("JPG", "Writing 2-bit BMP: %dx%d, bytesPerRow=%d, imageSize=%d, fileSize=%d, freeHeap=%d",
+            outWidth, outHeight, bytesPerRow, expectedImageSize, expectedFileSize, ESP.getFreeHeap());
+
+    if (!writeBmpHeader2bit(bmpOut, outWidth, outHeight)) {
+      LOG_ERR("JPG", "Failed to write BMP header - buffer may be full");
+      return false;
+    }
   }
 
   BmpConvertCtx ctx = {};
@@ -526,14 +594,16 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   jpeg->setPixelType(EIGHT_BIT_GRAYSCALE);
   jpeg->setUserPointer(&ctx);
 
-  rc = jpeg->decode(0, 0, 0);
+  LOG_DBG("JPG", "Starting JPEG decode for %dx%d -> %dx%d", srcWidth, srcHeight, outWidth, outHeight);
+
+  rc = jpeg->decode(0, 0, scaleFlag);
 
   if (rc != 1 || ctx.error) {
-    LOG_ERR("JPG", "JPEG decode failed (rc=%d, err=%d)", rc, jpeg->getLastError());
+    LOG_ERR("JPG", "JPEG decode failed (rc=%d, err=%d, ctx.error=%d)", rc, jpeg->getLastError(), ctx.error);
     return false;
   }
 
-  LOG_DBG("JPG", "Successfully converted JPEG to BMP");
+  LOG_DBG("JPG", "Successfully converted JPEG to BMP: %d rows written", ctx.outHeight);
   return true;
 }
 
