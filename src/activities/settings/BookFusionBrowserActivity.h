@@ -43,10 +43,16 @@ class BookFusionBrowserActivity final : public Activity {
   int selectedCategory = 0;
   int currentCategory = 0;
 
-  // User's custom shelves, fetched lazily on the first successful WiFi connection.
-  // Loaded once per activity session — bounded at MAX_SHELVES (~1.6 KB).
+  // User's custom shelves, fetched up front in onEnter() once WiFi is available
+  // so the unified menu (categories + shelves) is fully populated before the user
+  // picks anything. Bounded at MAX_SHELVES (~1.6 KB on the activity).
   BookFusionBookshelfList bookshelves;
   bool bookshelvesLoaded = false;
+
+  // What to do after WiFi connects: open the category menu (entry flow) or
+  // jump straight to fetching a page (user already picked a category).
+  enum PendingWifiAction { WIFI_FOR_MENU, WIFI_FOR_PAGE };
+  PendingWifiAction pendingWifiAction = WIFI_FOR_MENU;
 
   // When non-zero, the currently-displayed book list is filtered to this
   // shelf id (passed as `bookshelf_id` to /api/user/books/search). Zero means
@@ -66,6 +72,7 @@ class BookFusionBrowserActivity final : public Activity {
 
   void onWifiSelectionComplete(bool success);
   void handleCategorySelection();
+  void loadShelvesAndShowMenu();
   void loadPage(int page);
   void startDownload(int bookIndex);
 };

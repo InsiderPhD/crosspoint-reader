@@ -51,8 +51,20 @@ void BookFusionBrowserActivity::onEnter() {
     return;
   }
 
-  state = CATEGORY_SELECTION;
-  requestUpdate();
+  // Connect WiFi and fetch the user's bookshelves up front so the category
+  // menu shows the full [categories + shelves] list on the first render —
+  // the user doesn't have to enter a category and back out to make shelves
+  // appear. The wait is absorbed into the initial "Loading..." screen
+  // they'd see anyway when picking any category.
+  pendingWifiAction = WIFI_FOR_MENU;
+  if (WiFi.status() == WL_CONNECTED) {
+    loadShelvesAndShowMenu();
+    return;
+  }
+
+  state = WIFI_SELECTION;
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
 }
 
 void BookFusionBrowserActivity::handleCategorySelection() {
@@ -78,6 +90,9 @@ void BookFusionBrowserActivity::handleCategorySelection() {
     return;
   }
 
+  // WiFi dropped between activity entry and category pick — re-prompt and
+  // resume into the page fetch, not the menu, after reconnecting.
+  pendingWifiAction = WIFI_FOR_PAGE;
   state = WIFI_SELECTION;
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
@@ -95,8 +110,34 @@ void BookFusionBrowserActivity::onWifiSelectionComplete(bool success) {
     requestUpdate();
     return;
   }
+  if (pendingWifiAction == WIFI_FOR_MENU) {
+    loadShelvesAndShowMenu();
+    return;
+  }
   currentPage = 1;
   loadPage(1);
+}
+
+void BookFusionBrowserActivity::loadShelvesAndShowMenu() {
+  {
+    RenderLock lock(*this);
+    state = LOADING;
+  }
+  requestUpdate(true);
+
+  // Errors are silent — the menu still shows the 5 functional categories
+  // even if the shelf list fails to load (e.g. server outage). The flag flips
+  // either way so we don't retry-storm.
+  if (!bookshelvesLoaded) {
+    BookFusionSyncClient::searchBookshelves(bookshelves);
+    bookshelvesLoaded = true;
+  }
+
+  {
+    RenderLock lock(*this);
+    state = CATEGORY_SELECTION;
+  }
+  requestUpdate();
 }
 
 void BookFusionBrowserActivity::loadPage(int page) {
@@ -133,17 +174,6 @@ void BookFusionBrowserActivity::loadPage(int page) {
     }
     requestUpdate();
     return;
-  }
-
-  // Opportunistic shelf fetch: WiFi is up and the user is already waiting on
-  // "Loading...", so spending an extra second or so here is invisible. After this
-  // first successful loadPage(), backing to CATEGORY_SELECTION shows the shelves
-  // inline below the functional categories. Errors are silent — bookshelvesLoaded
-  // flips true regardless so we don't retry storm.
-  if (!bookshelvesLoaded) {
-    LOG_DBG("BFB", "Fetching bookshelves on first successful page load");
-    BookFusionSyncClient::searchBookshelves(bookshelves);
-    bookshelvesLoaded = true;
   }
 
   {
