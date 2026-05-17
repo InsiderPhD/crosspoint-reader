@@ -736,9 +736,11 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
     if (it != bookPaths.end()) {
       const size_t k = static_cast<size_t>(it - bookPaths.begin());
       bookPaths.erase(it);
-      // Keep parallel caches in lockstep so SortEntry views stay valid on rebuild.
+      // Keep ALL parallel caches in lockstep so SortEntry views stay valid on
+      // rebuild and so the BookFusion badge doesn't shift onto the wrong book.
       if (k < authorCache.size()) authorCache.erase(authorCache.begin() + k);
       if (k < dateAddedCache.size()) dateAddedCache.erase(dateAddedCache.begin() + k);
+      if (k < bookIsBookFusion.size()) bookIsBookFusion.erase(bookIsBookFusion.begin() + k);
     }
   };
 
