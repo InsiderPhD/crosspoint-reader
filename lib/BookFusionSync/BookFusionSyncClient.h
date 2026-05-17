@@ -49,6 +49,28 @@ struct BookFusionSearchResult {
 };
 
 /**
+ * A single user-created bookshelf from BookFusion.
+ * Plugin source (bf_browser.lua) only reads `id` and `name`, so that's all
+ * we parse — keeps the per-shelf footprint to 52 bytes.
+ */
+struct BookFusionBookshelf {
+  uint32_t id = 0;
+  char name[48] = {};
+};
+
+/**
+ * Full list of the user's bookshelves. The /api/user/bookshelves/search
+ * endpoint accepts no pagination params in the KOReader plugin's usage, so
+ * we assume it returns all shelves in one response. We cap at MAX_SHELVES
+ * (~1.6 KB) to bound heap usage; extra shelves are silently dropped.
+ */
+struct BookFusionBookshelfList {
+  static constexpr int MAX_SHELVES = 32;
+  BookFusionBookshelf shelves[MAX_SHELVES];
+  int count = 0;
+};
+
+/**
  * HTTP client for the BookFusion API.
  *
  * Base URL: https://www.bookfusion.com
@@ -88,9 +110,16 @@ class BookFusionSyncClient {
   static Error setProgress(uint32_t bookId, const BookFusionPosition& pos);
 
   // --- Library Browse & Download ---
+  // bookshelfId, when non-zero, restricts the search to a specific user bookshelf
+  // (sent as `bookshelf_id` in the request body alongside list/sort/page).
   static Error searchBooks(int page, BookFusionSearchResult& out, const char* list = nullptr,
-                           const char* sort = nullptr);
+                           const char* sort = nullptr, uint32_t bookshelfId = 0);
   static Error getDownloadUrl(uint32_t bookId, char* outUrl, size_t maxLen);
+
+  // --- Bookshelves ---
+  // Returns the user's custom shelves. POSTs `{}` to /api/user/bookshelves/search.
+  // The plugin source treats this as un-paginated; we accept that.
+  static Error searchBookshelves(BookFusionBookshelfList& out);
 
   static const char* errorString(Error error);
 

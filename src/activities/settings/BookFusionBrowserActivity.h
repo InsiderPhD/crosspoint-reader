@@ -38,8 +38,21 @@ class BookFusionBrowserActivity final : public Activity {
   int currentPage = 1;
 
   // Category menu: which item is highlighted, and which one we're browsing.
+  // The menu is a unified list of [5 categories, separator, N shelves]; indices
+  // map via menuIndexIsShelf() / menuIndexToShelf() below.
   int selectedCategory = 0;
   int currentCategory = 0;
+
+  // User's custom shelves, fetched lazily on the first successful WiFi connection.
+  // Loaded once per activity session — bounded at MAX_SHELVES (~1.6 KB).
+  BookFusionBookshelfList bookshelves;
+  bool bookshelvesLoaded = false;
+
+  // When non-zero, the currently-displayed book list is filtered to this
+  // shelf id (passed as `bookshelf_id` to /api/user/books/search). Zero means
+  // a normal category-driven browse.
+  uint32_t currentBookshelfId = 0;
+  char currentBookshelfName[48] = {};  // header label when browsing a shelf
 
   // Large enough for pre-signed S3 URLs with safety margin (can be >2000 chars).
   char downloadUrl[4096] = {};

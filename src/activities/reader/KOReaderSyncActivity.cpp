@@ -9,6 +9,7 @@
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
+#include "WifiCredentialStore.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -208,10 +209,9 @@ void KOReaderSyncActivity::onEnter() {
     return;
   }
 
-  // Launch WiFi selection subactivity
-  LOG_DBG("KOSync", "Launching WifiSelectionActivity...");
-  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-                         [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
+  // Connect to WiFi with popup feedback
+  LOG_DBG("KOSync", "Connecting to WiFi with popup...");
+  connectWifiWithPopup();
 }
 
 void KOReaderSyncActivity::onExit() {
@@ -223,12 +223,11 @@ void KOReaderSyncActivity::onExit() {
 void KOReaderSyncActivity::render(RenderLock&&) {
   const auto pageWidth = renderer.getScreenWidth();
 
-  renderer.clearScreen();
-  renderer.drawCenteredText(UI_12_FONT_ID, 15, tr(STR_KOREADER_SYNC), true, EpdFontFamily::BOLD);
-
+  // Use popup for simple status states, preserve background
   if (state == NO_CREDENTIALS) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 280, tr(STR_NO_CREDENTIALS_MSG), true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, 320, tr(STR_KOREADER_SETUP_HINT));
+    char fullMessage[128];
+    snprintf(fullMessage, sizeof(fullMessage), "%s\n\n%s", tr(STR_NO_CREDENTIALS_MSG), tr(STR_KOREADER_SETUP_HINT));
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), fullMessage);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -238,13 +237,16 @@ void KOReaderSyncActivity::render(RenderLock&&) {
   }
 
   if (state == SYNCING || state == UPLOADING) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 300, statusMessage.c_str(), true, EpdFontFamily::BOLD);
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), statusMessage.c_str());
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
 
   if (state == SHOWING_RESULT) {
+    // Use full screen for detailed comparison
+    renderer.clearScreen();
+
     // Show comparison
     renderer.drawCenteredText(UI_10_FONT_ID, 120, tr(STR_PROGRESS_FOUND), true, EpdFontFamily::BOLD);
 
@@ -308,8 +310,9 @@ void KOReaderSyncActivity::render(RenderLock&&) {
   }
 
   if (state == NO_REMOTE_PROGRESS) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 280, tr(STR_NO_REMOTE_MSG), true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, 320, tr(STR_UPLOAD_PROMPT));
+    char fullMessage[128];
+    snprintf(fullMessage, sizeof(fullMessage), "%s\n\n%s", tr(STR_NO_REMOTE_MSG), tr(STR_UPLOAD_PROMPT));
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), fullMessage);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_UPLOAD), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -319,7 +322,7 @@ void KOReaderSyncActivity::render(RenderLock&&) {
   }
 
   if (state == UPLOAD_COMPLETE) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 300, tr(STR_UPLOAD_SUCCESS), true, EpdFontFamily::BOLD);
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), tr(STR_UPLOAD_SUCCESS));
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -329,8 +332,9 @@ void KOReaderSyncActivity::render(RenderLock&&) {
   }
 
   if (state == SYNC_FAILED) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 280, tr(STR_SYNC_FAILED_MSG), true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, 320, statusMessage.c_str());
+    char fullMessage[256];
+    snprintf(fullMessage, sizeof(fullMessage), "%s\n\n%s", tr(STR_SYNC_FAILED_MSG), statusMessage.c_str());
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), fullMessage);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -403,5 +407,123 @@ void KOReaderSyncActivity::loop() {
       finish();
     }
     return;
+  }
+}
+
+void KOReaderSyncActivity::connectWifiWithPopup() {
+  // Show connecting popup
+  {
+    RenderLock lock(*this);
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "Connecting to WiFi...");
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+  }
+
+  // Load WiFi credentials
+  WIFI_STORE.loadFromFile();
+
+  // Try to auto-connect to the last known network
+  const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
+  if (lastSsid.empty()) {
+    // No saved networks, show error popup
+    {
+      RenderLock lock(*this);
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "No WiFi networks configured.\nPlease set up WiFi in Settings first.");
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+
+    // Wait briefly to show message, then exit
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    ActivityResult result;
+    result.isCancelled = true;
+    setResult(std::move(result));
+    finish();
+    return;
+  }
+
+  const auto* cred = WIFI_STORE.findCredential(lastSsid);
+  if (!cred) {
+    // Network found but no credentials
+    {
+      RenderLock lock(*this);
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "WiFi credentials not found.\nPlease reconnect in Settings.");
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+
+    // Wait briefly to show message, then exit
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    ActivityResult result;
+    result.isCancelled = true;
+    setResult(std::move(result));
+    finish();
+    return;
+  }
+
+  // Attempt connection
+  LOG_DBG("KOSync", "Attempting to connect to WiFi: %s", lastSsid.c_str());
+
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
+  delay(100);
+
+  if (cred->password.empty()) {
+    WiFi.begin(cred->ssid.c_str());
+  } else {
+    WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
+  }
+
+  // Wait for connection with timeout
+  int attempts = 0;
+  const int maxAttempts = 100; // 10 seconds
+
+  while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    attempts++;
+
+    // Update popup every second
+    if (attempts % 10 == 0) {
+      RenderLock lock(*this);
+      char statusMsg[64];
+      snprintf(statusMsg, sizeof(statusMsg), "Connecting to WiFi...\n(%d/%d)", attempts/10, maxAttempts/10);
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), statusMsg);
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    LOG_DBG("KOSync", "WiFi connected successfully");
+
+    // Show success popup briefly
+    {
+      RenderLock lock(*this);
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "WiFi connected!");
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+
+    // Proceed with sync
+    onWifiSelectionComplete(true);
+  } else {
+    LOG_DBG("KOSync", "WiFi connection failed");
+
+    // Show failure popup
+    {
+      RenderLock lock(*this);
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "WiFi connection failed.\nPlease check your settings.");
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+
+    // Wait to show message, then exit
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
+    ActivityResult result;
+    result.isCancelled = true;
+    setResult(std::move(result));
+    finish();
   }
 }

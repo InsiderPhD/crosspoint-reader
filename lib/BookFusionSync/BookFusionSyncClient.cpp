@@ -212,7 +212,7 @@ BookFusionSyncClient::Error BookFusionSyncClient::setProgress(uint32_t bookId, c
 // --- Library Browse & Download ---
 
 BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusionSearchResult& out, const char* list,
-                                                              const char* sort) {
+                                                              const char* sort, uint32_t bookshelfId) {
   if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
 
   char url[128];
@@ -238,6 +238,9 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
   reqBody["sort"] = (sort != nullptr) ? sort : "added_at-desc";
   if (list != nullptr) {
     reqBody["list"] = list;
+  }
+  if (bookshelfId != 0) {
+    reqBody["bookshelf_id"] = bookshelfId;
   }
   String bodyStr;
   serializeJson(reqBody, bodyStr);
@@ -362,6 +365,74 @@ BookFusionSyncClient::Error BookFusionSyncClient::getDownloadUrl(uint32_t bookId
 
   strlcpy(outUrl, dlUrl, maxLen);
   LOG_DBG("BFS", "getDownloadUrl: ok");
+  return OK;
+}
+
+BookFusionSyncClient::Error BookFusionSyncClient::searchBookshelves(BookFusionBookshelfList& out) {
+  if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
+  out.count = 0;
+
+  char url[128];
+  snprintf(url, sizeof(url), "%s/api/user/bookshelves/search", BASE_URL);
+
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure();
+  HTTPClient http;
+  http.begin(secureClient, url);
+  addAuthHeaders(http);
+  http.addHeader("Content-Type", "application/json");
+
+  const int httpCode = http.POST("{}");
+  LOG_DBG("BFS", "searchBookshelves response: %d", httpCode);
+
+  if (httpCode < 0) {
+    http.end();
+    return NETWORK_ERROR;
+  }
+  if (httpCode == 401) {
+    http.end();
+    return AUTH_FAILED;
+  }
+  if (httpCode != 200) {
+    http.end();
+    return SERVER_ERROR;
+  }
+
+  String responseBody = http.getString();
+  http.end();
+
+  // BookFusion may return other fields per shelf (cover URL, book count, etc.);
+  // the KOReader plugin only consumes id + name and so do we. Filtering keeps
+  // the JsonDocument heap small even for users with many shelves.
+  JsonDocument filter;
+  filter[0]["id"] = true;
+  filter[0]["name"] = true;
+
+  JsonDocument doc;
+  const auto parseErr = deserializeJson(doc, responseBody, DeserializationOption::Filter(filter));
+  if (parseErr != DeserializationError::Ok) {
+    LOG_ERR("BFS", "searchBookshelves JSON parse error: %s", parseErr.c_str());
+    return JSON_ERROR;
+  }
+  if (!doc.is<JsonArray>()) {
+    LOG_ERR("BFS", "searchBookshelves: expected JSON array");
+    return JSON_ERROR;
+  }
+
+  for (JsonObject shelf : doc.as<JsonArray>()) {
+    if (out.count >= BookFusionBookshelfList::MAX_SHELVES) {
+      LOG_DBG("BFS", "searchBookshelves: capped at %d shelves; extras dropped",
+              BookFusionBookshelfList::MAX_SHELVES);
+      break;
+    }
+    BookFusionBookshelf& s = out.shelves[out.count];
+    s.id = shelf["id"] | static_cast<uint32_t>(0);
+    if (s.id == 0) continue;  // skip malformed entries
+    strlcpy(s.name, shelf["name"] | "Unnamed", sizeof(s.name));
+    out.count++;
+  }
+
+  LOG_DBG("BFS", "searchBookshelves: loaded %d shelves", out.count);
   return OK;
 }
 
