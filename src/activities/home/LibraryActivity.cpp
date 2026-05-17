@@ -45,8 +45,11 @@ struct GridLayout {
 
 // Helper: compute the grid layout based on screen dimensions + active row count.
 // Cover height is capped at 226 (Lyra3Covers's homeCoverHeight) so the thumb
-// cache (thumb_226.bmp) renders at its native height without scaling.
-inline GridLayout computeLayout(int screenW, int screenH, int sidePadding, int gridTopY, int rows) {
+// cache (thumb_226.bmp) renders at its native height without scaling. The
+// caller passes the total bottom-reserved area (page indicator strip + button
+// hints bar) so both can be drawn beneath the grid without overlap.
+inline GridLayout computeLayout(int screenW, int screenH, int sidePadding, int gridTopY, int reservedBottom,
+                                int rows) {
   GridLayout L;
   L.sidePadding = sidePadding;
   L.tileWidth = (screenW - 2 * L.sidePadding) / LibraryActivity::GRID_COLS;
@@ -55,7 +58,7 @@ inline GridLayout computeLayout(int screenW, int screenH, int sidePadding, int g
   L.topY = gridTopY;
 
   const int vGaps = (rows - 1) * rowVGap;
-  L.rowH = (screenH - L.topY - vGaps - pageIndicatorHeight) / rows;
+  L.rowH = (screenH - L.topY - vGaps - reservedBottom) / rows;
 
   // Room below the cover for: title (up to 2 lines) + author (1 line) + progress (1 line)
   // + selection padding. Sized to match Lyra3Covers' info layout per tile.
@@ -158,7 +161,9 @@ LibraryActivity::SlotRect LibraryActivity::slotRect(int slotIndexInPage) const {
   // Header sits at metrics.topPadding for headerHeight pixels; grid starts below
   // it after one verticalSpacing of breathing room — matches RecentBooksActivity.cpp:199-202.
   const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY, gridRows());
+  const GridLayout L =
+      computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
+                    pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
 
   int tileX, tileY;
   tileOrigin(slotIndexInPage, L, tileX, tileY);
@@ -208,6 +213,7 @@ void LibraryActivity::render(RenderLock&&) {
     const auto& metrics = UITheme::getInstance().getMetrics();
     GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
                    tr(STR_LIBRARY), nullptr);
+    drawButtonHints();
     contextMenu.render(renderer);
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
@@ -224,9 +230,20 @@ void LibraryActivity::render(RenderLock&&) {
     renderSelectionOnly();
   }
 
+  drawButtonHints();
   contextMenu.render(renderer);
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
+}
+
+void LibraryActivity::drawButtonHints() {
+  // Same label set as HomeActivity (HomeActivity.cpp:407-409). When the book
+  // options modal is open, btn1 shows Back to cancel; otherwise it's empty
+  // because short-press Back goes home (long-press isn't yet bound to a label).
+  const auto labels = contextMenu.isOpen()
+                          ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                          : mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
 void LibraryActivity::refreshCurrentPageMeta() {
@@ -336,7 +353,9 @@ void LibraryActivity::renderPageFromScratch() {
   const int screenH = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY, gridRows());
+  const GridLayout L =
+      computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
+                    pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
 
   // Make sure currentPageMeta reflects on-disk state. Cheap — only reads
   // book.bin entries that already exist; never parses an EPUB from scratch.
@@ -443,7 +462,9 @@ void LibraryActivity::drawOverlay() {
   // Header sits at metrics.topPadding for headerHeight pixels; grid starts below
   // it after one verticalSpacing of breathing room — matches RecentBooksActivity.cpp:199-202.
   const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY, gridRows());
+  const GridLayout L =
+      computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
+                    pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
 
   const size_t page = currentPage();
   const size_t pageStart = page * pageSize();
@@ -518,7 +539,9 @@ void LibraryActivity::drawOverlay() {
   char indicator[40];
   snprintf(indicator, sizeof(indicator), "%zu / %zu", page + 1, pages > 0 ? pages : 1);
   const int indW = renderer.getTextWidth(SMALL_FONT_ID, indicator);
-  const int indY = screenH - pageIndicatorHeight + (pageIndicatorHeight - titleLineHeight) / 2;
+  // Page indicator sits in its own strip just above the button-hints bar.
+  const int indStripTop = screenH - metrics.buttonHintsHeight - pageIndicatorHeight;
+  const int indY = indStripTop + (pageIndicatorHeight - titleLineHeight) / 2;
   renderer.drawText(SMALL_FONT_ID, (screenW - indW) / 2, indY, indicator, true);
 
   // Scrollbar on the right edge, alongside the grid. Position + thumb height
@@ -529,7 +552,7 @@ void LibraryActivity::drawOverlay() {
   const int totalItems = static_cast<int>(bookPaths.size());
   if (totalP > 1 && totalItems > 0) {
     const int barAreaTop = L.topY;
-    const int barAreaBottom = screenH - pageIndicatorHeight;
+    const int barAreaBottom = screenH - metrics.buttonHintsHeight - pageIndicatorHeight;
     const int barAreaHeight = barAreaBottom - barAreaTop;
     const int barHeight = std::max(8, (barAreaHeight * ps) / totalItems);
     const int barY = barAreaTop + ((barAreaHeight - barHeight) * static_cast<int>(page)) / (totalP - 1);

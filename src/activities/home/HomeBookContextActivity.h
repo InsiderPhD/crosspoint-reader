@@ -15,8 +15,7 @@ class HomeBookContextActivity final : public Activity {
   bool awaitingConfirmRelease = false;  // Ignore first release if button held on entry
 
  public:
-  explicit HomeBookContextActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                   const std::string& bookTitle)
+  explicit HomeBookContextActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& bookTitle)
       : Activity("HomeBookContext", renderer, mappedInput), bookTitle(bookTitle) {}
   void onEnter() override;
   void loop() override;

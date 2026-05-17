@@ -15,6 +15,16 @@ class RecentBooksActivity final : public Activity {
 
   size_t selectorIndex = 0;
 
+  // Book context menu
+  bool showingBookOptions = false;
+  bool longPressBookTriggered = false;
+  bool awaitingBookOptionsRelease = false;
+  int bookOptionsIndex = 0;
+  std::string bookOptionsPath;
+  std::string bookOptionsTitle;
+  std::string bookOptionsAuthor;
+  int bookOptionsProgress = -1;
+
   // Recent tab state
   std::vector<RecentBook> recentBooks;
 

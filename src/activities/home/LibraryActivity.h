@@ -113,6 +113,10 @@ class LibraryActivity final : public Activity {
   // (under text) then title text. Adds a centered page indicator at the bottom.
   void drawOverlay();
 
+  // Bottom-of-screen button hint bar (« Home / Open / Up / Down). Labels swap
+  // to (Back / Select / Up / Down) while the book context menu is open.
+  void drawButtonHints();
+
   // Framebuffer snapshot helpers — same pattern as HomeActivity.
   bool storePageBuffer();
   bool restorePageBuffer();

@@ -13,10 +13,10 @@
 #include <I18n.h>
 
 #include "CrossPointSettings.h"
-#include "ReaderUtils.h"
-#include "ReadingStatsStore.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "ReaderUtils.h"
+#include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "XtcReaderChapterSelectionActivity.h"
 #include "components/UITheme.h"

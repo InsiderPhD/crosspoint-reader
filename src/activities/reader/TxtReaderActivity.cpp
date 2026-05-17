@@ -11,8 +11,8 @@
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
-#include "RecentBooksStore.h"
 #include "ReadingStatsStore.h"
+#include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 

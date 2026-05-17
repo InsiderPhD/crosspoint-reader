@@ -56,7 +56,21 @@ void BookFusionBrowserActivity::onEnter() {
 }
 
 void BookFusionBrowserActivity::handleCategorySelection() {
-  currentCategory = selectedCategory;
+  // Route selection to either a functional category or a user shelf.
+  // The unified-menu layout (see render()) is [categories, separator, shelves].
+  if (selectedCategory < NUM_CATEGORIES) {
+    currentCategory = selectedCategory;
+    currentBookshelfId = 0;
+    currentBookshelfName[0] = '\0';
+  } else if (bookshelvesLoaded && selectedCategory > NUM_CATEGORIES) {
+    const int shelfIdx = selectedCategory - (NUM_CATEGORIES + 1);
+    currentBookshelfId = bookshelves.shelves[shelfIdx].id;
+    strlcpy(currentBookshelfName, bookshelves.shelves[shelfIdx].name, sizeof(currentBookshelfName));
+    currentCategory = -1;  // unused while a shelf filter is active
+  } else {
+    // Separator row — shouldn't reach here (loop() filters it out), but guard anyway.
+    return;
+  }
   currentPage = 1;
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -93,8 +107,13 @@ void BookFusionBrowserActivity::loadPage(int page) {
   }
   requestUpdate(true);
 
-  const auto& cat = CATEGORIES[currentCategory];
-  const auto err = BookFusionSyncClient::searchBooks(page, searchResult, cat.list, cat.sort);
+  // Pick the right list/sort depending on whether we're filtering by shelf or category.
+  // Shelf mode bypasses the categorised lists ("currently_reading" etc.) and instead
+  // sends `bookshelf_id` so the server returns books from that shelf only.
+  const char* listParam = (currentBookshelfId != 0) ? nullptr : CATEGORIES[currentCategory].list;
+  const char* sortParam = (currentBookshelfId != 0) ? nullptr : CATEGORIES[currentCategory].sort;
+  const auto err =
+      BookFusionSyncClient::searchBooks(page, searchResult, listParam, sortParam, currentBookshelfId);
 
   if (err != BookFusionSyncClient::OK) {
     {
@@ -114,6 +133,17 @@ void BookFusionBrowserActivity::loadPage(int page) {
     }
     requestUpdate();
     return;
+  }
+
+  // Opportunistic shelf fetch: WiFi is up and the user is already waiting on
+  // "Loading...", so spending an extra second or so here is invisible. After this
+  // first successful loadPage(), backing to CATEGORY_SELECTION shows the shelves
+  // inline below the functional categories. Errors are silent — bookshelvesLoaded
+  // flips true regardless so we don't retry storm.
+  if (!bookshelvesLoaded) {
+    LOG_DBG("BFB", "Fetching bookshelves on first successful page load");
+    BookFusionSyncClient::searchBookshelves(bookshelves);
+    bookshelvesLoaded = true;
   }
 
   {
@@ -248,16 +278,29 @@ void BookFusionBrowserActivity::loop() {
       finish();
       return;
     }
+
+    const bool showShelves = bookshelvesLoaded && bookshelves.count > 0;
+    const int total = NUM_CATEGORIES + (showShelves ? 1 + bookshelves.count : 0);
+    const int sepIdx = showShelves ? NUM_CATEGORIES : -1;
+
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      handleCategorySelection();
+      if (selectedCategory != sepIdx) {  // separator is not selectable
+        handleCategorySelection();
+      }
       return;
     }
-    buttonNavigator.onNextRelease([this] {
-      selectedCategory = ButtonNavigator::nextIndex(selectedCategory, NUM_CATEGORIES);
+    buttonNavigator.onNextRelease([this, total, sepIdx] {
+      selectedCategory = ButtonNavigator::nextIndex(selectedCategory, total);
+      if (selectedCategory == sepIdx) {
+        selectedCategory = ButtonNavigator::nextIndex(selectedCategory, total);
+      }
       requestUpdate();
     });
-    buttonNavigator.onPreviousRelease([this] {
-      selectedCategory = ButtonNavigator::previousIndex(selectedCategory, NUM_CATEGORIES);
+    buttonNavigator.onPreviousRelease([this, total, sepIdx] {
+      selectedCategory = ButtonNavigator::previousIndex(selectedCategory, total);
+      if (selectedCategory == sepIdx) {
+        selectedCategory = ButtonNavigator::previousIndex(selectedCategory, total);
+      }
       requestUpdate();
     });
     return;
@@ -344,18 +387,41 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   const auto pageHeight = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
-  const char* headerTitle =
-      (state == CATEGORY_SELECTION) ? tr(STR_BF_BROWSE_LIBRARY) : I18N.get(CATEGORIES[currentCategory].nameId);
+  const char* headerTitle;
+  if (state == CATEGORY_SELECTION) {
+    headerTitle = tr(STR_BF_BROWSE_LIBRARY);
+  } else if (currentBookshelfId != 0) {
+    // Browsing inside a user shelf — header reads the shelf's own name.
+    headerTitle = currentBookshelfName;
+  } else {
+    headerTitle = I18N.get(CATEGORIES[currentCategory].nameId);
+  }
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle);
 
   if (state == CATEGORY_SELECTION) {
     const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
     const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
 
+    // Unified menu layout:
+    //   [0..NUM_CATEGORIES-1]                 → functional categories
+    //   [NUM_CATEGORIES]                      → "── Bookshelves ──" separator row (only when shelves exist)
+    //   [NUM_CATEGORIES+1 .. end]             → user shelves
+    // Separator is skipped during navigation; see loop() below.
+    const bool showShelves = bookshelvesLoaded && bookshelves.count > 0;
+    const int total = NUM_CATEGORIES + (showShelves ? 1 + bookshelves.count : 0);
+
     GUI.drawList(
-        renderer, Rect{0, contentTop, pageWidth, contentHeight}, NUM_CATEGORIES, selectedCategory,
-        [](int index) -> std::string { return std::string(I18N.get(CATEGORIES[index].nameId)); }, nullptr, nullptr,
-        nullptr, true);
+        renderer, Rect{0, contentTop, pageWidth, contentHeight}, total, selectedCategory,
+        [this](int index) -> std::string {
+          if (index < NUM_CATEGORIES) {
+            return std::string(I18N.get(CATEGORIES[index].nameId));
+          }
+          if (index == NUM_CATEGORIES) {
+            return std::string("--- ") + tr(STR_BF_BOOKSHELVES) + " ---";
+          }
+          return std::string(bookshelves.shelves[index - (NUM_CATEGORIES + 1)].name);
+        },
+        nullptr, nullptr, nullptr, true);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

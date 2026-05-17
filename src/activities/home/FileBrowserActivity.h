@@ -19,6 +19,16 @@ class FileBrowserActivity final : public Activity {
 
   bool lockLongPressBack = false;
 
+  // Book context menu
+  bool showingBookOptions = false;
+  bool longPressBookTriggered = false;
+  bool awaitingBookOptionsRelease = false;
+  int bookOptionsIndex = 0;
+  std::string bookOptionsPath;
+  std::string bookOptionsTitle;
+  std::string bookOptionsAuthor;
+  int bookOptionsProgress = -1;
+
   // Files state
   std::string basepath = "/";
   std::vector<std::string> files;
