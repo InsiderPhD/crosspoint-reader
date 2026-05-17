@@ -7,6 +7,8 @@
 
 #include "../Activity.h"
 #include "components/BookContextMenu.h"
+#include "components/SortMenu.h"
+#include "sorting/SortMode.h"
 #include "util/ButtonNavigator.h"
 
 class LibraryActivity final : public Activity {
@@ -21,8 +23,6 @@ class LibraryActivity final : public Activity {
   // grid collapses to a single row of 3.
   int gridRows() const;
   int pageSize() const { return GRID_COLS * gridRows(); }
-
-  enum class SortDirection : uint8_t { NewestFirst, OldestFirst };
 
   explicit LibraryActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("Library", renderer, mappedInput) {}
@@ -58,7 +58,19 @@ class LibraryActivity final : public Activity {
   // sorted (live) list, not a page-local index — this keeps wrap-around free
   // via ButtonNavigator's nextIndex / nextPageIndex helpers.
   size_t selectorIndex = 0;
-  SortDirection sortDirection = SortDirection::NewestFirst;
+
+  SortMenu sortMenu;
+  SortMode currentSort = SortMode::AlphabeticAsc;
+  std::vector<uint16_t> sortedIndices;
+  // Lazy metadata caches, populated on first selection of the relevant sort mode.
+  // Indexed in parallel with bookPaths (raw enumeration order).
+  std::vector<std::string> authorCache;
+  std::vector<uint32_t> dateAddedCache;
+  bool authorCacheReady = false;
+  bool dateAddedCacheReady = false;
+  // Set when a sort mode change needs a metadata pass; the next render() shows a
+  // "Sorting…" popup before running the (synchronous) rebuild.
+  bool pendingSortRebuild = false;
 
   // Framebuffer snapshot cache (mirrors HomeActivity pattern at HomeActivity.cpp:134-174).
   // After a page is fully drawn, we snapshot the framebuffer so subsequent selection
@@ -81,9 +93,14 @@ class LibraryActivity final : public Activity {
   }
 
   // Enumerate every .epub / .xtc on the SD (recursive, iterative via queue).
-  // Order: directory enumeration order (insertion order on FAT/exFAT), so
-  // sortDirection=NewestFirst displays the last-enumerated entries first.
+  // Order: directory enumeration order (insertion order on FAT/exFAT). The
+  // user-visible order is determined by `sortedIndices`, populated by
+  // rebuildSortedIndices().
   void enumerateBooks();
+
+  // Recomputes `sortedIndices` from bookPaths + the current sort mode. May
+  // populate authorCache or dateAddedCache the first time those modes are used.
+  void rebuildSortedIndices();
 
   // Render the current page from scratch using whatever metadata + thumb caches
   // exist on disk *right now*. Missing covers render as placeholders; they get

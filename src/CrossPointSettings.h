@@ -137,8 +137,9 @@ class CrossPointSettings {
     REFRESH_FREQUENCY_COUNT
   };
 
-  // Short power button press actions
-  enum SHORT_PWRBTN { IGNORE = 0, SLEEP = 1, PAGE_TURN = 2, FORCE_REFRESH = 3, SHORT_PWRBTN_COUNT };
+  // Short power button press actions (reader scope only — outside the reader Power
+  // short-press opens the sort menu unconditionally).
+  enum SHORT_PWRBTN { PAGE_TURN = 0, SLEEP = 1, FORCE_REFRESH = 2, SHORT_PWRBTN_COUNT };
 
   // Hide battery percentage
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
@@ -179,8 +180,11 @@ class CrossPointSettings {
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
   uint8_t textAntiAliasing = 1;
-  // Short power button click behaviour
-  uint8_t shortPwrBtn = IGNORE;
+  // Short power button click behaviour (reader scope only)
+  uint8_t shortPwrBtn = PAGE_TURN;
+  // Last-chosen sort order in list activities (Library / Recents / FileBrowser).
+  // Stored as a SortMode value; defaults to AlphabeticAsc on first run.
+  uint8_t sortMode = 0;
   // EPUB reading orientation settings
   // 0 = portrait (default), 1 = landscape clockwise, 2 = inverted, 3 = landscape counter-clockwise
   uint8_t orientation = PORTRAIT;

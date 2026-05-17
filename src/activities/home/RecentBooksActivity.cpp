@@ -25,18 +25,40 @@ void RecentBooksActivity::loadRecentBooks() {
   const auto& books = RECENT_BOOKS.getBooks();
   recentBooks.reserve(books.size());
 
-  // First collect valid books
-  std::vector<std::string> bookPaths;
   for (const auto& book : books) {
-    // Skip if file no longer exists
-    if (RecentBooksStore::isMissing(book)) {
-      continue;
-    }
+    if (RecentBooksStore::isMissing(book)) continue;
     recentBooks.push_back(book);
-    bookPaths.push_back(book.path);
   }
 
-  // Apply sorting to the paths
+  rebuildSortedIndices();
+}
+
+void RecentBooksActivity::rebuildSortedIndices() {
+  std::vector<SortEntry> entries;
+  entries.reserve(recentBooks.size());
+
+  for (size_t i = 0; i < recentBooks.size(); i++) {
+    const auto& b = recentBooks[i];
+    SortEntry e;
+    e.sortKey = b.title.empty() ? std::string_view(b.path) : std::string_view(b.title);
+    e.authorKey = b.author;
+    e.progressPercent = b.progressPercent;
+    e.lastOpenedRank = static_cast<uint16_t>(i);  // RECENT_BOOKS order = most-recent-first
+    e.dateAddedTs = 0;  // Filled lazily in DateAdded sort modes; see below.
+    entries.push_back(e);
+  }
+
+  if (currentSort == SortMode::DateAddedNewest || currentSort == SortMode::DateAddedOldest) {
+    for (size_t i = 0; i < recentBooks.size(); i++) {
+      HalFile f;
+      if (Storage.openFileForRead("RBA", recentBooks[i].path, f)) {
+        entries[i].dateAddedTs = f.getModifyDateTimePacked();
+        f.close();
+      }
+    }
+  }
+
+  applySort(sortedIndices, entries, currentSort);
 }
 
 void RecentBooksActivity::onEnter() {
@@ -47,6 +69,9 @@ void RecentBooksActivity::onEnter() {
   if (RECENT_BOOKS.pruneMissing()) {
     RECENT_BOOKS.saveToFile();
   }
+
+  // Pull last-chosen sort from settings (shared across all list activities).
+  currentSort = (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
 
   // Load data
   loadRecentBooks();
@@ -63,19 +88,39 @@ void RecentBooksActivity::onExit() {
 void RecentBooksActivity::loop() {
   const int pageItems = UITheme::getInstance().getNumberOfItemsPerPage(renderer, true, false, true, true);
 
+  // Power short-press → sort menu.
+  if (!showingBookOptions && sortMenu.checkTrigger(mappedInput, currentSort)) {
+    requestUpdate();
+    return;
+  }
+  if (sortMenu.isOpen()) {
+    SortMode picked;
+    bool cancelled;
+    if (sortMenu.handleInput(buttonNavigator, mappedInput, &picked, &cancelled)) {
+      if (!cancelled && picked != currentSort) {
+        currentSort = picked;
+        SETTINGS.sortMode = static_cast<uint8_t>(picked);
+        SETTINGS.saveToFile();
+        rebuildSortedIndices();
+      }
+      requestUpdate();
+    }
+    return;
+  }
 
   // Long press on a book → context menu
   if (!showingBookOptions && !longPressBookTriggered && !recentBooks.empty() &&
-      selectorIndex < static_cast<int>(recentBooks.size()) &&
+      selectorIndex < sortedIndices.size() &&
       mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= 700UL) {
+    const size_t actual = sortedIndices[selectorIndex];
     longPressBookTriggered = true;
     showingBookOptions = true;
     awaitingBookOptionsRelease = true;
     bookOptionsIndex = 0;
-    bookOptionsPath = recentBooks[selectorIndex].path;
-    bookOptionsTitle = recentBooks[selectorIndex].title;
-    bookOptionsAuthor = recentBooks[selectorIndex].author;
-    bookOptionsProgress = recentBooks[selectorIndex].progressPercent;
+    bookOptionsPath = recentBooks[actual].path;
+    bookOptionsTitle = recentBooks[actual].title;
+    bookOptionsAuthor = recentBooks[actual].author;
+    bookOptionsProgress = recentBooks[actual].progressPercent;
     requestUpdate();
     return;
   }
@@ -155,9 +200,10 @@ void RecentBooksActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (!recentBooks.empty() && selectorIndex < static_cast<int>(recentBooks.size())) {
-      LOG_DBG("RBA", "Selected recent book: %s", recentBooks[selectorIndex].path.c_str());
-      onSelectBook(recentBooks[selectorIndex].path);
+    if (!recentBooks.empty() && selectorIndex < sortedIndices.size()) {
+      const size_t actual = sortedIndices[selectorIndex];
+      LOG_DBG("RBA", "Selected recent book: %s", recentBooks[actual].path.c_str());
+      onSelectBook(recentBooks[actual].path);
       return;
     }
   }
@@ -196,14 +242,8 @@ void RecentBooksActivity::render(RenderLock&&) {
   const auto pageHeight = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
-  // Show current sort method in header
-  // TODO: Temporarily disabled to fix crash
-  /*char headerTitle[128];
-  snprintf(headerTitle, sizeof(headerTitle), "%s (%s)",
-           tr(STR_MENU_RECENT_BOOKS), sortableFiles.getCurrentSortDisplayName());
-
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle);*/
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_MENU_RECENT_BOOKS));
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_MENU_RECENT_BOOKS),
+                 sortModeLabel(currentSort));
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
@@ -212,14 +252,16 @@ void RecentBooksActivity::render(RenderLock&&) {
   if (recentBooks.empty()) {
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, tr(STR_NO_RECENT_BOOKS));
   } else {
+    auto at = [this](int index) -> const RecentBook& { return recentBooks[sortedIndices[index]]; };
     GUI.drawList(
-        renderer, Rect{0, contentTop, pageWidth, contentHeight}, recentBooks.size(), selectorIndex,
-        [this](int index) { return recentBooks[index].title; }, [this](int index) { return recentBooks[index].author; },
-        [this](int index) { return UITheme::getFileIcon(recentBooks[index].path); },
-        [this](int index) -> std::string {
-          if (recentBooks[index].progressPercent >= 0) {
+        renderer, Rect{0, contentTop, pageWidth, contentHeight}, sortedIndices.size(), selectorIndex,
+        [at](int index) { return at(index).title; }, [at](int index) { return at(index).author; },
+        [at](int index) { return UITheme::getFileIcon(at(index).path); },
+        [at](int index) -> std::string {
+          const auto& b = at(index);
+          if (b.progressPercent >= 0) {
             char buf[8];
-            snprintf(buf, sizeof(buf), "%d%%", static_cast<int>(recentBooks[index].progressPercent));
+            snprintf(buf, sizeof(buf), "%d%%", static_cast<int>(b.progressPercent));
             return std::string(buf);
           }
           return "";
@@ -241,8 +283,8 @@ void RecentBooksActivity::render(RenderLock&&) {
                                   bookOptionsProgress, bookOptionsIndex);
   }
 
-  // Render sort indicator overlay if active
-  // TODO: Temporarily disabled to fix crash
+  sortMenu.render(renderer);
+
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

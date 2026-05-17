@@ -107,6 +107,8 @@ void XtcReaderActivity::loop() {
     return;
   }
 
+  if (ReaderUtils::detectAndApplyForceRefresh(mappedInput, renderer)) return;
+
   // When long-press chapter skip is disabled, turn pages on press instead of release.
   const bool usePressForPageTurn = !SETTINGS.longPressChapterSkip;
   const bool prevTriggered = usePressForPageTurn ? (mappedInput.wasPressed(MappedInputManager::Button::PageBack) ||

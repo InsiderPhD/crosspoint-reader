@@ -7,6 +7,8 @@
 
 #include "../Activity.h"
 #include "RecentBooksStore.h"
+#include "components/SortMenu.h"
+#include "sorting/SortMode.h"
 #include "util/ButtonNavigator.h"
 
 class RecentBooksActivity final : public Activity {
@@ -28,8 +30,14 @@ class RecentBooksActivity final : public Activity {
   // Recent tab state
   std::vector<RecentBook> recentBooks;
 
+  // Sort state
+  SortMenu sortMenu;
+  SortMode currentSort = SortMode::LastOpenedNewest;
+  std::vector<uint16_t> sortedIndices;
+
   // Data loading
   void loadRecentBooks();
+  void rebuildSortedIndices();
 
  public:
   explicit RecentBooksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

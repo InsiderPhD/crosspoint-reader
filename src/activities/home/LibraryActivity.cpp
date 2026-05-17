@@ -88,6 +88,8 @@ void LibraryActivity::onEnter() {
   lastRenderedPage = static_cast<size_t>(-1);
   pageRendered = false;
   pageBufferStored = false;
+  // Pull last-chosen sort from settings (shared across all list activities).
+  currentSort = (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
   enumerateBooks();
   requestUpdate();
 }
@@ -97,6 +99,15 @@ void LibraryActivity::onExit() {
   freePageBuffer();
   bookPaths.clear();
   bookPaths.shrink_to_fit();
+  sortedIndices.clear();
+  sortedIndices.shrink_to_fit();
+  authorCache.clear();
+  authorCache.shrink_to_fit();
+  dateAddedCache.clear();
+  dateAddedCache.shrink_to_fit();
+  authorCacheReady = false;
+  dateAddedCacheReady = false;
+  pendingSortRebuild = false;
 }
 
 void LibraryActivity::enumerateBooks() {
@@ -141,15 +152,88 @@ void LibraryActivity::enumerateBooks() {
   }
 
   LOG_DBG(MODULE, "Enumerated %zu books from SD", bookPaths.size());
+
+  // Reset caches; their contents are bookPaths-indexed and must match the new list.
+  authorCache.assign(bookPaths.size(), std::string{});
+  dateAddedCache.assign(bookPaths.size(), 0u);
+  authorCacheReady = false;
+  dateAddedCacheReady = false;
+  rebuildSortedIndices();
+}
+
+namespace {
+// Helper: return the filename (without extension) view into `path`. Lifetime is bound
+// to the caller-owned string.
+std::string_view filenameView(const std::string& path) {
+  const auto slash = path.find_last_of('/');
+  const size_t start = (slash == std::string::npos) ? 0 : slash + 1;
+  const auto dot = path.find_last_of('.');
+  const size_t end = (dot == std::string::npos || dot < start) ? path.size() : dot;
+  return std::string_view(path).substr(start, end - start);
+}
+}  // namespace
+
+void LibraryActivity::rebuildSortedIndices() {
+  const bool needsAuthor =
+      (currentSort == SortMode::AuthorAsc || currentSort == SortMode::AuthorDesc) && !authorCacheReady;
+  const bool needsDateAdded =
+      (currentSort == SortMode::DateAddedNewest || currentSort == SortMode::DateAddedOldest) && !dateAddedCacheReady;
+
+  if (needsAuthor) {
+    for (size_t i = 0; i < bookPaths.size(); i++) {
+      const std::string& path = bookPaths[i];
+      if (FsHelpers::hasEpubExtension(path)) {
+        Epub epub(path, "/.crosspoint");
+        if (Storage.exists((epub.getCachePath() + "/book.bin").c_str()) && epub.load(true, true)) {
+          authorCache[i] = epub.getAuthor();
+        }
+      } else if (FsHelpers::hasXtcExtension(path)) {
+        Xtc xtc(path, "/.crosspoint");
+        if (xtc.load()) authorCache[i] = xtc.getAuthor();
+      }
+    }
+    authorCacheReady = true;
+  }
+
+  if (needsDateAdded) {
+    for (size_t i = 0; i < bookPaths.size(); i++) {
+      HalFile f;
+      if (Storage.openFileForRead(MODULE, bookPaths[i], f)) {
+        dateAddedCache[i] = f.getModifyDateTimePacked();
+        f.close();
+      }
+    }
+    dateAddedCacheReady = true;
+  }
+
+  // RecentBooksStore is capped at 10 entries (RecentBooksStore.cpp:18) — linear lookup is fine.
+  const auto& recents = RECENT_BOOKS.getBooks();
+
+  std::vector<SortEntry> entries;
+  entries.reserve(bookPaths.size());
+  for (size_t i = 0; i < bookPaths.size(); i++) {
+    SortEntry e;
+    e.sortKey = filenameView(bookPaths[i]);
+    e.authorKey = authorCacheReady ? std::string_view(authorCache[i]) : std::string_view{};
+    e.dateAddedTs = dateAddedCacheReady ? dateAddedCache[i] : 0u;
+    e.progressPercent = -1;
+    e.lastOpenedRank = LAST_OPENED_NEVER;
+    for (size_t r = 0; r < recents.size(); r++) {
+      if (recents[r].path == bookPaths[i]) {
+        e.progressPercent = recents[r].progressPercent;
+        e.lastOpenedRank = static_cast<uint16_t>(r);
+        break;
+      }
+    }
+    entries.push_back(e);
+  }
+
+  applySort(sortedIndices, entries, currentSort);
 }
 
 std::string LibraryActivity::pathAtLogicalIndex(size_t logicalIdx) const {
-  if (logicalIdx >= bookPaths.size()) return {};
-  // NewestFirst: reverse the directory enumeration order (last-enumerated = newest on FAT).
-  const size_t physicalIdx = (sortDirection == SortDirection::NewestFirst)
-                                 ? (bookPaths.size() - 1 - logicalIdx)
-                                 : logicalIdx;
-  return bookPaths[physicalIdx];
+  if (logicalIdx >= sortedIndices.size()) return {};
+  return bookPaths[sortedIndices[logicalIdx]];
 }
 
 std::string LibraryActivity::currentPath() const { return pathAtLogicalIndex(selectorIndex); }
@@ -208,13 +292,30 @@ void LibraryActivity::freePageBuffer() {
 }
 
 void LibraryActivity::render(RenderLock&&) {
+  // A sort mode change can require a metadata pass (book.bin parsing, SD stats)
+  // that takes seconds for large libraries. Show a "Sorting…" popup *before*
+  // running the rebuild so the user sees feedback rather than a frozen modal.
+  if (pendingSortRebuild) {
+    GUI.drawPopup(renderer, tr(STR_SORTING));
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+    if (SETTINGS.darkMode) renderer.invertScreen();
+
+    rebuildSortedIndices();
+    pendingSortRebuild = false;
+    lastRenderedPage = static_cast<size_t>(-1);
+    pageBufferStored = false;
+    // Fall through to the normal render path so the new sorted page is drawn.
+  }
+
   if (bookPaths.empty()) {
     renderer.clearScreen();
     const auto& metrics = UITheme::getInstance().getMetrics();
     GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
-                   tr(STR_LIBRARY), nullptr);
+                   tr(STR_LIBRARY), sortModeLabel(currentSort));
     drawButtonHints();
     contextMenu.render(renderer);
+    sortMenu.render(renderer);
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
@@ -232,6 +333,7 @@ void LibraryActivity::render(RenderLock&&) {
 
   drawButtonHints();
   contextMenu.render(renderer);
+  sortMenu.render(renderer);
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
@@ -402,7 +504,8 @@ void LibraryActivity::renderPageFromScratch() {
   // Fast render — never blocks on cover generation. Missing covers stay as
   // placeholders until loop() fills them in one at a time.
   renderer.clearScreen();
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, screenW, metrics.headerHeight}, tr(STR_LIBRARY), nullptr);
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, screenW, metrics.headerHeight}, tr(STR_LIBRARY),
+                 sortModeLabel(currentSort));
   for (int i = 0; i < booksOnPage; ++i) drawTileCover(i);
   drawOverlay();
 
@@ -564,20 +667,28 @@ void LibraryActivity::drawOverlay() {
 
 void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const std::string& path,
                                          const std::string& title) {
-  // Library-side reload: invalidate snapshot, restore selector if list shrank.
+  // Library-side reload: invalidate snapshot, refresh the sort permutation, restore
+  // selector if the list shrank.
   auto reloadAfterMutation = [this] {
+    rebuildSortedIndices();
     pageBufferStored = false;
     pageRendered = false;
     lastRenderedPage = static_cast<size_t>(-1);
-    if (selectorIndex >= bookPaths.size() && !bookPaths.empty()) {
-      selectorIndex = bookPaths.size() - 1;
+    if (selectorIndex >= sortedIndices.size() && !sortedIndices.empty()) {
+      selectorIndex = sortedIndices.size() - 1;
     }
     requestUpdate();
   };
 
   auto removeBookFromList = [this](const std::string& p) {
     auto it = std::find(bookPaths.begin(), bookPaths.end(), p);
-    if (it != bookPaths.end()) bookPaths.erase(it);
+    if (it != bookPaths.end()) {
+      const size_t k = static_cast<size_t>(it - bookPaths.begin());
+      bookPaths.erase(it);
+      // Keep parallel caches in lockstep so SortEntry views stay valid on rebuild.
+      if (k < authorCache.size()) authorCache.erase(authorCache.begin() + k);
+      if (k < dateAddedCache.size()) dateAddedCache.erase(dateAddedCache.begin() + k);
+    }
   };
 
   switch (action) {
@@ -650,6 +761,35 @@ void LibraryActivity::loop() {
 
   const int total = static_cast<int>(bookPaths.size());
   const int pageItems = pageSize();
+
+  // Power short-press → sort menu. Suppressed while the book context menu is open
+  // or a sort rebuild is pending.
+  if (!contextMenu.isOpen() && !pendingSortRebuild && sortMenu.checkTrigger(mappedInput, currentSort)) {
+    pageBufferStored = false;  // Modal overlay invalidates the snapshot.
+    requestUpdate();
+    return;
+  }
+  if (sortMenu.isOpen()) {
+    SortMode picked;
+    bool cancelled = false;
+    if (sortMenu.handleInput(buttonNavigator, mappedInput, &picked, &cancelled)) {
+      if (!cancelled && picked != currentSort) {
+        currentSort = picked;
+        SETTINGS.sortMode = static_cast<uint8_t>(picked);
+        SETTINGS.saveToFile();
+        pendingSortRebuild = true;  // Render will show "Sorting…" and do the work.
+        selectorIndex = 0;
+        lastRenderedPage = static_cast<size_t>(-1);
+        pageBufferStored = false;
+      } else {
+        pageBufferStored = false;  // Modal overlay invalidates the snapshot.
+      }
+      requestUpdate();
+    } else {
+      requestUpdate();
+    }
+    return;
+  }
 
   // Active modal — drive it and dispatch on terminal events.
   if (contextMenu.isOpen()) {

@@ -169,3 +169,15 @@ HalFile HalFile::openNextFile() {
 }
 bool HalFile::isOpen() const { return impl != nullptr && impl->file.isOpen(); }  // already thread-safe, no need to wrap
 HalFile::operator bool() const { return isOpen(); }
+
+bool HalFile::getModifyDateTime(uint16_t* date, uint16_t* time) {
+  if (impl == nullptr || !impl->file.isOpen()) return false;
+  HalStorage::StorageLock lock;
+  return impl->file.getModifyDateTime(date, time);
+}
+
+uint32_t HalFile::getModifyDateTimePacked() {
+  uint16_t date = 0, time = 0;
+  if (!getModifyDateTime(&date, &time)) return 0;
+  return (static_cast<uint32_t>(date) << 16) | time;
+}

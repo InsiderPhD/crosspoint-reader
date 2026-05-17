@@ -100,6 +100,12 @@ class HalFile : public Print {
   HalFile openNextFile();
   bool isOpen() const;
   operator bool() const;
+
+  // Read FAT modify date/time. Returns false if the file is not open or the read fails.
+  bool getModifyDateTime(uint16_t* date, uint16_t* time);
+  // Packed (date << 16) | time. FAT layout makes this directly comparable as a wall-clock-ordered
+  // uint32_t — newer files have higher values. Returns 0 on failure.
+  uint32_t getModifyDateTimePacked();
 };
 
 // Only do renaming FsFile to HalFile if this header is included by downstream code

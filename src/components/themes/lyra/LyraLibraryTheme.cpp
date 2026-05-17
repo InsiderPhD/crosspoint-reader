@@ -90,7 +90,7 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
 
       // Measure the label up-front so we can stack icon + label as one unit
       // and center them vertically inside the cover frame.
-      const char* label = tr(STR_LIBRARY);
+      const char* label = tr(STR_VIEW_ALL_COVERS);
       const int labelLineH = renderer.getLineHeight(SMALL_FONT_ID);
       const int labelW = renderer.getTextWidth(SMALL_FONT_ID, label);
       const int stackH = LIBRARY_ICON_SIZE + LIBRARY_LABEL_GAP + labelLineH;
@@ -121,7 +121,7 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
     int progressPercent = 0;
 
     if (i == LIBRARY_SLOT) {
-      titleLines = renderer.wrappedText(SMALL_FONT_ID, tr(STR_LIBRARY), maxLineWidth, 2);
+      titleLines = renderer.wrappedText(SMALL_FONT_ID, tr(STR_VIEW_ALL_COVERS), maxLineWidth, 2);
     } else if (i < static_cast<int>(recentBooks.size())) {
       const bool isBookFusionBook = BookFusionBookIdStore::loadBookId(recentBooks[i].path.c_str()) != 0;
       const std::string displayTitle =

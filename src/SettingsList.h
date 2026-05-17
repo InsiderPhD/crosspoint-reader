@@ -80,8 +80,18 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                         {StrId::STR_REFRESH_SCREEN, StrId::STR_SYNC_WITH_BOOKFUSION}, "longPressAction",
                         StrId::STR_CAT_CONTROLS),
       SettingInfo::Enum(StrId::STR_SHORT_PWR_BTN, &CrossPointSettings::shortPwrBtn,
-                        {StrId::STR_IGNORE, StrId::STR_SLEEP, StrId::STR_PAGE_TURN, StrId::STR_FORCE_REFRESH},
+                        {StrId::STR_PAGE_TURN, StrId::STR_SLEEP, StrId::STR_FORCE_REFRESH},
                         "shortPwrBtn", StrId::STR_CAT_CONTROLS),
+      // Persisted last-chosen sort. Hidden from the settings UI (no category set) —
+      // edited only via the in-activity sort menu. Listed here so JsonSettingsIO
+      // round-trips it through settings.json. The enumValues just exist for
+      // validation clamping in loadSettings; users never see them.
+      SettingInfo::Enum(StrId::STR_SORT_BY, &CrossPointSettings::sortMode,
+                        {StrId::STR_SORT_ALPHA_ASC, StrId::STR_SORT_ALPHA_DESC, StrId::STR_SORT_AUTHOR_ASC,
+                         StrId::STR_SORT_AUTHOR_DESC, StrId::STR_SORT_LAST_OPENED_NEW, StrId::STR_SORT_LAST_OPENED_OLD,
+                         StrId::STR_SORT_PROGRESS_MOST, StrId::STR_SORT_PROGRESS_LEAST, StrId::STR_SORT_DATE_ADDED_NEW,
+                         StrId::STR_SORT_DATE_ADDED_OLD},
+                        "sortMode"),
 
       // --- System ---
       SettingInfo::Enum(StrId::STR_TIME_TO_SLEEP, &CrossPointSettings::sleepTimeout,

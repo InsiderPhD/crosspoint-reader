@@ -2,6 +2,7 @@
 
 #include <CrossPointSettings.h>
 #include <GfxRenderer.h>
+#include <HalDisplay.h>
 #include <Logging.h>
 
 #include "MappedInputManager.h"
@@ -47,6 +48,18 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
                              : (input.wasReleased(MappedInputManager::Button::PageForward) || powerTurn ||
                                 input.wasReleased(MappedInputManager::Button::Right));
   return {prev, next};
+}
+
+// If the user has Power short-press mapped to FORCE_REFRESH and Power was just released,
+// half-refresh the e-ink screen. Used by the reader activities; the global main loop no
+// longer handles Power so the setting's scope stays reader-only (Power in list activities
+// opens the sort menu).
+inline bool detectAndApplyForceRefresh(const MappedInputManager& input, const GfxRenderer& renderer) {
+  if (SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::FORCE_REFRESH) return false;
+  if (!input.wasReleased(MappedInputManager::Button::Power)) return false;
+  LOG_DBG("READER", "Manual screen refresh triggered");
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  return true;
 }
 
 // Called on each user-initiated page turn to update the rolling reading speed estimate.

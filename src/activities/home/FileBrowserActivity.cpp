@@ -23,6 +23,12 @@ constexpr unsigned long GO_HOME_MS = 1000;
 
 void FileBrowserActivity::loadFiles() {
   files.clear();
+  fileEntries.clear();
+  folderEntries.clear();
+  authorCache.clear();
+  dateAddedCache.clear();
+  authorCacheReady = false;
+  dateAddedCacheReady = false;
 
   auto root = Storage.open(basepath.c_str());
   if (!root || !root.isDirectory()) {
@@ -39,24 +45,108 @@ void FileBrowserActivity::loadFiles() {
     }
 
     if (file.isDirectory()) {
-      files.emplace_back(std::string(name) + "/");
+      folderEntries.emplace_back(std::string(name) + "/");
     } else {
       std::string_view filename{name};
       if (FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
           FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
           FsHelpers::hasBmpExtension(filename)) {
-        files.emplace_back(filename);
+        fileEntries.emplace_back(filename);
       }
     }
   }
   root.close();
-  FsHelpers::sortFileList(files);
+
+  // Folders always keep natural sort and pin to the bottom of the display list.
+  FsHelpers::sortFileList(folderEntries);
+  authorCache.assign(fileEntries.size(), std::string{});
+  dateAddedCache.assign(fileEntries.size(), 0u);
+
+  rebuildFilesList();
+}
+
+namespace {
+std::string_view filenameStemView(const std::string& name) {
+  const auto dot = name.find_last_of('.');
+  return (dot == std::string::npos) ? std::string_view(name) : std::string_view(name).substr(0, dot);
+}
+}  // namespace
+
+void FileBrowserActivity::rebuildFilesList() {
+  const bool needsAuthor =
+      (currentSort == SortMode::AuthorAsc || currentSort == SortMode::AuthorDesc) && !authorCacheReady;
+  const bool needsDateAdded =
+      (currentSort == SortMode::DateAddedNewest || currentSort == SortMode::DateAddedOldest) && !dateAddedCacheReady;
+
+  std::string baseWithSlash = basepath;
+  if (baseWithSlash.empty() || baseWithSlash.back() != '/') baseWithSlash += '/';
+
+  if (needsAuthor) {
+    for (size_t i = 0; i < fileEntries.size(); i++) {
+      const std::string fullPath = baseWithSlash + fileEntries[i];
+      if (FsHelpers::hasEpubExtension(fileEntries[i])) {
+        Epub epub(fullPath, "/.crosspoint");
+        if (Storage.exists((epub.getCachePath() + "/book.bin").c_str()) && epub.load(true, true)) {
+          authorCache[i] = epub.getAuthor();
+        }
+      } else if (FsHelpers::hasXtcExtension(fileEntries[i])) {
+        Xtc xtc(fullPath, "/.crosspoint");
+        if (xtc.load()) authorCache[i] = xtc.getAuthor();
+      }
+      // TXT/MD/BMP have no author metadata; left empty so they sink to the end of Author sorts.
+    }
+    authorCacheReady = true;
+  }
+
+  if (needsDateAdded) {
+    for (size_t i = 0; i < fileEntries.size(); i++) {
+      const std::string fullPath = baseWithSlash + fileEntries[i];
+      HalFile f;
+      if (Storage.openFileForRead("FileBrowser", fullPath, f)) {
+        dateAddedCache[i] = f.getModifyDateTimePacked();
+        f.close();
+      }
+    }
+    dateAddedCacheReady = true;
+  }
+
+  const auto& recents = RECENT_BOOKS.getBooks();
+
+  std::vector<SortEntry> entries;
+  entries.reserve(fileEntries.size());
+  for (size_t i = 0; i < fileEntries.size(); i++) {
+    SortEntry e;
+    e.sortKey = filenameStemView(fileEntries[i]);
+    e.authorKey = authorCacheReady ? std::string_view(authorCache[i]) : std::string_view{};
+    e.dateAddedTs = dateAddedCacheReady ? dateAddedCache[i] : 0u;
+    e.progressPercent = -1;
+    e.lastOpenedRank = LAST_OPENED_NEVER;
+    const std::string fullPath = baseWithSlash + fileEntries[i];
+    for (size_t r = 0; r < recents.size(); r++) {
+      if (recents[r].path == fullPath) {
+        e.progressPercent = recents[r].progressPercent;
+        e.lastOpenedRank = static_cast<uint16_t>(r);
+        break;
+      }
+    }
+    entries.push_back(e);
+  }
+
+  std::vector<uint16_t> sortedIndices;
+  applySort(sortedIndices, entries, currentSort);
+
+  files.clear();
+  files.reserve(fileEntries.size() + folderEntries.size());
+  for (uint16_t idx : sortedIndices) files.push_back(fileEntries[idx]);
+  for (const auto& folder : folderEntries) files.push_back(folder);
 }
 
 void FileBrowserActivity::onEnter() {
   Activity::onEnter();
 
   selectorIndex = 0;
+  // Pull last-chosen sort from settings (shared across all list activities).
+  currentSort = (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
 
   auto root = Storage.open(basepath.c_str());
   if (!root) {
@@ -93,18 +183,32 @@ void FileBrowserActivity::clearFileMetadata(const std::string& fullPath) {
 }
 
 void FileBrowserActivity::loop() {
-
-  // Long press BACK (1s+) goes to root folder
-  // but Long press BACK (1s+) from ReaderActivity sends us here with the MappedInput already set.
-  // So ignore it the first time.
-  if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= GO_HOME_MS &&
-      basepath != "/" && !lockLongPressBack && !showingBookOptions) {
-    basepath = "/";
-    loadFiles();
-    selectorIndex = 0;
+  // Power short-press → sort menu. Suppressed during book-options modal and while
+  // a sort rebuild is pending.
+  if (!showingBookOptions && !pendingSortRebuild && sortMenu.checkTrigger(mappedInput, currentSort)) {
     requestUpdate();
     return;
   }
+  if (sortMenu.isOpen()) {
+    SortMode picked;
+    bool cancelled = false;
+    if (sortMenu.handleInput(buttonNavigator, mappedInput, &picked, &cancelled)) {
+      if (!cancelled && picked != currentSort) {
+        currentSort = picked;
+        SETTINGS.sortMode = static_cast<uint8_t>(picked);
+        SETTINGS.saveToFile();
+        pendingSortRebuild = true;
+        selectorIndex = 0;
+      }
+      requestUpdate();
+    } else {
+      requestUpdate();
+    }
+    return;
+  }
+
+  // Note: long-press Back (1s+) is handled globally in main.cpp and returns to Home
+  // regardless of the current activity. No per-activity "go to root" gesture anymore.
 
   if (lockLongPressBack && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     lockLongPressBack = false;
@@ -335,6 +439,17 @@ std::string getFileExtension(std::string filename) {
 }
 
 void FileBrowserActivity::render(RenderLock&&) {
+  // Deferred sort rebuild: show a "Sorting…" popup before doing the (potentially slow)
+  // metadata pass on first selection of an Author/DateAdded mode.
+  if (pendingSortRebuild) {
+    GUI.drawPopup(renderer, tr(STR_SORTING));
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    rebuildFilesList();
+    pendingSortRebuild = false;
+  }
+
   renderer.clearScreen();
 
   const auto pageWidth = renderer.getScreenWidth();
@@ -343,8 +458,9 @@ void FileBrowserActivity::render(RenderLock&&) {
 
   std::string folderName = (basepath == "/") ? tr(STR_SD_CARD) : basepath.substr(basepath.rfind('/') + 1);
 
-  // Show folder name in header
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str());
+  // Show folder name in header; right side shows the active sort label.
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str(),
+                 sortModeLabel(currentSort));
 
   const int pathLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
   const int pathReserved = pathLineHeight + metrics.verticalSpacing;
@@ -427,6 +543,8 @@ void FileBrowserActivity::render(RenderLock&&) {
     UITheme::drawBookOptionsPopup(renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(), folder.c_str(),
                                   bookOptionsProgress, bookOptionsIndex);
   }
+
+  sortMenu.render(renderer);
 
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();

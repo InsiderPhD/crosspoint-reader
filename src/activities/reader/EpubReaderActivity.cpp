@@ -329,6 +329,8 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  if (ReaderUtils::detectAndApplyForceRefresh(mappedInput, renderer)) return;
+
   auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
   if (!prevTriggered && !nextTriggered) {
     return;

@@ -445,18 +445,23 @@ void loop() {
     return;
   }
 
-  // Refresh screen when power button is short-pressed with FORCE_REFRESH setting.
-  if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::FORCE_REFRESH &&
-      mappedInputManager.wasReleased(MappedInputManager::Button::Power)) {
-    LOG_DBG("MAIN", "Manual screen refresh triggered");
-    RenderLock lock;
-    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
-  }
-
   // Refresh the battery icon when USB is plugged or unplugged.
   // Placed after sleep guards so we never queue a render that won't be processed.
   if (gpio.wasUsbStateChanged()) {
     activityManager.requestUpdate();
+  }
+
+  // Long-press Back from any activity returns to the home screen. Fires once per hold
+  // cycle (resets on release) so a continued hold doesn't keep retriggering, and
+  // individual activities don't need their own copy of this gesture.
+  static bool longBackHomeFired = false;
+  if (mappedInputManager.isPressed(MappedInputManager::Button::Back)) {
+    if (!longBackHomeFired && mappedInputManager.getHeldTime() >= 1000UL) {
+      longBackHomeFired = true;
+      activityManager.goHome();
+    }
+  } else {
+    longBackHomeFired = false;
   }
 
   const unsigned long activityStartTime = millis();
