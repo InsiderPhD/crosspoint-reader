@@ -20,9 +20,6 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                         "sleepScreen", StrId::STR_CAT_DISPLAY),
       SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
                         {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode", StrId::STR_CAT_DISPLAY),
-      SettingInfo::Enum(StrId::STR_SLEEP_ORIENTATION, &CrossPointSettings::sleepScreenOrientation,
-                        {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED, StrId::STR_LANDSCAPE_CCW},
-                        "sleepScreenOrientation", StrId::STR_CAT_DISPLAY),
       SettingInfo::Enum(StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,
                         {StrId::STR_NONE_OPT, StrId::STR_FILTER_CONTRAST, StrId::STR_INVERTED},
                         "sleepScreenCoverFilter", StrId::STR_CAT_DISPLAY),
@@ -149,9 +146,6 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                           StrId::STR_CUSTOMISE_STATUS_BAR),
       SettingInfo::Enum(StrId::STR_TIME_LEFT, &CrossPointSettings::statusBarTimeLeft,
                         {StrId::STR_HIDE, StrId::STR_CHAPTER, StrId::STR_BOOK}, "statusBarTimeLeft",
-                        StrId::STR_CUSTOMISE_STATUS_BAR),
-      SettingInfo::Enum(StrId::STR_XTC_STATUS_BAR, &CrossPointSettings::xtcStatusBarMode,
-                        {StrId::STR_HIDE, StrId::STR_BOTTOM, StrId::STR_TOP}, "xtcStatusBarMode",
                         StrId::STR_CUSTOMISE_STATUS_BAR),
   };
   return list;
