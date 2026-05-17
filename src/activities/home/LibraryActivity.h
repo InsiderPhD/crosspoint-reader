@@ -74,6 +74,11 @@ class LibraryActivity final : public Activity {
   // Set when a sort mode change needs a metadata pass; the next render() shows a
   // "Sorting…" popup before running the (synchronous) rebuild.
   bool pendingSortRebuild = false;
+  // Set on activity entry; the first render() shows a "Loading…" popup before
+  // running enumerateBooks(). The SD-card BFS dominates initial load time on
+  // libraries with many files, so the user needs feedback that the device
+  // hasn't frozen.
+  bool initialLoadPending = false;
 
   // Framebuffer snapshot cache (mirrors HomeActivity pattern at HomeActivity.cpp:134-174).
   // After a page is fully drawn, we snapshot the framebuffer so subsequent selection

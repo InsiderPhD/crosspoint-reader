@@ -91,7 +91,9 @@ void LibraryActivity::onEnter() {
   pageBufferStored = false;
   // Pull last-chosen sort from settings (shared across all list activities).
   currentSort = (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
-  enumerateBooks();
+  // Defer the SD BFS to the first render so we can paint a "Loading…" popup
+  // before it starts. Matches the pendingSortRebuild pattern below.
+  initialLoadPending = true;
   requestUpdate();
 }
 
@@ -311,6 +313,22 @@ void LibraryActivity::freePageBuffer() {
 }
 
 void LibraryActivity::render(RenderLock&&) {
+  // Initial entry: paint a "Loading…" popup over whatever the prior activity
+  // left in the framebuffer, push it to e-ink, THEN run the (synchronous) SD
+  // BFS. Without this, the device looks frozen for a second or two on a
+  // populated library. Falls through to the normal render path so the
+  // populated page paints in the same render call.
+  if (initialLoadPending) {
+    GUI.drawPopup(renderer, tr(STR_LOADING));
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+    if (SETTINGS.darkMode) renderer.invertScreen();
+
+    enumerateBooks();
+    initialLoadPending = false;
+    // Fall through.
+  }
+
   // A sort mode change can require a metadata pass (book.bin parsing, SD stats)
   // that takes seconds for large libraries. Show a "Sorting…" popup *before*
   // running the rebuild so the user sees feedback rather than a frozen modal.
