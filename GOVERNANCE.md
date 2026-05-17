@@ -1,6 +1,11 @@
 # Project Governance & Community Principles
 
-CrossPoint Reader is a community-driven, open-source project. Our goal is to provide a high-quality, open-source
+> **Note:** KatiePoint Reader is a personal fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader)
+> and isn't actively soliciting external contributions. The governance text below is inherited from the upstream project
+> and still applies to anyone who chooses to engage; for community-driven contribution, the upstream project is the
+> better venue.
+
+KatiePoint Reader is a community-driven, open-source project. Our goal is to provide a high-quality, open-source
 firmware alternative for the Xteink X4 hardware. To keep this project productive and welcoming as we grow, we ask all
 contributors to follow these principles.
 
@@ -14,7 +19,7 @@ Technical discussions can get heated, but they should never be personal.
   etc.) are not welcome here and will be moderated.
 
 ### 2. A "Do-ocracy" with Guidance
-CrossPoint thrives because people step up to build what they want to see.
+KatiePoint thrives because people step up to build what they want to see.
 - If you want a feature, the best way to get it is to start an
   [Idea Discussion](https://github.com/crosspoint-reader/crosspoint-reader/discussions/categories/ideas) or open a PR.
 - If you want to report a bug, check for duplicates and create an

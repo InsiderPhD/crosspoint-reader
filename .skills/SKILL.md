@@ -1,4 +1,4 @@
-# CrossPoint Reader Development Guide
+# KatiePoint Reader Development Guide
 
 Project: Open-source e-reader firmware for Xteink X4 (ESP32-C3)
 Mission: Provide a lightweight, high-performance reading experience focused on EPUB rendering on constrained hardware.

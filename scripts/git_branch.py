@@ -2,7 +2,7 @@
 PlatformIO pre-build script: inject git branch into CROSSPOINT_VERSION for
 the default (dev) environment.
 
-Results in a version string like:  1.1.0-dev+feat-koysnc-xpath
+Results in a version string like:  Dev-KT-v1.2.0-dev+feature/file-list-sorting
 Release environments are unaffected; they set CROSSPOINT_VERSION in the ini.
 """
 
@@ -63,10 +63,10 @@ def inject_version(env):
     project_dir = env['PROJECT_DIR']
     base_version = get_base_version(project_dir)
     branch = get_git_branch(project_dir)
-    version_string = f'{base_version}-dev+{branch}'
+    version_string = f'Dev-KT-v{base_version}-dev+{branch}'
 
     env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
-    print(f'CrossPoint build version: {version_string}')
+    print(f'KatiePoint build version: {version_string}')
 
 
 # PlatformIO/SCons entry point — Import and env are SCons builtins injected at runtime.
