@@ -116,6 +116,36 @@ Footnote body text is collected during EPUB indexing via a multi-phase scan of t
 
 ---
 
+### Library View (3xN Cover Grid)
+A paginated grid view of every book on the SD card, accessible by switching to the new **Lyra Library** UI theme (Settings → Display → UI Theme). The grid lays out 3 covers per page in landscape and 6 (3×2) in portrait, with the cover size and styling matched to the Lyra3Covers home tile — cropped bitmap fill, rounded selection corners with light-gray dither sides, title (2 lines, wrapped) + author (truncated) + reading progress below each cover.
+
+**Navigation**:
+- Up/Down/Left/Right: step one cover, wraps at edges.
+- Long-press a direction: jump to the next/previous page.
+- Confirm: open the selected book.
+- Long-press Confirm: open the book options menu (mark read, reset progress, shelve, delete, reindex, regenerate cover) — same six-option modal as the home recents tile.
+- Back: return to home.
+
+**Loading behaviour**: on first visit, books with no cached thumbnail show a placeholder + a centered "Loading…" popup. Covers fill in one per render pass (~3–5 s each on EPUBs that have never been opened); subsequent visits are instant since `thumb_226.bmp` is cached on the SD card. Once all covers on a page are processed the popup disappears — any remaining placeholders represent books without an extractable cover image. Generation is confined to the render task to avoid a `TaskPriorityDisinherit` mutex race when both tasks decode bitmaps simultaneously.
+
+**Lyra Library theme**: based on Lyra3Covers, the third home tile is permanently a "Library" button (Library icon + label centered inside the cover frame) that launches the grid view. Selecting it from the Settings theme picker is how users opt in to the library.
+
+**Other niceties**:
+- Header bar styled to match Recent Books (Lyra header at the top).
+- Page indicator (`X / Y`) centered at the bottom of the grid.
+- Lyra-style scrollbar on the right edge when there's more than one page.
+- BookFusion-synced books get a `& ` title prefix, matching the marker used by the home recents tile.
+- Recursive SD enumeration via BFS deque, so books in any subdirectory are picked up.
+- Newest-added sort comes for free from FAT enumeration order (reversed).
+
+**Supporting refactor**: the long-press book-options modal was extracted from `HomeActivity` into a shared `BookContextMenu` helper so the same six-option behaviour drives both the home and library screens — fewer places to keep in sync.
+
+**Files added**: `LibraryActivity.cpp`, `LibraryActivity.h`, `LyraLibraryTheme.cpp`, `LyraLibraryTheme.h`, `BookContextMenu.cpp`, `BookContextMenu.h`
+
+**Files changed**: `ActivityManager.cpp`, `ActivityManager.h`, `HomeActivity.h`, `HomeActivity.cpp`, `UITheme.cpp`, `UITheme.h`, `BaseTheme.h`, `CrossPointSettings.h`, `SettingsList.h`, `english.yaml`
+
+---
+
 ## Bug Fixes
 
 ### Shelving a Book Cleared All Recents
