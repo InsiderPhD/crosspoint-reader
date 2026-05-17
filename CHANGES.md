@@ -103,6 +103,19 @@ A new **X-Small** font size option is available under Reader settings, adding a 
 
 ---
 
+### Monospace Reader Font (JetBrains Mono)
+A new **Monospace** option in Reader → Font Family, backed by JetBrains Mono. Useful for code-heavy EPUBs (technical books, programming references) where a fixed-width font keeps indentation, ASCII art, and tabular text readable.
+
+Bundled sizes: 6, 8, 10, 12pt in regular and bold. Generated with the existing `fontconvert.py` pipeline using `--2bit --compress --pnum` flags (anti-aliased, compressed, proportional numerals), matching the other reader fonts.
+
+The source TTFs ship in `lib/EpdFont/builtinFonts/source/JetbrainsMono/` so the conversion is reproducible.
+
+**Files added**: 8 × `mono_<size>_<style>.h`, JetBrains Mono TTFs
+
+**Files changed**: `all.h` (includes), `convert-builtin-fonts.sh` (Mono conversion loop), `fontIds.h` (regenerated)
+
+---
+
 ### Inline Footnotes ("On page" mode)
 Footnote text can now be rendered at the bottom of the page that references it, beneath a short horizontal rule — no need to open a menu.
 

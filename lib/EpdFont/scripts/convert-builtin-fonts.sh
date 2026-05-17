@@ -4,9 +4,9 @@ set -e
 
 cd "$(dirname "$0")"
 
-READER_FONT_STYLES=("Regular" "Italic" "Bold" "BoldItalic")
-BOOKERLY_FONT_SIZES=(10 12 14 16 18)
-NOTOSANS_FONT_SIZES=(12 14 16 18)
+READER_FONT_STYLES=("Regular" "Italic" "Bold")
+BOOKERLY_FONT_SIZES=(10 12 14 16)
+NOTOSANS_FONT_SIZES=(12 14 16)
 OPENDYSLEXIC_FONT_SIZES=(6 8 10 12 14)
 
 for size in ${BOOKERLY_FONT_SIZES[@]}; do
@@ -58,6 +58,19 @@ for size in ${UI_FONT_SIZES[@]}; do
 done
 
 python3 fontconvert.py notosans_8_regular 8 ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf > ../builtinFonts/notosans_8_regular.h
+
+MONO_FONT_SIZES=(6 8 10 12)
+MONO_FONT_STYLES=("Regular" "Bold")
+
+for size in ${MONO_FONT_SIZES[@]}; do
+  for style in ${MONO_FONT_STYLES[@]}; do
+    font_name="mono_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
+    font_path="../builtinFonts/source/JetBrainsMono/JetBrainsMono-${style}.ttf"
+    output_path="../builtinFonts/${font_name}.h"
+    python3 fontconvert.py $font_name $size $font_path --2bit --compress --pnum > $output_path
+    echo "Generated $output_path"
+  done
+done
 
 echo ""
 echo "Running compression verification..."
