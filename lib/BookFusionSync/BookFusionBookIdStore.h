@@ -15,6 +15,9 @@ class BookFusionBookIdStore {
   // Load book_id for the given epub path. Returns 0 if not a BookFusion book.
   static uint32_t loadBookId(const char* epubPath);
 
+  // Cheap "is this a BookFusion book?" check — sidecar existence only, no parse.
+  static bool hasBookId(const char* epubPath);
+
   // Save book_id for an epub path. Returns false on I/O error or if id == 0.
   static bool saveBookId(const char* epubPath, uint32_t bookId);
 

@@ -66,6 +66,9 @@ class LibraryActivity final : public Activity {
   // Indexed in parallel with bookPaths (raw enumeration order).
   std::vector<std::string> authorCache;
   std::vector<uint32_t> dateAddedCache;
+  // Parallel to bookPaths: true if the book has a BookFusion sidecar.
+  // Populated once in enumerateBooks() to avoid an SD stat per cover tile, per redraw.
+  std::vector<bool> bookIsBookFusion;
   bool authorCacheReady = false;
   bool dateAddedCacheReady = false;
   // Set when a sort mode change needs a metadata pass; the next render() shows a
@@ -85,6 +88,7 @@ class LibraryActivity final : public Activity {
   // Empty string if list is empty.
   std::string currentPath() const;
   std::string pathAtLogicalIndex(size_t logicalIdx) const;
+  bool isBookFusionAtLogicalIndex(size_t logicalIdx) const;
 
   size_t currentPage() const { return bookPaths.empty() ? 0 : selectorIndex / pageSize(); }
   size_t totalPages() const {

@@ -29,6 +29,9 @@ class RecentBooksActivity final : public Activity {
 
   // Recent tab state
   std::vector<RecentBook> recentBooks;
+  // Parallel to recentBooks: true if the book has a BookFusion sidecar. Populated
+  // once at loadRecentBooks() so the row-icon callback doesn't hit the SD card.
+  std::vector<bool> recentBooksIsBookFusion;
 
   // Sort state
   SortMenu sortMenu;

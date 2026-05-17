@@ -42,6 +42,12 @@ uint32_t BookFusionBookIdStore::loadBookId(const char* epubPath) {
   return bookId;
 }
 
+bool BookFusionBookIdStore::hasBookId(const char* epubPath) {
+  char sidecarPath[64];
+  buildSidecarPath(epubPath, sidecarPath, sizeof(sidecarPath));
+  return Storage.exists(sidecarPath);
+}
+
 bool BookFusionBookIdStore::saveBookId(const char* epubPath, uint32_t bookId) {
   if (bookId == 0) {
     LOG_ERR("BFS", "Refusing to save book_id=0 for %s", epubPath);

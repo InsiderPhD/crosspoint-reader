@@ -106,6 +106,8 @@ void LibraryActivity::onExit() {
   authorCache.shrink_to_fit();
   dateAddedCache.clear();
   dateAddedCache.shrink_to_fit();
+  bookIsBookFusion.clear();
+  bookIsBookFusion.shrink_to_fit();
   authorCacheReady = false;
   dateAddedCacheReady = false;
   pendingSortRebuild = false;
@@ -159,6 +161,16 @@ void LibraryActivity::enumerateBooks() {
   dateAddedCache.assign(bookPaths.size(), 0u);
   authorCacheReady = false;
   dateAddedCacheReady = false;
+
+  // BookFusion badge cache — sidecar existence read once at enumeration so cover
+  // tiles don't hit the SD card per redraw. Only EPUBs can be BF-linked.
+  bookIsBookFusion.assign(bookPaths.size(), false);
+  for (size_t i = 0; i < bookPaths.size(); i++) {
+    if (FsHelpers::hasEpubExtension(bookPaths[i])) {
+      bookIsBookFusion[i] = BookFusionBookIdStore::hasBookId(bookPaths[i].c_str());
+    }
+  }
+
   rebuildSortedIndices();
 }
 
@@ -238,6 +250,12 @@ std::string LibraryActivity::pathAtLogicalIndex(size_t logicalIdx) const {
 }
 
 std::string LibraryActivity::currentPath() const { return pathAtLogicalIndex(selectorIndex); }
+
+bool LibraryActivity::isBookFusionAtLogicalIndex(size_t logicalIdx) const {
+  if (logicalIdx >= sortedIndices.size()) return false;
+  const size_t bookIdx = sortedIndices[logicalIdx];
+  return bookIdx < bookIsBookFusion.size() && bookIsBookFusion[bookIdx];
+}
 
 LibraryActivity::SlotRect LibraryActivity::slotRect(int slotIndexInPage) const {
   const int screenW = renderer.getScreenWidth();
@@ -499,18 +517,22 @@ void LibraryActivity::renderPageFromScratch() {
       renderer.drawIcon(CoverIcon, coverX + 24, coverY + 24, 32, 32);
     }
 
-    // BookFusion badge on the cover's bottom-left corner. badgeY is snapped
-    // to a multiple of 8 because drawImageTransparent truncates the display-X
-    // coordinate (= renderer.y) via integer divide by 8 — non-aligned values
-    // shift the icon up to 7 px relative to the white fillRect underneath.
+    // BookFusion-linked books: bottom-left badge with white padding around the
+    // mark, inset from the cover corner. iconY is snapped to a multiple of 8
+    // because drawImageTransparent truncates the display-y via integer divide
+    // by 8 — non-aligned values shift the icon relative to the white fill.
     const size_t pageStart = currentPage() * pageSize();
-    if (BookFusionBookIdStore::loadBookId(pathAtLogicalIndex(pageStart + slot).c_str()) != 0) {
-      constexpr int BF_BADGE_SIZE = 24;
-      constexpr int BF_BADGE_INSET = 2;
-      const int badgeX = coverX + BF_BADGE_INSET;
-      const int badgeY = ((coverY + L.coverDrawH - BF_BADGE_SIZE - BF_BADGE_INSET) / 8) * 8;
+    if (isBookFusionAtLogicalIndex(pageStart + slot)) {
+      constexpr int BF_ICON_SIZE = 24;
+      constexpr int BF_PADDING = 4;  // White padding around the icon.
+      constexpr int BF_MARGIN = 4;   // Distance from the cover edge.
+      constexpr int BF_BADGE_SIZE = BF_ICON_SIZE + 2 * BF_PADDING;
+      const int iconY = ((coverY + L.coverDrawH - BF_MARGIN - BF_PADDING - BF_ICON_SIZE) / 8) * 8;
+      const int badgeX = coverX + BF_MARGIN;
+      const int badgeY = iconY - BF_PADDING;
+      const int iconX = badgeX + BF_PADDING;
       renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
-      renderer.drawIcon(BookFusion24Icon, badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE);
+      renderer.drawIcon(BookFusion24Icon, iconX, iconY, BF_ICON_SIZE, BF_ICON_SIZE);
     }
   };
 
@@ -520,10 +542,16 @@ void LibraryActivity::renderPageFromScratch() {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, screenW, metrics.headerHeight}, tr(STR_LIBRARY),
                  sortModeLabel(currentSort));
   for (int i = 0; i < booksOnPage; ++i) drawTileCover(i);
-  drawOverlay();
 
+  // Snapshot covers+header BEFORE drawing the selection/text layer, so
+  // renderSelectionOnly() can restore a clean page and draw a fresh
+  // selection band on top. Snapshotting after drawOverlay() would bake
+  // in the selection band at slot 0 (initial selectorIndex), causing it
+  // to persist behind every subsequent navigation.
   pageBufferStored = storePageBuffer();
   pageRendered = pageBufferStored;
+
+  drawOverlay();
 
   // === Two-phase load: show placeholders first, generate missing covers second. ===
   // The page is fully drawn at this point with whatever's cached + placeholders

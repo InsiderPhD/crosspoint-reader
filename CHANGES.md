@@ -403,7 +403,7 @@ The Force Refresh dispatch was moved out of the global main loop into a new `Rea
 ---
 
 ### LyraLibrary Tile Label
-The third tile on the home screen under the Lyra Library theme used to be labelled **Library** (both inside the cover frame and as the title below). Both labels now read **View All Covers** to make it clearer the tile is a shortcut to the full grid, not a settings entry.
+The third tile on the home screen under the Lyra Library theme used to be labelled **Library** (both inside the cover frame and as the title below). Both labels now read **Library** to make it clearer the tile is a shortcut to the full grid, not a settings entry.
 
 **Files changed**: `src/components/themes/lyra/LyraLibraryTheme.cpp` (both `tr(STR_LIBRARY)` references → `tr(STR_VIEW_ALL_COVERS)`), `lib/I18n/translations/english.yaml` (new `STR_VIEW_ALL_COVERS` key).
 
@@ -438,7 +438,7 @@ The third tile on the home screen under the Lyra Library theme used to be labell
 | `STR_SORT_DATE_ADDED_NEW` | `"Newest on device"` |
 | `STR_SORT_DATE_ADDED_OLD` | `"Oldest on device"` |
 | `STR_SORTING` | `"Sorting…"` |
-| `STR_VIEW_ALL_COVERS` | `"View All Covers"` |
+| `STR_VIEW_ALL_COVERS` | `"Library"` |
 | `STR_IGNORE` | *(removed from Short Power Button settings options; key kept in `english.yaml` for legacy)* |
 
 The legacy `STR_SORT_ALPHABETICAL` / `STR_SORT_RECENT` / `STR_SORT_PROGRESS` keys (left over from an unfinished `SortingManager` sketch on `master`) were removed in favour of the new `STR_SORT_<mode>` set.

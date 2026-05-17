@@ -77,17 +77,23 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
         renderer.drawIcon(CoverIcon, coverX + 24, coverY + 24, 32, 32);
       }
 
-      // BookFusion badge on the cover's bottom-left corner. badgeY aligned to
-      // a multiple of 8 — drawImageTransparent truncates display.x =
-      // renderer.y to a byte boundary.
+      // BookFusion-linked books: bottom-left badge with white padding around
+      // the mark, inset from the cover corner. iconY snapped to a multiple of
+      // 8 because drawImageTransparent truncates the display-y via integer
+      // divide by 8 — non-aligned values shift the icon relative to the white
+      // fill.
       if (i < static_cast<int>(recentBooks.size()) &&
-          BookFusionBookIdStore::loadBookId(recentBooks[i].path.c_str()) != 0) {
-        constexpr int BF_BADGE_SIZE = 24;
-        constexpr int BF_BADGE_INSET = 2;
-        const int badgeX = coverX + BF_BADGE_INSET;
-        const int badgeY = ((coverY + coverHeight - BF_BADGE_SIZE - BF_BADGE_INSET) / 8) * 8;
+          BookFusionBookIdStore::hasBookId(recentBooks[i].path.c_str())) {
+        constexpr int BF_ICON_SIZE = 24;
+        constexpr int BF_PADDING = 4;
+        constexpr int BF_MARGIN = 4;
+        constexpr int BF_BADGE_SIZE = BF_ICON_SIZE + 2 * BF_PADDING;
+        const int iconY = ((coverY + coverHeight - BF_MARGIN - BF_PADDING - BF_ICON_SIZE) / 8) * 8;
+        const int badgeX = coverX + BF_MARGIN;
+        const int badgeY = iconY - BF_PADDING;
+        const int iconX = badgeX + BF_PADDING;
         renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
-        renderer.drawIcon(BookFusion24Icon, badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE);
+        renderer.drawIcon(BookFusion24Icon, iconX, iconY, BF_ICON_SIZE, BF_ICON_SIZE);
       }
     }
 
@@ -129,14 +135,28 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
     const int maxLineWidth = tileWidth - 2 * hPaddingInSelection;
     const bool tileSelected = (selectorIndex == i);
 
+    // Library tile: label lives inside the cover frame (drawn in the first
+    // pass), so no title block below. Selection wraps only the cover, capped
+    // with a thin rounded band so the box closes off cleanly.
+    if (i == LIBRARY_SLOT) {
+      if (tileSelected) {
+        renderer.fillRoundedRect(tileX, tileY, tileWidth, hPaddingInSelection, cornerRadius, true, true, false, false,
+                                 Color::LightGray);
+        renderer.fillRectDither(tileX, tileY + hPaddingInSelection, hPaddingInSelection, coverHeight, Color::LightGray);
+        renderer.fillRectDither(tileX + tileWidth - hPaddingInSelection, tileY + hPaddingInSelection,
+                                hPaddingInSelection, coverHeight, Color::LightGray);
+        renderer.fillRoundedRect(tileX, tileY + coverHeight + hPaddingInSelection, tileWidth, hPaddingInSelection,
+                                 cornerRadius, false, false, true, true, Color::LightGray);
+      }
+      continue;
+    }
+
     // Compose the text block for this tile.
     std::vector<std::string> titleLines;
     bool hasProgress = false;
     int progressPercent = 0;
 
-    if (i == LIBRARY_SLOT) {
-      titleLines = renderer.wrappedText(SMALL_FONT_ID, tr(STR_VIEW_ALL_COVERS), maxLineWidth, 2);
-    } else if (i < static_cast<int>(recentBooks.size())) {
+    if (i < static_cast<int>(recentBooks.size())) {
       titleLines = renderer.wrappedText(SMALL_FONT_ID, recentBooks[i].title.c_str(), maxLineWidth, 3);
       hasProgress = recentBooks[i].progressPercent >= 0;
       progressPercent = recentBooks[i].progressPercent;

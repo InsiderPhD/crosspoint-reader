@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include "../util/ConfirmationActivity.h"
+#include "BookFusionBookIdStore.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
@@ -22,12 +23,17 @@ constexpr unsigned long LONG_PRESS_MS = 1000;
 
 void RecentBooksActivity::loadRecentBooks() {
   recentBooks.clear();
+  recentBooksIsBookFusion.clear();
   const auto& books = RECENT_BOOKS.getBooks();
   recentBooks.reserve(books.size());
+  recentBooksIsBookFusion.reserve(books.size());
 
   for (const auto& book : books) {
     if (RecentBooksStore::isMissing(book)) continue;
+    const bool isBookFusion =
+        FsHelpers::hasEpubExtension(book.path) && BookFusionBookIdStore::hasBookId(book.path.c_str());
     recentBooks.push_back(book);
+    recentBooksIsBookFusion.push_back(isBookFusion);
   }
 
   rebuildSortedIndices();
@@ -83,6 +89,7 @@ void RecentBooksActivity::onEnter() {
 void RecentBooksActivity::onExit() {
   Activity::onExit();
   recentBooks.clear();
+  recentBooksIsBookFusion.clear();
 }
 
 void RecentBooksActivity::loop() {
@@ -253,10 +260,13 @@ void RecentBooksActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, tr(STR_NO_RECENT_BOOKS));
   } else {
     auto at = [this](int index) -> const RecentBook& { return recentBooks[sortedIndices[index]]; };
+    auto isBookFusion = [this](int index) { return recentBooksIsBookFusion[sortedIndices[index]]; };
     GUI.drawList(
         renderer, Rect{0, contentTop, pageWidth, contentHeight}, sortedIndices.size(), selectorIndex,
         [at](int index) { return at(index).title; }, [at](int index) { return at(index).author; },
-        [at](int index) { return UITheme::getFileIcon(at(index).path); },
+        [at, isBookFusion](int index) {
+          return isBookFusion(index) ? UIIcon::BookFusion : UITheme::getFileIcon(at(index).path);
+        },
         [at](int index) -> std::string {
           const auto& b = at(index);
           if (b.progressPercent >= 0) {

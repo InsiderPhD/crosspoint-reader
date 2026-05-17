@@ -77,19 +77,25 @@ void Lyra3CoversTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
           renderer.drawIcon(CoverIcon, tileX + hPaddingInSelection + 24, tileY + hPaddingInSelection + 24, 32, 32);
         }
 
-        // BookFusion badge on the cover's bottom-left corner. badgeY aligned
-        // to a multiple of 8 — drawImageTransparent truncates the display-X
-        // coordinate (= renderer.y) to a byte boundary.
-        if (BookFusionBookIdStore::loadBookId(recentBooks[i].path.c_str()) != 0) {
-          constexpr int BF_BADGE_SIZE = 24;
-          constexpr int BF_BADGE_INSET = 2;
-          const int badgeX = tileX + hPaddingInSelection + BF_BADGE_INSET;
-          const int badgeY = ((tileY + hPaddingInSelection + Lyra3CoversMetrics::values.homeCoverHeight - BF_BADGE_SIZE -
-                               BF_BADGE_INSET) /
-                              8) *
-                             8;
+        // BookFusion-linked books: bottom-left badge with white padding around
+        // the mark, inset from the cover corner. iconY is snapped to a multiple
+        // of 8 because drawImageTransparent truncates the display-y via integer
+        // divide by 8 — non-aligned values shift the icon relative to the white
+        // fill.
+        if (BookFusionBookIdStore::hasBookId(recentBooks[i].path.c_str())) {
+          constexpr int BF_ICON_SIZE = 24;
+          constexpr int BF_PADDING = 4;
+          constexpr int BF_MARGIN = 4;
+          constexpr int BF_BADGE_SIZE = BF_ICON_SIZE + 2 * BF_PADDING;
+          const int coverX = tileX + hPaddingInSelection;
+          const int coverY = tileY + hPaddingInSelection;
+          const int coverDrawH = Lyra3CoversMetrics::values.homeCoverHeight;
+          const int iconY = ((coverY + coverDrawH - BF_MARGIN - BF_PADDING - BF_ICON_SIZE) / 8) * 8;
+          const int badgeX = coverX + BF_MARGIN;
+          const int badgeY = iconY - BF_PADDING;
+          const int iconX = badgeX + BF_PADDING;
           renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
-          renderer.drawIcon(BookFusion24Icon, badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE);
+          renderer.drawIcon(BookFusion24Icon, iconX, iconY, BF_ICON_SIZE, BF_ICON_SIZE);
         }
       }
 

@@ -25,6 +25,7 @@ void FileBrowserActivity::loadFiles() {
   files.clear();
   fileEntries.clear();
   folderEntries.clear();
+  fileEntryIsBookFusion.clear();
   authorCache.clear();
   dateAddedCache.clear();
   authorCacheReady = false;
@@ -61,6 +62,20 @@ void FileBrowserActivity::loadFiles() {
   FsHelpers::sortFileList(folderEntries);
   authorCache.assign(fileEntries.size(), std::string{});
   dateAddedCache.assign(fileEntries.size(), 0u);
+
+  // BookFusion icon cache — read once at directory load (an expected wait) rather
+  // than per-row, per-redraw while scrolling. Only EPUBs can be BF-linked.
+  fileEntryIsBookFusion.assign(fileEntries.size(), false);
+  {
+    std::string baseWithSlash = basepath;
+    if (baseWithSlash.empty() || baseWithSlash.back() != '/') baseWithSlash += '/';
+    for (size_t i = 0; i < fileEntries.size(); i++) {
+      if (FsHelpers::hasEpubExtension(fileEntries[i])) {
+        const std::string fullPath = baseWithSlash + fileEntries[i];
+        fileEntryIsBookFusion[i] = BookFusionBookIdStore::hasBookId(fullPath.c_str());
+      }
+    }
+  }
 
   rebuildFilesList();
 }
@@ -136,9 +151,17 @@ void FileBrowserActivity::rebuildFilesList() {
   applySort(sortedIndices, entries, currentSort);
 
   files.clear();
+  filesIsBookFusion.clear();
   files.reserve(fileEntries.size() + folderEntries.size());
-  for (uint16_t idx : sortedIndices) files.push_back(fileEntries[idx]);
-  for (const auto& folder : folderEntries) files.push_back(folder);
+  filesIsBookFusion.reserve(fileEntries.size() + folderEntries.size());
+  for (uint16_t idx : sortedIndices) {
+    files.push_back(fileEntries[idx]);
+    filesIsBookFusion.push_back(fileEntryIsBookFusion[idx]);
+  }
+  for (const auto& folder : folderEntries) {
+    files.push_back(folder);
+    filesIsBookFusion.push_back(false);
+  }
 }
 
 void FileBrowserActivity::onEnter() {
@@ -397,12 +420,12 @@ void FileBrowserActivity::loop() {
 
   // Process normal navigation
     int listSize = static_cast<int>(files.size());
-    buttonNavigator.onNextRelease([this, listSize] {
+    buttonNavigator.onNextPress([this, listSize] {
       selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), listSize);
       requestUpdate();
     });
 
-    buttonNavigator.onPreviousRelease([this, listSize] {
+    buttonNavigator.onPreviousPress([this, listSize] {
       selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), listSize);
       requestUpdate();
     });
@@ -475,29 +498,12 @@ void FileBrowserActivity::render(RenderLock&&) {
         [this](int index) { return getFileName(files[index]); }, nullptr,
         [this](int index) {
           // BookFusion-linked books display the BF mark in the row's icon slot
-          // instead of the file-type icon. BF-linked files are always EPUBs.
-          if (files[index].back() != '/') {
-            const std::string fullPath = (basepath.back() == '/') ? basepath + files[index] : basepath + "/" + files[index];
-            if (BookFusionBookIdStore::loadBookId(fullPath.c_str()) != 0) {
-              return UIIcon::BookFusion;
-            }
-          }
+          // instead of the file-type icon. Sidecar existence is cached at
+          // loadFiles() to avoid an SD stat per row, per redraw.
+          if (filesIsBookFusion[index]) return UIIcon::BookFusion;
           return UITheme::getFileIcon(files[index]);
         },
-        [this](int index) -> std::string {
-          const std::string& entry = files[index];
-          if (entry.back() == '/') return "";  // Directory
-          const std::string fullPath = (basepath.back() == '/') ? basepath + entry : basepath + "/" + entry;
-          for (const auto& book : RECENT_BOOKS.getBooks()) {
-            if (book.path == fullPath && book.progressPercent > 0) {
-              if (book.progressPercent >= 90) return "X";
-              char buf[6];
-              snprintf(buf, sizeof(buf), "%d%%", static_cast<int>(book.progressPercent));
-              return std::string(buf);
-            }
-          }
-          return "";
-        },
+        nullptr,
         false);
   }
 

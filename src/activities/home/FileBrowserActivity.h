@@ -40,6 +40,11 @@ class FileBrowserActivity final : public Activity {
   // folderEntries stay alphabetic.
   std::vector<std::string> fileEntries;
   std::vector<std::string> folderEntries;
+  // Parallel to fileEntries: true if the file has a BookFusion sidecar.
+  // Populated once at loadFiles(); avoids an SD stat per row, per redraw, while scrolling.
+  std::vector<bool> fileEntryIsBookFusion;
+  // Parallel to `files` (the display list); rebuilt by rebuildFilesList().
+  std::vector<bool> filesIsBookFusion;
 
   // Sort state
   SortMenu sortMenu;
