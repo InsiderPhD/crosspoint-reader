@@ -15,6 +15,8 @@
 #include "components/UITheme.h"
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
+#include "components/icons/bookfusion14.h"
+#include "components/icons/bookfusion24.h"
 #include "components/icons/cover.h"
 #include "components/icons/file24.h"
 #include "components/icons/folder.h"
@@ -80,6 +82,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return Book24Icon;
       case UIIcon::File:
         return File24Icon;
+      case UIIcon::BookFusion:
+        return BookFusion24Icon;
       default:
         return nullptr;
     }
@@ -481,9 +485,11 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     }
 
     const bool isBookFusionBook = BookFusionBookIdStore::loadBookId(book.path.c_str()) != 0;
-    const std::string displayTitle =
-        isBookFusionBook ? std::string("& ") + book.title : book.title;
-    auto titleLines = renderer.wrappedText(UI_12_FONT_ID, displayTitle.c_str(), textWidth, 3, EpdFontFamily::BOLD);
+    constexpr int BF_ICON_SIZE = 14;
+    constexpr int BF_ICON_GAP = 2;
+    const int bfReserved = isBookFusionBook ? (BF_ICON_SIZE + BF_ICON_GAP) : 0;
+    auto titleLines =
+        renderer.wrappedText(UI_12_FONT_ID, book.title.c_str(), textWidth - bfReserved, 3, EpdFontFamily::BOLD);
 
     auto author = renderer.truncatedText(UI_10_FONT_ID, book.author.c_str(), textWidth);
     const int titleLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
@@ -494,8 +500,13 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     const int totalBlockHeight = titleBlockHeight + authorHeight + progressHeight;
     int titleY = tileY + tileHeight / 2 - totalBlockHeight / 2;
     const int textX = tileX + hPaddingInSelection + coverWidth + LyraMetrics::values.verticalSpacing;
-    for (const auto& line : titleLines) {
-      renderer.drawText(UI_12_FONT_ID, textX, titleY, line.c_str(), true, EpdFontFamily::BOLD);
+    for (size_t i = 0; i < titleLines.size(); i++) {
+      if (i == 0 && isBookFusionBook) {
+        renderer.drawIcon(BookFusion14Icon, textX, titleY + (titleLineHeight - BF_ICON_SIZE) / 2, BF_ICON_SIZE,
+                          BF_ICON_SIZE);
+      }
+      const int lineX = (i == 0) ? (textX + bfReserved) : textX;
+      renderer.drawText(UI_12_FONT_ID, lineX, titleY, titleLines[i].c_str(), true, EpdFontFamily::BOLD);
       titleY += titleLineHeight;
     }
     if (!book.author.empty()) {

@@ -472,19 +472,18 @@ void FileBrowserActivity::render(RenderLock&&) {
   } else {
     GUI.drawList(
         renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), selectorIndex,
+        [this](int index) { return getFileName(files[index]); }, nullptr,
         [this](int index) {
-          std::string filename = getFileName(files[index]);
-          // Mark BookFusion-linked books with an "&" prefix — a visual cue that this
-          // entry "references" a cloud-side BookFusion book and will sync to it.
-          if (files[index].back() != '/') { // Not a directory
+          // BookFusion-linked books display the BF mark in the row's icon slot
+          // instead of the file-type icon. BF-linked files are always EPUBs.
+          if (files[index].back() != '/') {
             const std::string fullPath = (basepath.back() == '/') ? basepath + files[index] : basepath + "/" + files[index];
             if (BookFusionBookIdStore::loadBookId(fullPath.c_str()) != 0) {
-              return "& " + filename;
+              return UIIcon::BookFusion;
             }
           }
-          return filename;
-        }, nullptr,
-        [this](int index) { return UITheme::getFileIcon(files[index]); },
+          return UITheme::getFileIcon(files[index]);
+        },
         [this](int index) -> std::string {
           const std::string& entry = files[index];
           if (entry.back() == '/') return "";  // Directory

@@ -11,6 +11,7 @@
 #include "BookFusionBookIdStore.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
+#include "components/icons/bookfusion14.h"
 #include "components/icons/cover.h"
 #include "components/icons/library.h"
 #include "fontIds.h"
@@ -119,14 +120,16 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
     std::vector<std::string> titleLines;
     bool hasProgress = false;
     int progressPercent = 0;
+    bool isBookFusionBook = false;
+    constexpr int BF_ICON_SIZE = 14;
+    constexpr int BF_ICON_GAP = 2;
 
     if (i == LIBRARY_SLOT) {
       titleLines = renderer.wrappedText(SMALL_FONT_ID, tr(STR_VIEW_ALL_COVERS), maxLineWidth, 2);
     } else if (i < static_cast<int>(recentBooks.size())) {
-      const bool isBookFusionBook = BookFusionBookIdStore::loadBookId(recentBooks[i].path.c_str()) != 0;
-      const std::string displayTitle =
-          isBookFusionBook ? std::string("& ") + recentBooks[i].title : recentBooks[i].title;
-      titleLines = renderer.wrappedText(SMALL_FONT_ID, displayTitle.c_str(), maxLineWidth, 3);
+      isBookFusionBook = BookFusionBookIdStore::loadBookId(recentBooks[i].path.c_str()) != 0;
+      const int bfReserved = isBookFusionBook ? (BF_ICON_SIZE + BF_ICON_GAP) : 0;
+      titleLines = renderer.wrappedText(SMALL_FONT_ID, recentBooks[i].title.c_str(), maxLineWidth - bfReserved, 3);
       hasProgress = recentBooks[i].progressPercent >= 0;
       progressPercent = recentBooks[i].progressPercent;
     } else {
@@ -150,8 +153,14 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
     }
 
     int currentY = tileY + coverHeight + hPaddingInSelection + 5;
-    for (const auto& line : titleLines) {
-      renderer.drawText(SMALL_FONT_ID, tileX + hPaddingInSelection, currentY, line.c_str(), true);
+    const int bfReserved = isBookFusionBook ? (BF_ICON_SIZE + BF_ICON_GAP) : 0;
+    for (size_t lineIdx = 0; lineIdx < titleLines.size(); lineIdx++) {
+      if (lineIdx == 0 && isBookFusionBook) {
+        renderer.drawIcon(BookFusion14Icon, tileX + hPaddingInSelection,
+                          currentY + (titleLineHeight - BF_ICON_SIZE) / 2, BF_ICON_SIZE, BF_ICON_SIZE);
+      }
+      const int lineX = tileX + hPaddingInSelection + ((lineIdx == 0) ? bfReserved : 0);
+      renderer.drawText(SMALL_FONT_ID, lineX, currentY, titleLines[lineIdx].c_str(), true);
       currentY += titleLineHeight;
     }
     if (hasProgress) {

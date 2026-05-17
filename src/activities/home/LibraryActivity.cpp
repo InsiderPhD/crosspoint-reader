@@ -22,6 +22,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
+#include "components/icons/bookfusion14.h"
 #include "components/icons/cover.h"
 
 namespace {
@@ -384,10 +385,8 @@ void LibraryActivity::refreshCurrentPageMeta() {
       meta.title = path.substr(slash + 1, dot - slash - 1);
     }
 
-    // NOTE: the BookFusion "& " prefix is applied at *render* time via
-    // displayTitleForSlot() in drawOverlay(), NOT stored on meta.title. Storing
-    // it here would stack ("& & & Title") because refreshCurrentPageMeta runs
-    // on every page change while drawOverlay also re-prefixes.
+    // BookFusion-linked books get a leading BF icon at *render* time in
+    // drawOverlay(); the link state isn't stored on meta.title.
 
     // Progress comes from RecentBooksStore's in-memory list; -1 ("not started")
     // if not present. getBooks() is a vector scan — cheap.
@@ -576,18 +575,21 @@ void LibraryActivity::drawOverlay() {
 
   const int titleLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
 
-  // Returns the title with a ◆ prefix if the book is BookFusion-linked. Shared by
-  // the line-count lambda below and the actual draw loop so layout stays in sync.
-  auto displayTitleForSlot = [&](int slot) -> std::string {
-    const bool isBookFusionBook =
-        BookFusionBookIdStore::loadBookId(pathAtLogicalIndex(pageStart + slot).c_str()) != 0;
-    return isBookFusionBook ? std::string("& ") + currentPageMeta[slot].title : currentPageMeta[slot].title;
+  constexpr int BF_ICON_SIZE = 14;
+  constexpr int BF_ICON_GAP = 2;
+
+  // Shared by the line-count lambda and the draw loop so wrap widths stay in
+  // sync. BF-linked books reserve space for the inline icon on the first line.
+  auto isBookFusionForSlot = [&](int slot) -> bool {
+    return BookFusionBookIdStore::loadBookId(pathAtLogicalIndex(pageStart + slot).c_str()) != 0;
   };
 
   // Number of text rows a slot will draw: up-to-2 title lines + optional author + optional progress.
   auto infoBlockLines = [&](int slot) -> int {
     const int maxLineWidth = L.tileWidth - 2 * hPaddingInSelection;
-    auto titleLines = renderer.wrappedText(SMALL_FONT_ID, displayTitleForSlot(slot).c_str(), maxLineWidth, 2);
+    const int bfReserved = isBookFusionForSlot(slot) ? (BF_ICON_SIZE + BF_ICON_GAP) : 0;
+    auto titleLines =
+        renderer.wrappedText(SMALL_FONT_ID, currentPageMeta[slot].title.c_str(), maxLineWidth - bfReserved, 2);
     int n = static_cast<int>(titleLines.size());
     if (!currentPageMeta[slot].author.empty()) n++;
     if (currentPageMeta[slot].progressPercent >= 0) n++;
@@ -615,10 +617,18 @@ void LibraryActivity::drawOverlay() {
     tileOrigin(i, L, tileX, tileY);
     const int maxLineWidth = L.tileWidth - 2 * hPaddingInSelection;
 
-    auto titleLines = renderer.wrappedText(SMALL_FONT_ID, displayTitleForSlot(i).c_str(), maxLineWidth, 2);
+    const bool isBookFusionBook = isBookFusionForSlot(i);
+    const int bfReserved = isBookFusionBook ? (BF_ICON_SIZE + BF_ICON_GAP) : 0;
+    auto titleLines =
+        renderer.wrappedText(SMALL_FONT_ID, currentPageMeta[i].title.c_str(), maxLineWidth - bfReserved, 2);
     int textY = tileY + hPaddingInSelection + L.coverDrawH + hPaddingInSelection + 5;
-    for (const auto& line : titleLines) {
-      renderer.drawText(SMALL_FONT_ID, tileX + hPaddingInSelection, textY, line.c_str(), true);
+    for (size_t lineIdx = 0; lineIdx < titleLines.size(); lineIdx++) {
+      if (lineIdx == 0 && isBookFusionBook) {
+        renderer.drawIcon(BookFusion14Icon, tileX + hPaddingInSelection,
+                          textY + (titleLineHeight - BF_ICON_SIZE) / 2, BF_ICON_SIZE, BF_ICON_SIZE);
+      }
+      const int lineX = tileX + hPaddingInSelection + ((lineIdx == 0) ? bfReserved : 0);
+      renderer.drawText(SMALL_FONT_ID, lineX, textY, titleLines[lineIdx].c_str(), true);
       textY += titleLineHeight;
     }
     if (!currentPageMeta[i].author.empty()) {
