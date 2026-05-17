@@ -91,8 +91,9 @@ class ChapterHtmlSlimParser {
   // Footnote link tracking
   bool insideFootnoteLink = false;
   int footnoteLinkDepth = -1;
-  FootnoteEntry currentFootnote = {};
+  char currentFootnoteLinkText[24] = {};
   int currentFootnoteLinkTextLen = 0;
+  char currentFootnoteLinkHref[64] = {};
   std::vector<std::pair<int, FootnoteEntry>> pendingFootnotes;  // <wordIndex, entry>
   std::vector<FootnoteEntry> deferredFootnotes;  // overflow from previous page (half-device cap)
   int wordsExtractedInBlock = 0;
