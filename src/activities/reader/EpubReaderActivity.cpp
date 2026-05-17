@@ -1400,19 +1400,11 @@ void EpubReaderActivity::performBookFusionSync() {
     renderer.displayBuffer();
   }
 
-  // Wait briefly to show the completion message
+  // Wait briefly to show the completion message, then redraw the page so
+  // the user can continue reading. The "Sync completed successfully!" toast
+  // is feedback enough — no need to flash a full refresh on top.
   vTaskDelay(1500 / portTICK_PERIOD_MS);
-
-  // Block until the render task has drawn the page over the popup, then do
-  // a full refresh on the clean page to clear ghosting and signal "done".
-  // requestUpdate(true) is async — it only notifies the task — so taking
-  // RenderLock right after would deadlock the redraw and the FULL_REFRESH
-  // would just flush the popup back to the screen.
   requestUpdateAndWait();
-  {
-    RenderLock lock;
-    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
-  }
 }
 
 ScreenshotInfo EpubReaderActivity::getScreenshotInfo() const {
