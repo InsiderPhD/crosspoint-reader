@@ -15,7 +15,6 @@
 #include "components/UITheme.h"
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
-#include "components/icons/bookfusion16.h"
 #include "components/icons/bookfusion24.h"
 #include "components/icons/cover.h"
 #include "components/icons/file24.h"
@@ -462,6 +461,18 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
         renderer.drawIcon(CoverIcon, tileX + hPaddingInSelection + 24, tileY + hPaddingInSelection + 24, 32, 32);
       }
 
+      // BookFusion badge on the cover's bottom-left corner. White backing so
+      // the glyph stays visible regardless of the cover image underneath.
+      if (BookFusionBookIdStore::loadBookId(book.path.c_str()) != 0) {
+        constexpr int BF_BADGE_SIZE = 24;
+        constexpr int BF_BADGE_INSET = 2;
+        const int badgeX = tileX + hPaddingInSelection + BF_BADGE_INSET;
+        const int badgeY = tileY + hPaddingInSelection + LyraMetrics::values.homeCoverHeight - BF_BADGE_SIZE -
+                           BF_BADGE_INSET;
+        renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
+        renderer.drawIcon(BookFusion24Icon, badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE);
+      }
+
       coverBufferStored = storeCoverBuffer();
       coverRendered = coverBufferStored;  // Only consider it rendered if we successfully stored the buffer
     }
@@ -484,12 +495,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
                                hPaddingInSelection, cornerRadius, false, false, true, true, Color::LightGray);
     }
 
-    const bool isBookFusionBook = BookFusionBookIdStore::loadBookId(book.path.c_str()) != 0;
-    constexpr int BF_ICON_SIZE = 16;
-    constexpr int BF_ICON_GAP = 2;
-    const int bfReserved = isBookFusionBook ? (BF_ICON_SIZE + BF_ICON_GAP) : 0;
-    auto titleLines =
-        renderer.wrappedText(UI_12_FONT_ID, book.title.c_str(), textWidth - bfReserved, 3, EpdFontFamily::BOLD);
+    auto titleLines = renderer.wrappedText(UI_12_FONT_ID, book.title.c_str(), textWidth, 3, EpdFontFamily::BOLD);
 
     auto author = renderer.truncatedText(UI_10_FONT_ID, book.author.c_str(), textWidth);
     const int titleLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
@@ -500,13 +506,8 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     const int totalBlockHeight = titleBlockHeight + authorHeight + progressHeight;
     int titleY = tileY + tileHeight / 2 - totalBlockHeight / 2;
     const int textX = tileX + hPaddingInSelection + coverWidth + LyraMetrics::values.verticalSpacing;
-    for (size_t i = 0; i < titleLines.size(); i++) {
-      if (i == 0 && isBookFusionBook) {
-        renderer.drawIcon(BookFusion16Icon, textX, titleY + (titleLineHeight - BF_ICON_SIZE) / 2, BF_ICON_SIZE,
-                          BF_ICON_SIZE);
-      }
-      const int lineX = (i == 0) ? (textX + bfReserved) : textX;
-      renderer.drawText(UI_12_FONT_ID, lineX, titleY, titleLines[i].c_str(), true, EpdFontFamily::BOLD);
+    for (const auto& line : titleLines) {
+      renderer.drawText(UI_12_FONT_ID, textX, titleY, line.c_str(), true, EpdFontFamily::BOLD);
       titleY += titleLineHeight;
     }
     if (!book.author.empty()) {

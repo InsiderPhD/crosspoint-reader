@@ -22,7 +22,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
-#include "components/icons/bookfusion16.h"
+#include "components/icons/bookfusion24.h"
 #include "components/icons/cover.h"
 
 namespace {
@@ -498,6 +498,17 @@ void LibraryActivity::renderPageFromScratch() {
       renderer.fillRect(coverX, coverY + L.coverDrawH / 3, L.coverDrawW, 2 * L.coverDrawH / 3, true);
       renderer.drawIcon(CoverIcon, coverX + 24, coverY + 24, 32, 32);
     }
+
+    // BookFusion badge on the cover's bottom-left corner.
+    const size_t pageStart = currentPage() * pageSize();
+    if (BookFusionBookIdStore::loadBookId(pathAtLogicalIndex(pageStart + slot).c_str()) != 0) {
+      constexpr int BF_BADGE_SIZE = 24;
+      constexpr int BF_BADGE_INSET = 2;
+      const int badgeX = coverX + BF_BADGE_INSET;
+      const int badgeY = coverY + L.coverDrawH - BF_BADGE_SIZE - BF_BADGE_INSET;
+      renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
+      renderer.drawIcon(BookFusion24Icon, badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE);
+    }
   };
 
   // Fast render — never blocks on cover generation. Missing covers stay as
@@ -575,21 +586,10 @@ void LibraryActivity::drawOverlay() {
 
   const int titleLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
 
-  constexpr int BF_ICON_SIZE = 16;
-  constexpr int BF_ICON_GAP = 2;
-
-  // Shared by the line-count lambda and the draw loop so wrap widths stay in
-  // sync. BF-linked books reserve space for the inline icon on the first line.
-  auto isBookFusionForSlot = [&](int slot) -> bool {
-    return BookFusionBookIdStore::loadBookId(pathAtLogicalIndex(pageStart + slot).c_str()) != 0;
-  };
-
   // Number of text rows a slot will draw: up-to-2 title lines + optional author + optional progress.
   auto infoBlockLines = [&](int slot) -> int {
     const int maxLineWidth = L.tileWidth - 2 * hPaddingInSelection;
-    const int bfReserved = isBookFusionForSlot(slot) ? (BF_ICON_SIZE + BF_ICON_GAP) : 0;
-    auto titleLines =
-        renderer.wrappedText(SMALL_FONT_ID, currentPageMeta[slot].title.c_str(), maxLineWidth - bfReserved, 2);
+    auto titleLines = renderer.wrappedText(SMALL_FONT_ID, currentPageMeta[slot].title.c_str(), maxLineWidth, 2);
     int n = static_cast<int>(titleLines.size());
     if (!currentPageMeta[slot].author.empty()) n++;
     if (currentPageMeta[slot].progressPercent >= 0) n++;
@@ -617,18 +617,10 @@ void LibraryActivity::drawOverlay() {
     tileOrigin(i, L, tileX, tileY);
     const int maxLineWidth = L.tileWidth - 2 * hPaddingInSelection;
 
-    const bool isBookFusionBook = isBookFusionForSlot(i);
-    const int bfReserved = isBookFusionBook ? (BF_ICON_SIZE + BF_ICON_GAP) : 0;
-    auto titleLines =
-        renderer.wrappedText(SMALL_FONT_ID, currentPageMeta[i].title.c_str(), maxLineWidth - bfReserved, 2);
+    auto titleLines = renderer.wrappedText(SMALL_FONT_ID, currentPageMeta[i].title.c_str(), maxLineWidth, 2);
     int textY = tileY + hPaddingInSelection + L.coverDrawH + hPaddingInSelection + 5;
-    for (size_t lineIdx = 0; lineIdx < titleLines.size(); lineIdx++) {
-      if (lineIdx == 0 && isBookFusionBook) {
-        renderer.drawIcon(BookFusion16Icon, tileX + hPaddingInSelection,
-                          textY + (titleLineHeight - BF_ICON_SIZE) / 2, BF_ICON_SIZE, BF_ICON_SIZE);
-      }
-      const int lineX = tileX + hPaddingInSelection + ((lineIdx == 0) ? bfReserved : 0);
-      renderer.drawText(SMALL_FONT_ID, lineX, textY, titleLines[lineIdx].c_str(), true);
+    for (const auto& line : titleLines) {
+      renderer.drawText(SMALL_FONT_ID, tileX + hPaddingInSelection, textY, line.c_str(), true);
       textY += titleLineHeight;
     }
     if (!currentPageMeta[i].author.empty()) {
