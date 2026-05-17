@@ -1403,7 +1403,9 @@ void EpubReaderActivity::performBookFusionSync() {
   // Wait briefly to show the completion message
   vTaskDelay(1500 / portTICK_PERIOD_MS);
 
-  // Always do a full refresh afterward as visual feedback
+  // Redraw the page so the popup is gone and the user can continue reading,
+  // then a full refresh on the clean page doubles as the "sync done" flash.
+  requestUpdate(true);
   {
     RenderLock lock;
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
