@@ -183,8 +183,8 @@ void verifyPowerButtonDuration() {
     do {
       delay(10);
       gpio.update();
-    } while (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getPowerButtonHeldTime() < calibratedPressDuration);
-    abort = gpio.getPowerButtonHeldTime() < calibratedPressDuration;
+    } while (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getHeldTime() < calibratedPressDuration);
+    abort = gpio.getHeldTime() < calibratedPressDuration;
   } else {
     abort = true;
   }
@@ -435,7 +435,7 @@ void loop() {
     return;
   }
 
-  if (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getPowerButtonHeldTime() > SETTINGS.getPowerButtonDuration()) {
+  if (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getHeldTime() > SETTINGS.getPowerButtonDuration()) {
     // If the screenshot combination is potentially being pressed, don't sleep
     if (gpio.isPressed(HalGPIO::BTN_DOWN)) {
       return;
