@@ -11,7 +11,7 @@
 #include "BookFusionBookIdStore.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
-#include "components/icons/bookfusion14.h"
+#include "components/icons/bookfusion16.h"
 #include "components/icons/cover.h"
 #include "components/icons/library.h"
 #include "fontIds.h"
@@ -121,7 +121,7 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
     bool hasProgress = false;
     int progressPercent = 0;
     bool isBookFusionBook = false;
-    constexpr int BF_ICON_SIZE = 14;
+    constexpr int BF_ICON_SIZE = 16;
     constexpr int BF_ICON_GAP = 2;
 
     if (i == LIBRARY_SLOT) {
@@ -156,7 +156,7 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
     const int bfReserved = isBookFusionBook ? (BF_ICON_SIZE + BF_ICON_GAP) : 0;
     for (size_t lineIdx = 0; lineIdx < titleLines.size(); lineIdx++) {
       if (lineIdx == 0 && isBookFusionBook) {
-        renderer.drawIcon(BookFusion14Icon, tileX + hPaddingInSelection,
+        renderer.drawIcon(BookFusion16Icon, tileX + hPaddingInSelection,
                           currentY + (titleLineHeight - BF_ICON_SIZE) / 2, BF_ICON_SIZE, BF_ICON_SIZE);
       }
       const int lineX = tileX + hPaddingInSelection + ((lineIdx == 0) ? bfReserved : 0);

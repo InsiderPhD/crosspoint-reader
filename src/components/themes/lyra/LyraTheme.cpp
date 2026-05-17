@@ -15,7 +15,7 @@
 #include "components/UITheme.h"
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
-#include "components/icons/bookfusion14.h"
+#include "components/icons/bookfusion16.h"
 #include "components/icons/bookfusion24.h"
 #include "components/icons/cover.h"
 #include "components/icons/file24.h"
@@ -485,7 +485,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     }
 
     const bool isBookFusionBook = BookFusionBookIdStore::loadBookId(book.path.c_str()) != 0;
-    constexpr int BF_ICON_SIZE = 14;
+    constexpr int BF_ICON_SIZE = 16;
     constexpr int BF_ICON_GAP = 2;
     const int bfReserved = isBookFusionBook ? (BF_ICON_SIZE + BF_ICON_GAP) : 0;
     auto titleLines =
@@ -502,7 +502,7 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     const int textX = tileX + hPaddingInSelection + coverWidth + LyraMetrics::values.verticalSpacing;
     for (size_t i = 0; i < titleLines.size(); i++) {
       if (i == 0 && isBookFusionBook) {
-        renderer.drawIcon(BookFusion14Icon, textX, titleY + (titleLineHeight - BF_ICON_SIZE) / 2, BF_ICON_SIZE,
+        renderer.drawIcon(BookFusion16Icon, textX, titleY + (titleLineHeight - BF_ICON_SIZE) / 2, BF_ICON_SIZE,
                           BF_ICON_SIZE);
       }
       const int lineX = (i == 0) ? (textX + bfReserved) : textX;
