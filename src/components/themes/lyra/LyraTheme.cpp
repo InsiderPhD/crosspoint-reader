@@ -21,12 +21,12 @@
 #include "components/icons/check24.h"
 #include "components/icons/cover.h"
 #include "components/icons/file24.h"
+#include "components/icons/files24.h"
 #include "components/icons/folder.h"
 #include "components/icons/folder24.h"
 #include "components/icons/hotspot.h"
 #include "components/icons/image24.h"
 #include "components/icons/library.h"
-#include "components/icons/library24.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
 #include "components/icons/star24.h"
@@ -94,8 +94,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return Arrow24Icon;
       case UIIcon::Check:
         return Check24Icon;
-      case UIIcon::Library:
-        return Library24Icon;
+      case UIIcon::Files:
+        return Files24Icon;
       default:
         return nullptr;
     }

@@ -38,7 +38,7 @@ constexpr Category CATEGORIES[] = {
     {StrId::STR_BF_FAVORITES, "favorites", nullptr, UIIcon::Star},
     {StrId::STR_BF_PLAN_TO_READ, "planned_to_read", nullptr, UIIcon::Arrow},
     {StrId::STR_BF_COMPLETED, "completed", nullptr, UIIcon::Check},
-    {StrId::STR_BF_ALL_BOOKS, nullptr, nullptr, UIIcon::Library},
+    {StrId::STR_BF_ALL_BOOKS, nullptr, nullptr, UIIcon::Files},
 };
 constexpr int NUM_CATEGORIES = sizeof(CATEGORIES) / sizeof(CATEGORIES[0]);
 
