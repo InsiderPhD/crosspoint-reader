@@ -9,7 +9,7 @@
 /**
  * Browse and download books from the user's BookFusion library.
  *
- * Shows the user's library 8 books at a time (paginated).
+ * Shows the user's library 10 books at a time (paginated).
  * Selecting a book fetches a pre-signed download URL, streams the EPUB
  * to the SD card, and writes a BookFusion sidecar via BookFusionBookIdStore
  * so that progress sync works immediately after download.
@@ -33,7 +33,7 @@ class BookFusionBrowserActivity final : public Activity {
   State state = CATEGORY_SELECTION;
   ButtonNavigator buttonNavigator;
 
-  BookFusionSearchResult searchResult;  // Current page of 8 books plus cover URLs (~4 KB)
+  BookFusionSearchResult searchResult;  // Current page of 10 books plus cover URLs (~5 KB)
   int selectedIndex = 0;
   int currentPage = 1;
 
@@ -67,6 +67,10 @@ class BookFusionBrowserActivity final : public Activity {
   size_t downloadTotal = 0;
   unsigned long lastProgressUpdateMs = 0;  // Throttle progress updates
   char downloadedCoverPath[96] = {};       // Resolved thumb BMP path for DOWNLOAD_COMPLETE popup
+  // Phase label shown on the Downloading screen — "Connecting…" → "Downloading…"
+  // → "Saving…". Updated at each long-running step so the user can see the activity
+  // isn't stuck. Empty string falls back to the generic Downloading label.
+  char downloadStatus[32] = {};
 
   char errorMsg[128] = {};
 

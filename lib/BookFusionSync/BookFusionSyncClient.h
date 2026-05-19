@@ -43,7 +43,7 @@ struct BookFusionBook {
  * item, but that sentinel is only used to set hasMore and is not retained.
  */
 struct BookFusionSearchResult {
-  static constexpr int MAX_BOOKS = 8;
+  static constexpr int MAX_BOOKS = 10;
   BookFusionBook books[MAX_BOOKS];
   int count = 0;
   int currentPage = 0;

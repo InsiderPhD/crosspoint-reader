@@ -29,7 +29,11 @@ class FileWriteStream final : public Stream {
       writeOk_ = false;
     }
     downloaded_ += written;
-    if (progress_ && total_ > 0) {
+    // Always fire the progress callback — callers can render a percentage
+    // when total_ > 0 and fall back to a byte counter otherwise. Pre-signed
+    // S3 URLs (e.g. BookFusion's download links) often omit Content-Length,
+    // so gating on total_ would leave those transfers without any feedback.
+    if (progress_) {
       progress_(downloaded_, total_);
     }
     return written;

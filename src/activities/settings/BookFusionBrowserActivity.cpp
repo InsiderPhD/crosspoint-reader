@@ -330,8 +330,9 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
     lastProgressUpdateMs = 0;  // Reset progress update throttling
     strlcpy(downloadTitle, book.title, sizeof(downloadTitle));
     downloadedCoverPath[0] = '\0';  // Cleared until pre-gen succeeds below
+    strlcpy(downloadStatus, tr(STR_CONNECTING), sizeof(downloadStatus));
   }
-  // Non-blocking: the render task draws the "Downloading…" frame in parallel
+  // Non-blocking: the render task draws the "Connecting…" frame in parallel
   // with the cover fetch below. Blocking here (requestUpdateAndWait) would
   // serialise a full ~1 s e-ink refresh in front of every other step.
   requestUpdate(true);
@@ -400,6 +401,17 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
         downloadProgress = downloaded;
         downloadTotal = total;
 
+        // First byte arrived — flip the status from "Connecting…" to
+        // "Downloading…". Done inside the callback (rather than up-front
+        // before calling HttpDownloader) so the render task has time to paint
+        // the "Connecting… + cover" frame first; otherwise the cover frame
+        // gets coalesced away on the e-ink refresh queue. HttpDownloader now
+        // always fires the callback, including for transfers without
+        // Content-Length, so this branch is reliable.
+        if (lastProgressUpdateMs == 0) {
+          strlcpy(downloadStatus, tr(STR_DOWNLOADING), sizeof(downloadStatus));
+        }
+
         // Update immediately for first progress report or every 2 seconds
         if (lastProgressUpdateMs == 0 || timeSinceLastUpdate >= 2000) {
           lastProgressUpdateMs = currentMs;
@@ -416,6 +428,13 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
     requestUpdate();
     return;
   }
+
+  // EPUB transfer done — the remaining work (metadata parse, sidecar write,
+  // optional cover fallback, progress sync) is silent on the network and SD
+  // bus but can take 1-2 s on a big book. Flip the status so the user knows
+  // we're still doing something useful.
+  strlcpy(downloadStatus, tr(STR_SAVING), sizeof(downloadStatus));
+  requestUpdate(true);
 
   // Save sidecar so BookFusionSyncActivity can find the book_id for this file.
   BookFusionBookIdStore::saveBookId(filename.c_str(), book.id);
@@ -701,7 +720,11 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
       }
     }
 
-    renderer.drawCenteredText(UI_10_FONT_ID, statusY, tr(STR_DOWNLOADING));
+    // Use the phase label set by startDownload (Connecting / Downloading /
+    // Saving). Falls back to the generic STR_DOWNLOADING if the buffer is
+    // somehow blank — should never happen in practice.
+    const char* status = (downloadStatus[0] != '\0') ? downloadStatus : tr(STR_DOWNLOADING);
+    renderer.drawCenteredText(UI_10_FONT_ID, statusY, status, true, EpdFontFamily::BOLD);
     const int maxWidth = pageWidth - 40;
     auto title = renderer.truncatedText(UI_10_FONT_ID, downloadTitle, maxWidth);
     renderer.drawCenteredText(UI_10_FONT_ID, statusY + 30, title.c_str());
