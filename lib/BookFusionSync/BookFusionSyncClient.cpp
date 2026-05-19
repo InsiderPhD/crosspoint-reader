@@ -3,12 +3,15 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <Logging.h>
+#include <Stream.h>
 #include <WiFiClientSecure.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "BookFusionTokenStore.h"
+#include "StreamingJsonParser.h"
 
 namespace {
 // Add auth and accept headers to an authenticated request.
@@ -17,6 +20,386 @@ void addAuthHeaders(HTTPClient& http) {
   http.addHeader("Authorization", bearer.c_str());
   http.addHeader("Accept", BookFusionSyncClient::API_ACCEPT);
 }
+
+bool keyEquals(const char* key, size_t len, const char* expected) {
+  return strlen(expected) == len && memcmp(key, expected, len) == 0;
+}
+
+void safeCopyToken(char* dst, size_t dstSize, const char* src, size_t srcLen) {
+  if (dstSize == 0) return;
+  const size_t n = (srcLen < dstSize - 1) ? srcLen : dstSize - 1;
+  memcpy(dst, src, n);
+  dst[n] = '\0';
+}
+
+void safeAppendToken(char* dst, size_t dstSize, const char* src, size_t srcLen) {
+  if (dstSize == 0 || srcLen == 0) return;
+  const size_t used = strlen(dst);
+  if (used >= dstSize - 1) return;
+  const size_t available = dstSize - 1 - used;
+  const size_t n = (srcLen < available) ? srcLen : available;
+  memcpy(dst + used, src, n);
+  dst[used + n] = '\0';
+}
+
+void appendAuthor(BookFusionBook& book, const char* name, size_t len) {
+  if (len == 0) return;
+  if (book.authors[0] != '\0') {
+    safeAppendToken(book.authors, sizeof(book.authors), ", ", 2);
+  }
+  safeAppendToken(book.authors, sizeof(book.authors), name, len);
+}
+
+class BookFusionSearchJsonStream final : public Stream {
+ public:
+  BookFusionSearchJsonStream(BookFusionSearchResult& out, int page)
+      : out_(out),
+        parser_(JsonCallbacks{this, sOnKey, sOnString, sOnNumber, sOnBool, sOnNull, sOnObjectStart, sOnObjectEnd,
+                              sOnArrayStart, sOnArrayEnd}) {
+    out_.count = 0;
+    out_.currentPage = page;
+    out_.hasMore = false;
+  }
+
+  size_t write(uint8_t byte) override { return write(&byte, 1); }
+
+  size_t write(const uint8_t* buffer, size_t size) override {
+    bytesRead_ += size;
+    parser_.feed(reinterpret_cast<const char*>(buffer), size);
+    return size;
+  }
+
+  int available() override { return 0; }
+  int read() override { return -1; }
+  int peek() override { return -1; }
+
+  size_t bytesRead() const { return bytesRead_; }
+  bool empty() const { return bytesRead_ == 0; }
+  bool ok() const { return bytesRead_ > 0 && rootArraySeen_ && rootArrayClosed_ && depth_ == 0 && !parser_.hasError(); }
+
+ private:
+  enum class LastKey : uint8_t {
+    NONE,
+    ID,
+    TITLE,
+    FORMAT,
+    COVER,
+    COVER_URL,
+    AUTHORS,
+    AUTHOR_NAME,
+  };
+
+  static void sOnKey(void* ctx, const char* key, size_t len) {
+    static_cast<BookFusionSearchJsonStream*>(ctx)->onKey(key, len);
+  }
+
+  static void sOnString(void* ctx, const char* value, size_t len) {
+    static_cast<BookFusionSearchJsonStream*>(ctx)->onString(value, len);
+  }
+
+  static void sOnNumber(void* ctx, const char* value, size_t len) {
+    static_cast<BookFusionSearchJsonStream*>(ctx)->onNumber(value, len);
+  }
+
+  static void sOnBool(void* ctx, bool /*value*/) {
+    static_cast<BookFusionSearchJsonStream*>(ctx)->lastKey_ = LastKey::NONE;
+  }
+
+  static void sOnNull(void* ctx) { static_cast<BookFusionSearchJsonStream*>(ctx)->lastKey_ = LastKey::NONE; }
+
+  static void sOnObjectStart(void* ctx) { static_cast<BookFusionSearchJsonStream*>(ctx)->onObjectStart(); }
+
+  static void sOnObjectEnd(void* ctx) { static_cast<BookFusionSearchJsonStream*>(ctx)->onObjectEnd(); }
+
+  static void sOnArrayStart(void* ctx) { static_cast<BookFusionSearchJsonStream*>(ctx)->onArrayStart(); }
+
+  static void sOnArrayEnd(void* ctx) { static_cast<BookFusionSearchJsonStream*>(ctx)->onArrayEnd(); }
+
+  void onKey(const char* key, size_t len) {
+    lastKey_ = LastKey::NONE;
+
+    if (inBook_ && depth_ == bookDepth_) {
+      if (keyEquals(key, len, "id")) {
+        lastKey_ = LastKey::ID;
+      } else if (keyEquals(key, len, "title")) {
+        lastKey_ = LastKey::TITLE;
+      } else if (keyEquals(key, len, "format")) {
+        lastKey_ = LastKey::FORMAT;
+      } else if (keyEquals(key, len, "cover")) {
+        lastKey_ = LastKey::COVER;
+      } else if (keyEquals(key, len, "authors")) {
+        lastKey_ = LastKey::AUTHORS;
+      }
+    } else if (inCover_ && depth_ == coverDepth_ && keyEquals(key, len, "url")) {
+      lastKey_ = LastKey::COVER_URL;
+    } else if (inAuthor_ && depth_ == authorDepth_ && keyEquals(key, len, "name")) {
+      lastKey_ = LastKey::AUTHOR_NAME;
+    }
+  }
+
+  void onString(const char* value, size_t len) {
+    switch (lastKey_) {
+      case LastKey::ID:
+        currentBook_.id = static_cast<uint32_t>(strtoul(value, nullptr, 10));
+        break;
+      case LastKey::TITLE:
+        safeCopyToken(currentBook_.title, sizeof(currentBook_.title), value, len);
+        break;
+      case LastKey::FORMAT:
+        safeCopyToken(currentBook_.format, sizeof(currentBook_.format), value, len);
+        break;
+      case LastKey::COVER_URL:
+        safeCopyToken(currentBook_.coverUrl, sizeof(currentBook_.coverUrl), value, len);
+        break;
+      case LastKey::AUTHOR_NAME:
+        appendAuthor(currentBook_, value, len);
+        break;
+      default:
+        break;
+    }
+    lastKey_ = LastKey::NONE;
+  }
+
+  void onNumber(const char* value, size_t /*len*/) {
+    if (lastKey_ == LastKey::ID) {
+      currentBook_.id = static_cast<uint32_t>(strtoul(value, nullptr, 10));
+    }
+    lastKey_ = LastKey::NONE;
+  }
+
+  void onObjectStart() {
+    if (rootArraySeen_ && !inBook_ && depth_ == 1) {
+      beginBook(depth_ + 1);
+    } else if (inBook_ && lastKey_ == LastKey::COVER && depth_ == bookDepth_) {
+      inCover_ = true;
+      coverDepth_ = depth_ + 1;
+    } else if (inAuthors_ && depth_ == authorsDepth_) {
+      inAuthor_ = true;
+      authorDepth_ = depth_ + 1;
+    }
+    ++depth_;
+    lastKey_ = LastKey::NONE;
+  }
+
+  void onObjectEnd() {
+    if (inAuthor_ && depth_ == authorDepth_) {
+      inAuthor_ = false;
+      authorDepth_ = 0;
+    } else if (inCover_ && depth_ == coverDepth_) {
+      inCover_ = false;
+      coverDepth_ = 0;
+    } else if (inBook_ && depth_ == bookDepth_) {
+      commitBook();
+      inBook_ = false;
+      bookDepth_ = 0;
+    }
+    if (depth_ > 0) --depth_;
+    lastKey_ = LastKey::NONE;
+  }
+
+  void onArrayStart() {
+    if (depth_ == 0) {
+      rootArraySeen_ = true;
+    } else if (inBook_ && lastKey_ == LastKey::AUTHORS && depth_ == bookDepth_) {
+      inAuthors_ = true;
+      authorsDepth_ = depth_ + 1;
+    }
+    ++depth_;
+    lastKey_ = LastKey::NONE;
+  }
+
+  void onArrayEnd() {
+    if (inAuthors_ && depth_ == authorsDepth_) {
+      inAuthors_ = false;
+      authorsDepth_ = 0;
+    }
+    if (rootArraySeen_ && depth_ == 1) {
+      rootArrayClosed_ = true;
+    }
+    if (depth_ > 0) --depth_;
+    lastKey_ = LastKey::NONE;
+  }
+
+  void beginBook(uint8_t bookDepth) {
+    currentBook_ = BookFusionBook{};
+    safeCopyToken(currentBook_.title, sizeof(currentBook_.title), "Untitled", 8);
+    safeCopyToken(currentBook_.format, sizeof(currentBook_.format), "epub", 4);
+    bookDepth_ = bookDepth;
+    inBook_ = true;
+  }
+
+  void commitBook() {
+    if (currentBook_.id == 0) return;
+    if (out_.count >= BookFusionSearchResult::MAX_BOOKS) {
+      out_.hasMore = true;
+      return;
+    }
+    out_.books[out_.count++] = currentBook_;
+  }
+
+  BookFusionSearchResult& out_;
+  StreamingJsonParser parser_;
+  BookFusionBook currentBook_;
+  LastKey lastKey_ = LastKey::NONE;
+  size_t bytesRead_ = 0;
+  uint8_t depth_ = 0;
+  uint8_t bookDepth_ = 0;
+  uint8_t coverDepth_ = 0;
+  uint8_t authorsDepth_ = 0;
+  uint8_t authorDepth_ = 0;
+  bool rootArraySeen_ = false;
+  bool rootArrayClosed_ = false;
+  bool inBook_ = false;
+  bool inCover_ = false;
+  bool inAuthors_ = false;
+  bool inAuthor_ = false;
+};
+
+class BookFusionBookshelfJsonStream final : public Stream {
+ public:
+  explicit BookFusionBookshelfJsonStream(BookFusionBookshelfList& out)
+      : out_(out),
+        parser_(JsonCallbacks{this, sOnKey, sOnString, sOnNumber, sOnBool, sOnNull, sOnObjectStart, sOnObjectEnd,
+                              sOnArrayStart, sOnArrayEnd}) {
+    out_.count = 0;
+  }
+
+  size_t write(uint8_t byte) override { return write(&byte, 1); }
+
+  size_t write(const uint8_t* buffer, size_t size) override {
+    bytesRead_ += size;
+    parser_.feed(reinterpret_cast<const char*>(buffer), size);
+    return size;
+  }
+
+  int available() override { return 0; }
+  int read() override { return -1; }
+  int peek() override { return -1; }
+
+  size_t bytesRead() const { return bytesRead_; }
+  bool capped() const { return capped_; }
+  bool empty() const { return bytesRead_ == 0; }
+  bool ok() const { return bytesRead_ > 0 && rootArraySeen_ && rootArrayClosed_ && depth_ == 0 && !parser_.hasError(); }
+
+ private:
+  enum class LastKey : uint8_t {
+    NONE,
+    ID,
+    NAME,
+  };
+
+  static void sOnKey(void* ctx, const char* key, size_t len) {
+    static_cast<BookFusionBookshelfJsonStream*>(ctx)->onKey(key, len);
+  }
+
+  static void sOnString(void* ctx, const char* value, size_t len) {
+    static_cast<BookFusionBookshelfJsonStream*>(ctx)->onString(value, len);
+  }
+
+  static void sOnNumber(void* ctx, const char* value, size_t len) {
+    static_cast<BookFusionBookshelfJsonStream*>(ctx)->onNumber(value, len);
+  }
+
+  static void sOnBool(void* ctx, bool /*value*/) {
+    static_cast<BookFusionBookshelfJsonStream*>(ctx)->lastKey_ = LastKey::NONE;
+  }
+
+  static void sOnNull(void* ctx) { static_cast<BookFusionBookshelfJsonStream*>(ctx)->lastKey_ = LastKey::NONE; }
+
+  static void sOnObjectStart(void* ctx) { static_cast<BookFusionBookshelfJsonStream*>(ctx)->onObjectStart(); }
+
+  static void sOnObjectEnd(void* ctx) { static_cast<BookFusionBookshelfJsonStream*>(ctx)->onObjectEnd(); }
+
+  static void sOnArrayStart(void* ctx) { static_cast<BookFusionBookshelfJsonStream*>(ctx)->onArrayStart(); }
+
+  static void sOnArrayEnd(void* ctx) { static_cast<BookFusionBookshelfJsonStream*>(ctx)->onArrayEnd(); }
+
+  void onKey(const char* key, size_t len) {
+    lastKey_ = LastKey::NONE;
+
+    if (inShelf_ && depth_ == shelfDepth_) {
+      if (keyEquals(key, len, "id")) {
+        lastKey_ = LastKey::ID;
+      } else if (keyEquals(key, len, "name")) {
+        lastKey_ = LastKey::NAME;
+      }
+    }
+  }
+
+  void onString(const char* value, size_t len) {
+    if (lastKey_ == LastKey::ID) {
+      currentShelf_.id = static_cast<uint32_t>(strtoul(value, nullptr, 10));
+    } else if (lastKey_ == LastKey::NAME) {
+      safeCopyToken(currentShelf_.name, sizeof(currentShelf_.name), value, len);
+    }
+    lastKey_ = LastKey::NONE;
+  }
+
+  void onNumber(const char* value, size_t /*len*/) {
+    if (lastKey_ == LastKey::ID) {
+      currentShelf_.id = static_cast<uint32_t>(strtoul(value, nullptr, 10));
+    }
+    lastKey_ = LastKey::NONE;
+  }
+
+  void onObjectStart() {
+    if (rootArraySeen_ && !inShelf_ && depth_ == 1) {
+      currentShelf_ = BookFusionBookshelf{};
+      safeCopyToken(currentShelf_.name, sizeof(currentShelf_.name), "Unnamed", 7);
+      shelfDepth_ = depth_ + 1;
+      inShelf_ = true;
+    }
+    ++depth_;
+    lastKey_ = LastKey::NONE;
+  }
+
+  void onObjectEnd() {
+    if (inShelf_ && depth_ == shelfDepth_) {
+      commitShelf();
+      inShelf_ = false;
+      shelfDepth_ = 0;
+    }
+    if (depth_ > 0) --depth_;
+    lastKey_ = LastKey::NONE;
+  }
+
+  void onArrayStart() {
+    if (depth_ == 0) {
+      rootArraySeen_ = true;
+    }
+    ++depth_;
+    lastKey_ = LastKey::NONE;
+  }
+
+  void onArrayEnd() {
+    if (rootArraySeen_ && depth_ == 1) {
+      rootArrayClosed_ = true;
+    }
+    if (depth_ > 0) --depth_;
+    lastKey_ = LastKey::NONE;
+  }
+
+  void commitShelf() {
+    if (currentShelf_.id == 0) return;
+    if (out_.count >= BookFusionBookshelfList::MAX_SHELVES) {
+      capped_ = true;
+      return;
+    }
+    out_.shelves[out_.count++] = currentShelf_;
+  }
+
+  BookFusionBookshelfList& out_;
+  StreamingJsonParser parser_;
+  BookFusionBookshelf currentShelf_;
+  LastKey lastKey_ = LastKey::NONE;
+  size_t bytesRead_ = 0;
+  uint8_t depth_ = 0;
+  uint8_t shelfDepth_ = 0;
+  bool rootArraySeen_ = false;
+  bool rootArrayClosed_ = false;
+  bool inShelf_ = false;
+  bool capped_ = false;
+};
 }  // namespace
 
 // --- Device Code Auth ---
@@ -225,12 +608,9 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
   addAuthHeaders(http);
   http.addHeader("Content-Type", "application/json");
 
-  // 8 books per display page keeps the raw response under ~20 KB.
-  // Arduino String grows by doubling: a 53 KB response (21 books) needs a
-  // ~64 KB buffer during the final realloc, pushing peak heap above 113 KB.
-  // With 8 books the response is ~20 KB → peak ~40 KB, well within budget.
-  // Request 9 to detect hasMore without needing response headers.
-  static constexpr int BOOKS_PER_PAGE = 8;
+  // Keep one visible page in memory. The response body itself is streamed
+  // through BookFusionSearchJsonStream, so we never allocate the raw JSON.
+  static constexpr int BOOKS_PER_PAGE = BookFusionSearchResult::MAX_BOOKS;
 
   JsonDocument reqBody;
   reqBody["page"] = page;
@@ -261,69 +641,25 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
     return SERVER_ERROR;
   }
 
-  // Read the full response body before parsing. Streaming from WiFiClientSecure
-  // causes IncompleteInput errors because TLS chunks arrive after ArduinoJson
-  // has already read past the end of what was buffered.
-  String responseBody = http.getString();
+  BookFusionSearchJsonStream responseStream(out, page);
+  const int writeResult = http.writeToStream(&responseStream);
   http.end();
 
-  // Build a filter that discards every field except the four we need.
-  // BookFusion books carry ~20 fields (cover URLs, descriptions, etc.); keeping
-  // only what we display reduces JsonDocument heap from ~30 KB to ~5 KB.
-  JsonDocument filter;
-  filter[0]["id"] = true;
-  filter[0]["title"] = true;
-  filter[0]["format"] = true;
-  filter[0]["authors"][0]["name"] = true;
-
-  JsonDocument doc;
-  const auto parseErr = deserializeJson(doc, responseBody, DeserializationOption::Filter(filter));
-
-  if (parseErr != DeserializationError::Ok) {
-    LOG_ERR("BFS", "searchBooks JSON parse error: %s", parseErr.c_str());
+  if (writeResult < 0) {
+    LOG_ERR("BFS", "searchBooks body stream error: %d", writeResult);
+    return NETWORK_ERROR;
+  }
+  if (responseStream.empty()) {
+    LOG_ERR("BFS", "searchBooks response body empty");
+    return JSON_ERROR;
+  }
+  if (!responseStream.ok()) {
+    LOG_ERR("BFS", "searchBooks streaming JSON parse error after %zu bytes", responseStream.bytesRead());
     return JSON_ERROR;
   }
 
-  if (!doc.is<JsonArray>()) {
-    LOG_ERR("BFS", "searchBooks: expected JSON array");
-    return JSON_ERROR;
-  }
-
-  JsonArray arr = doc.as<JsonArray>();
-  out.count = 0;
-  out.currentPage = page;
-  out.hasMore = false;
-
-  for (JsonObject book : arr) {
-    if (out.count >= BOOKS_PER_PAGE) {
-      out.hasMore = true;
-      break;
-    }
-
-    BookFusionBook& b = out.books[out.count];
-    b.id = book["id"] | static_cast<uint32_t>(0);
-    if (b.id == 0) continue;
-
-    strlcpy(b.title, book["title"] | "Untitled", sizeof(b.title));
-    strlcpy(b.format, book["format"] | "epub", sizeof(b.format));
-
-    // Concatenate author names from the authors array.
-    b.authors[0] = '\0';
-    JsonArray authors = book["authors"].as<JsonArray>();
-    bool first = true;
-    for (JsonObject author : authors) {
-      const char* name = author["name"] | "";
-      if (name[0] != '\0') {
-        if (!first) strlcat(b.authors, ", ", sizeof(b.authors));
-        strlcat(b.authors, name, sizeof(b.authors));
-        first = false;
-      }
-    }
-
-    out.count++;
-  }
-
-  LOG_DBG("BFS", "searchBooks: %d books on page %d, hasMore=%d", out.count, page, out.hasMore);
+  LOG_DBG("BFS", "searchBooks: %d books on page %d, hasMore=%d, streamed=%zu bytes", out.count, page, out.hasMore,
+          responseStream.bytesRead());
   return OK;
 }
 
@@ -398,41 +734,28 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBookshelves(BookFusionBo
     return SERVER_ERROR;
   }
 
-  String responseBody = http.getString();
+  BookFusionBookshelfJsonStream responseStream(out);
+  const int writeResult = http.writeToStream(&responseStream);
   http.end();
 
-  // BookFusion may return other fields per shelf (cover URL, book count, etc.);
-  // the KOReader plugin only consumes id + name and so do we. Filtering keeps
-  // the JsonDocument heap small even for users with many shelves.
-  JsonDocument filter;
-  filter[0]["id"] = true;
-  filter[0]["name"] = true;
-
-  JsonDocument doc;
-  const auto parseErr = deserializeJson(doc, responseBody, DeserializationOption::Filter(filter));
-  if (parseErr != DeserializationError::Ok) {
-    LOG_ERR("BFS", "searchBookshelves JSON parse error: %s", parseErr.c_str());
+  if (writeResult < 0) {
+    LOG_ERR("BFS", "searchBookshelves body stream error: %d", writeResult);
+    return NETWORK_ERROR;
+  }
+  if (responseStream.empty()) {
+    LOG_ERR("BFS", "searchBookshelves response body empty");
     return JSON_ERROR;
   }
-  if (!doc.is<JsonArray>()) {
-    LOG_ERR("BFS", "searchBookshelves: expected JSON array");
+  if (!responseStream.ok()) {
+    LOG_ERR("BFS", "searchBookshelves streaming JSON parse error after %zu bytes", responseStream.bytesRead());
     return JSON_ERROR;
   }
 
-  for (JsonObject shelf : doc.as<JsonArray>()) {
-    if (out.count >= BookFusionBookshelfList::MAX_SHELVES) {
-      LOG_DBG("BFS", "searchBookshelves: capped at %d shelves; extras dropped",
-              BookFusionBookshelfList::MAX_SHELVES);
-      break;
-    }
-    BookFusionBookshelf& s = out.shelves[out.count];
-    s.id = shelf["id"] | static_cast<uint32_t>(0);
-    if (s.id == 0) continue;  // skip malformed entries
-    strlcpy(s.name, shelf["name"] | "Unnamed", sizeof(s.name));
-    out.count++;
+  if (responseStream.capped()) {
+    LOG_DBG("BFS", "searchBookshelves: capped at %d shelves; extras dropped", BookFusionBookshelfList::MAX_SHELVES);
   }
 
-  LOG_DBG("BFS", "searchBookshelves: loaded %d shelves", out.count);
+  LOG_DBG("BFS", "searchBookshelves: loaded %d shelves, streamed=%zu bytes", out.count, responseStream.bytesRead());
   return OK;
 }
 

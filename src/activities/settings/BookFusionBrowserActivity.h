@@ -9,7 +9,7 @@
 /**
  * Browse and download books from the user's BookFusion library.
  *
- * Shows the user's library 20 books at a time (paginated).
+ * Shows the user's library 8 books at a time (paginated).
  * Selecting a book fetches a pre-signed download URL, streams the EPUB
  * to the SD card, and writes a BookFusion sidecar via BookFusionBookIdStore
  * so that progress sync works immediately after download.
@@ -33,7 +33,7 @@ class BookFusionBrowserActivity final : public Activity {
   State state = CATEGORY_SELECTION;
   ButtonNavigator buttonNavigator;
 
-  BookFusionSearchResult searchResult;  // Current page of 20 books (~2.5 KB on heap)
+  BookFusionSearchResult searchResult;  // Current page of 8 books plus cover URLs (~4 KB)
   int selectedIndex = 0;
   int currentPage = 1;
 

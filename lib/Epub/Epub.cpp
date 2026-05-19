@@ -1,5 +1,6 @@
 #include "Epub.h"
 
+#include <Bitmap.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <JpegToBmpConverter.h>
@@ -11,6 +12,25 @@
 #include "Epub/parsers/ContentOpfParser.h"
 #include "Epub/parsers/TocNavParser.h"
 #include "Epub/parsers/TocNcxParser.h"
+
+namespace {
+
+bool coverBmpIsReadable(const std::string& path) {
+  FsFile file;
+  if (!Storage.openFileForRead("EBP", path, file)) return false;
+
+  Bitmap bitmap(file);
+  const auto err = bitmap.parseHeaders();
+  file.close();
+
+  if (err != BmpReaderError::Ok) {
+    LOG_ERR("EBP", "Cover BMP validation failed (err=%d): %s", static_cast<int>(err), path.c_str());
+    return false;
+  }
+  return true;
+}
+
+}  // namespace
 
 bool Epub::findContentOpfFile(std::string* contentOpfFile) const {
   const auto containerPath = "META-INF/container.xml";
@@ -525,9 +545,16 @@ std::string Epub::getCoverBmpPath(bool cropped) const {
 }
 
 bool Epub::generateCoverBmp(bool cropped) const {
+  const auto coverBmpPath = getCoverBmpPath(cropped);
+
   // Already generated, return true
-  if (Storage.exists(getCoverBmpPath(cropped).c_str())) {
-    return true;
+  if (Storage.exists(coverBmpPath.c_str())) {
+    if (coverBmpIsReadable(coverBmpPath)) {
+      return true;
+    }
+
+    LOG_ERR("EBP", "Removing invalid cached cover BMP: %s", coverBmpPath.c_str());
+    Storage.remove(coverBmpPath.c_str());
   }
 
   if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
@@ -558,21 +585,30 @@ bool Epub::generateCoverBmp(bool cropped) const {
     }
 
     FsFile coverBmp;
-    if (!Storage.openFileForWrite("EBP", getCoverBmpPath(cropped), coverBmp)) {
+    if (!Storage.openFileForWrite("EBP", coverBmpPath, coverBmp)) {
       return false;
     }
     const bool success = JpegToBmpConverter::jpegFileToBmpStream(coverJpg, coverBmp, cropped);
     // Explicitly close() files before calling Storage.remove()
     coverJpg.close();
+    coverBmp.flush();
     coverBmp.close();
     Storage.remove(coverJpgTempPath.c_str());
 
     if (!success) {
       LOG_ERR("EBP", "Failed to generate BMP from cover image");
-      Storage.remove(getCoverBmpPath(cropped).c_str());
+      Storage.remove(coverBmpPath.c_str());
+      return false;
     }
-    LOG_DBG("EBP", "Generated BMP from JPG cover image, success: %s", success ? "yes" : "no");
-    return success;
+
+    if (!coverBmpIsReadable(coverBmpPath)) {
+      LOG_ERR("EBP", "Generated cover BMP is invalid, removing: %s", coverBmpPath.c_str());
+      Storage.remove(coverBmpPath.c_str());
+      return false;
+    }
+
+    LOG_DBG("EBP", "Generated BMP from JPG cover image, success: yes");
+    return true;
   }
 
   if (FsHelpers::hasPngExtension(coverImageHref)) {
@@ -592,21 +628,30 @@ bool Epub::generateCoverBmp(bool cropped) const {
     }
 
     FsFile coverBmp;
-    if (!Storage.openFileForWrite("EBP", getCoverBmpPath(cropped), coverBmp)) {
+    if (!Storage.openFileForWrite("EBP", coverBmpPath, coverBmp)) {
       return false;
     }
     const bool success = PngToBmpConverter::pngFileToBmpStream(coverPng, coverBmp, cropped);
     // Explicitly close() files before calling Storage.remove()
     coverPng.close();
+    coverBmp.flush();
     coverBmp.close();
     Storage.remove(coverPngTempPath.c_str());
 
     if (!success) {
       LOG_ERR("EBP", "Failed to generate BMP from PNG cover image");
-      Storage.remove(getCoverBmpPath(cropped).c_str());
+      Storage.remove(coverBmpPath.c_str());
+      return false;
     }
-    LOG_DBG("EBP", "Generated BMP from PNG cover image, success: %s", success ? "yes" : "no");
-    return success;
+
+    if (!coverBmpIsReadable(coverBmpPath)) {
+      LOG_ERR("EBP", "Generated cover BMP is invalid, removing: %s", coverBmpPath.c_str());
+      Storage.remove(coverBmpPath.c_str());
+      return false;
+    }
+
+    LOG_DBG("EBP", "Generated BMP from PNG cover image, success: yes");
+    return true;
   }
 
   LOG_ERR("EBP", "Cover image is not a supported format, skipping");
@@ -654,8 +699,8 @@ bool Epub::generateThumbBmp(int height) const {
     // Use regular grayscale BMP instead of 1-bit BMP to avoid reading issues
     int THUMB_TARGET_WIDTH = height * 0.6;
     int THUMB_TARGET_HEIGHT = height;
-    const bool success = JpegToBmpConverter::jpegFileToBmpStreamWithSize(coverJpg, thumbBmp, THUMB_TARGET_WIDTH,
-                                                                         THUMB_TARGET_HEIGHT);
+    const bool success =
+        JpegToBmpConverter::jpegFileToBmpStreamWithSize(coverJpg, thumbBmp, THUMB_TARGET_WIDTH, THUMB_TARGET_HEIGHT);
     // Explicitly flush and close() files before calling Storage.remove()
     coverJpg.close();
     LOG_DBG("EBP", "Flushing BMP data to disk...");

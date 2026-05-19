@@ -13,10 +13,12 @@
 #include "BookFusionBookIdStore.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
+#include "components/icons/arrow24.h"
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
 #include "components/icons/bookfusion24.h"
 #include "components/icons/bookfusion32.h"
+#include "components/icons/check24.h"
 #include "components/icons/cover.h"
 #include "components/icons/file24.h"
 #include "components/icons/folder.h"
@@ -24,8 +26,10 @@
 #include "components/icons/hotspot.h"
 #include "components/icons/image24.h"
 #include "components/icons/library.h"
+#include "components/icons/library24.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
+#include "components/icons/star24.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/wifi.h"
@@ -84,6 +88,14 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return File24Icon;
       case UIIcon::BookFusion:
         return BookFusion24Icon;
+      case UIIcon::Star:
+        return Star24Icon;
+      case UIIcon::Arrow:
+        return Arrow24Icon;
+      case UIIcon::Check:
+        return Check24Icon;
+      case UIIcon::Library:
+        return Library24Icon;
       default:
         return nullptr;
     }

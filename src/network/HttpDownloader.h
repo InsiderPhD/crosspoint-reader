@@ -34,8 +34,9 @@ class HttpDownloader {
    * @param url The URL to download
    * @param destPath The destination path on SD card
    * @param progress Optional progress callback
+   * @param allowConfiguredAuth Whether to attach configured OPDS Basic auth for non-BookFusion URLs
    * @return DownloadError indicating success or failure type
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
-                                      ProgressCallback progress = nullptr);
+                                      ProgressCallback progress = nullptr, bool allowConfiguredAuth = true);
 };

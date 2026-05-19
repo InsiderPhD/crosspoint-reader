@@ -28,17 +28,13 @@ inline bool write16(Print& out, const uint16_t value) {
 }
 
 inline bool write32(Print& out, const uint32_t value) {
-  return (out.write(value & 0xFF) == 1) &&
-         (out.write((value >> 8) & 0xFF) == 1) &&
-         (out.write((value >> 16) & 0xFF) == 1) &&
-         (out.write((value >> 24) & 0xFF) == 1);
+  return (out.write(value & 0xFF) == 1) && (out.write((value >> 8) & 0xFF) == 1) &&
+         (out.write((value >> 16) & 0xFF) == 1) && (out.write((value >> 24) & 0xFF) == 1);
 }
 
 inline bool write32Signed(Print& out, const int32_t value) {
-  return (out.write(value & 0xFF) == 1) &&
-         (out.write((value >> 8) & 0xFF) == 1) &&
-         (out.write((value >> 16) & 0xFF) == 1) &&
-         (out.write((value >> 24) & 0xFF) == 1);
+  return (out.write(value & 0xFF) == 1) && (out.write((value >> 8) & 0xFF) == 1) &&
+         (out.write((value >> 16) & 0xFF) == 1) && (out.write((value >> 24) & 0xFF) == 1);
 }
 
 // Helper function: Write BMP header with 8-bit grayscale (256 levels)
@@ -136,9 +132,9 @@ static bool writeBmpHeader2bit(Print& bmpOut, const int width, const int height)
   }
 
   // DIB Header (BITMAPINFOHEADER - 40 bytes)
-  if (!write32(bmpOut, 40) || !write32Signed(bmpOut, width) || !write32Signed(bmpOut, -height) ||
-      !write16(bmpOut, 1) || !write16(bmpOut, 2) || !write32(bmpOut, 0) || !write32(bmpOut, imageSize) ||
-      !write32(bmpOut, 2835) || !write32(bmpOut, 2835) || !write32(bmpOut, 4) || !write32(bmpOut, 4)) {
+  if (!write32(bmpOut, 40) || !write32Signed(bmpOut, width) || !write32Signed(bmpOut, -height) || !write16(bmpOut, 1) ||
+      !write16(bmpOut, 2) || !write32(bmpOut, 0) || !write32(bmpOut, imageSize) || !write32(bmpOut, 2835) ||
+      !write32(bmpOut, 2835) || !write32(bmpOut, 4) || !write32(bmpOut, 4)) {
     LOG_ERR("JPG", "Failed to write BMP DIB header");
     return false;
   }
@@ -229,8 +225,15 @@ struct BmpConvertCtx {
   FloydSteinbergDitherer* fsDitherer;
   Atkinson1BitDitherer* atkinson1BitDitherer;
 
+  int rowsWritten;
+  int callbackCount;
   bool error;
 };
+
+static int scaledDecodeDimension(const int value, const int scaleShift) {
+  if (scaleShift <= 0) return value;
+  return (value + (1 << scaleShift) - 1) >> scaleShift;
+}
 
 // Write a fully-assembled output row (grayscale bytes, length outWidth) to BMP
 static void writeOutputRow(BmpConvertCtx* ctx, const uint8_t* srcRow, int outY) {
@@ -268,8 +271,11 @@ static void writeOutputRow(BmpConvertCtx* ctx, const uint8_t* srcRow, int outY) 
 
   int bytesWritten = ctx->bmpOut->write(ctx->bmpRow, ctx->bytesPerRow);
   if (bytesWritten != ctx->bytesPerRow) {
-    LOG_ERR("JPG", "Row write failed: expected %d bytes, wrote %d bytes, freeHeap=%d", ctx->bytesPerRow, bytesWritten, ESP.getFreeHeap());
+    LOG_ERR("JPG", "Row write failed: expected %d bytes, wrote %d bytes, freeHeap=%d", ctx->bytesPerRow, bytesWritten,
+            ESP.getFreeHeap());
     ctx->error = true;
+  } else {
+    ctx->rowsWritten++;
   }
 }
 
@@ -311,8 +317,11 @@ static void flushScaledRow(BmpConvertCtx* ctx) {
 
   int bytesWritten = ctx->bmpOut->write(ctx->bmpRow, ctx->bytesPerRow);
   if (bytesWritten != ctx->bytesPerRow) {
-    LOG_ERR("JPG", "Row write failed: expected %d bytes, wrote %d bytes, freeHeap=%d", ctx->bytesPerRow, bytesWritten, ESP.getFreeHeap());
+    LOG_ERR("JPG", "Row write failed: expected %d bytes, wrote %d bytes, freeHeap=%d", ctx->bytesPerRow, bytesWritten,
+            ESP.getFreeHeap());
     ctx->error = true;
+  } else {
+    ctx->rowsWritten++;
   }
   ctx->currentOutY++;
 }
@@ -328,9 +337,9 @@ int bmpDrawCallback(JPEGDRAW* pDraw) {
     return 0;
   }
 
-  static int callbackCount = 0;
-  if (callbackCount++ < 3) {
-    LOG_DBG("JPG", "Draw callback %d: %dx%d block at (%d,%d)", callbackCount, pDraw->iWidth, pDraw->iHeight, pDraw->x, pDraw->y);
+  if (ctx->callbackCount++ < 3) {
+    LOG_DBG("JPG", "Draw callback %d: %dx%d block at (%d,%d)", ctx->callbackCount, pDraw->iWidth, pDraw->iHeight,
+            pDraw->x, pDraw->y);
   }
 
   const uint8_t* pixels = reinterpret_cast<uint8_t*>(pDraw->pPixels);
@@ -422,8 +431,9 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
 
   int srcWidth = jpeg->getWidth();
   int srcHeight = jpeg->getHeight();
+  const bool progressive = jpeg->getJPEGType() == JPEG_MODE_PROGRESSIVE;
 
-  LOG_DBG("JPG", "JPEG dimensions: %dx%d", srcWidth, srcHeight);
+  LOG_DBG("JPG", "JPEG dimensions: %dx%d%s", srcWidth, srcHeight, progressive ? " (progressive)" : "");
 
   // Sanity bound to reject malformed JPEGs / overflow-prone headers up front.
   // The real memory-budget bound is applied after native scaled-decode below, since
@@ -445,7 +455,13 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   // down with N². Existing area-averaging downstream polishes to exact target dims.
   int scaleFlag = 0;
   int scaleShift = 0;
-  if (targetWidth > 0 && targetHeight > 0) {
+  if (progressive) {
+    // JPEGDEC only decodes the first DC scan of progressive JPEGs and forces
+    // 1/8 output internally. Mirror that here so callback row assembly waits
+    // for the width JPEGDEC actually emits, not the full source width.
+    scaleFlag = JPEG_SCALE_EIGHTH;
+    scaleShift = 3;
+  } else if (targetWidth > 0 && targetHeight > 0) {
     if ((srcWidth >> 3) >= targetWidth && (srcHeight >> 3) >= targetHeight) {
       scaleFlag = JPEG_SCALE_EIGHTH;
       scaleShift = 3;
@@ -458,10 +474,12 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     }
   }
   if (scaleShift > 0) {
-    LOG_DBG("JPG", "Native scaled decode 1/%d: %dx%d -> %dx%d effective",
-            1 << scaleShift, srcWidth, srcHeight, srcWidth >> scaleShift, srcHeight >> scaleShift);
-    srcWidth >>= scaleShift;
-    srcHeight >>= scaleShift;
+    const int scaledWidth = scaledDecodeDimension(srcWidth, scaleShift);
+    const int scaledHeight = scaledDecodeDimension(srcHeight, scaleShift);
+    LOG_DBG("JPG", "Native scaled decode 1/%d: %dx%d -> %dx%d effective", 1 << scaleShift, srcWidth, srcHeight,
+            scaledWidth, scaledHeight);
+    srcWidth = scaledWidth;
+    srcHeight = scaledHeight;
   }
 
   // Memory-budget bound on the *post-scale* dimensions — these drive the MCU
@@ -469,8 +487,8 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   constexpr int MAX_EFFECTIVE_WIDTH = 2048;
   constexpr int MAX_EFFECTIVE_HEIGHT = 3072;
   if (srcWidth > MAX_EFFECTIVE_WIDTH || srcHeight > MAX_EFFECTIVE_HEIGHT) {
-    LOG_DBG("JPG", "Image still too large after 1/%d scale (%dx%d effective, max %dx%d)",
-            1 << scaleShift, srcWidth, srcHeight, MAX_EFFECTIVE_WIDTH, MAX_EFFECTIVE_HEIGHT);
+    LOG_DBG("JPG", "Image still too large after 1/%d scale (%dx%d effective, max %dx%d)", 1 << scaleShift, srcWidth,
+            srcHeight, MAX_EFFECTIVE_WIDTH, MAX_EFFECTIVE_HEIGHT);
     jpeg->close();
     delete jpeg;
     return false;
@@ -518,8 +536,8 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     bytesPerRow = (outWidth * 2 + 31) / 32 * 4;
     const int expectedImageSize = bytesPerRow * outHeight;
     const int expectedFileSize = 70 + expectedImageSize;
-    LOG_DBG("JPG", "Writing 2-bit BMP: %dx%d, bytesPerRow=%d, imageSize=%d, fileSize=%d, freeHeap=%d",
-            outWidth, outHeight, bytesPerRow, expectedImageSize, expectedFileSize, ESP.getFreeHeap());
+    LOG_DBG("JPG", "Writing 2-bit BMP: %dx%d, bytesPerRow=%d, imageSize=%d, fileSize=%d, freeHeap=%d", outWidth,
+            outHeight, bytesPerRow, expectedImageSize, expectedFileSize, ESP.getFreeHeap());
 
     if (!writeBmpHeader2bit(bmpOut, outWidth, outHeight)) {
       LOG_ERR("JPG", "Failed to write BMP header - buffer may be full");
@@ -538,6 +556,8 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   ctx.needsScaling = needsScaling;
   ctx.scaleX_fp = scaleX_fp;
   ctx.scaleY_fp = scaleY_fp;
+  ctx.rowsWritten = 0;
+  ctx.callbackCount = 0;
   ctx.error = false;
 
   // RAII guard: frees all heap resources on any return path
@@ -603,7 +623,12 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
 
-  LOG_DBG("JPG", "Successfully converted JPEG to BMP: %d rows written", ctx.outHeight);
+  if (ctx.rowsWritten != ctx.outHeight) {
+    LOG_ERR("JPG", "JPEG decode incomplete: wrote %d/%d BMP rows", ctx.rowsWritten, ctx.outHeight);
+    return false;
+  }
+
+  LOG_DBG("JPG", "Successfully converted JPEG to BMP: %d rows written", ctx.rowsWritten);
   return true;
 }
 

@@ -34,14 +34,16 @@ struct BookFusionBook {
   char title[64] = {};
   char authors[48] = {};
   char format[8] = {};  // "EPUB", "PDF", etc.
+  char coverUrl[384] = {};
 };
 
 /**
  * Paginated result from the book search endpoint.
- * Request one extra item (MAX_BOOKS + 1) to detect whether more pages exist.
+ * Stores one display page. The search request asks BookFusion for one extra
+ * item, but that sentinel is only used to set hasMore and is not retained.
  */
 struct BookFusionSearchResult {
-  static constexpr int MAX_BOOKS = 20;
+  static constexpr int MAX_BOOKS = 8;
   BookFusionBook books[MAX_BOOKS];
   int count = 0;
   int currentPage = 0;
