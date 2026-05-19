@@ -47,6 +47,15 @@ constexpr int NUM_CATEGORIES = sizeof(CATEGORIES) / sizeof(CATEGORIES[0]);
 // (when reserving content area for the indicator) — must agree.
 constexpr int categoryPageIndicatorH = 30;
 
+// The device only has an EPUB reader (the file browser allow-list is
+// EPUB/XTC/TXT/MD/BMP — see FileBrowserActivity.cpp). Other BookFusion
+// formats (PDF, audio, etc.) appear in the API responses but can't be opened
+// here, so we render them with a strike-through and refuse the download.
+bool bookFusionFormatIsEpub(const BookFusionBook& book) {
+  if (book.format[0] == '\0') return true;  // Default in the parser is "epub".
+  return strcasecmp(book.format, "epub") == 0;
+}
+
 enum class CoverImageType { Unknown, Jpeg, Png };
 
 std::string normalizeBookFusionCoverUrl(const char* coverUrl) {
@@ -321,6 +330,20 @@ void BookFusionBrowserActivity::loadPage(int page) {
 
 void BookFusionBrowserActivity::startDownload(int bookIndex) {
   const auto& book = searchResult.books[bookIndex];
+
+  // BookFusion shelves can contain PDF and audio books alongside EPUBs. The
+  // browse list renders the non-EPUB rows with a strike-through; pressing
+  // Confirm on one of them lands here. Bail with a clear message rather than
+  // burning bandwidth on a file the device can't open.
+  if (!bookFusionFormatIsEpub(book)) {
+    {
+      RenderLock lock(*this);
+      state = ERROR;
+      strlcpy(errorMsg, tr(STR_BF_FORMAT_UNSUPPORTED), sizeof(errorMsg));
+    }
+    requestUpdate();
+    return;
+  }
 
   {
     RenderLock lock(*this);
@@ -597,12 +620,22 @@ void BookFusionBrowserActivity::loop() {
     // lands on the last item — both keep "one step at a time" feeling
     // continuous across the page break.
     buttonNavigator.onNextRelease([this, totalItems] {
-      if (selectedIndex == totalItems - 1 && searchResult.hasMore) {
-        loadPage(currentPage + 1);
-      } else {
-        selectedIndex = ButtonNavigator::nextIndex(selectedIndex, totalItems);
-        requestUpdate();
+      if (selectedIndex == totalItems - 1) {
+        if (searchResult.hasMore) {
+          loadPage(currentPage + 1);
+          return;
+        }
+        // On the last item of the last page — wrap forward to page 1 if we
+        // know there's more than one page. Mirrors the tap-Up wrap from page 1
+        // back to the last page. Lands on item 0 of page 1 so the continuous
+        // step keeps going forward.
+        if (currentPage > 1) {
+          loadPage(1);
+          return;
+        }
       }
+      selectedIndex = ButtonNavigator::nextIndex(selectedIndex, totalItems);
+      requestUpdate();
     });
 
     buttonNavigator.onPreviousRelease([this, totalItems] {
@@ -638,11 +671,32 @@ void BookFusionBrowserActivity::loop() {
     // (only `hasMore` is known, not the total page count), so we just bounce off
     // the ends rather than wrapping.
     buttonNavigator.onNextContinuous([this] {
-      if (searchResult.hasMore) loadPage(currentPage + 1);
+      if (searchResult.hasMore) {
+        loadPage(currentPage + 1);
+        return;
+      }
+      // No more pages forward — wrap to page 1 (jump semantics: land on
+      // item 0). Mirrors the hold-Up wrap to the last page from page 1.
+      if (currentPage > 1) {
+        loadPage(1);
+      }
     });
 
     buttonNavigator.onPreviousContinuous([this] {
-      if (currentPage > 1) loadPage(currentPage - 1);
+      if (currentPage > 1) {
+        loadPage(currentPage - 1);
+        return;
+      }
+      // Already on page 1 — wrap to the last page when we know how many there
+      // are (Total-Count). Lands on item 0 of the last page (jump semantics)
+      // rather than the last item (which is the tap-Up continuous-step
+      // behaviour). If totalCount is unknown we leave hold-Up as a no-op.
+      constexpr int perPage = BookFusionSearchResult::MAX_BOOKS;
+      const int lastPage =
+          searchResult.totalCount > 0 ? (searchResult.totalCount + perPage - 1) / perPage : 0;
+      if (lastPage > 1) {
+        loadPage(lastPage);
+      }
     });
   }
 }
@@ -834,6 +888,30 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
       [this](int index) -> std::string { return std::string(searchResult.books[index].title); },
       [this](int index) -> std::string { return std::string(searchResult.books[index].authors); },
       [](int /*index*/) { return UIIcon::BookFusion; }, nullptr, false);
+
+  // Overlay a strike-through on rows whose book isn't an EPUB so the user can
+  // see the book exists but at a glance knows it can't be opened here. We
+  // replicate drawList's internal pagination math (BaseTheme/LyraTheme line
+  // layout: title at itemY+7, subtitle at itemY+30) so the lines land on the
+  // rows that were just drawn. If the theme ever changes those offsets this
+  // overlay drifts and is the only thing to update.
+  {
+    const int rowHeight = metrics.listWithSubtitleRowHeight;
+    const int pageItems = (rowHeight > 0) ? contentHeight / rowHeight : 0;
+    if (pageItems > 0) {
+      const int pageStartIndex = (selectedIndex / pageItems) * pageItems;
+      const int titleStrikeY = 7 + renderer.getLineHeight(UI_10_FONT_ID) / 2;
+      const int subtitleStrikeY = 30 + renderer.getLineHeight(SMALL_FONT_ID) / 2;
+      const int strikeLeft = metrics.contentSidePadding + 8;
+      const int strikeRight = pageWidth - metrics.contentSidePadding - 8;
+      for (int i = pageStartIndex; i < searchResult.count && i < pageStartIndex + pageItems; ++i) {
+        if (bookFusionFormatIsEpub(searchResult.books[i])) continue;
+        const int itemY = contentTop + (i % pageItems) * rowHeight;
+        renderer.drawLine(strikeLeft, itemY + titleStrikeY, strikeRight, itemY + titleStrikeY, true);
+        renderer.drawLine(strikeLeft, itemY + subtitleStrikeY, strikeRight, itemY + subtitleStrikeY, true);
+      }
+    }
+  }
 
   // Prefer the exact page count when BookFusion returned a `Total-Count`
   // response header (we read it into searchResult.totalCount in the client).

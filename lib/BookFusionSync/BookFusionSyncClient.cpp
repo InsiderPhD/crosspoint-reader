@@ -622,7 +622,13 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
 
   JsonDocument reqBody;
   reqBody["page"] = page;
-  reqBody["per_page"] = BOOKS_PER_PAGE + 1;
+  // Ask the server for exactly BOOKS_PER_PAGE. The previous `+1` trick (request
+  // one extra book to detect hasMore from overflow) meant the server then
+  // paginated in groups of `per_page+1`, so every page boundary lost one book
+  // and totals that landed badly on the modulo produced an empty final page.
+  // Now that we have the Total-Count response header we derive hasMore from
+  // totalCount instead, and pages align cleanly with the server.
+  reqBody["per_page"] = BOOKS_PER_PAGE;
   reqBody["sort"] = (sort != nullptr) ? sort : "added_at-desc";
   if (list != nullptr) {
     reqBody["list"] = list;
@@ -671,6 +677,16 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
   if (!responseStream.ok()) {
     LOG_ERR("BFS", "searchBooks streaming JSON parse error after %zu bytes", responseStream.bytesRead());
     return JSON_ERROR;
+  }
+
+  // Authoritative hasMore: derived from Total-Count when present (the common
+  // case — confirmed via empirical header dump). Falls back to "we got a full
+  // page" only if the header is missing, since with per_page=BOOKS_PER_PAGE
+  // the server no longer hands us a sentinel overflow book to detect.
+  if (out.totalCount > 0) {
+    out.hasMore = page * BOOKS_PER_PAGE < out.totalCount;
+  } else {
+    out.hasMore = out.count == BOOKS_PER_PAGE;
   }
 
   LOG_DBG("BFS", "searchBooks: %d books on page %d (total=%d, hasMore=%d), streamed=%zu bytes", out.count, page,
