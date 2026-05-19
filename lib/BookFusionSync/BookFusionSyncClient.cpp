@@ -608,6 +608,14 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
   addAuthHeaders(http);
   http.addHeader("Content-Type", "application/json");
 
+  // BookFusion emits a `Total-Count` response header with the total number of
+  // books across all pages (confirmed empirically via header dump). HTTPClient
+  // requires us to register the key up-front; it's then readable via
+  // http.header("Total-Count") after the request. collectHeaders takes
+  // `const char**`, so the array can't be `const`-of-`const`.
+  static const char* kCollectedHeaders[] = {"Total-Count"};
+  http.collectHeaders(kCollectedHeaders, sizeof(kCollectedHeaders) / sizeof(kCollectedHeaders[0]));
+
   // Keep one visible page in memory. The response body itself is streamed
   // through BookFusionSearchJsonStream, so we never allocate the raw JSON.
   static constexpr int BOOKS_PER_PAGE = BookFusionSearchResult::MAX_BOOKS;
@@ -627,6 +635,13 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
 
   const int httpCode = http.POST(bodyStr);
   LOG_DBG("BFS", "searchBooks page=%d response: %d", page, httpCode);
+
+  // Pick up the total before any early returns so the count is still written
+  // into `out` on partial-success paths (currently the early returns bail out
+  // before populating `out` anyway, but reading the header here is cheap and
+  // future-proofs the assignment).
+  const String totalCountHeader = http.header("Total-Count");
+  out.totalCount = totalCountHeader.length() > 0 ? totalCountHeader.toInt() : 0;
 
   if (httpCode < 0) {
     http.end();
@@ -658,8 +673,8 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
     return JSON_ERROR;
   }
 
-  LOG_DBG("BFS", "searchBooks: %d books on page %d, hasMore=%d, streamed=%zu bytes", out.count, page, out.hasMore,
-          responseStream.bytesRead());
+  LOG_DBG("BFS", "searchBooks: %d books on page %d (total=%d, hasMore=%d), streamed=%zu bytes", out.count, page,
+          out.totalCount, out.hasMore, responseStream.bytesRead());
   return OK;
 }
 

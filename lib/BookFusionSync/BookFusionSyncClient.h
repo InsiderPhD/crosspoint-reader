@@ -45,7 +45,9 @@ struct BookFusionBook {
 struct BookFusionSearchResult {
   static constexpr int MAX_BOOKS = 10;
   BookFusionBook books[MAX_BOOKS];
-  int count = 0;
+  int count = 0;        // Books in this page.
+  int totalCount = 0;   // Total books across all pages (from the Total-Count
+                        // response header). 0 means the server didn't tell us.
   int currentPage = 0;
   bool hasMore = false;
 };

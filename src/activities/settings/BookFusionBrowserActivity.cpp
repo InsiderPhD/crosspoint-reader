@@ -590,13 +590,46 @@ void BookFusionBrowserActivity::loop() {
       return;
     }
 
-    // Tap = step through the current page (wraps).
+    // Tap = step through the current page. Falling off either end loads the
+    // adjacent API page so paging works without requiring the hold-Up/Down
+    // gesture. Coming back from a forward fall, the cursor lands on the
+    // first item of the new page; coming back from a backward fall, it
+    // lands on the last item — both keep "one step at a time" feeling
+    // continuous across the page break.
     buttonNavigator.onNextRelease([this, totalItems] {
-      selectedIndex = ButtonNavigator::nextIndex(selectedIndex, totalItems);
-      requestUpdate();
+      if (selectedIndex == totalItems - 1 && searchResult.hasMore) {
+        loadPage(currentPage + 1);
+      } else {
+        selectedIndex = ButtonNavigator::nextIndex(selectedIndex, totalItems);
+        requestUpdate();
+      }
     });
 
     buttonNavigator.onPreviousRelease([this, totalItems] {
+      // First item, not on page 1 → step back a page.
+      // First item, already on page 1, and we know there are more pages →
+      //   wrap all the way around to the last page.
+      // Either case lands on the last item of the loaded page so backward
+      // stepping feels continuous across the page break.
+      if (selectedIndex == 0) {
+        constexpr int perPage = BookFusionSearchResult::MAX_BOOKS;
+        const int lastPage =
+            searchResult.totalCount > 0 ? (searchResult.totalCount + perPage - 1) / perPage : 0;
+        int target = 0;
+        if (currentPage > 1) {
+          target = currentPage - 1;
+        } else if (lastPage > 1) {
+          target = lastPage;
+        }
+        if (target > 0) {
+          loadPage(target);
+          if (state == BROWSING && searchResult.count > 0) {
+            selectedIndex = searchResult.count - 1;
+            requestUpdate();
+          }
+          return;
+        }
+      }
       selectedIndex = ButtonNavigator::previousIndex(selectedIndex, totalItems);
       requestUpdate();
     });
@@ -802,10 +835,16 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
       [this](int index) -> std::string { return std::string(searchResult.books[index].authors); },
       [](int /*index*/) { return UIIcon::BookFusion; }, nullptr, false);
 
-  // The BookFusion API only reports `hasMore`, not the total page count, so the
-  // total reads as `N` on the last page and `N+` while more remain server-side.
+  // Prefer the exact page count when BookFusion returned a `Total-Count`
+  // response header (we read it into searchResult.totalCount in the client).
+  // If the header is missing for some reason, fall back to the `+` suffix so
+  // the user at least knows more pages exist.
   char indicator[24];
-  if (searchResult.hasMore) {
+  if (searchResult.totalCount > 0) {
+    const int perPage = BookFusionSearchResult::MAX_BOOKS;
+    const int totalPages = (searchResult.totalCount + perPage - 1) / perPage;
+    snprintf(indicator, sizeof(indicator), "%d / %d", currentPage, totalPages);
+  } else if (searchResult.hasMore) {
     snprintf(indicator, sizeof(indicator), "%d / %d+", currentPage, currentPage);
   } else {
     snprintf(indicator, sizeof(indicator), "%d / %d", currentPage, currentPage);
