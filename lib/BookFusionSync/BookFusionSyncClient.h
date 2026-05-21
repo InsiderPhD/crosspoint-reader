@@ -69,7 +69,11 @@ struct BookFusionBookshelf {
  * (~1.6 KB) to bound heap usage; extra shelves are silently dropped.
  */
 struct BookFusionBookshelfList {
-  static constexpr int MAX_SHELVES = 32;
+  // Server-side pagination has been added to the bookshelves endpoint (we ask
+  // for 32 per request and walk pages until we've got everything or hit the
+  // cap), so the cap can be larger than one server-page. 64 covers virtually
+  // every user; ~3.3 KB on the activity heap is well within budget.
+  static constexpr int MAX_SHELVES = 64;
   BookFusionBookshelf shelves[MAX_SHELVES];
   int count = 0;
 };

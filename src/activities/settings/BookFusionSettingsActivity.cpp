@@ -4,7 +4,6 @@
 #include <I18n.h>
 
 #include "BookFusionAuthActivity.h"
-#include "BookFusionBrowserActivity.h"
 #include "BookFusionTokenStore.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
@@ -13,10 +12,8 @@
 namespace {
 constexpr int LINK_INDEX = 0;
 constexpr int UNLINK_INDEX = 1;
-constexpr int BROWSE_INDEX = 2;
 
-const StrId menuNames[BookFusionSettingsActivity::MENU_ITEMS] = {StrId::STR_BF_LINK_ACCOUNT, StrId::STR_BF_UNLINK,
-                                                                 StrId::STR_BF_BROWSE_LIBRARY};
+const StrId menuNames[BookFusionSettingsActivity::MENU_ITEMS] = {StrId::STR_BF_LINK_ACCOUNT, StrId::STR_BF_UNLINK};
 }  // namespace
 
 void BookFusionSettingsActivity::onEnter() {
@@ -56,11 +53,6 @@ void BookFusionSettingsActivity::handleSelection() {
   } else if (selectedIndex == UNLINK_INDEX) {
     BF_TOKEN_STORE.clearToken();
     requestUpdate();
-  } else if (selectedIndex == BROWSE_INDEX) {
-    if (BF_TOKEN_STORE.hasToken()) {
-      startActivityForResult(std::make_unique<BookFusionBrowserActivity>(renderer, mappedInput),
-                             [this](const ActivityResult&) { requestUpdate(); });
-    }
   }
 }
 
@@ -82,9 +74,6 @@ void BookFusionSettingsActivity::render(RenderLock&&) {
       [](int index) -> std::string {
         if (index == LINK_INDEX) {
           return BF_TOKEN_STORE.hasToken() ? std::string(tr(STR_BF_LINKED)) : std::string(tr(STR_BF_NOT_LINKED));
-        }
-        if (index == BROWSE_INDEX && !BF_TOKEN_STORE.hasToken()) {
-          return std::string(tr(STR_BF_NOT_LINKED));
         }
         return "";
       },

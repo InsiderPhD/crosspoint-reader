@@ -3,12 +3,17 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include "BookFusionTokenStore.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 namespace {
-constexpr int MENU_ITEM_COUNT = 4;
+// The BookFusion entry only appears once the user has linked an account in
+// Settings → System → BookFusion Sync. Hiding it pre-link avoids the dead row
+// that would otherwise just fail with NO_TOKEN once the user tried to use it.
+constexpr int MAX_MENU_ITEM_COUNT = 4;
+int visibleMenuItemCount() { return BF_TOKEN_STORE.hasToken() ? 4 : 3; }
 }  // namespace
 
 void NetworkModeSelectionActivity::onEnter() {
@@ -45,13 +50,14 @@ void NetworkModeSelectionActivity::loop() {
   }
 
   // Handle navigation
-  buttonNavigator.onNext([this] {
-    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, MENU_ITEM_COUNT);
+  const int itemCount = visibleMenuItemCount();
+  buttonNavigator.onNext([this, itemCount] {
+    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, itemCount);
     requestUpdate();
   });
 
-  buttonNavigator.onPrevious([this] {
-    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, MENU_ITEM_COUNT);
+  buttonNavigator.onPrevious([this, itemCount] {
+    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, itemCount);
     requestUpdate();
   });
 }
@@ -67,15 +73,19 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
-  // Menu items and descriptions
-  static constexpr StrId menuItems[MENU_ITEM_COUNT] = {StrId::STR_JOIN_NETWORK, StrId::STR_CALIBRE_WIRELESS,
-                                                       StrId::STR_CREATE_HOTSPOT, StrId::STR_BF_BROWSE_LIBRARY};
-  static constexpr StrId menuDescs[MENU_ITEM_COUNT] = {StrId::STR_JOIN_DESC, StrId::STR_CALIBRE_DESC,
-                                                       StrId::STR_HOTSPOT_DESC, StrId::STR_BF_LIBRARY_DESC};
-  static constexpr UIIcon menuIcons[MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot, UIIcon::BookFusion};
+  // Menu items and descriptions. Arrays are sized to MAX_MENU_ITEM_COUNT but
+  // only `visibleMenuItemCount()` of them are passed to drawList — the
+  // BookFusion row at index 3 is hidden whenever the user hasn't linked an
+  // account yet (see BookFusionTokenStore).
+  static constexpr StrId menuItems[MAX_MENU_ITEM_COUNT] = {StrId::STR_JOIN_NETWORK, StrId::STR_CALIBRE_WIRELESS,
+                                                           StrId::STR_CREATE_HOTSPOT, StrId::STR_BF_BROWSE_LIBRARY};
+  static constexpr StrId menuDescs[MAX_MENU_ITEM_COUNT] = {StrId::STR_JOIN_DESC, StrId::STR_CALIBRE_DESC,
+                                                           StrId::STR_HOTSPOT_DESC, StrId::STR_BF_LIBRARY_DESC};
+  static constexpr UIIcon menuIcons[MAX_MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot,
+                                                            UIIcon::BookFusion};
 
   GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(MENU_ITEM_COUNT), selectedIndex,
+      renderer, Rect{0, contentTop, pageWidth, contentHeight}, visibleMenuItemCount(), selectedIndex,
       [](int index) { return std::string(I18N.get(menuItems[index])); },
       [](int index) { return std::string(I18N.get(menuDescs[index])); }, [](int index) { return menuIcons[index]; });
 

@@ -5,7 +5,8 @@
 
 /**
  * Settings submenu for BookFusion Sync.
- * Shows "Link Account" and "Unlink Account" options with linked/not-linked status.
+ * Account-only: "Link Account" and "Unlink Account" with linked/not-linked
+ * status. Library browsing lives under the Network-mode menu, not here.
  */
 class BookFusionSettingsActivity final : public Activity {
  public:
@@ -17,7 +18,7 @@ class BookFusionSettingsActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
 
-  static constexpr int MENU_ITEMS = 3;
+  static constexpr int MENU_ITEMS = 2;
 
  private:
   ButtonNavigator buttonNavigator;

@@ -257,12 +257,12 @@ class BookFusionSearchJsonStream final : public Stream {
 
 class BookFusionBookshelfJsonStream final : public Stream {
  public:
+  // Doesn't reset out.count — callers manage it so we can accumulate across
+  // pages when searchBookshelves iterates the paginated endpoint.
   explicit BookFusionBookshelfJsonStream(BookFusionBookshelfList& out)
       : out_(out),
         parser_(JsonCallbacks{this, sOnKey, sOnString, sOnNumber, sOnBool, sOnNull, sOnObjectStart, sOnObjectEnd,
-                              sOnArrayStart, sOnArrayEnd}) {
-    out_.count = 0;
-  }
+                              sOnArrayStart, sOnArrayEnd}) {}
 
   size_t write(uint8_t byte) override { return write(&byte, 1); }
 
@@ -739,54 +739,93 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBookshelves(BookFusionBo
   if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
   out.count = 0;
 
-  char url[128];
-  snprintf(url, sizeof(url), "%s/api/user/bookshelves/search", BASE_URL);
+  // Server-side pagination — walk pages until we've fetched everything or
+  // filled the local cap. Total-Count is read from the first response and
+  // used as a hard bound; the per-page fall-through (short page = last page)
+  // handles servers that ever omit the header. Pagination matches the books
+  // endpoint pattern (Rails Kaminari/pagy convention).
+  static constexpr int SHELVES_PER_PAGE = 32;
+  static constexpr int MAX_PAGES = 8;  // safety: ≤8 requests ≈ 256 shelves of API hit
+  int totalCount = 0;
 
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
-  HTTPClient http;
-  http.begin(secureClient, url);
-  addAuthHeaders(http);
-  http.addHeader("Content-Type", "application/json");
+  for (int page = 1; page <= MAX_PAGES; ++page) {
+    if (out.count >= BookFusionBookshelfList::MAX_SHELVES) {
+      LOG_DBG("BFS", "searchBookshelves: local cap (%d) reached after page %d", out.count, page - 1);
+      break;
+    }
 
-  const int httpCode = http.POST("{}");
-  LOG_DBG("BFS", "searchBookshelves response: %d", httpCode);
+    char url[128];
+    snprintf(url, sizeof(url), "%s/api/user/bookshelves/search", BASE_URL);
 
-  if (httpCode < 0) {
+    WiFiClientSecure secureClient;
+    secureClient.setInsecure();
+    HTTPClient http;
+    http.begin(secureClient, url);
+    addAuthHeaders(http);
+    http.addHeader("Content-Type", "application/json");
+
+    static const char* kCollectedHeaders[] = {"Total-Count"};
+    http.collectHeaders(kCollectedHeaders, sizeof(kCollectedHeaders) / sizeof(kCollectedHeaders[0]));
+
+    JsonDocument reqBody;
+    reqBody["page"] = page;
+    reqBody["per_page"] = SHELVES_PER_PAGE;
+    String bodyStr;
+    serializeJson(reqBody, bodyStr);
+
+    const int httpCode = http.POST(bodyStr);
+    LOG_DBG("BFS", "searchBookshelves page=%d response: %d", page, httpCode);
+
+    if (httpCode < 0) {
+      http.end();
+      return NETWORK_ERROR;
+    }
+    if (httpCode == 401) {
+      http.end();
+      return AUTH_FAILED;
+    }
+    if (httpCode != 200) {
+      http.end();
+      return SERVER_ERROR;
+    }
+
+    if (page == 1) {
+      const String totalHeader = http.header("Total-Count");
+      totalCount = totalHeader.length() > 0 ? totalHeader.toInt() : 0;
+    }
+
+    const int countBeforePage = out.count;
+    BookFusionBookshelfJsonStream responseStream(out);
+    const int writeResult = http.writeToStream(&responseStream);
     http.end();
-    return NETWORK_ERROR;
-  }
-  if (httpCode == 401) {
-    http.end();
-    return AUTH_FAILED;
-  }
-  if (httpCode != 200) {
-    http.end();
-    return SERVER_ERROR;
+
+    if (writeResult < 0) {
+      LOG_ERR("BFS", "searchBookshelves body stream error: %d", writeResult);
+      return NETWORK_ERROR;
+    }
+    if (responseStream.empty()) {
+      LOG_ERR("BFS", "searchBookshelves response body empty");
+      return JSON_ERROR;
+    }
+    if (!responseStream.ok()) {
+      LOG_ERR("BFS", "searchBookshelves streaming JSON parse error after %zu bytes", responseStream.bytesRead());
+      return JSON_ERROR;
+    }
+
+    const int pageCount = out.count - countBeforePage;
+    LOG_DBG("BFS", "searchBookshelves: page %d added %d shelves (total now %d, server total=%d)", page, pageCount,
+            out.count, totalCount);
+
+    if (pageCount == 0) break;                  // empty response — defensive
+    if (pageCount < SHELVES_PER_PAGE) break;    // short page = last page
+    if (totalCount > 0 && page * SHELVES_PER_PAGE >= totalCount) break;  // header says we're done
+    if (responseStream.capped()) break;         // stream hit MAX_SHELVES mid-page
   }
 
-  BookFusionBookshelfJsonStream responseStream(out);
-  const int writeResult = http.writeToStream(&responseStream);
-  http.end();
-
-  if (writeResult < 0) {
-    LOG_ERR("BFS", "searchBookshelves body stream error: %d", writeResult);
-    return NETWORK_ERROR;
+  if (totalCount > 0 && out.count < totalCount) {
+    LOG_DBG("BFS", "searchBookshelves: capped at %d / %d shelves; extras dropped", out.count, totalCount);
   }
-  if (responseStream.empty()) {
-    LOG_ERR("BFS", "searchBookshelves response body empty");
-    return JSON_ERROR;
-  }
-  if (!responseStream.ok()) {
-    LOG_ERR("BFS", "searchBookshelves streaming JSON parse error after %zu bytes", responseStream.bytesRead());
-    return JSON_ERROR;
-  }
-
-  if (responseStream.capped()) {
-    LOG_DBG("BFS", "searchBookshelves: capped at %d shelves; extras dropped", BookFusionBookshelfList::MAX_SHELVES);
-  }
-
-  LOG_DBG("BFS", "searchBookshelves: loaded %d shelves, streamed=%zu bytes", out.count, responseStream.bytesRead());
+  LOG_DBG("BFS", "searchBookshelves: loaded %d shelves", out.count);
   return OK;
 }
 
