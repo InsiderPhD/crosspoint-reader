@@ -9,9 +9,12 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
+#include <esp_sntp.h>
 #include <esp_system.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <limits>
 
 #include "CrossPointSettings.h"
@@ -25,7 +28,6 @@
 #include "BookFusionBookIdStore.h"
 #include "BookFusionSyncClient.h"
 #include "BookFusionTokenStore.h"
-#include "ProgressMapper.h"
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
 #include "ReadingStatsStore.h"
@@ -52,6 +54,109 @@ int clampPercent(int percent) {
     return 100;
   }
   return percent;
+}
+
+float clampUnit(const float value) {
+  if (value < 0.0f) {
+    return 0.0f;
+  }
+  if (value > 1.0f) {
+    return 1.0f;
+  }
+  return value;
+}
+
+float pageToIntraSpineProgress(const int pageNumber, const int totalPages) {
+  if (totalPages <= 1) {
+    return 0.0f;
+  }
+  const int clampedPage = std::max(0, std::min(pageNumber, totalPages - 1));
+  return static_cast<float>(clampedPage) / static_cast<float>(totalPages - 1);
+}
+
+bool makeBookFusionPosition(const std::shared_ptr<Epub>& epub, const int spineIndex, const int pageNumber,
+                            const int totalPages, BookFusionPosition& out) {
+  if (!epub) {
+    return false;
+  }
+
+  const int spineCount = epub->getSpineItemsCount();
+  if (spineCount <= 0 || spineIndex < 0 || spineIndex >= spineCount) {
+    return false;
+  }
+
+  const float intra = pageToIntraSpineProgress(pageNumber, totalPages);
+  out.percentage = epub->calculateProgress(spineIndex, intra) * 100.0f;
+  out.chapterIndex = spineIndex;
+  out.pagePositionInBook = (static_cast<float>(spineIndex) + intra) / static_cast<float>(spineCount);
+  return true;
+}
+
+bool resolveBookFusionPosition(const std::shared_ptr<Epub>& epub, const BookFusionPosition& pos, int& outSpineIndex,
+                               float& outIntraSpineProgress) {
+  if (!epub) {
+    return false;
+  }
+
+  const int spineCount = epub->getSpineItemsCount();
+  if (spineCount <= 0) {
+    return false;
+  }
+
+  int spineIndex = pos.chapterIndex;
+  if (spineIndex < 0 || spineIndex >= spineCount) {
+    const float bookPos = clampUnit(pos.pagePositionInBook);
+    spineIndex = static_cast<int>(bookPos * static_cast<float>(spineCount));
+    if (spineIndex >= spineCount) {
+      spineIndex = spineCount - 1;
+    }
+  }
+
+  outSpineIndex = spineIndex;
+  outIntraSpineProgress =
+      clampUnit(pos.pagePositionInBook * static_cast<float>(spineCount) - static_cast<float>(spineIndex));
+  return true;
+}
+
+BookFusionStoredPosition storedPositionFromBookFusion(const BookFusionPosition& pos) {
+  BookFusionStoredPosition stored;
+  stored.percentage = pos.percentage;
+  stored.chapterIndex = pos.chapterIndex;
+  stored.pagePositionInBook = pos.pagePositionInBook;
+  return stored;
+}
+
+bool sameBookFusionPosition(const BookFusionStoredPosition& stored, const BookFusionPosition& pos) {
+  static constexpr float PAGE_POSITION_EPSILON = 0.0005f;
+  static constexpr float PERCENTAGE_EPSILON = 0.05f;
+  return stored.chapterIndex == pos.chapterIndex &&
+         std::fabs(stored.pagePositionInBook - pos.pagePositionInBook) <= PAGE_POSITION_EPSILON &&
+         std::fabs(stored.percentage - pos.percentage) <= PERCENTAGE_EPSILON;
+}
+
+bool syncBookFusionTimeWithNTP() {
+  if (esp_sntp_enabled()) {
+    esp_sntp_stop();
+  }
+
+  esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
+  esp_sntp_setservername(0, "pool.ntp.org");
+  esp_sntp_init();
+
+  int retry = 0;
+  constexpr int MAX_RETRIES = 50;
+  while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && retry < MAX_RETRIES) {
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    retry++;
+  }
+
+  const bool ok = retry < MAX_RETRIES;
+  if (ok) {
+    LOG_DBG("BFS", "Internet time synced");
+  } else {
+    LOG_DBG("BFS", "Internet time sync timeout");
+  }
+  return ok;
 }
 
 }  // namespace
@@ -1316,58 +1421,107 @@ void EpubReaderActivity::performBookFusionSync() {
   // Show initial sync popup
   {
     RenderLock lock(*this);
-    UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Fetching remote progress...");
+    UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Fetching current time...");
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
   }
+  const bool internetTimeSynced = syncBookFusionTimeWithNTP();
 
-  // Get current local position
-  const int currentPage = section ? section->currentPage + 1 : 0;
-  const int totalPages = section ? section->pageCount : 0;
-
-  CrossPointPosition localPos;
-  localPos.spineIndex = currentSpineIndex;
-  localPos.pageNumber = currentPage;
-  localPos.totalPages = totalPages;
+  // Get current local position. section->currentPage is zero-based, which is
+  // the coordinate system used by the reader and the sync mappers.
+  const int currentPage = section ? section->currentPage : nextPageNumber;
+  const int totalPages = section ? section->pageCount : cachedChapterTotalPageCount;
 
   // Convert local position to BookFusion format
-  KOReaderPosition localKoPos = ProgressMapper::toKOReader(epub, localPos);
   BookFusionPosition localBfPos;
-  localBfPos.percentage = localKoPos.percentage * 100.0f;  // BookFusion uses 0-100
-  localBfPos.chapterIndex = currentSpineIndex;
-  localBfPos.pagePositionInBook = localKoPos.percentage;
+  if (!makeBookFusionPosition(epub, currentSpineIndex, currentPage, totalPages, localBfPos)) {
+    LOG_DBG("BFS", "Could not build local BookFusion position, performing refresh instead");
+    RenderLock lock;
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+    return;
+  }
+  char lastSyncAt[40] = {};
+  const bool hasLastSyncAt = BookFusionBookIdStore::loadLastSyncAt(epubPath.c_str(), lastSyncAt, sizeof(lastSyncAt));
+  BookFusionStoredPosition lastSyncedPosition;
+  const bool hasLastSyncedPosition = BookFusionBookIdStore::loadLastSyncedPosition(epubPath.c_str(), lastSyncedPosition);
+
+  {
+    RenderLock lock(*this);
+    UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Downloading progress...");
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+  }
 
   // First, try to fetch remote progress from BookFusion
   BookFusionPosition remoteBfPos;
   auto downloadResult = BookFusionSyncClient::getProgress(bookId, remoteBfPos);
 
-  bool shouldUpdateLocal = false;
+  bool shouldUploadProgress = true;
+  bool appliedRemoteProgress = false;
+  bool alreadyUpToDate = false;
   if (downloadResult == BookFusionSyncClient::OK) {
     LOG_DBG("BFS", "Remote progress: %.2f%%, Local progress: %.2f%%", remoteBfPos.percentage, localBfPos.percentage);
 
-    // If remote progress is significantly ahead (more than 1%), update local position
-    if (remoteBfPos.percentage > localBfPos.percentage + 1.0f) {
-      LOG_DBG("BFS", "Remote progress ahead, updating local position");
+    const bool canCompareUpdatedAt = hasLastSyncAt && remoteBfPos.updatedAt[0] != '\0';
+    const bool canCompareSyncState = canCompareUpdatedAt && hasLastSyncedPosition;
+    const bool remoteIsNewer = canCompareUpdatedAt && strcmp(remoteBfPos.updatedAt, lastSyncAt) > 0;
+    const bool remoteIsFurtherAhead = remoteBfPos.percentage > localBfPos.percentage + 1.0f;
+    const bool localChangedSinceLastSync =
+        hasLastSyncedPosition && !sameBookFusionPosition(lastSyncedPosition, localBfPos);
 
-      // Convert remote BookFusion position back to CrossPoint format
-      KOReaderPosition remoteKoPos;
-      remoteKoPos.percentage = remoteBfPos.pagePositionInBook;
-      remoteKoPos.xpath = ""; // Will be generated by ProgressMapper
+    if (canCompareSyncState) {
+      LOG_DBG("BFS", "Last synced at %s; remote updated_at=%s; local changed=%d", lastSyncAt, remoteBfPos.updatedAt,
+              localChangedSinceLastSync ? 1 : 0);
+    } else if (canCompareUpdatedAt) {
+      LOG_DBG("BFS", "Have sync timestamp but no stored sync position; falling back to furthest-ahead rule");
+    } else {
+      LOG_DBG("BFS", "No comparable sync timestamp; falling back to furthest-ahead rule");
+    }
 
-      CrossPointPosition remotePos = ProgressMapper::toCrossPoint(epub, remoteKoPos, currentSpineIndex,
-                                                                  section ? section->pageCount : 0);
+    const bool shouldApplyRemote =
+        (canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) ||
+        (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync && !internetTimeSynced &&
+         remoteIsFurtherAhead) ||
+        (!canCompareSyncState && remoteIsFurtherAhead);
 
-      // Update local position if valid
-      if (remotePos.spineIndex >= 0 && remotePos.spineIndex < epub->getSpineItemsCount()) {
-        currentSpineIndex = remotePos.spineIndex;
-        // Reset section to force reload with new spine index
-        section.reset();
-        // Set pending page number for when section loads
-        if (remotePos.pageNumber > 0) {
-          nextPageNumber = remotePos.pageNumber;
-          shouldUpdateLocal = true;
-        }
+    if (shouldApplyRemote) {
+      if (canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) {
+        LOG_DBG("BFS", "Remote progress is newer and local is unchanged, updating local position");
+      } else if (canCompareSyncState) {
+        LOG_DBG("BFS", "Internet time unavailable; remote is further ahead, updating local position");
+      } else {
+        LOG_DBG("BFS", "Remote progress ahead, updating local position");
       }
+
+      int remoteSpineIndex = 0;
+      float remoteSpineProgress = 0.0f;
+      if (resolveBookFusionPosition(epub, remoteBfPos, remoteSpineIndex, remoteSpineProgress)) {
+        currentSpineIndex = remoteSpineIndex;
+        nextPageNumber = 0;
+        cachedChapterTotalPageCount = 0;
+        pendingPageJump.reset();
+        pendingSpineProgress = remoteSpineProgress;
+        pendingPercentJump = true;
+        section.reset();
+        shouldUploadProgress = false;
+        appliedRemoteProgress = true;
+        if (remoteBfPos.updatedAt[0] != '\0') {
+          BookFusionBookIdStore::saveLastSyncAt(epubPath.c_str(), remoteBfPos.updatedAt);
+        }
+        BookFusionBookIdStore::saveLastSyncedPosition(epubPath.c_str(), storedPositionFromBookFusion(remoteBfPos));
+        LOG_DBG("BFS", "Applied remote BookFusion position: chapter %d, intra %.2f%%", remoteSpineIndex,
+                remoteSpineProgress * 100.0f);
+      } else {
+        LOG_DBG("BFS", "Remote BookFusion position could not be resolved, keeping local position");
+      }
+    } else if (canCompareSyncState && !remoteIsNewer && !localChangedSinceLastSync) {
+      shouldUploadProgress = false;
+      alreadyUpToDate = true;
+      LOG_DBG("BFS", "BookFusion progress already up to date");
+    } else if (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync && internetTimeSynced) {
+      LOG_DBG("BFS", "Local position changed; using freshly synced internet time and uploading local progress");
+    } else if (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync) {
+      LOG_DBG("BFS", "Local and remote both changed without internet time; keeping furthest-ahead fallback");
     }
   } else if (downloadResult == BookFusionSyncClient::NOT_FOUND) {
     LOG_DBG("BFS", "No remote progress found, will upload current position");
@@ -1375,21 +1529,34 @@ void EpubReaderActivity::performBookFusionSync() {
     LOG_DBG("BFS", "Failed to fetch remote progress: %s", BookFusionSyncClient::errorString(downloadResult));
   }
 
-  // Show upload popup
-  {
-    RenderLock lock(*this);
-    UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Uploading progress...");
-    if (SETTINGS.darkMode) renderer.invertScreen();
-    renderer.displayBuffer();
-  }
+  BookFusionSyncClient::Error uploadResult = BookFusionSyncClient::OK;
+  if (shouldUploadProgress) {
+    // Show upload popup
+    {
+      RenderLock lock(*this);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Uploading progress...");
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
 
-  // Upload current position to BookFusion (whether updated from remote or not)
-  auto uploadResult = BookFusionSyncClient::setProgress(bookId, localBfPos);
+    BookFusionPosition uploadedBfPos = localBfPos;
+    uploadResult = BookFusionSyncClient::setProgress(bookId, localBfPos, &uploadedBfPos);
+    if (uploadResult == BookFusionSyncClient::OK) {
+      if (uploadedBfPos.updatedAt[0] != '\0') {
+        BookFusionBookIdStore::saveLastSyncAt(epubPath.c_str(), uploadedBfPos.updatedAt);
+      }
+      BookFusionBookIdStore::saveLastSyncedPosition(epubPath.c_str(), storedPositionFromBookFusion(uploadedBfPos));
+    }
+  }
 
   // Show completion popup
   {
     RenderLock lock(*this);
-    if (uploadResult == BookFusionSyncClient::OK) {
+    if (appliedRemoteProgress) {
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Remote progress applied!");
+    } else if (alreadyUpToDate) {
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Progress already up to date.");
+    } else if (uploadResult == BookFusionSyncClient::OK) {
       LOG_DBG("BFS", "Progress uploaded successfully");
       UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Sync completed successfully!");
     } else {

@@ -13,6 +13,7 @@ struct BookFusionPosition {
   float percentage = 0.0f;          // 0–100
   float pagePositionInBook = 0.0f;  // fractional book position
   int chapterIndex = 0;             // spine index, 0-based
+  char updatedAt[40] = {};          // Server timestamp from updated_at, if present
 };
 
 /**
@@ -115,7 +116,7 @@ class BookFusionSyncClient {
 
   // --- Progress ---
   static Error getProgress(uint32_t bookId, BookFusionPosition& out);
-  static Error setProgress(uint32_t bookId, const BookFusionPosition& pos);
+  static Error setProgress(uint32_t bookId, const BookFusionPosition& pos, BookFusionPosition* out = nullptr);
 
   // --- Library Browse & Download ---
   // bookshelfId, when non-zero, restricts the search to a specific user bookshelf

@@ -2,6 +2,12 @@
 #include <cstddef>
 #include <cstdint>
 
+struct BookFusionStoredPosition {
+  float percentage = 0.0f;
+  float pagePositionInBook = 0.0f;
+  int chapterIndex = 0;
+};
+
 /**
  * Per-book sidecar for BookFusion book IDs.
  *
@@ -20,6 +26,14 @@ class BookFusionBookIdStore {
 
   // Save book_id for an epub path. Returns false on I/O error or if id == 0.
   static bool saveBookId(const char* epubPath, uint32_t bookId);
+
+  // Load/save the last server reading_position updated_at seen for this EPUB.
+  static bool loadLastSyncAt(const char* epubPath, char* out, size_t maxLen);
+  static bool saveLastSyncAt(const char* epubPath, const char* updatedAt);
+
+  // Load/save the BookFusion position associated with last_sync_at.
+  static bool loadLastSyncedPosition(const char* epubPath, BookFusionStoredPosition& out);
+  static bool saveLastSyncedPosition(const char* epubPath, const BookFusionStoredPosition& position);
 
  private:
   // Derives /.crosspoint/bookfusion_<32hexchars>.json from the epub path.

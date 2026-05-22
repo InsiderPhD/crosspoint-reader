@@ -508,6 +508,9 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
           progressFile.write(data, sizeof(data));
           progressFile.flush();
           progressFile.close();
+          if (remotePos.updatedAt[0] != '\0') {
+            BookFusionBookIdStore::saveLastSyncAt(filename.c_str(), remotePos.updatedAt);
+          }
           LOG_DBG("BFB", "Synced BookFusion position: chapter %d (%.1f%% in book)", remotePos.chapterIndex,
                   remotePos.percentage);
         }

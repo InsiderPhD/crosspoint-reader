@@ -50,6 +50,13 @@ void appendAuthor(BookFusionBook& book, const char* name, size_t len) {
   safeAppendToken(book.authors, sizeof(book.authors), name, len);
 }
 
+void readBookFusionPosition(JsonDocument& doc, BookFusionPosition& out) {
+  out.percentage = doc["percentage"] | 0.0f;
+  out.chapterIndex = doc["chapter_index"] | 0;
+  out.pagePositionInBook = doc["page_position_in_book"] | 0.0f;
+  strlcpy(out.updatedAt, doc["updated_at"] | "", sizeof(out.updatedAt));
+}
+
 class BookFusionSearchJsonStream final : public Stream {
  public:
   BookFusionSearchJsonStream(BookFusionSearchResult& out, int page)
@@ -541,11 +548,10 @@ BookFusionSyncClient::Error BookFusionSyncClient::getProgress(uint32_t bookId, B
       return JSON_ERROR;
     }
 
-    out.percentage = doc["percentage"] | 0.0f;
-    out.chapterIndex = doc["chapter_index"] | 0;
-    out.pagePositionInBook = doc["page_position_in_book"] | 0.0f;
+    readBookFusionPosition(doc, out);
 
-    LOG_DBG("BFS", "Remote progress: %.2f%%, chapter %d", out.percentage, out.chapterIndex);
+    LOG_DBG("BFS", "Remote progress: %.2f%%, chapter %d, updated_at=%s", out.percentage, out.chapterIndex,
+            out.updatedAt);
     return OK;
   }
 
@@ -558,7 +564,8 @@ BookFusionSyncClient::Error BookFusionSyncClient::getProgress(uint32_t bookId, B
   return SERVER_ERROR;
 }
 
-BookFusionSyncClient::Error BookFusionSyncClient::setProgress(uint32_t bookId, const BookFusionPosition& pos) {
+BookFusionSyncClient::Error BookFusionSyncClient::setProgress(uint32_t bookId, const BookFusionPosition& pos,
+                                                              BookFusionPosition* out) {
   if (!BF_TOKEN_STORE.hasToken()) {
     return NO_TOKEN;
   }
@@ -582,11 +589,25 @@ BookFusionSyncClient::Error BookFusionSyncClient::setProgress(uint32_t bookId, c
   serializeJson(body, bodyStr);
 
   const int httpCode = http.POST(bodyStr);
+  String responseBody;
+  if (httpCode == 200 || httpCode == 201) {
+    responseBody = http.getString();
+  }
   http.end();
 
   LOG_DBG("BFS", "setProgress response: %d", httpCode);
 
-  if (httpCode == 200 || httpCode == 201) return OK;
+  if (httpCode == 200 || httpCode == 201) {
+    if (out != nullptr && responseBody.length() > 0) {
+      JsonDocument doc;
+      if (deserializeJson(doc, responseBody) == DeserializationError::Ok) {
+        readBookFusionPosition(doc, *out);
+      } else {
+        LOG_DBG("BFS", "setProgress response JSON parse skipped");
+      }
+    }
+    return OK;
+  }
   if (httpCode == 401) return AUTH_FAILED;
   if (httpCode < 0) return NETWORK_ERROR;
   return SERVER_ERROR;
