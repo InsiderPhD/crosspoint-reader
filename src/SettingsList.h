@@ -43,9 +43,13 @@ inline const std::vector<SettingInfo>& getSettingsList() {
       SettingInfo::Enum(StrId::STR_FONT_FAMILY, &CrossPointSettings::fontFamily,
                         {StrId::STR_BOOKERLY, StrId::STR_NOTO_SANS, StrId::STR_OPEN_DYSLEXIC, StrId::STR_MONOSPACE},
                         "fontFamily", StrId::STR_CAT_READER),
+      // SD card font family name (persisted only; selection happens in FontSelectionActivity
+      // launched by the FontFamily action below). Hidden from device UI (no category) and from
+      // web UI categorization, but round-trips through settings.json.
+      SettingInfo::String(StrId::STR_FONT_FAMILY, CrossPointSettings::getInstance().sdFontFamilyName,
+                          sizeof(CrossPointSettings::getInstance().sdFontFamilyName), "sdFontFamilyName"),
       SettingInfo::Enum(StrId::STR_FONT_SIZE, &CrossPointSettings::fontSize,
-                        {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE, StrId::STR_X_SMALL}, "fontSize",
-                        StrId::STR_CAT_READER),
+                        {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE}, "fontSize", StrId::STR_CAT_READER),
       SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing,
                         {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE}, "lineSpacing", StrId::STR_CAT_READER),
       SettingInfo::Value(StrId::STR_SCREEN_MARGIN, &CrossPointSettings::screenMargin, {5, 40, 5}, "screenMargin",

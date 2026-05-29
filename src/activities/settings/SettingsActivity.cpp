@@ -3,16 +3,21 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 
+#include <cstring>
+
 #include "BookFusionSettingsActivity.h"
 #include "ButtonRemapActivity.h"
 #include "CalibreSettingsActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
+#include "FontDownloadActivity.h"
+#include "FontSelectionActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "LanguageSelectActivity.h"
 #include "MappedInputManager.h"
 #include "OtaUpdateActivity.h"
 #include "ResetStatsActivity.h"
+#include "SdCardFontGlobals.h"
 #include "SettingsList.h"
 #include "StatusBarSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -33,6 +38,10 @@ void SettingsActivity::onEnter() {
 
   for (const auto& setting : getSettingsList()) {
     if (setting.category == StrId::STR_NONE_OPT) continue;
+    // Device-only override: hide the built-in fontFamily Enum so the FontFamily
+    // Action (appended below) is the single picker entry. Web UI still sees the
+    // Enum because CrossPointWebServer iterates getSettingsList() directly.
+    if (setting.type == SettingType::ENUM && setting.key && std::strcmp(setting.key, "fontFamily") == 0) continue;
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       displaySettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_READER) {
@@ -57,6 +66,8 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
+  readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_FAMILY, SettingAction::FontFamily));
+  readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_DOWNLOAD, SettingAction::FontDownload));
 
   // Reset selection to first category
   selectedCategoryIndex = 0;
@@ -202,6 +213,18 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::ResetStats:
         startActivityForResult(std::make_unique<ResetStatsActivity>(renderer, mappedInput), resultHandler);
         break;
+      case SettingAction::FontFamily:
+        startActivityForResult(
+            std::make_unique<FontSelectionActivity>(renderer, mappedInput, &sdFontSystem.registry()),
+            [this](const ActivityResult&) {
+              SETTINGS.saveToFile();
+              ensureSdFontLoaded();
+            });
+        break;
+      case SettingAction::FontDownload:
+        startActivityForResult(std::make_unique<FontDownloadActivity>(renderer, mappedInput),
+                               [this](const ActivityResult&) { ensureSdFontLoaded(); });
+        break;
       case SettingAction::None:
         // Do nothing
         break;
@@ -252,6 +275,17 @@ void SettingsActivity::render(RenderLock&&) {
           valueText = I18N.get(setting.enumValues[value]);
         } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
           valueText = std::to_string(SETTINGS.*(setting.valuePtr));
+        } else if (setting.type == SettingType::ACTION && setting.action == SettingAction::FontFamily) {
+          if (SETTINGS.sdFontFamilyName[0] != '\0') {
+            valueText = SETTINGS.sdFontFamilyName;
+          } else {
+            static const StrId builtinFontNames[] = {StrId::STR_BOOKERLY, StrId::STR_NOTO_SANS,
+                                                     StrId::STR_OPEN_DYSLEXIC, StrId::STR_MONOSPACE};
+            const uint8_t f = SETTINGS.fontFamily;
+            if (f < sizeof(builtinFontNames) / sizeof(builtinFontNames[0])) {
+              valueText = I18N.get(builtinFontNames[f]);
+            }
+          }
         }
         return valueText;
       },

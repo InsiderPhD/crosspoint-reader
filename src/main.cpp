@@ -22,6 +22,7 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "BookFusionTokenStore.h"
+#include "SdCardFontSystem.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "components/UITheme.h"
@@ -33,7 +34,10 @@ MappedInputManager mappedInputManager(gpio);
 GfxRenderer renderer(display);
 ActivityManager activityManager(renderer, mappedInputManager);
 FontDecompressor fontDecompressor;
-FontCacheManager fontCacheManager(renderer.getFontMap());
+SdCardFontSystem sdFontSystem;
+FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts());
+
+void ensureSdFontLoaded() { sdFontSystem.ensureLoaded(renderer); }
 
 // Fonts
 EpdFont bookerly14RegularFont(&bookerly_14_regular);
@@ -47,22 +51,12 @@ EpdFont bookerly10BoldFont(&bookerly_10_bold);
 EpdFont bookerly10ItalicFont(&bookerly_10_italic);
 EpdFontFamily bookerly10FontFamily(&bookerly10RegularFont, &bookerly10BoldFont, &bookerly10ItalicFont,
                                    &bookerly10BoldFont);
-EpdFont bookerly12RegularFont(&bookerly_12_regular);
-EpdFont bookerly12BoldFont(&bookerly_12_bold);
-EpdFont bookerly12ItalicFont(&bookerly_12_italic);
-EpdFontFamily bookerly12FontFamily(&bookerly12RegularFont, &bookerly12BoldFont, &bookerly12ItalicFont,
-                                   &bookerly12BoldFont);
 EpdFont bookerly16RegularFont(&bookerly_16_regular);
 EpdFont bookerly16BoldFont(&bookerly_16_bold);
 EpdFont bookerly16ItalicFont(&bookerly_16_italic);
 EpdFontFamily bookerly16FontFamily(&bookerly16RegularFont, &bookerly16BoldFont, &bookerly16ItalicFont,
                                    &bookerly16BoldFont);
 
-EpdFont notosans12RegularFont(&notosans_12_regular);
-EpdFont notosans12BoldFont(&notosans_12_bold);
-EpdFont notosans12ItalicFont(&notosans_12_italic);
-EpdFontFamily notosans12FontFamily(&notosans12RegularFont, &notosans12BoldFont, &notosans12ItalicFont,
-                                   &notosans12BoldFont);
 EpdFont notosans14RegularFont(&notosans_14_regular);
 EpdFont notosans14BoldFont(&notosans_14_bold);
 EpdFont notosans14ItalicFont(&notosans_14_italic);
@@ -79,11 +73,6 @@ EpdFont opendyslexic6BoldFont(&opendyslexic_6_bold);
 EpdFont opendyslexic6ItalicFont(&opendyslexic_6_italic);
 EpdFontFamily opendyslexic6FontFamily(&opendyslexic6RegularFont, &opendyslexic6BoldFont, &opendyslexic6ItalicFont,
                                       &opendyslexic6BoldFont);
-EpdFont opendyslexic8RegularFont(&opendyslexic_8_regular);
-EpdFont opendyslexic8BoldFont(&opendyslexic_8_bold);
-EpdFont opendyslexic8ItalicFont(&opendyslexic_8_italic);
-EpdFontFamily opendyslexic8FontFamily(&opendyslexic8RegularFont, &opendyslexic8BoldFont, &opendyslexic8ItalicFont,
-                                      &opendyslexic8BoldFont);
 EpdFont opendyslexic10RegularFont(&opendyslexic_10_regular);
 EpdFont opendyslexic10BoldFont(&opendyslexic_10_bold);
 EpdFont opendyslexic10ItalicFont(&opendyslexic_10_italic);
@@ -104,9 +93,6 @@ EpdFontFamily opendyslexic14FontFamily(&opendyslexic14RegularFont, &opendyslexic
 EpdFont mono6RegularFont(&mono_6_regular);
 EpdFont mono6BoldFont(&mono_6_bold);
 EpdFontFamily mono6FontFamily(&mono6RegularFont, &mono6BoldFont, &mono6RegularFont, &mono6BoldFont);
-EpdFont mono8RegularFont(&mono_8_regular);
-EpdFont mono8BoldFont(&mono_8_bold);
-EpdFontFamily mono8FontFamily(&mono8RegularFont, &mono8BoldFont, &mono8RegularFont, &mono8BoldFont);
 EpdFont mono10RegularFont(&mono_10_regular);
 EpdFont mono10BoldFont(&mono_10_bold);
 EpdFontFamily mono10FontFamily(&mono10RegularFont, &mono10BoldFont, &mono10RegularFont, &mono10BoldFont);
@@ -232,25 +218,25 @@ void setupDisplayAndFonts() {
   renderer.insertFont(BOOKERLY_14_FONT_ID, bookerly14FontFamily);
 #ifndef OMIT_FONTS
   renderer.insertFont(BOOKERLY_10_FONT_ID, bookerly10FontFamily);
-  renderer.insertFont(BOOKERLY_12_FONT_ID, bookerly12FontFamily);
   renderer.insertFont(BOOKERLY_16_FONT_ID, bookerly16FontFamily);
 
-  renderer.insertFont(NOTOSANS_12_FONT_ID, notosans12FontFamily);
   renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
   renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily);
   renderer.insertFont(OPENDYSLEXIC_6_FONT_ID, opendyslexic6FontFamily);
-  renderer.insertFont(OPENDYSLEXIC_8_FONT_ID, opendyslexic8FontFamily);
   renderer.insertFont(OPENDYSLEXIC_10_FONT_ID, opendyslexic10FontFamily);
   renderer.insertFont(OPENDYSLEXIC_12_FONT_ID, opendyslexic12FontFamily);
   renderer.insertFont(OPENDYSLEXIC_14_FONT_ID, opendyslexic14FontFamily);
 #endif  // OMIT_FONTS
   renderer.insertFont(MONO_6_FONT_ID, mono6FontFamily);
-  renderer.insertFont(MONO_8_FONT_ID, mono8FontFamily);
   renderer.insertFont(MONO_10_FONT_ID, mono10FontFamily);
   renderer.insertFont(MONO_12_FONT_ID, mono12FontFamily);
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
+
+  // Discover and load SD card fonts
+  sdFontSystem.begin(renderer);
+
   LOG_DBG("MAIN", "Fonts setup");
 }
 

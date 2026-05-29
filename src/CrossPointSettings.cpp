@@ -303,10 +303,8 @@ int CrossPointSettings::getRefreshFrequency() const {
 
 int CrossPointSettings::getCodeFontId() const {
   switch (fontSize) {
-    case X_SMALL:
-      return MONO_6_FONT_ID;
     case SMALL:
-      return MONO_8_FONT_ID;
+      return MONO_6_FONT_ID;
     case MEDIUM:
       return MONO_10_FONT_ID;
     case LARGE:
@@ -316,14 +314,18 @@ int CrossPointSettings::getCodeFontId() const {
 }
 
 int CrossPointSettings::getReaderFontId() const {
+  // SD card font selection overrides the built-in fontFamily enum.
+  if (sdFontFamilyName[0] != '\0' && sdFontIdResolver) {
+    int id = sdFontIdResolver(sdFontResolverCtx, sdFontFamilyName, fontSize);
+    if (id != 0) return id;
+    // SD font failed to load — fall through to built-in below.
+  }
   switch (fontFamily) {
     case BOOKERLY:
     default:
       switch (fontSize) {
-        case X_SMALL:
-          return BOOKERLY_10_FONT_ID;
         case SMALL:
-          return BOOKERLY_12_FONT_ID;
+          return BOOKERLY_10_FONT_ID;
         case MEDIUM:
         default:
           return BOOKERLY_14_FONT_ID;
@@ -332,10 +334,8 @@ int CrossPointSettings::getReaderFontId() const {
       }
     case NOTOSANS:
       switch (fontSize) {
-        case X_SMALL:
-          return SMALL_FONT_ID;  // NotoSans 8pt (no 10pt NotoSans available)
         case SMALL:
-          return NOTOSANS_12_FONT_ID;
+          return SMALL_FONT_ID;  // NotoSans 8pt (no 10pt NotoSans available)
         case MEDIUM:
         default:
           return NOTOSANS_14_FONT_ID;
@@ -345,21 +345,17 @@ int CrossPointSettings::getReaderFontId() const {
     case OPENDYSLEXIC:
       switch (fontSize) {
         case SMALL:
-          return OPENDYSLEXIC_8_FONT_ID;
+          return OPENDYSLEXIC_6_FONT_ID;
         case MEDIUM:
         default:
           return OPENDYSLEXIC_10_FONT_ID;
         case LARGE:
           return OPENDYSLEXIC_12_FONT_ID;
-        case X_SMALL:
-          return OPENDYSLEXIC_6_FONT_ID;
       }
     case MONOSPACE:
       switch (fontSize) {
-        case X_SMALL:
-          return MONO_6_FONT_ID;
         case SMALL:
-          return MONO_8_FONT_ID;
+          return MONO_6_FONT_ID;
         case MEDIUM:
           return MONO_10_FONT_ID;
         case LARGE:

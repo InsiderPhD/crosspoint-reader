@@ -23,6 +23,8 @@ enum class SettingAction {
   CheckForUpdates,
   Language,
   ResetStats,
+  FontFamily,
+  FontDownload,
 };
 
 struct SettingInfo {

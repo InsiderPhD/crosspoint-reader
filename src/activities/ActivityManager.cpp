@@ -2,6 +2,7 @@
 
 #include <HalPowerManager.h>
 
+#include "SdCardFontGlobals.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -17,8 +18,11 @@
 #include "util/FullScreenMessageActivity.h"
 
 void ActivityManager::begin() {
+  // 12 KB stack: SD card font rendering adds depth (file open + read + decode
+  // + ring-buffer insert) on top of an already-deep reader render path, which
+  // overflowed the previous 8 KB during on-demand glyph loading.
   xTaskCreate(&renderTaskTrampoline, "ActivityManagerRender",
-              8192,              // Stack size
+              12288,             // Stack size
               this,              // Parameters
               1,                 // Priority
               &renderTaskHandle  // Task handle
@@ -191,6 +195,7 @@ void ActivityManager::goToBrowser() {
 }
 
 void ActivityManager::goToReader(std::string path) {
+  ensureSdFontLoaded();
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path)));
 }
 

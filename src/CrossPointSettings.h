@@ -103,10 +103,13 @@ class CrossPointSettings {
   // Swapped: Next, Previous
   enum SIDE_BUTTON_LAYOUT { PREV_NEXT = 0, NEXT_PREV = 1, SIDE_BUTTON_LAYOUT_COUNT };
 
-  // Font family options
+  // Font family options (built-in fonts only; SD card fonts use sdFontFamilyName)
   enum FONT_FAMILY { BOOKERLY = 0, NOTOSANS = 1, OPENDYSLEXIC = 2, MONOSPACE = 3, FONT_FAMILY_COUNT };
+  static constexpr uint8_t BUILTIN_FONT_COUNT = FONT_FAMILY_COUNT;
   // Font size options
-  enum FONT_SIZE { SMALL = 0, MEDIUM = 1, LARGE = 2, X_SMALL = 3, FONT_SIZE_COUNT };
+  // Three sizes matching upstream. "Small" now uses what was previously "X Small"
+  // (Bookerly 10pt, OpenDyslexic 6pt, Mono 6pt — NotoSans falls back to 8pt SMALL_FONT_ID).
+  enum FONT_SIZE { SMALL = 0, MEDIUM = 1, LARGE = 2, FONT_SIZE_COUNT };
   enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, LINE_COMPRESSION_COUNT };
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,
@@ -199,6 +202,13 @@ class CrossPointSettings {
   uint8_t frontButtonRight = FRONT_HW_RIGHT;
   // Reader font settings
   uint8_t fontFamily = BOOKERLY;
+  // SD card font family name. Non-empty value overrides fontFamily.
+  char sdFontFamilyName[32] = "";
+  // SD font resolver: returns the font ID for (sdFontFamilyName, fontSize), or 0 if not loaded.
+  // Set by SdCardFontSystem::begin() so getReaderFontId() can route to SD fonts without
+  // a hard link from CrossPointSettings (which is also built into web/tests).
+  int (*sdFontIdResolver)(void* ctx, const char* familyName, uint8_t fontSizeEnum) = nullptr;
+  void* sdFontResolverCtx = nullptr;
   uint8_t fontSize = MEDIUM;
   uint8_t lineSpacing = NORMAL;
   uint8_t paragraphAlignment = JUSTIFIED;
