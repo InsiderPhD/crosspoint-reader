@@ -39,23 +39,22 @@ FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts
 
 void ensureSdFontLoaded() { sdFontSystem.ensureLoaded(renderer); }
 
-// Fonts
-EpdFont bookerly14RegularFont(&bookerly_14_regular);
-EpdFont bookerly14BoldFont(&bookerly_14_bold);
-EpdFont bookerly14ItalicFont(&bookerly_14_italic);
-EpdFontFamily bookerly14FontFamily(&bookerly14RegularFont, &bookerly14BoldFont, &bookerly14ItalicFont,
-                                   &bookerly14BoldFont);
+// Fonts. bookerly_8 is the default MEDIUM reader font so it stays outside
+// OMIT_FONTS (slim build still gets a working reader font).
+EpdFont bookerly8RegularFont(&bookerly_8_regular);
+EpdFont bookerly8BoldFont(&bookerly_8_bold);
+EpdFont bookerly8ItalicFont(&bookerly_8_italic);
+EpdFontFamily bookerly8FontFamily(&bookerly8RegularFont, &bookerly8BoldFont, &bookerly8ItalicFont, &bookerly8BoldFont);
 #ifndef OMIT_FONTS
+EpdFont bookerly6RegularFont(&bookerly_6_regular);
+EpdFont bookerly6BoldFont(&bookerly_6_bold);
+EpdFont bookerly6ItalicFont(&bookerly_6_italic);
+EpdFontFamily bookerly6FontFamily(&bookerly6RegularFont, &bookerly6BoldFont, &bookerly6ItalicFont, &bookerly6BoldFont);
 EpdFont bookerly10RegularFont(&bookerly_10_regular);
 EpdFont bookerly10BoldFont(&bookerly_10_bold);
 EpdFont bookerly10ItalicFont(&bookerly_10_italic);
 EpdFontFamily bookerly10FontFamily(&bookerly10RegularFont, &bookerly10BoldFont, &bookerly10ItalicFont,
                                    &bookerly10BoldFont);
-EpdFont bookerly16RegularFont(&bookerly_16_regular);
-EpdFont bookerly16BoldFont(&bookerly_16_bold);
-EpdFont bookerly16ItalicFont(&bookerly_16_italic);
-EpdFontFamily bookerly16FontFamily(&bookerly16RegularFont, &bookerly16BoldFont, &bookerly16ItalicFont,
-                                   &bookerly16BoldFont);
 
 EpdFont notosans14RegularFont(&notosans_14_regular);
 EpdFont notosans14BoldFont(&notosans_14_bold);
@@ -215,10 +214,10 @@ void setupDisplayAndFonts() {
   }
   fontCacheManager.setFontDecompressor(&fontDecompressor);
   renderer.setFontCacheManager(&fontCacheManager);
-  renderer.insertFont(BOOKERLY_14_FONT_ID, bookerly14FontFamily);
+  renderer.insertFont(BOOKERLY_8_FONT_ID, bookerly8FontFamily);
 #ifndef OMIT_FONTS
+  renderer.insertFont(BOOKERLY_6_FONT_ID, bookerly6FontFamily);
   renderer.insertFont(BOOKERLY_10_FONT_ID, bookerly10FontFamily);
-  renderer.insertFont(BOOKERLY_16_FONT_ID, bookerly16FontFamily);
 
   renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
   renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily);

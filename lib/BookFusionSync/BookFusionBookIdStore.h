@@ -6,6 +6,13 @@ struct BookFusionStoredPosition {
   float percentage = 0.0f;
   float pagePositionInBook = 0.0f;
   int chapterIndex = 0;
+  // Exact page coordinates from the moment we synced. Used for an integer-
+  // exact "did local advance?" check that doesn't fall through to the
+  // floating-point epsilon, which can hide a 2-page advance in books with
+  // many chapters. -1/0 mean the sidecar predates this field or was written
+  // by an apply-remote (where local pageNumber isn't known yet).
+  int pageNumber = -1;
+  int totalPages = 0;
 };
 
 /**

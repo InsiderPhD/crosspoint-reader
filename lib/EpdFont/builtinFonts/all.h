@@ -1,17 +1,14 @@
 #pragma once
 
+#include <builtinFonts/bookerly_6_bold.h>
+#include <builtinFonts/bookerly_6_italic.h>
+#include <builtinFonts/bookerly_6_regular.h>
+#include <builtinFonts/bookerly_8_bold.h>
+#include <builtinFonts/bookerly_8_italic.h>
+#include <builtinFonts/bookerly_8_regular.h>
 #include <builtinFonts/bookerly_10_bold.h>
 #include <builtinFonts/bookerly_10_italic.h>
 #include <builtinFonts/bookerly_10_regular.h>
-#include <builtinFonts/bookerly_12_bold.h>
-#include <builtinFonts/bookerly_12_italic.h>
-#include <builtinFonts/bookerly_12_regular.h>
-#include <builtinFonts/bookerly_14_bold.h>
-#include <builtinFonts/bookerly_14_italic.h>
-#include <builtinFonts/bookerly_14_regular.h>
-#include <builtinFonts/bookerly_16_bold.h>
-#include <builtinFonts/bookerly_16_italic.h>
-#include <builtinFonts/bookerly_16_regular.h>
 
 #include <builtinFonts/notosans_8_regular.h>
 #include <builtinFonts/notosans_12_bold.h>

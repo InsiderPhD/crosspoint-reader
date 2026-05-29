@@ -66,12 +66,17 @@ float clampUnit(const float value) {
   return value;
 }
 
+// BookFusion's page_position_in_book uses the "start-of-page" convention:
+//   page N of M chapter pages -> intra = N / M  (0-based N, so page 0 -> 0)
+// The previous N / (M-1) endpoint convention caused the web reader to land
+// one page ahead because its decoder does floor/round(intra * M). Match the
+// convention so floor(intra * M) recovers the original page exactly.
 float pageToIntraSpineProgress(const int pageNumber, const int totalPages) {
-  if (totalPages <= 1) {
+  if (totalPages <= 0) {
     return 0.0f;
   }
   const int clampedPage = std::max(0, std::min(pageNumber, totalPages - 1));
-  return static_cast<float>(clampedPage) / static_cast<float>(totalPages - 1);
+  return static_cast<float>(clampedPage) / static_cast<float>(totalPages);
 }
 
 bool makeBookFusionPosition(const std::shared_ptr<Epub>& epub, const int spineIndex, const int pageNumber,
@@ -123,14 +128,32 @@ BookFusionStoredPosition storedPositionFromBookFusion(const BookFusionPosition& 
   stored.percentage = pos.percentage;
   stored.chapterIndex = pos.chapterIndex;
   stored.pagePositionInBook = pos.pagePositionInBook;
+  // pageNumber/totalPages stay at sentinel; callers that know the local
+  // chapter-relative page should overwrite them before persisting.
   return stored;
 }
 
-bool sameBookFusionPosition(const BookFusionStoredPosition& stored, const BookFusionPosition& pos) {
+// Returns true if the current local reading position matches the stored
+// last-synced position. When the stored sidecar has integer page coordinates
+// (post-upgrade sync after a local upload), compare those exactly — that
+// catches a 2-page advance that the float epsilon would otherwise swallow in
+// books with many chapters. Falls back to the float epsilon for legacy
+// sidecars and for stored positions written after an apply-remote (where the
+// local page number isn't known at save time).
+bool sameBookFusionPosition(const BookFusionStoredPosition& stored, const BookFusionPosition& pos, int localPageNumber,
+                            int localTotalPages) {
+  if (stored.chapterIndex != pos.chapterIndex) return false;
+  if (stored.pageNumber >= 0 && stored.totalPages > 0 && localPageNumber >= 0 && localTotalPages > 0) {
+    // Integer-exact comparison. totalPages can drift if the layout changed
+    // (font/orientation change repaginated the chapter); when that happens
+    // fall back to the float check rather than spuriously reporting "changed".
+    if (stored.totalPages == localTotalPages) {
+      return stored.pageNumber == localPageNumber;
+    }
+  }
   static constexpr float PAGE_POSITION_EPSILON = 0.0005f;
   static constexpr float PERCENTAGE_EPSILON = 0.05f;
-  return stored.chapterIndex == pos.chapterIndex &&
-         std::fabs(stored.pagePositionInBook - pos.pagePositionInBook) <= PAGE_POSITION_EPSILON &&
+  return std::fabs(stored.pagePositionInBook - pos.pagePositionInBook) <= PAGE_POSITION_EPSILON &&
          std::fabs(stored.percentage - pos.percentage) <= PERCENTAGE_EPSILON;
 }
 
@@ -1491,23 +1514,32 @@ void EpubReaderActivity::performBookFusionSync() {
     const bool canCompareSyncState = canCompareUpdatedAt && hasLastSyncedPosition;
     const bool remoteIsNewer = canCompareUpdatedAt && strcmp(remoteBfPos.updatedAt, lastSyncAt) > 0;
     const bool remoteIsFurtherAhead = remoteBfPos.percentage > localBfPos.percentage + 1.0f;
+    // Symmetric guard so a remote write that left the position behind local
+    // (e.g. another device briefly opened the book and re-synced without
+    // advancing) doesn't drag us backward just because its updated_at is later.
+    const bool localIsFurtherAhead = localBfPos.percentage > remoteBfPos.percentage + 1.0f;
     const bool localChangedSinceLastSync =
-        hasLastSyncedPosition && !sameBookFusionPosition(lastSyncedPosition, localBfPos);
+        hasLastSyncedPosition && !sameBookFusionPosition(lastSyncedPosition, localBfPos, currentPage, totalPages);
 
     if (canCompareSyncState) {
-      LOG_DBG("BFS", "Last synced at %s; remote updated_at=%s; local changed=%d", lastSyncAt, remoteBfPos.updatedAt,
-              localChangedSinceLastSync ? 1 : 0);
+      LOG_DBG("BFS", "Last synced at %s; remote updated_at=%s; local changed=%d; localAhead=%d", lastSyncAt,
+              remoteBfPos.updatedAt, localChangedSinceLastSync ? 1 : 0, localIsFurtherAhead ? 1 : 0);
     } else if (canCompareUpdatedAt) {
       LOG_DBG("BFS", "Have sync timestamp but no stored sync position; falling back to furthest-ahead rule");
     } else {
       LOG_DBG("BFS", "No comparable sync timestamp; falling back to furthest-ahead rule");
     }
 
+    // Never drag local backward: if local is meaningfully ahead of remote, keep
+    // local and upload. This overrides the "remote newer wins" rule because a
+    // newer timestamp on a behind-position is most often a stale write from
+    // another device that opened the book without advancing.
     const bool shouldApplyRemote =
-        (canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) ||
-        (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync && !internetTimeSynced &&
-         remoteIsFurtherAhead) ||
-        (!canCompareSyncState && remoteIsFurtherAhead);
+        !localIsFurtherAhead &&
+        ((canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) ||
+         (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync && !internetTimeSynced &&
+          remoteIsFurtherAhead) ||
+         (!canCompareSyncState && remoteIsFurtherAhead));
 
     if (shouldApplyRemote) {
       if (canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) {
@@ -1516,6 +1548,17 @@ void EpubReaderActivity::performBookFusionSync() {
         LOG_DBG("BFS", "Internet time unavailable; remote is further ahead, updating local position");
       } else {
         LOG_DBG("BFS", "Remote progress ahead, updating local position");
+      }
+
+      // Show direction-clear popup so the user can see we're pulling FROM
+      // BookFusion (rather than the opposite).
+      {
+        RenderLock lock(*this);
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Applying remote progress (%.0f%%)...", remoteBfPos.percentage);
+        UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
+        if (SETTINGS.darkMode) renderer.invertScreen();
+        renderer.displayBuffer();
       }
 
       int remoteSpineIndex = 0;
@@ -1555,6 +1598,8 @@ void EpubReaderActivity::performBookFusionSync() {
       LOG_DBG("BFS", "Local position changed; using freshly synced internet time and uploading local progress");
     } else if (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync) {
       LOG_DBG("BFS", "Local and remote both changed without internet time; keeping furthest-ahead fallback");
+    } else if (localIsFurtherAhead && remoteIsNewer) {
+      LOG_DBG("BFS", "Remote updated_at is newer but remote position is behind local; uploading local");
     }
   } else if (downloadResult == BookFusionSyncClient::NOT_FOUND) {
     LOG_DBG("BFS", "No remote progress found, will upload current position");
@@ -1564,10 +1609,12 @@ void EpubReaderActivity::performBookFusionSync() {
 
   BookFusionSyncClient::Error uploadResult = BookFusionSyncClient::OK;
   if (shouldUploadProgress) {
-    // Show upload popup
+    // Show direction-clear popup so the user can see we're pushing TO BookFusion.
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Uploading progress...");
+      char msg[64];
+      snprintf(msg, sizeof(msg), "Uploading local progress (%.0f%%)...", localBfPos.percentage);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -1584,7 +1631,13 @@ void EpubReaderActivity::performBookFusionSync() {
           LOG_DBG("BFS", "Recorded local sync timestamp %s (upload omitted updated_at)", localTs);
         }
       }
-      BookFusionBookIdStore::saveLastSyncedPosition(epubPath.c_str(), storedPositionFromBookFusion(uploadedBfPos));
+      BookFusionStoredPosition stored = storedPositionFromBookFusion(uploadedBfPos);
+      // Capture exact page coordinates so the next sync's
+      // localChangedSinceLastSync check is integer-exact instead of falling
+      // through to the float epsilon (which can hide a small advance).
+      stored.pageNumber = currentPage;
+      stored.totalPages = totalPages;
+      BookFusionBookIdStore::saveLastSyncedPosition(epubPath.c_str(), stored);
     }
   }
 
@@ -1592,12 +1645,16 @@ void EpubReaderActivity::performBookFusionSync() {
   {
     RenderLock lock(*this);
     if (appliedRemoteProgress) {
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Remote progress applied!");
+      char msg[80];
+      snprintf(msg, sizeof(msg), "Pulled from BookFusion\n%.1f%% applied to device", remoteBfPos.percentage);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
     } else if (alreadyUpToDate) {
       UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Progress already up to date.");
     } else if (uploadResult == BookFusionSyncClient::OK) {
       LOG_DBG("BFS", "Progress uploaded successfully");
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Sync completed successfully!");
+      char msg[80];
+      snprintf(msg, sizeof(msg), "Pushed to BookFusion\n%.1f%% uploaded from device", localBfPos.percentage);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
     } else {
       LOG_DBG("BFS", "Upload failed: %s", BookFusionSyncClient::errorString(uploadResult));
       char errorMsg[128];
@@ -1627,6 +1684,7 @@ void EpubReaderActivity::performBookFusionSync() {
   pagesUntilFullRefresh = 1;
   requestUpdateAndWait();
 }
+
 
 ScreenshotInfo EpubReaderActivity::getScreenshotInfo() const {
   ScreenshotInfo info;

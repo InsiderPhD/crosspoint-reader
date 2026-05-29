@@ -101,6 +101,8 @@ bool BookFusionBookIdStore::loadLastSyncedPosition(const char* epubPath, BookFus
   out.percentage = doc["last_sync_percentage"] | 0.0f;
   out.chapterIndex = doc["last_sync_chapter_index"] | 0;
   out.pagePositionInBook = doc["last_sync_page_position_in_book"] | 0.0f;
+  out.pageNumber = doc["last_sync_page_number"] | -1;
+  out.totalPages = doc["last_sync_total_pages"] | 0;
   return true;
 }
 
@@ -189,6 +191,8 @@ bool BookFusionBookIdStore::saveLastSyncedPosition(const char* epubPath, const B
   doc["last_sync_percentage"] = position.percentage;
   doc["last_sync_chapter_index"] = position.chapterIndex;
   doc["last_sync_page_position_in_book"] = position.pagePositionInBook;
+  doc["last_sync_page_number"] = position.pageNumber;
+  doc["last_sync_total_pages"] = position.totalPages;
 
   String json;
   serializeJson(doc, json);
