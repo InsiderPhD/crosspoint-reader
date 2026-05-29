@@ -134,6 +134,24 @@ bool sameBookFusionPosition(const BookFusionStoredPosition& stored, const BookFu
          std::fabs(stored.percentage - pos.percentage) <= PERCENTAGE_EPSILON;
 }
 
+// Format the current device clock as an ISO 8601 UTC timestamp matching the
+// shape BookFusion uses for `updated_at` (e.g. "2026-05-29T17:56:12.000Z").
+// Caller must have NTP-synced the clock first — without that the formatted
+// string is meaningless. Returns true on success, false if the clock looks
+// uninitialised (year < 2024).
+bool formatLocalSyncTimestamp(char* out, size_t outLen) {
+  if (!out || outLen < 25) return false;
+  time_t now = time(nullptr);
+  struct tm tm_utc;
+  if (!gmtime_r(&now, &tm_utc)) return false;
+  if (tm_utc.tm_year + 1900 < 2024) return false;  // clock not synced
+  // strftime can't emit ".000Z"; build it by hand to match server format
+  // so string comparisons against remote updated_at sort correctly.
+  snprintf(out, outLen, "%04d-%02d-%02dT%02d:%02d:%02d.000Z", tm_utc.tm_year + 1900, tm_utc.tm_mon + 1, tm_utc.tm_mday,
+           tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
+  return true;
+}
+
 bool syncBookFusionTimeWithNTP() {
   if (esp_sntp_enabled()) {
     esp_sntp_stop();
@@ -343,6 +361,10 @@ void EpubReaderActivity::loop() {
         // WiFi connected, perform BookFusion sync
         performBookFusionSync();
       });
+    } else if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_NONE) {
+      // No-op. longPressFeedbackShown stays true so the matching release won't
+      // open the reader menu — holding Confirm with this setting means "do
+      // nothing, keep reading".
     } else {
       // Default: full e-ink refresh to clear ghosting
       RenderLock lock;
@@ -1114,13 +1136,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
   const auto tDisplay = millis();
 
-  // Save bw buffer to reset buffer state after grayscale data sync
-  renderer.storeBwBuffer();
+  // Save bw buffer to reset buffer state after grayscale data sync.
+  // If allocation fails (heap fragmentation, typically after WiFi/sync ops),
+  // skip the grayscale pass entirely — running it without a saved BW buffer
+  // leaves the screen in a half-grayscale state (visible ghosting).
+  const bool bwStored = renderer.storeBwBuffer();
   const auto tBwStore = millis();
 
   // grayscale rendering — skipped in dark mode (AA LUT was computed for black-on-white)
   // TODO: Only do this if font supports it
-  if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode) {
+  if (bwStored && SETTINGS.textAntiAliasing && !SETTINGS.darkMode) {
     renderer.clearScreen(0x00);
     renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
     page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
@@ -1507,6 +1532,14 @@ void EpubReaderActivity::performBookFusionSync() {
         appliedRemoteProgress = true;
         if (remoteBfPos.updatedAt[0] != '\0') {
           BookFusionBookIdStore::saveLastSyncAt(epubPath.c_str(), remoteBfPos.updatedAt);
+        } else if (internetTimeSynced) {
+          // Fall back to local NTP-synced clock so the next sync has a baseline
+          // to compare against and won't drop into "furthest-ahead wins".
+          char localTs[40];
+          if (formatLocalSyncTimestamp(localTs, sizeof(localTs))) {
+            BookFusionBookIdStore::saveLastSyncAt(epubPath.c_str(), localTs);
+            LOG_DBG("BFS", "Recorded local sync timestamp %s (remote omitted updated_at)", localTs);
+          }
         }
         BookFusionBookIdStore::saveLastSyncedPosition(epubPath.c_str(), storedPositionFromBookFusion(remoteBfPos));
         LOG_DBG("BFS", "Applied remote BookFusion position: chapter %d, intra %.2f%%", remoteSpineIndex,
@@ -1544,6 +1577,12 @@ void EpubReaderActivity::performBookFusionSync() {
     if (uploadResult == BookFusionSyncClient::OK) {
       if (uploadedBfPos.updatedAt[0] != '\0') {
         BookFusionBookIdStore::saveLastSyncAt(epubPath.c_str(), uploadedBfPos.updatedAt);
+      } else if (internetTimeSynced) {
+        char localTs[40];
+        if (formatLocalSyncTimestamp(localTs, sizeof(localTs))) {
+          BookFusionBookIdStore::saveLastSyncAt(epubPath.c_str(), localTs);
+          LOG_DBG("BFS", "Recorded local sync timestamp %s (upload omitted updated_at)", localTs);
+        }
       }
       BookFusionBookIdStore::saveLastSyncedPosition(epubPath.c_str(), storedPositionFromBookFusion(uploadedBfPos));
     }
@@ -1570,9 +1609,22 @@ void EpubReaderActivity::performBookFusionSync() {
   }
 
   // Wait briefly to show the completion message, then redraw the page so
-  // the user can continue reading. The "Sync completed successfully!" toast
-  // is feedback enough — no need to flash a full refresh on top.
+  // the user can continue reading.
   vTaskDelay(1500 / portTICK_PERIOD_MS);
+
+  // Drop WiFi before redrawing. TLS/HTTP buffers and the LWIP control blocks
+  // hold tens of KB of heap; if we leave them up the grayscale render's
+  // storeBwBuffer() (six 8 KB chunks) can fail to find a contiguous block,
+  // leaving the screen in a half-grayscale state — that's the post-sync
+  // ghosting we saw in the field.
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  delay(100);
+
+  // Force a full refresh on the next render to clear residue from the popup
+  // sequence (4× fast refresh in the sync flow above) and any grayscale
+  // half-frame.
+  pagesUntilFullRefresh = 1;
   requestUpdateAndWait();
 }
 

@@ -158,7 +158,12 @@ class CrossPointSettings {
   enum DARK_MODE { DARK_MODE_OFF = 0, DARK_MODE_ON = 1, DARK_MODE_COUNT };
 
   // Long press confirm button action
-  enum LONG_PRESS_ACTION { LONG_PRESS_REFRESH = 0, LONG_PRESS_SYNC = 1, LONG_PRESS_ACTION_COUNT };
+  enum LONG_PRESS_ACTION {
+    LONG_PRESS_REFRESH = 0,
+    LONG_PRESS_SYNC = 1,
+    LONG_PRESS_NONE = 2,
+    LONG_PRESS_ACTION_COUNT
+  };
 
 
   // Sleep screen settings
