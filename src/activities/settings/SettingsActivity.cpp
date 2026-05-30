@@ -279,7 +279,7 @@ void SettingsActivity::render(RenderLock&&) {
           if (SETTINGS.sdFontFamilyName[0] != '\0') {
             valueText = SETTINGS.sdFontFamilyName;
           } else {
-            static const StrId builtinFontNames[] = {StrId::STR_BOOKERLY, StrId::STR_NOTO_SANS,
+            static const StrId builtinFontNames[] = {StrId::STR_BOOKERLY, StrId::STR_INTER,
                                                      StrId::STR_OPEN_DYSLEXIC, StrId::STR_MONOSPACE};
             const uint8_t f = SETTINGS.fontFamily;
             if (f < sizeof(builtinFontNames) / sizeof(builtinFontNames[0])) {

@@ -90,12 +90,17 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
 }
 
 // Consumes data to minimize memory usage
-void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int fontId, const uint16_t viewportWidth,
+void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int baseFontId, const uint16_t viewportWidth,
                                        const std::function<void(std::shared_ptr<TextBlock>)>& processLine,
                                        const bool includeLastLine) {
   if (words.empty()) {
     return;
   }
+
+  // A block may override the reader font (e.g. <pre> code blocks use monospace). Measure and
+  // lay out with the same font TextBlock::render will draw with, otherwise the wrapping math
+  // uses the wrong glyph metrics and lines overflow or under-fill. Mirrors TextBlock::render.
+  const int fontId = blockStyle.fontOverride != 0 ? blockStyle.fontOverride : baseFontId;
 
   // Apply fixed transforms before any per-line layout work.
   applyParagraphIndent();

@@ -55,6 +55,31 @@ EpdFont bookerly10BoldFont(&bookerly_10_bold);
 EpdFont bookerly10ItalicFont(&bookerly_10_italic);
 EpdFontFamily bookerly10FontFamily(&bookerly10RegularFont, &bookerly10BoldFont, &bookerly10ItalicFont,
                                    &bookerly10BoldFont);
+EpdFont bookerly12RegularFont(&bookerly_12_regular);
+EpdFont bookerly12BoldFont(&bookerly_12_bold);
+EpdFont bookerly12ItalicFont(&bookerly_12_italic);
+EpdFontFamily bookerly12FontFamily(&bookerly12RegularFont, &bookerly12BoldFont, &bookerly12ItalicFont,
+                                   &bookerly12BoldFont);
+
+// Inter is the sans-serif reader family, normalised to Bookerly sizes (6/8/10/12). Kept
+// fully separate from the UI's NotoSans (SMALL_FONT) so regenerating reader fonts never
+// touches the UI font.
+EpdFont inter6RegularFont(&inter_6_regular);
+EpdFont inter6BoldFont(&inter_6_bold);
+EpdFont inter6ItalicFont(&inter_6_italic);
+EpdFontFamily inter6FontFamily(&inter6RegularFont, &inter6BoldFont, &inter6ItalicFont, &inter6BoldFont);
+EpdFont inter8RegularFont(&inter_8_regular);
+EpdFont inter8BoldFont(&inter_8_bold);
+EpdFont inter8ItalicFont(&inter_8_italic);
+EpdFontFamily inter8FontFamily(&inter8RegularFont, &inter8BoldFont, &inter8ItalicFont, &inter8BoldFont);
+EpdFont inter10RegularFont(&inter_10_regular);
+EpdFont inter10BoldFont(&inter_10_bold);
+EpdFont inter10ItalicFont(&inter_10_italic);
+EpdFontFamily inter10FontFamily(&inter10RegularFont, &inter10BoldFont, &inter10ItalicFont, &inter10BoldFont);
+EpdFont inter12RegularFont(&inter_12_regular);
+EpdFont inter12BoldFont(&inter_12_bold);
+EpdFont inter12ItalicFont(&inter_12_italic);
+EpdFontFamily inter12FontFamily(&inter12RegularFont, &inter12BoldFont, &inter12ItalicFont, &inter12BoldFont);
 
 EpdFont notosans14RegularFont(&notosans_14_regular);
 EpdFont notosans14BoldFont(&notosans_14_bold);
@@ -72,6 +97,11 @@ EpdFont opendyslexic6BoldFont(&opendyslexic_6_bold);
 EpdFont opendyslexic6ItalicFont(&opendyslexic_6_italic);
 EpdFontFamily opendyslexic6FontFamily(&opendyslexic6RegularFont, &opendyslexic6BoldFont, &opendyslexic6ItalicFont,
                                       &opendyslexic6BoldFont);
+EpdFont opendyslexic8RegularFont(&opendyslexic_8_regular);
+EpdFont opendyslexic8BoldFont(&opendyslexic_8_bold);
+EpdFont opendyslexic8ItalicFont(&opendyslexic_8_italic);
+EpdFontFamily opendyslexic8FontFamily(&opendyslexic8RegularFont, &opendyslexic8BoldFont, &opendyslexic8ItalicFont,
+                                      &opendyslexic8BoldFont);
 EpdFont opendyslexic10RegularFont(&opendyslexic_10_regular);
 EpdFont opendyslexic10BoldFont(&opendyslexic_10_bold);
 EpdFont opendyslexic10ItalicFont(&opendyslexic_10_italic);
@@ -92,6 +122,9 @@ EpdFontFamily opendyslexic14FontFamily(&opendyslexic14RegularFont, &opendyslexic
 EpdFont mono6RegularFont(&mono_6_regular);
 EpdFont mono6BoldFont(&mono_6_bold);
 EpdFontFamily mono6FontFamily(&mono6RegularFont, &mono6BoldFont, &mono6RegularFont, &mono6BoldFont);
+EpdFont mono8RegularFont(&mono_8_regular);
+EpdFont mono8BoldFont(&mono_8_bold);
+EpdFontFamily mono8FontFamily(&mono8RegularFont, &mono8BoldFont, &mono8RegularFont, &mono8BoldFont);
 EpdFont mono10RegularFont(&mono_10_regular);
 EpdFont mono10BoldFont(&mono_10_bold);
 EpdFontFamily mono10FontFamily(&mono10RegularFont, &mono10BoldFont, &mono10RegularFont, &mono10BoldFont);
@@ -218,15 +251,22 @@ void setupDisplayAndFonts() {
 #ifndef OMIT_FONTS
   renderer.insertFont(BOOKERLY_6_FONT_ID, bookerly6FontFamily);
   renderer.insertFont(BOOKERLY_10_FONT_ID, bookerly10FontFamily);
+  renderer.insertFont(BOOKERLY_12_FONT_ID, bookerly12FontFamily);
 
+  renderer.insertFont(INTER_6_FONT_ID, inter6FontFamily);
+  renderer.insertFont(INTER_8_FONT_ID, inter8FontFamily);
+  renderer.insertFont(INTER_10_FONT_ID, inter10FontFamily);
+  renderer.insertFont(INTER_12_FONT_ID, inter12FontFamily);
   renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
   renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily);
   renderer.insertFont(OPENDYSLEXIC_6_FONT_ID, opendyslexic6FontFamily);
+  renderer.insertFont(OPENDYSLEXIC_8_FONT_ID, opendyslexic8FontFamily);
   renderer.insertFont(OPENDYSLEXIC_10_FONT_ID, opendyslexic10FontFamily);
   renderer.insertFont(OPENDYSLEXIC_12_FONT_ID, opendyslexic12FontFamily);
   renderer.insertFont(OPENDYSLEXIC_14_FONT_ID, opendyslexic14FontFamily);
 #endif  // OMIT_FONTS
   renderer.insertFont(MONO_6_FONT_ID, mono6FontFamily);
+  renderer.insertFont(MONO_8_FONT_ID, mono8FontFamily);
   renderer.insertFont(MONO_10_FONT_ID, mono10FontFamily);
   renderer.insertFont(MONO_12_FONT_ID, mono12FontFamily);
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);

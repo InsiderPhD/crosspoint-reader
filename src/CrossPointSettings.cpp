@@ -236,7 +236,7 @@ float CrossPointSettings::getReaderLineCompression() const {
         case WIDE:
           return 1.1f;
       }
-    case NOTOSANS:
+    case INTER:
       switch (lineSpacing) {
         case TIGHT:
           return 0.90f;
@@ -302,13 +302,16 @@ int CrossPointSettings::getRefreshFrequency() const {
 }
 
 int CrossPointSettings::getCodeFontId() const {
+  // Sizes match Bookerly (6/8/10/12) so code blocks read at the same scale as body text.
   switch (fontSize) {
     case SMALL:
       return MONO_6_FONT_ID;
     case MEDIUM:
-      return MONO_10_FONT_ID;
-    case LARGE:
     default:
+      return MONO_8_FONT_ID;
+    case LARGE:
+      return MONO_10_FONT_ID;
+    case EXTRA_LARGE:
       return MONO_12_FONT_ID;
   }
 }
@@ -320,6 +323,8 @@ int CrossPointSettings::getReaderFontId() const {
     if (id != 0) return id;
     // SD font failed to load — fall through to built-in below.
   }
+  // All families normalised to the same point sizes (6/8/10/12) so switching family
+  // or size keeps text at a consistent scale.
   switch (fontFamily) {
     case BOOKERLY:
     default:
@@ -331,16 +336,20 @@ int CrossPointSettings::getReaderFontId() const {
           return BOOKERLY_8_FONT_ID;
         case LARGE:
           return BOOKERLY_10_FONT_ID;
+        case EXTRA_LARGE:
+          return BOOKERLY_12_FONT_ID;
       }
-    case NOTOSANS:
+    case INTER:
       switch (fontSize) {
         case SMALL:
-          return SMALL_FONT_ID;  // NotoSans 8pt (no 10pt NotoSans available)
+          return INTER_6_FONT_ID;
         case MEDIUM:
         default:
-          return NOTOSANS_14_FONT_ID;
+          return INTER_8_FONT_ID;
         case LARGE:
-          return NOTOSANS_16_FONT_ID;
+          return INTER_10_FONT_ID;
+        case EXTRA_LARGE:
+          return INTER_12_FONT_ID;
       }
     case OPENDYSLEXIC:
       switch (fontSize) {
@@ -348,8 +357,10 @@ int CrossPointSettings::getReaderFontId() const {
           return OPENDYSLEXIC_6_FONT_ID;
         case MEDIUM:
         default:
-          return OPENDYSLEXIC_10_FONT_ID;
+          return OPENDYSLEXIC_8_FONT_ID;
         case LARGE:
+          return OPENDYSLEXIC_10_FONT_ID;
+        case EXTRA_LARGE:
           return OPENDYSLEXIC_12_FONT_ID;
       }
     case MONOSPACE:
@@ -357,9 +368,11 @@ int CrossPointSettings::getReaderFontId() const {
         case SMALL:
           return MONO_6_FONT_ID;
         case MEDIUM:
-          return MONO_10_FONT_ID;
-        case LARGE:
         default:
+          return MONO_8_FONT_ID;
+        case LARGE:
+          return MONO_10_FONT_ID;
+        case EXTRA_LARGE:
           return MONO_12_FONT_ID;
       }
   }

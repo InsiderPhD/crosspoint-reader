@@ -38,6 +38,12 @@ struct PageResult {
 struct SyncResult {
   int spineIndex = 0;
   int page = 0;
+  // BookFusion stores positions as a percent within the spine item, not a
+  // literal page number. When the result comes from BookFusion, the reader
+  // uses this fraction (via pendingSpineProgress / pendingPercentJump) to
+  // resolve the destination page once the new section's pageCount is known.
+  // < 0 means "use page" (KOReader path).
+  float intraSpineProgress = -1.0f;
 };
 
 enum class NetworkMode;

@@ -26,6 +26,7 @@
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
 #include "BookFusionBookIdStore.h"
+#include "BookFusionSyncActivity.h"
 #include "BookFusionSyncClient.h"
 #include "BookFusionTokenStore.h"
 #include "QrDisplayActivity.h"
@@ -38,7 +39,13 @@
 #include "fontIds.h"
 #include "util/ScreenshotUtil.h"
 
-namespace {
+// NOTE: This file used to wrap its helpers in an anonymous namespace.
+// BookFusionSyncActivity needs to call makeBookFusionPosition,
+// resolveBookFusionPosition, storedPositionFromBookFusion, and
+// formatLocalSyncTimestamp; those four (and the helpers they depend on) are
+// now externally linked so the activity can share them rather than
+// duplicating the position math.
+
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
 constexpr unsigned long skipChapterMs = 700;
 // pages per minute, first item is 1 to prevent division by zero if accessed
@@ -199,8 +206,6 @@ bool syncBookFusionTimeWithNTP() {
   }
   return ok;
 }
-
-}  // namespace
 
 void EpubReaderActivity::buildBookPageCache() {
   const int spineCount = epub->getSpineItemsCount();
@@ -708,20 +713,50 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       requestUpdate();
       break;
     }
-    case EpubReaderMenuActivity::MenuAction::SYNC: {
-      // Check if this is a BookFusion book and we have BookFusion credentials
+    case EpubReaderMenuActivity::MenuAction::SYNC_PUSH:
+    case EpubReaderMenuActivity::MenuAction::SYNC_PULL: {
+      const bool isPush = (action == EpubReaderMenuActivity::MenuAction::SYNC_PUSH);
       std::string epubPath = epub->getPath();
       uint32_t bookId = BookFusionBookIdStore::loadBookId(epubPath.c_str());
 
       if (bookId != 0 && BF_TOKEN_STORE.hasToken()) {
-        // BookFusion book with valid account - use BookFusion sync
-        // First ensure WiFi is connected with popup feedback
-        connectWifiForSyncWithPopup([this]() {
-          // WiFi connected, perform BookFusion sync
-          performBookFusionSync();
-        });
+        // BookFusion book with a valid account. Full-screen WiFi selection,
+        // then full-screen sync activity. Mirrors the KOReader sync flow so
+        // the two paths feel consistent.
+        const int currentPage = section ? section->currentPage : nextPageNumber;
+        const int totalPages = section ? section->pageCount : cachedChapterTotalPageCount;
+        const int spineIndex = currentSpineIndex;
+        const auto bfDirection =
+            isPush ? BookFusionSyncActivity::Direction::PUSH : BookFusionSyncActivity::Direction::PULL;
+        startActivityForResult(
+            std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+            [this, bookId, spineIndex, currentPage, totalPages, bfDirection](const ActivityResult& result) {
+              if (result.isCancelled) return;
+              startActivityForResult(std::make_unique<BookFusionSyncActivity>(renderer, mappedInput, epub, bookId,
+                                                                              spineIndex, currentPage, totalPages,
+                                                                              bfDirection),
+                                     [this](const ActivityResult& syncResult) {
+                                       if (syncResult.isCancelled) return;
+                                       const auto& sync = std::get<SyncResult>(syncResult.data);
+                                       RenderLock lock(*this);
+                                       currentSpineIndex = sync.spineIndex;
+                                       nextPageNumber = 0;
+                                       cachedChapterTotalPageCount = 0;
+                                       pendingPageJump.reset();
+                                       if (sync.intraSpineProgress >= 0.0f) {
+                                         pendingSpineProgress = sync.intraSpineProgress;
+                                         pendingPercentJump = true;
+                                       } else {
+                                         nextPageNumber = sync.page;
+                                       }
+                                       section.reset();
+                                       pagesUntilFullRefresh = 1;  // full refresh on the post-sync redraw
+                                     });
+            });
       } else if (KOREADER_STORE.hasCredentials()) {
-        // Fall back to KOReader sync if not BookFusion book but have KOReader credentials
+        // KOReader fallback. KOReaderSyncActivity already runs its own full-
+        // screen WiFi selection — pass the direction so it skips its result
+        // comparison screen and performs the chosen direction immediately.
         const int currentPage = section ? section->currentPage : nextPageNumber;
         const int totalPages = section ? section->pageCount : cachedChapterTotalPageCount;
         std::optional<uint16_t> paragraphIndex;
@@ -732,23 +767,26 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             paragraphIndex = *pIdx;
           }
         }
-        startActivityForResult(
-            std::make_unique<KOReaderSyncActivity>(renderer, mappedInput, epub, epub->getPath(), currentSpineIndex,
-                                                   currentPage, totalPages, paragraphIndex),
-            [this](const ActivityResult& result) {
-              if (!result.isCancelled) {
-                const auto& sync = std::get<SyncResult>(result.data);
-                if (currentSpineIndex != sync.spineIndex || (section && section->currentPage != sync.page)) {
-                  RenderLock lock(*this);
-                  currentSpineIndex = sync.spineIndex;
-                  nextPageNumber = sync.page;
-                  cachedChapterTotalPageCount = 0;  // Prevent rescaling sync page
-                  pendingPageJump.reset();
-                  saveProgress(currentSpineIndex, nextPageNumber, 0);
-                  section.reset();
-                }
-              }
-            });
+        const auto direction =
+            isPush ? KOReaderSyncActivity::Direction::PUSH : KOReaderSyncActivity::Direction::PULL;
+        startActivityForResult(std::make_unique<KOReaderSyncActivity>(renderer, mappedInput, epub, epub->getPath(),
+                                                                      currentSpineIndex, currentPage, totalPages,
+                                                                      paragraphIndex, direction),
+                               [this](const ActivityResult& result) {
+                                 if (!result.isCancelled) {
+                                   const auto& sync = std::get<SyncResult>(result.data);
+                                   if (currentSpineIndex != sync.spineIndex ||
+                                       (section && section->currentPage != sync.page)) {
+                                     RenderLock lock(*this);
+                                     currentSpineIndex = sync.spineIndex;
+                                     nextPageNumber = sync.page;
+                                     cachedChapterTotalPageCount = 0;
+                                     pendingPageJump.reset();
+                                     saveProgress(currentSpineIndex, nextPageNumber, 0);
+                                     section.reset();
+                                   }
+                                 }
+                               });
       }
       break;
     }
@@ -921,10 +959,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
       const auto popupFn = [this]() { GUI.drawPopup(renderer, tr(STR_INDEXING)); };
 
-      if (!section->createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
-                                      SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
-                                      viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                      SETTINGS.imageRendering, SETTINGS.footnoteDisplay, popupFn)) {
+      if (!section->createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(),
+                                      SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+                                      SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
+                                      SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
+                                      SETTINGS.footnoteDisplay, popupFn)) {
         LOG_ERR("ERS", "Failed to persist page data to SD");
         section.reset();
         return;
@@ -1065,10 +1104,11 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   }
 
   LOG_DBG("ERS", "Silently indexing next chapter: %d", nextSpineIndex);
-  if (!nextSection.createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
-                                     SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
-                                     viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                     SETTINGS.imageRendering, SETTINGS.footnoteDisplay)) {
+  if (!nextSection.createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(),
+                                     SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+                                     SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
+                                     SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
+                                     SETTINGS.footnoteDisplay)) {
     LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
   }
 }

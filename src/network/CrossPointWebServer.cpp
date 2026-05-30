@@ -22,8 +22,6 @@
 #include "html/HomePageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
-#include <BookFusionSyncClient.h>
-#include <BookFusionBookIdStore.h>
 #include <Epub.h>
 
 namespace {
@@ -58,126 +56,6 @@ void clearEpubCacheIfNeeded(const String& filePath) {
     Epub(filePath.c_str(), "/.crosspoint").clearCache();
     LOG_DBG("WEB", "Cleared epub cache for: %s", filePath.c_str());
   }
-}
-
-// Helper function to clean strings for fuzzy matching
-void cleanStringForMatching(const char* input, char* output, size_t outputSize) {
-  if (!input || !output || outputSize == 0) return;
-
-  size_t j = 0;
-  bool lastWasSpace = false;
-
-  for (size_t i = 0; input[i] && j < outputSize - 1; i++) {
-    char c = input[i];
-
-    // Convert to lowercase
-    if (c >= 'A' && c <= 'Z') {
-      c = c + ('a' - 'A');
-    }
-
-    // Skip punctuation and multiple spaces
-    if (c == ' ' || c == '\t' || c == '\n') {
-      if (!lastWasSpace && j > 0) {
-        output[j++] = ' ';
-        lastWasSpace = true;
-      }
-    } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
-      output[j++] = c;
-      lastWasSpace = false;
-    }
-    // Skip other punctuation characters
-  }
-
-  // Remove trailing space
-  if (j > 0 && output[j-1] == ' ') {
-    j--;
-  }
-
-  output[j] = '\0';
-}
-
-// Fuzzy string matching for titles and authors
-bool fuzzyStringMatch(const char* str1, const char* str2) {
-  if (!str1 || !str2) return false;
-
-  char clean1[128], clean2[128];
-  cleanStringForMatching(str1, clean1, sizeof(clean1));
-  cleanStringForMatching(str2, clean2, sizeof(clean2));
-
-  return strcmp(clean1, clean2) == 0;
-}
-
-// Check if BookFusion book matches EPUB metadata
-bool matchesBookFusionBook(const char* epubTitle, const char* epubAuthor, const BookFusionBook& bfBook) {
-  // Title must match
-  if (!fuzzyStringMatch(epubTitle, bfBook.title)) {
-    return false;
-  }
-
-  // Author must match (allow partial matches for multiple authors)
-  if (!fuzzyStringMatch(epubAuthor, bfBook.authors)) {
-    return false;
-  }
-
-  return true;
-}
-
-// Attempt to auto-link uploaded EPUB to BookFusion library
-void attemptBookFusionAutoLink(const String& filePath) {
-  // Only process .epub files
-  if (!FsHelpers::hasEpubExtension(filePath)) {
-    return;
-  }
-
-  LOG_DBG("WEB", "Attempting BookFusion auto-link for: %s", filePath.c_str());
-
-  // Load EPUB metadata
-  Epub epub(filePath.c_str(), "/.crosspoint");
-  if (!epub.load(true, true)) {  // buildIfMissing=true, skipLoadingCss=true
-    LOG_DBG("WEB", "Could not load EPUB metadata for auto-link");
-    return;
-  }
-
-  // Get title and author
-  const auto& title = epub.getTitle();
-  const auto& author = epub.getAuthor();
-
-  if (title.empty() || author.empty()) {
-    LOG_DBG("WEB", "EPUB missing title or author, skipping auto-link");
-    return;
-  }
-
-  LOG_DBG("WEB", "Searching BookFusion for: '%s' by '%s'", title.c_str(), author.c_str());
-
-  // Search BookFusion library (first 5 pages = up to 100 books)
-  for (int page = 1; page <= 5; page++) {
-    BookFusionSearchResult searchResult;
-    const auto err = BookFusionSyncClient::searchBooks(page, searchResult);
-
-    if (err != BookFusionSyncClient::OK) {
-      LOG_DBG("WEB", "BookFusion search failed on page %d: %s", page, BookFusionSyncClient::errorString(err));
-      break;
-    }
-
-    // Check each book for a match
-    for (int i = 0; i < searchResult.count; i++) {
-      const auto& book = searchResult.books[i];
-
-      if (matchesBookFusionBook(title.c_str(), author.c_str(), book)) {
-        // Found a match! Save the BookFusion book ID
-        BookFusionBookIdStore::saveBookId(filePath.c_str(), book.id);
-        LOG_INF("WEB", "Auto-linked '%s' to BookFusion book ID %u", filePath.c_str(), book.id);
-        return;
-      }
-    }
-
-    // Stop if we've reached the end
-    if (!searchResult.hasMore) {
-      break;
-    }
-  }
-
-  LOG_DBG("WEB", "No BookFusion match found for '%s' by '%s'", title.c_str(), author.c_str());
 }
 
 String normalizeWebPath(const String& inputPath) {
@@ -875,9 +753,6 @@ void CrossPointWebServer::handleUploadPost(UploadState& state) const {
     // Clear EPUB cache if needed
     clearEpubCacheIfNeeded(fullPath);
 
-    // Attempt BookFusion auto-linking
-    attemptBookFusionAutoLink(fullPath);
-
     server->send(200, "text/plain", "File uploaded successfully: " + state.fileName);
   } else {
     const String error = state.error.isEmpty() ? "Unknown error during upload" : state.error;
@@ -1547,7 +1422,6 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
             wsLastCompleteAt = millis();
             LOG_DBG("WS", "Zero-byte upload complete: %s", filePath.c_str());
             clearEpubCacheIfNeeded(filePath);
-            attemptBookFusionAutoLink(filePath);
             wsServer->sendTXT(num, "DONE");
             wsLastProgressSent = 0;
             break;
@@ -1617,9 +1491,6 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
         if (!filePath.endsWith("/")) filePath += "/";
         filePath += wsUploadFileName;
         clearEpubCacheIfNeeded(filePath);
-
-        // Attempt BookFusion auto-linking
-        attemptBookFusionAutoLink(filePath);
 
         wsServer->sendTXT(num, "DONE");
         wsLastProgressSent = 0;

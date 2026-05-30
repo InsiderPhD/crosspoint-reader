@@ -4,8 +4,13 @@ set -e
 
 cd "$(dirname "$0")"
 
+# Reader families (Bookerly, Inter, OpenDyslexic, Mono) are normalised to the same point
+# sizes (6/8/10/12 = Small/Medium/Large/X-Large) so switching family keeps text at the same
+# scale. NotoSans is no longer a reader family — only notosans_8_regular (the shared UI
+# SMALL_FONT) and the legacy 12/14/16 sizes are still generated/registered.
 READER_FONT_STYLES=("Regular" "Italic" "Bold")
-BOOKERLY_FONT_SIZES=(6 8 10)
+BOOKERLY_FONT_SIZES=(6 8 10 12)
+INTER_FONT_SIZES=(6 8 10 12)
 NOTOSANS_FONT_SIZES=(12 14 16)
 OPENDYSLEXIC_FONT_SIZES=(6 8 10 12 14)
 
@@ -13,6 +18,16 @@ for size in ${BOOKERLY_FONT_SIZES[@]}; do
   for style in ${READER_FONT_STYLES[@]}; do
     font_name="bookerly_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
     font_path="../builtinFonts/source/Bookerly/Bookerly-${style}.ttf"
+    output_path="../builtinFonts/${font_name}.h"
+    python3 fontconvert.py $font_name $size $font_path --2bit --compress --pnum > $output_path
+    echo "Generated $output_path"
+  done
+done
+
+for size in ${INTER_FONT_SIZES[@]}; do
+  for style in ${READER_FONT_STYLES[@]}; do
+    font_name="inter_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
+    font_path="../builtinFonts/source/Inter/Inter-${style}.ttf"
     output_path="../builtinFonts/${font_name}.h"
     python3 fontconvert.py $font_name $size $font_path --2bit --compress --pnum > $output_path
     echo "Generated $output_path"
@@ -34,12 +49,7 @@ for size in ${OPENDYSLEXIC_FONT_SIZES[@]}; do
     font_name="opendyslexic_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
     font_path="../builtinFonts/source/OpenDyslexic/OpenDyslexic-${style}.otf"
     output_path="../builtinFonts/${font_name}.h"
-    # 6pt uses --force-autohint and --width-scale 0.8 to condense the naturally wide glyphs
-    if [ "$size" = "6" ]; then
-      python3 fontconvert.py $font_name $size $font_path --2bit --compress --force-autohint --width-scale 0.8 > $output_path
-    else
-      python3 fontconvert.py $font_name $size $font_path --2bit --compress > $output_path
-    fi
+    python3 fontconvert.py $font_name $size $font_path --2bit --compress > $output_path
     echo "Generated $output_path"
   done
 done

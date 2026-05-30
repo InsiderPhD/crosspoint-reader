@@ -120,7 +120,24 @@ void KOReaderSyncActivity::performSync() {
   const auto result = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
 
   if (result == KOReaderSyncClient::NOT_FOUND) {
-    // No remote progress - offer to upload
+    // No remote progress on the server.
+    if (direction == Direction::PUSH) {
+      // Nothing to compare; just upload local.
+      performUpload();
+      return;
+    }
+    if (direction == Direction::PULL) {
+      // Nothing to pull. Surface a clear failure rather than the legacy
+      // "offer to upload" prompt the user didn't ask for.
+      {
+        RenderLock lock(*this);
+        state = SYNC_FAILED;
+        statusMessage = "No remote progress to pull";
+      }
+      requestUpdate(true);
+      return;
+    }
+    // ASK: legacy "offer to upload" behaviour.
     {
       RenderLock lock(*this);
       state = NO_REMOTE_PROGRESS;
@@ -203,6 +220,17 @@ void KOReaderSyncActivity::performSync() {
   CrossPointPosition localPos =
       makeLocalPositionWithParagraph(currentSpineIndex, currentPage, totalPagesInSpine, currentParagraphIndex);
   localProgress = ProgressMapper::toKOReader(epub, localPos);
+
+  // Explicit direction skips the comparison screen.
+  if (direction == Direction::PULL) {
+    setResult(SyncResult{remotePosition.spineIndex, remotePosition.pageNumber});
+    finish();
+    return;
+  }
+  if (direction == Direction::PUSH) {
+    performUpload();
+    return;
+  }
 
   {
     RenderLock lock(*this);

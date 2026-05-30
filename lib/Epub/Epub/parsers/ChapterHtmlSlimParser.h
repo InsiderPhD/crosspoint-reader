@@ -39,6 +39,7 @@ class ChapterHtmlSlimParser {
   int boldUntilDepth = INT_MAX;
   int italicUntilDepth = INT_MAX;
   int underlineUntilDepth = INT_MAX;
+  int preUntilDepth = INT_MAX;  // when set, we are inside a <pre> block (monospace + hard line breaks)
   // buffer for building up words from characters, will auto break if longer than this
   // leave one char at end for null pointer
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
@@ -48,6 +49,7 @@ class ChapterHtmlSlimParser {
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
   int fontId;
+  int codeFontId;  // monospace font id used for <pre> blocks (0 = no override)
   float lineCompression;
   bool extraParagraphSpacing;
   uint8_t paragraphAlignment;
@@ -129,7 +131,8 @@ class ChapterHtmlSlimParser {
 
  public:
   explicit ChapterHtmlSlimParser(std::shared_ptr<Epub> epub, const std::string& filepath, GfxRenderer& renderer,
-                                 const int fontId, const float lineCompression, const bool extraParagraphSpacing,
+                                 const int fontId, const int codeFontId, const float lineCompression,
+                                 const bool extraParagraphSpacing,
                                  const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                                  const uint16_t viewportHeight, const bool hyphenationEnabled,
                                  const std::function<void(std::unique_ptr<Page>, uint16_t, uint16_t)>& completePageFn,
@@ -142,6 +145,7 @@ class ChapterHtmlSlimParser {
         filepath(filepath),
         renderer(renderer),
         fontId(fontId),
+        codeFontId(codeFontId),
         lineCompression(lineCompression),
         extraParagraphSpacing(extraParagraphSpacing),
         paragraphAlignment(paragraphAlignment),

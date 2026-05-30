@@ -71,6 +71,14 @@ class SdCardFont {
   // Returns true if the given style is present in this font file.
   bool hasStyle(uint8_t style) const;
 
+  // Map a requested style to the closest style actually present in this font file
+  // (e.g. a missing italic resolves to regular). Keeps the advance/prewarm paths in
+  // sync with EpdFontFamily's render-time fallback for fonts that lack some variants.
+  uint8_t resolveStyle(uint8_t style) const;
+
+  // Resolve every set bit of a style mask through resolveStyle().
+  uint8_t resolveStyleMask(uint8_t styleMask) const;
+
   // Number of styles present in this font file.
   uint8_t styleCount() const { return styleCount_; }
 

@@ -51,7 +51,14 @@ class FontCacheManager {
 
   enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;
-  std::string scanText_;
-  uint32_t scanStyleCounts_[4] = {};
-  int scanFontId_ = -1;
+
+  // Per-font scan accumulator. A page may mix fonts (e.g. a <pre> code block in the
+  // monospace font alongside body text in the reader font); each must be prewarmed
+  // independently, otherwise the un-prewarmed font's glyphs are loaded one-at-a-time
+  // through the on-demand overflow ring (slow SD I/O for SD-card fonts).
+  struct ScanEntry {
+    std::string text;
+    uint32_t styleCounts[4] = {};
+  };
+  std::map<int, ScanEntry> scanEntries_;
 };

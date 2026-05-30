@@ -38,7 +38,8 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
   items.push_back({MenuAction::MARK_AS_COMPLETED, StrId::STR_MARK_AS_COMPLETED});
   items.push_back({MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON});
-  items.push_back({MenuAction::SYNC, StrId::STR_SYNC_PROGRESS});
+  items.push_back({MenuAction::SYNC_PUSH, StrId::STR_SYNC_PUSH_PROGRESS});
+  items.push_back({MenuAction::SYNC_PULL, StrId::STR_SYNC_PULL_PROGRESS});
   items.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
   return items;
 }

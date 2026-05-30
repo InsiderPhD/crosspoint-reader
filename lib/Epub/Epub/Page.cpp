@@ -131,7 +131,11 @@ int Page::countWrappedLines(GfxRenderer& renderer, const int fontId, const char*
         lineBuf[lineLen] = ' ';
         memcpy(lineBuf + lineLen + 1, wordBuf, wCopy);
         lineBuf[lineLen + 1 + wCopy] = '\0';
-        if (renderer.getTextWidth(fontId, lineBuf) > maxWidth) {
+        // Use the advance-table path (getTextAdvanceX), not getTextWidth's per-glyph
+        // iteration: for SD-card fonts the latter loads each glyph through the 8-slot
+        // on-demand overflow ring (SD I/O + log spam per glyph). The footnote glyphs are
+        // prewarmed into the advance table in parseAndBuildPages().
+        if (renderer.getTextAdvanceX(fontId, lineBuf, EpdFontFamily::REGULAR) > maxWidth) {
           // Doesn't fit: new line
           lineBuf[savedLen] = '\0';
           lines++;
@@ -177,7 +181,8 @@ void drawWrappedText(GfxRenderer& renderer, const int fontId, const char* text, 
         lineBuf[lineLen] = ' ';
         memcpy(lineBuf + lineLen + 1, wordBuf, wCopy);
         lineBuf[lineLen + 1 + wCopy] = '\0';
-        if (renderer.getTextWidth(fontId, lineBuf) > maxWidth) {
+        // Advance-table measurement (see countWrappedLines) to avoid SD-font glyph thrash.
+        if (renderer.getTextAdvanceX(fontId, lineBuf, EpdFontFamily::REGULAR) > maxWidth) {
           // Flush line without this word
           lineBuf[savedLen] = '\0';
           renderer.drawText(fontId, x, y, lineBuf);
@@ -216,6 +221,11 @@ void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xO
   int includedFootnotes = 0;
   for (const auto& fn : footnotes) {
     if (fn.text[0] == '\0') continue;
+    // Prewarm SD-card glyph metrics so this measurement (and the draw pass below) hit the
+    // persistent advance table instead of the 8-slot on-demand overflow ring. Pages loaded
+    // from cache never went through the parser's prewarm, so it must happen here too.
+    // No-op for flash-resident fonts.
+    renderer.ensureSdCardFontReady(fontId, fn.text);
     const int fnLines = countWrappedLines(renderer, fontId, fn.text, viewportWidth);
     if (totalLines + fnLines > maxLines) break;
     totalLines += fnLines;

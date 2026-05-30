@@ -9,7 +9,24 @@
 #include <builtinFonts/bookerly_10_bold.h>
 #include <builtinFonts/bookerly_10_italic.h>
 #include <builtinFonts/bookerly_10_regular.h>
+#include <builtinFonts/bookerly_12_bold.h>
+#include <builtinFonts/bookerly_12_italic.h>
+#include <builtinFonts/bookerly_12_regular.h>
 
+#include <builtinFonts/inter_6_bold.h>
+#include <builtinFonts/inter_6_italic.h>
+#include <builtinFonts/inter_6_regular.h>
+#include <builtinFonts/inter_8_bold.h>
+#include <builtinFonts/inter_8_italic.h>
+#include <builtinFonts/inter_8_regular.h>
+#include <builtinFonts/inter_10_bold.h>
+#include <builtinFonts/inter_10_italic.h>
+#include <builtinFonts/inter_10_regular.h>
+#include <builtinFonts/inter_12_bold.h>
+#include <builtinFonts/inter_12_italic.h>
+#include <builtinFonts/inter_12_regular.h>
+
+// NotoSans 8pt regular is the shared UI SMALL_FONT; 12/14/16 are legacy reader sizes.
 #include <builtinFonts/notosans_8_regular.h>
 #include <builtinFonts/notosans_12_bold.h>
 #include <builtinFonts/notosans_12_italic.h>

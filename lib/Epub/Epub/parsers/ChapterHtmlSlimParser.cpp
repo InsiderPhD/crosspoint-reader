@@ -226,7 +226,7 @@ constexpr int NUM_HEADER_TAGS = sizeof(HEADER_TAGS) / sizeof(HEADER_TAGS[0]);
 constexpr size_t MIN_SIZE_FOR_POPUP = 10 * 1024;  // 10KB
 constexpr size_t PARSE_BUFFER_SIZE = 1024;
 
-const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote"};
+const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "pre"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
 
 const char* BOLD_TAGS[] = {"b", "strong"};
@@ -852,14 +852,23 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       self->startNewTextBlock(self->blockStyleStack.back().withoutBottom());
     } else {
       self->currentCssStyle = cssStyle;
-      const auto accumulated = self->blockStyleStack.back().getCombinedBlockStyle(userAlignmentBlockStyle,
-                                                                                  BlockStyle::CombineAxis::Horizontal);
+      auto accumulated = self->blockStyleStack.back().getCombinedBlockStyle(userAlignmentBlockStyle,
+                                                                            BlockStyle::CombineAxis::Horizontal);
+      // <pre> renders in the monospace code font. fontOverride must be set before the block
+      // is created so layout (ParsedText::layoutAndExtractLines) measures in the same font
+      // that TextBlock::render will draw with — otherwise wrapping uses the wrong glyph widths.
+      if (strcmp(name, "pre") == 0 && self->codeFontId != 0) {
+        accumulated.fontOverride = self->codeFontId;
+      }
       self->blockStyleStack.push_back(accumulated);
       self->startNewTextBlock(accumulated.withoutBottom());
       self->updateEffectiveInlineStyle();
 
       if (strcmp(name, "li") == 0) {
         self->currentTextBlock->addWord("\xe2\x80\xa2", EpdFontFamily::REGULAR);
+      } else if (strcmp(name, "pre") == 0) {
+        // Track depth so characterData() can treat newlines as hard line breaks inside <pre>.
+        self->preUntilDepth = std::min(self->preUntilDepth, self->depth);
       }
     }
   } else if (matches(name, UNDERLINE_TAGS, NUM_UNDERLINE_TAGS)) {
@@ -1002,6 +1011,17 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
 
   for (int i = 0; i < len; i++) {
     if (isWhitespace(s[i])) {
+      // Inside <pre>: a newline is a hard line break rather than collapsible whitespace.
+      // Flush the pending word and start a fresh block that inherits the <pre> block style
+      // (including the monospace fontOverride) so each source line renders on its own line.
+      if (s[i] == '\n' && self->preUntilDepth < self->depth && self->currentTextBlock) {
+        if (self->partWordBufferIndex > 0) {
+          self->flushPartWordBuffer();
+        }
+        self->startNewTextBlock(self->currentTextBlock->getBlockStyle());
+        self->nextWordContinues = false;
+        continue;
+      }
       // Currently looking at whitespace, if there's anything in the partWordBuffer, flush it
       if (self->partWordBufferIndex > 0) {
         self->flushPartWordBuffer();
@@ -1243,6 +1263,11 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
     self->underlineUntilDepth = INT_MAX;
   }
 
+  // Leaving <pre> block
+  if (self->preUntilDepth == self->depth) {
+    self->preUntilDepth = INT_MAX;
+  }
+
   // Pop from inline style stack if we pushed an entry at this depth
   // This handles all inline elements: b, i, u, span, etc.
   if (!self->inlineStyleStack.empty() && self->inlineStyleStack.back().depth == self->depth) {
@@ -1338,6 +1363,18 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
                                        nullptr, nullptr, 0, nullptr, nullptr, 0,
                                        fragBuf->ids, fragCount);
       footnoteBodyEntryCount += extra;
+    }
+
+    // Prewarm SD-card font glyph metrics for every footnote body once. countWrappedLines()
+    // is re-run per footnote on every line added to the page (see addLineToPage) plus once
+    // per reference in lookupFootnoteLineCount; the persistent advance table survives those
+    // calls. Without this prewarm each measurement re-loads glyphs through the 8-slot
+    // on-demand overflow ring (one SD read + LOG_DBG per glyph — the footnote-text flood).
+    // ensureSdCardFontReady() is a no-op for flash-resident fonts.
+    for (int i = 0; i < footnoteBodyEntryCount; i++) {
+      if (footnoteBodyEntries[i].text[0] != '\0') {
+        renderer.ensureSdCardFontReady(fontId, footnoteBodyEntries[i].text);
+      }
     }
   }
 

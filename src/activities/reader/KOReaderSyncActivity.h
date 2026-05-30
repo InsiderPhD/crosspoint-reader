@@ -21,10 +21,17 @@
  */
 class KOReaderSyncActivity final : public Activity {
  public:
+  // ASK shows the comparison screen (legacy behaviour for any caller that
+  // doesn't pass a direction). PUSH/PULL skip the comparison and immediately
+  // perform the chosen direction — used by the reader menu's explicit
+  // "Push Local Progress" / "Pull Remote Progress" entries.
+  enum class Direction { ASK, PUSH, PULL };
+
   explicit KOReaderSyncActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                 const std::shared_ptr<Epub>& epub, const std::string& epubPath, int currentSpineIndex,
                                 int currentPage, int totalPagesInSpine,
-                                std::optional<uint16_t> currentParagraphIndex = std::nullopt)
+                                std::optional<uint16_t> currentParagraphIndex = std::nullopt,
+                                Direction direction = Direction::ASK)
       : Activity("KOReaderSync", renderer, mappedInput),
         epub(epub),
         epubPath(epubPath),
@@ -32,6 +39,7 @@ class KOReaderSyncActivity final : public Activity {
         currentPage(currentPage),
         totalPagesInSpine(totalPagesInSpine),
         currentParagraphIndex(currentParagraphIndex),
+        direction(direction),
         remoteProgress{},
         remotePosition{},
         localProgress{} {}
@@ -62,6 +70,7 @@ class KOReaderSyncActivity final : public Activity {
   int currentPage;
   int totalPagesInSpine;
   std::optional<uint16_t> currentParagraphIndex;
+  Direction direction;
 
   State state = WIFI_SELECTION;
   std::string statusMessage;

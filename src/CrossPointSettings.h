@@ -104,12 +104,11 @@ class CrossPointSettings {
   enum SIDE_BUTTON_LAYOUT { PREV_NEXT = 0, NEXT_PREV = 1, SIDE_BUTTON_LAYOUT_COUNT };
 
   // Font family options (built-in fonts only; SD card fonts use sdFontFamilyName)
-  enum FONT_FAMILY { BOOKERLY = 0, NOTOSANS = 1, OPENDYSLEXIC = 2, MONOSPACE = 3, FONT_FAMILY_COUNT };
+  enum FONT_FAMILY { BOOKERLY = 0, INTER = 1, OPENDYSLEXIC = 2, MONOSPACE = 3, FONT_FAMILY_COUNT };
   static constexpr uint8_t BUILTIN_FONT_COUNT = FONT_FAMILY_COUNT;
-  // Font size options
-  // Three sizes matching upstream. "Small" now uses what was previously "X Small"
-  // (Bookerly 10pt, OpenDyslexic 6pt, Mono 6pt — NotoSans falls back to 8pt SMALL_FONT_ID).
-  enum FONT_SIZE { SMALL = 0, MEDIUM = 1, LARGE = 2, FONT_SIZE_COUNT };
+  // Font size options. All families are normalised to the same point sizes (6/8/10/12)
+  // so switching family keeps text at the same scale.
+  enum FONT_SIZE { SMALL = 0, MEDIUM = 1, LARGE = 2, EXTRA_LARGE = 3, FONT_SIZE_COUNT };
   enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, LINE_COMPRESSION_COUNT };
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,

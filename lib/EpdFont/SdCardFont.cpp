@@ -588,6 +588,11 @@ int32_t SdCardFont::findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) 
 int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOnly) {
   if (!loaded_) return -1;
 
+  // Resolve requested styles to present ones so absent variants (e.g. italic) get their
+  // fallback style prewarmed — that's the style render will actually draw via the family.
+  styleMask = resolveStyleMask(styleMask);
+  if (styleMask == 0) return 0;
+
   unsigned long startMs = millis();
 
   // Step 1: Extract unique codepoints from UTF-8 text (shared across all styles).
@@ -995,7 +1000,10 @@ bool SdCardFont::hasAdvanceTable() const {
 }
 
 uint16_t SdCardFont::getAdvance(uint32_t codepoint, uint8_t style) const {
-  style &= (MAX_STYLES - 1);
+  // Resolve to a present style so measurement matches render-time fallback. Without this,
+  // measuring italic text in a font that lacks italic reads the empty advanceTable_[ITALIC]
+  // and returns 0, producing zero-width (overlapping) glyphs while render draws regular.
+  style = resolveStyle(style);
   if (!advanceTable_[style]) return 0;
   const AdvanceEntry* table = advanceTable_[style];
   const uint32_t size = advanceTableSize_[style];
@@ -1017,6 +1025,12 @@ uint16_t SdCardFont::getAdvance(uint32_t codepoint, uint8_t style) const {
 
 int SdCardFont::buildAdvanceTable(const char* utf8Text, uint8_t styleMask) {
   if (!loaded_) return -1;
+
+  // Resolve requested styles to present ones so getAdvance() (which also resolves) finds
+  // the entries it looks up — otherwise an absent style's table stays empty and measurement
+  // falls back to 0-width.
+  styleMask = resolveStyleMask(styleMask);
+  if (styleMask == 0) return 0;
 
   // Note: advance table is preserved across calls. We only fetch codepoints
   // not already present, then merge them in. Use clearPersistentCache() to
@@ -1097,13 +1111,21 @@ int SdCardFont::buildAdvanceTable(const char* utf8Text, uint8_t styleMask) {
 
     uint32_t needCount = 0;
     uint32_t missedThisStyle = 0;
+    // Codepoints absent from this style's glyph set fall back to the replacement glyph's
+    // advance. Without this, a missing glyph gets no advance-table entry, getAdvance()
+    // returns 0, and the character renders zero-width — stacking on top of the next one
+    // (notably in italic styles with incomplete glyph coverage). Mirrors upstream #1958.
+    const int32_t replacementIdx = findGlobalGlyphIndex(s, REPLACEMENT_GLYPH);
     for (uint32_t i = 0; i < cpCount; i++) {
       const uint32_t cp = codepoints[i];
       if (advanceTableLookup(si, cp, nullptr)) continue;  // already cached
       int32_t idx = findGlobalGlyphIndex(s, cp);
       if (idx < 0) {
-        missedThisStyle++;
-        continue;
+        if (replacementIdx < 0) {
+          missedThisStyle++;
+          continue;
+        }
+        idx = replacementIdx;
       }
       mappings[needCount].codepoint = cp;
       mappings[needCount].glyphIndex = idx;
@@ -1189,6 +1211,36 @@ EpdFont* SdCardFont::getEpdFont(uint8_t style) {
 }
 
 bool SdCardFont::hasStyle(uint8_t style) const { return styles_[style & (MAX_STYLES - 1)].present; }
+
+uint8_t SdCardFont::resolveStyle(uint8_t style) const {
+  style &= (MAX_STYLES - 1);
+  if (styles_[style].present) return style;
+  // Style bits (mirror EpdFontFamily::Style): bit0 = bold, bit1 = italic.
+  static constexpr uint8_t BOLD_BIT = 0x01;
+  static constexpr uint8_t ITALIC_BIT = 0x02;
+  // Prefer keeping weight over slant: drop italic first, then bold, then plain regular.
+  const uint8_t candidates[] = {
+      static_cast<uint8_t>(style & ~ITALIC_BIT),
+      static_cast<uint8_t>(style & ~BOLD_BIT),
+      0,
+  };
+  for (const uint8_t c : candidates) {
+    if (styles_[c].present) return c;
+  }
+  // Last resort: any present style (handles unusual fonts lacking a regular variant).
+  for (uint8_t s = 0; s < MAX_STYLES; s++) {
+    if (styles_[s].present) return s;
+  }
+  return 0;
+}
+
+uint8_t SdCardFont::resolveStyleMask(uint8_t styleMask) const {
+  uint8_t resolved = 0;
+  for (uint8_t s = 0; s < MAX_STYLES; s++) {
+    if (styleMask & (1u << s)) resolved |= static_cast<uint8_t>(1u << resolveStyle(s));
+  }
+  return resolved;
+}
 
 // --- On-demand glyph loading (overflow buffer) ---
 

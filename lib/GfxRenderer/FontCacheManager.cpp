@@ -62,8 +62,9 @@ void FontCacheManager::resetStats() {
 bool FontCacheManager::isScanning() const { return scanMode_ == ScanMode::Scanning; }
 
 void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::Style style) {
-  scanText_ += text;
-  if (scanFontId_ < 0) scanFontId_ = fontId;
+  auto& entry = scanEntries_[fontId];
+  if (entry.text.capacity() == 0) entry.text.reserve(1024);  // limit concat-driven reallocations
+  entry.text += text;
   const uint8_t baseStyle = static_cast<uint8_t>(style) & 0x03;
   const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
   uint32_t cpCount = 0;
@@ -71,7 +72,7 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
     if ((*p & 0xC0) != 0x80) cpCount++;
     p++;
   }
-  scanStyleCounts_[baseStyle] += cpCount;
+  entry.styleCounts[baseStyle] += cpCount;
 }
 
 // --- PrewarmScope implementation ---
@@ -80,33 +81,31 @@ FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manage
   manager_->scanMode_ = ScanMode::Scanning;
   manager_->clearCache();
   manager_->resetStats();
-  manager_->scanText_.clear();
-  manager_->scanText_.reserve(2048);  // Pre-allocate to avoid heap fragmentation from repeated concat
-  memset(manager_->scanStyleCounts_, 0, sizeof(manager_->scanStyleCounts_));
-  manager_->scanFontId_ = -1;
+  manager_->scanEntries_.clear();
 }
 
 void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
   manager_->scanMode_ = ScanMode::None;
-  if (manager_->scanText_.empty()) return;
 
-  // Build style bitmask from all styles that appeared during the scan
-  uint8_t styleMask = 0;
-  for (uint8_t i = 0; i < 4; i++) {
-    if (manager_->scanStyleCounts_[i] > 0) styleMask |= (1 << i);
+  // Prewarm every font that appeared during the scan (typically 1, but a page with a
+  // <pre> code block mixes the reader font and the monospace font).
+  for (auto& [fontId, entry] : manager_->scanEntries_) {
+    if (entry.text.empty()) continue;
+    uint8_t styleMask = 0;
+    for (uint8_t i = 0; i < 4; i++) {
+      if (entry.styleCounts[i] > 0) styleMask |= (1 << i);
+    }
+    if (styleMask == 0) styleMask = 1;  // default to regular
+    manager_->prewarmCache(fontId, entry.text.c_str(), styleMask);
   }
-  if (styleMask == 0) styleMask = 1;  // default to regular
 
-  manager_->prewarmCache(manager_->scanFontId_, manager_->scanText_.c_str(), styleMask);
-
-  // Free scan string memory
-  manager_->scanText_.clear();
-  manager_->scanText_.shrink_to_fit();
+  // Free scan memory
+  manager_->scanEntries_.clear();
 }
 
 FontCacheManager::PrewarmScope::~PrewarmScope() {
   if (active_) {
-    endScanAndPrewarm();  // no-op if already called (scanText_ is empty)
+    endScanAndPrewarm();  // no-op if already called (scanEntries_ is empty)
     manager_->clearCache();
   }
 }

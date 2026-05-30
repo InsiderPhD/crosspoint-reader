@@ -70,7 +70,9 @@ class EpubReaderActivity final : public Activity {
   void navigateToHref(const std::string& href, bool savePosition = false);
   void restoreSavedPosition();
 
-  // BookFusion sync
+  // BookFusion sync — bidirectional auto-merge used by the long-press Confirm
+  // "quick sync". The reader-menu Push/Pull entries use BookFusionSyncActivity
+  // instead (full-screen flow), not this method.
   void performBookFusionSync();
   void connectWifiForSyncWithPopup(std::function<void()> onSuccess);
 
