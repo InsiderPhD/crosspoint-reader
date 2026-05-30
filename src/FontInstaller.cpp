@@ -55,6 +55,35 @@ bool FontInstaller::isValidCpfontFilename(const char* name) {
   return true;
 }
 
+bool FontInstaller::sanitizeCpfontFilename(const char* name, char* outBuf, size_t outBufSize) {
+  if (name == nullptr || outBuf == nullptr || outBufSize == 0) return false;
+
+  static constexpr char kExt[] = ".cpfont";
+  static constexpr size_t kExtLen = sizeof(kExt) - 1;
+  const size_t nameLen = strlen(name);
+  // Must already carry the ".cpfont" extension (case-sensitive, matching the validator).
+  if (nameLen <= kExtLen) return false;
+  if (strcmp(name + nameLen - kExtLen, kExt) != 0) return false;
+
+  const size_t baseLen = nameLen - kExtLen;
+  // Need room for the sanitised basename + extension + NUL.
+  if (baseLen + kExtLen + 1 > outBufSize) return false;
+
+  // Replace every disallowed basename character (spaces, %, etc.) with '_'. This also
+  // neutralises any '/', '\' or '.' so path traversal can't survive sanitisation.
+  size_t j = 0;
+  for (size_t i = 0; i < baseLen; ++i) {
+    const char c = name[i];
+    const bool ok = std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_';
+    outBuf[j++] = ok ? c : '_';
+  }
+  if (j == 0) return false;  // empty basename
+
+  memcpy(outBuf + j, kExt, kExtLen);
+  outBuf[j + kExtLen] = '\0';
+  return true;
+}
+
 bool FontInstaller::ensureFamilyDir(const char* familyName) {
   // Reuse the family's existing root if installed; otherwise pick the
   // default-write root (hidden if no roots exist yet).

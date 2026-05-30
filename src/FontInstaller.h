@@ -28,6 +28,13 @@ class FontInstaller {
   /// "evil/foo.cpfont".
   static bool isValidCpfontFilename(const char* name);
 
+  /// Sanitise an uploaded filename into a valid .cpfont name: every character in the
+  /// basename that isn't alphanumeric/hyphen/underscore (spaces, %, etc.) is replaced
+  /// with '_', preserving the ".cpfont" extension. Writes the result to outBuf.
+  /// Returns false if the input lacks a ".cpfont" extension, the basename is empty,
+  /// or outBuf is too small. The result is guaranteed to pass isValidCpfontFilename().
+  static bool sanitizeCpfontFilename(const char* name, char* outBuf, size_t outBufSize);
+
   /// Ensure /<root>/<family>/ exists, where <root> is /.fonts (preferred) or /fonts.
   /// Re-uses the existing root if the family is already installed; otherwise
   /// creates it under SdCardFontRegistry::defaultWriteRoot().

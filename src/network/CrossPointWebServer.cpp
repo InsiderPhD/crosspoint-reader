@@ -1567,10 +1567,15 @@ void CrossPointWebServer::handleFontUploadData() {
         break;
       }
 
-      String filename = upload.filename;
-      if (!FontInstaller::isValidCpfontFilename(filename.c_str())) {
-        LOG_ERR("WEB", "Invalid font filename: %s", filename.c_str());
+      // Sanitise the uploaded filename (spaces, %, etc. -> '_') rather than rejecting it,
+      // so fonts like "lexend 700 12 15_12.cpfont" install as "lexend_700_12_15_12.cpfont".
+      char sanitizedName[128];
+      if (!FontInstaller::sanitizeCpfontFilename(upload.filename.c_str(), sanitizedName, sizeof(sanitizedName))) {
+        LOG_ERR("WEB", "Invalid font filename: %s", upload.filename.c_str());
         break;
+      }
+      if (strcmp(sanitizedName, upload.filename.c_str()) != 0) {
+        LOG_DBG("WEB", "Sanitised font filename: %s -> %s", upload.filename.c_str(), sanitizedName);
       }
 
       fontUpload.familyName = family.c_str();
@@ -1582,7 +1587,7 @@ void CrossPointWebServer::handleFontUploadData() {
       }
 
       char path[128];
-      FontInstaller::buildFontPath(family.c_str(), filename.c_str(), path, sizeof(path));
+      FontInstaller::buildFontPath(family.c_str(), sanitizedName, path, sizeof(path));
       fontUpload.filePath = path;
 
       if (!Storage.openFileForWrite("WEB", path, fontUpload.file)) {
@@ -1591,7 +1596,7 @@ void CrossPointWebServer::handleFontUploadData() {
       }
 
       fontUpload.valid = true;
-      LOG_DBG("WEB", "Font upload started: %s -> %s", filename.c_str(), path);
+      LOG_DBG("WEB", "Font upload started: %s -> %s", sanitizedName, path);
       break;
     }
 
