@@ -1,295 +1,961 @@
 #include "ReadingStatsActivity.h"
 
-#include <FsHelpers.h>
 #include <GfxRenderer.h>
-#include <HalStorage.h>
+#include <HalGPIO.h>
 #include <I18n.h>
-#include <Logging.h>
-#include <Serialization.h>
 
-#include "CrossPointSettings.h"
-#include "MappedInputManager.h"
+#include <algorithm>
+#include <array>
+#include <ctime>
+#include <string>
+#include <vector>
+
+#include "CrossPointState.h"
+#include "ReadingDayDetailActivity.h"
+#include "ReadingStatsDetailActivity.h"
 #include "ReadingStatsStore.h"
-#include "RecentBooksStore.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
+#include "components/icons/award24.h"
+#include "components/icons/book24.h"
+#include "components/icons/checkbox24.h"
+#include "components/icons/check24.h"
+#include "components/icons/confetti24.h"
+#include "components/icons/files24.h"
+#include "components/icons/last30days24.h"
+#include "components/icons/last7days24.h"
+#include "components/icons/readingtime24.h"
+#include "components/icons/recent.h"
+#include "components/icons/receipttotal24.h"
+#include "components/icons/streak24.h"
 #include "fontIds.h"
-
-// ---- Static member definitions ----
-bool ReadingStatsActivity::hasCachedData = false;
-uint64_t ReadingStatsActivity::sCachedTotalBytes = 0;
-int64_t ReadingStatsActivity::sCachedFreeBytes = -1;
-int ReadingStatsActivity::sCachedEpubCount = 0;
+#include "util/ReadingStatsAnalytics.h"
+#include "util/TimeUtils.h"
 
 namespace {
+constexpr unsigned long BOOK_LONG_PRESS_MS = 1000;
+constexpr unsigned long PAGE_SWITCH_LONG_PRESS_MS = 700;
+constexpr int TOTAL_STATS_PAGES = 4;
+constexpr int PAGE_OVERVIEW = 0;
+constexpr int PAGE_STARTED_BOOKS = 1;
+constexpr int PAGE_WEEKLY = 2;
+constexpr int PAGE_MONTHLY = 3;
 
-constexpr uint8_t STATS_CACHE_VERSION = 1;
-constexpr char STATS_CACHE_PATH[] = "/.crosspoint/stats_cache.bin";
+constexpr int SUMMARY_ROW_HEIGHT = 34;
+constexpr int SUMMARY_GAP = 8;
+constexpr int LIST_HEADER_HEIGHT = 34;
+constexpr int LIST_HEADER_BOTTOM_GAP = 12;
+constexpr int BOOK_ROW_HEIGHT = 82;
+constexpr int BOOK_ROW_GAP = 10;
+constexpr int BOOKS_PER_PAGE = 4;
+constexpr int CHART_HEIGHT = 170;
+constexpr int CHART_HEADER_HEIGHT = 34;
+constexpr int CHART_TOP_GAP = 8;
+constexpr int SECTION_GAP = 10;
+constexpr int MONTH_HEADER_HEIGHT = 34;
+constexpr int HEATMAP_GRID_GAP = 6;
+constexpr int LEGEND_HEIGHT = 30;
+constexpr int LEGEND_SWATCH_SIZE = 16;
+constexpr int PAGE_INDICATOR_HEIGHT = 30;
 
-void formatDuration(uint32_t totalSeconds, char* buf, size_t bufSize) {
-  const uint32_t mins = (totalSeconds + 30) / 60;
-  if (mins < 60) {
-    snprintf(buf, bufSize, "%um", static_cast<unsigned>(mins < 1 ? 0 : mins));
-  } else if (mins < 60 * 24) {
-    snprintf(buf, bufSize, "%uh %um", static_cast<unsigned>(mins / 60), static_cast<unsigned>(mins % 60));
-  } else {
-    const uint32_t hours = mins / 60;
-    snprintf(buf, bufSize, "%ud %uh", static_cast<unsigned>(hours / 24), static_cast<unsigned>(hours % 24));
+constexpr int SELECTION_SIDE_WIDTH = 8;
+constexpr int SELECTION_CAP_HEIGHT = 8;
+constexpr int SELECTION_RADIUS = 6;
+
+struct ChartBar {
+  std::string bottomLabel;
+  std::string topLabel;
+  uint64_t readingMs = 0;
+};
+
+struct HeatmapCell {
+  uint32_t dayOrdinal = 0;
+  uint64_t readingMs = 0;
+  unsigned day = 0;
+  bool inViewedMonth = false;
+  bool isReferenceDay = false;
+};
+
+struct MonthSummary {
+  uint64_t monthTotalReadingMs = 0;
+  uint64_t yearTotalReadingMs = 0;
+  uint64_t bestDayReadingMs = 0;
+  uint32_t monthDaysRead = 0;
+  unsigned bestDayOfMonth = 0;
+};
+
+void captureFirstStatsAccessDate() {
+  // Keep this path network-free. Calling NTP before networking is initialized
+  // can trigger lwIP asserts on some boots.
+  static bool attemptedThisBoot = false;
+  if (attemptedThisBoot || TimeUtils::isClockValid(APP_STATE.lastKnownValidTimestamp)) {
+    return;
   }
-}
+  attemptedThisBoot = true;
 
-void formatStorageSize(int64_t bytes, char* buf, size_t bufSize) {
-  if (bytes < 0) {
-    snprintf(buf, bufSize, "--");
-  } else if (bytes >= 1000LL * 1024 * 1024) {
-    snprintf(buf, bufSize, "%llu GB", static_cast<unsigned long long>(bytes / (1024ULL * 1024 * 1024)));
-  } else {
-    snprintf(buf, bufSize, "%llu MB", static_cast<unsigned long long>(bytes / (1024ULL * 1024)));
+  const uint32_t now = TimeUtils::getCurrentValidTimestamp();
+  if (!TimeUtils::isClockValid(now)) {
+    return;
   }
+
+  APP_STATE.lastKnownValidTimestamp = now;
+  APP_STATE.saveToFile();
 }
 
-// Try to read cached values from the file written by a previous boot session.
-// Returns true and populates out-params on success.
-bool tryLoadFileCache(uint64_t& outTotal, int64_t& outFree, int& outEpubs) {
-  FsFile f;
-  if (!Storage.openFileForRead("Stats", STATS_CACHE_PATH, f)) return false;
-  uint8_t version = 0;
-  serialization::readPod(f, version);
-  if (version != STATS_CACHE_VERSION) {
-    f.close();
-    return false;
+std::vector<const ReadingBookStats*> getUnfinishedBooks() {
+  std::vector<const ReadingBookStats*> unfinished;
+  const auto& books = READING_STATS.getBooks();
+  unfinished.reserve(books.size());
+  for (const auto& book : books) {
+    if (book.lastProgressPercent < 95) {
+      unfinished.push_back(&book);
+    }
   }
-  int32_t epubs = 0;
-  serialization::readPod(f, outTotal);
-  serialization::readPod(f, outFree);
-  serialization::readPod(f, epubs);
-  f.close();
-  outEpubs = static_cast<int>(epubs);
-  return true;
+  return unfinished;
 }
 
-void saveFileCache(uint64_t total, int64_t freeB, int epubs) {
-  Storage.mkdir("/.crosspoint");
-  FsFile f;
-  if (!Storage.openFileForWrite("Stats", STATS_CACHE_PATH, f)) return;
-  constexpr uint8_t version = STATS_CACHE_VERSION;
-  serialization::writePod(f, version);
-  serialization::writePod(f, total);
-  serialization::writePod(f, freeB);
-  const int32_t epubCount = static_cast<int32_t>(epubs);
-  serialization::writePod(f, epubCount);
-  f.close();
+std::string getBookTitle(const ReadingBookStats& book) { return book.title.empty() ? book.path : book.title; }
+
+std::string getBookSubtitle(const ReadingBookStats& book) {
+  if (!book.author.empty()) {
+    return book.author;
+  }
+  return book.completed ? std::string(tr(STR_DONE)) : std::string(tr(STR_IN_PROGRESS));
 }
 
-// Iterative BFS EPUB count — stack-safe, runs in background task
-int countEpubsOnDevice() {
-  int count = 0;
-  std::vector<std::string> dirs;
-  dirs.reserve(8);
-  dirs.emplace_back("/");
+void drawMetricRow(GfxRenderer& renderer, const Rect& rect, const uint8_t* icon, const char* label,
+                   const std::string& value) {
+  constexpr int iconSize = 24;
+  constexpr int iconPad = 5;
+  constexpr int textY = 6;
+  renderer.drawIcon(icon, rect.x, rect.y + iconPad, iconSize, iconSize);
+  renderer.drawText(UI_10_FONT_ID, rect.x + iconSize + 10, rect.y + textY, label);
+  const int valueWidth = renderer.getTextWidth(UI_10_FONT_ID, value.c_str(), EpdFontFamily::BOLD);
+  renderer.drawText(UI_10_FONT_ID, rect.x + rect.width - valueWidth, rect.y + textY, value.c_str(), true,
+                    EpdFontFamily::BOLD);
+  renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1);
+}
 
-  char name[128];
-  while (!dirs.empty()) {
-    const std::string path = std::move(dirs.back());
-    dirs.pop_back();
+void drawBottomPageIndicator(GfxRenderer& renderer, const ThemeMetrics& metrics, const int currentPage,
+                             const int totalPages) {
+  char indicator[24];
+  snprintf(indicator, sizeof(indicator), "%d / %d", currentPage, totalPages);
 
-    auto dir = Storage.open(path.c_str());
-    if (!dir || !dir.isDirectory()) {
-      if (dir) dir.close();
+  const int screenW = renderer.getScreenWidth();
+  const int screenH = renderer.getScreenHeight();
+  const int lineH = renderer.getLineHeight(SMALL_FONT_ID);
+  const int indicatorW = renderer.getTextWidth(SMALL_FONT_ID, indicator);
+  const int stripTop = screenH - metrics.buttonHintsHeight - PAGE_INDICATOR_HEIGHT;
+  const int y = stripTop + (PAGE_INDICATOR_HEIGHT - lineH) / 2;
+  renderer.drawText(SMALL_FONT_ID, (screenW - indicatorW) / 2, y, indicator, true);
+}
+
+void drawLyraStyleButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
+                              const char* btn4) {
+  const GfxRenderer::Orientation originalOrientation = renderer.getOrientation();
+  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+
+  const int pageHeight = renderer.getScreenHeight();
+  constexpr int buttonWidth = 80;
+  constexpr int smallButtonHeight = 15;
+  constexpr int buttonHeight = 40;
+  constexpr int buttonY = 40;
+  constexpr int textYOffset = 7;
+  constexpr int x4ButtonPositions[] = {58, 146, 254, 342};
+  constexpr int x3ButtonPositions[] = {65, 157, 291, 383};
+  const int* buttonPositions = gpio.deviceIsX3() ? x3ButtonPositions : x4ButtonPositions;
+  const char* labels[] = {btn1, btn2, btn3, btn4};
+
+  for (int i = 0; i < 4; ++i) {
+    const int x = buttonPositions[i];
+    if (labels[i] != nullptr && labels[i][0] != '\0') {
+      renderer.fillRoundedRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, SELECTION_RADIUS, Color::White);
+      renderer.drawRoundedRect(x, pageHeight - buttonY, buttonWidth, buttonHeight, 1, SELECTION_RADIUS, true, true,
+                               false, false, true);
+      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
+      const int textX = x + (buttonWidth - 1 - textWidth) / 2;
+      renderer.drawText(SMALL_FONT_ID, textX, pageHeight - buttonY + textYOffset, labels[i]);
+    } else {
+      renderer.fillRoundedRect(x, pageHeight - smallButtonHeight, buttonWidth, smallButtonHeight, SELECTION_RADIUS,
+                               Color::White);
+      renderer.drawRoundedRect(x, pageHeight - smallButtonHeight, buttonWidth, smallButtonHeight, 1, SELECTION_RADIUS,
+                               true, true, false, false, true);
+    }
+  }
+
+  renderer.setOrientation(originalOrientation);
+}
+
+void civilFromDays(int z, int& year, unsigned& month, unsigned& day) {
+  z += 719468;
+  const int era = (z >= 0 ? z : z - 146096) / 146097;
+  const unsigned doe = static_cast<unsigned>(z - era * 146097);
+  const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  year = static_cast<int>(yoe) + era * 400;
+  const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  const unsigned mp = (5 * doy + 2) / 153;
+  day = doy - (153 * mp + 2) / 5 + 1;
+  month = mp + (mp < 10 ? 3 : -9);
+  year += (month <= 2);
+}
+
+std::string formatMinutesLabel(const uint64_t readingMs) {
+  const uint64_t totalMinutes = readingMs / 60000ULL;
+  if (totalMinutes == 0) {
+    return "";
+  }
+  return std::to_string(totalMinutes) + "m";
+}
+
+std::string formatDayLabel(const uint32_t dayOrdinal) {
+  if (dayOrdinal == 0) {
+    return "";
+  }
+
+  int year = 0;
+  unsigned month = 0;
+  unsigned day = 0;
+  civilFromDays(static_cast<int>(dayOrdinal), year, month, day);
+
+  char buffer[16];
+  snprintf(buffer, sizeof(buffer), "%02u/%02u", day, month);
+  return buffer;
+}
+
+std::string formatMonthLabel(const unsigned month) {
+  char buffer[8];
+  snprintf(buffer, sizeof(buffer), "%02u", month);
+  return buffer;
+}
+
+uint32_t getDisplayReferenceDayOrdinal() {
+  const uint32_t displayTimestamp = READING_STATS.getDisplayTimestamp();
+  if (!TimeUtils::isClockValid(displayTimestamp)) {
+    return 0;
+  }
+  return TimeUtils::getLocalDayOrdinal(displayTimestamp);
+}
+
+std::vector<ChartBar> getRecentDailyReadingBars() {
+  std::vector<ChartBar> bars(7);
+  const auto& readingDays = READING_STATS.getReadingDays();
+  if (readingDays.empty()) {
+    return bars;
+  }
+
+  uint32_t referenceDayOrdinal = getDisplayReferenceDayOrdinal();
+  if (referenceDayOrdinal == 0) {
+    referenceDayOrdinal = readingDays.back().dayOrdinal;
+  }
+
+  for (int index = 0; index < 7; ++index) {
+    const uint32_t dayOrdinal = referenceDayOrdinal >= static_cast<uint32_t>(6 - index)
+                                    ? referenceDayOrdinal - static_cast<uint32_t>(6 - index)
+                                    : 0;
+    bars[index].bottomLabel = formatDayLabel(dayOrdinal);
+    for (const auto& day : readingDays) {
+      if (day.dayOrdinal == dayOrdinal) {
+        bars[index].readingMs = day.readingMs;
+        bars[index].topLabel = formatMinutesLabel(day.readingMs);
+        break;
+      }
+    }
+  }
+
+  return bars;
+}
+
+int resolveReferenceYear(const std::vector<ReadingDayStats>& readingDays) {
+  uint32_t referenceDayOrdinal = getDisplayReferenceDayOrdinal();
+  if (referenceDayOrdinal == 0 && !readingDays.empty()) {
+    referenceDayOrdinal = readingDays.back().dayOrdinal;
+  }
+
+  if (referenceDayOrdinal == 0) {
+    return 0;
+  }
+
+  int year = 0;
+  unsigned month = 0;
+  unsigned day = 0;
+  civilFromDays(static_cast<int>(referenceDayOrdinal), year, month, day);
+  return year;
+}
+
+std::vector<ChartBar> getAnnualReadingBars(int& year) {
+  std::vector<ChartBar> bars(12);
+  for (unsigned month = 1; month <= 12; ++month) {
+    bars[month - 1].bottomLabel = formatMonthLabel(month);
+  }
+
+  const auto& readingDays = READING_STATS.getReadingDays();
+  year = resolveReferenceYear(readingDays);
+  if (year == 0) {
+    return bars;
+  }
+
+  for (const auto& day : readingDays) {
+    int dayYear = 0;
+    unsigned dayMonth = 0;
+    unsigned dayNumber = 0;
+    civilFromDays(static_cast<int>(day.dayOrdinal), dayYear, dayMonth, dayNumber);
+    if (dayYear != year || dayMonth == 0 || dayMonth > 12) {
       continue;
     }
-    dir.rewindDirectory();
-    for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
-      file.getName(name, sizeof(name));
-      if (name[0] == '.' || strcmp(name, "System Volume Information") == 0) {
-        file.close();
-        continue;
-      }
-      if (file.isDirectory()) {
-        dirs.push_back((path.back() == '/') ? path + name : path + "/" + name);
-      } else if (FsHelpers::hasEpubExtension(std::string_view{name})) {
-        count++;
-      }
-      file.close();
+    bars[dayMonth - 1].readingMs += day.readingMs;
+  }
+
+  return bars;
+}
+
+std::string formatAnnualReadingTitle(const int year) {
+  if (year <= 0) {
+    return tr(STR_ANNUAL_READING);
+  }
+  return std::string(tr(STR_ANNUAL_READING)) + " (" + std::to_string(year) + ")";
+}
+
+uint64_t getCurrentYearReadingMs() {
+  const auto& readingDays = READING_STATS.getReadingDays();
+  const int referenceYear = resolveReferenceYear(readingDays);
+  if (referenceYear == 0) {
+    return 0;
+  }
+
+  uint64_t totalMs = 0;
+  for (const auto& day : readingDays) {
+    int dayYear = 0;
+    unsigned dayMonth = 0;
+    unsigned dayNumber = 0;
+    civilFromDays(static_cast<int>(day.dayOrdinal), dayYear, dayMonth, dayNumber);
+    if (dayYear == referenceYear) {
+      totalMs += day.readingMs;
     }
-    dir.close();
   }
-  return count;
+  return totalMs;
 }
 
+void drawReadingChart(GfxRenderer& renderer, const Rect& rect, const std::vector<ChartBar>& bars,
+                      const bool rotateBottomLabels) {
+  if (bars.empty()) {
+    return;
+  }
+
+  const int innerLeft = rect.x + 14;
+  const int innerRight = rect.x + rect.width - 14;
+  const int topLabelY = rect.y + 2;
+  const int chartTop = rect.y + 30;
+  const int bottomGap = rotateBottomLabels ? 12 : 10;
+  const int bottomLabelAreaHeight = rotateBottomLabels ? 40 : 18;
+  const int baselineY = rect.y + rect.height - bottomLabelAreaHeight - bottomGap - 2;
+  const int bottomLabelY = baselineY + bottomGap;
+  const int chartHeight = std::max(1, baselineY - chartTop);
+
+  const int barCount = static_cast<int>(bars.size());
+  const int barGap = barCount <= 7 ? 7 : 4;
+  const int minBarWidth = barCount <= 7 ? 12 : 8;
+  const int barWidth = std::max(minBarWidth, (innerRight - innerLeft - barGap * (barCount - 1)) / barCount);
+  const int usedWidth = barWidth * barCount + barGap * (barCount - 1);
+  const int chartLeft = rect.x + (rect.width - usedWidth) / 2;
+  uint64_t maxValue = 1;
+  for (const auto& bar : bars) {
+    maxValue = std::max(maxValue, bar.readingMs);
+  }
+
+  renderer.drawLine(innerLeft - 2, baselineY, innerRight + 2, baselineY, 2, true);
+
+  for (int index = 0; index < barCount; ++index) {
+    const int barX = chartLeft + index * (barWidth + barGap);
+    const uint64_t readingMs = bars[index].readingMs;
+    if (!bars[index].topLabel.empty()) {
+      const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, bars[index].topLabel.c_str(), EpdFontFamily::REGULAR);
+      renderer.drawText(SMALL_FONT_ID, barX + (barWidth - labelWidth) / 2, topLabelY, bars[index].topLabel.c_str());
+    }
+
+    int barHeight = static_cast<int>((readingMs * chartHeight) / maxValue);
+    if (readingMs > 0 && barHeight < 6) {
+      barHeight = 6;
+    }
+
+    const int barY = baselineY - barHeight;
+    if (barHeight > 0) {
+      renderer.fillRectDither(barX + 1, barY + 1, std::max(0, barWidth - 2), std::max(0, barHeight - 2),
+                              Color::LightGray);
+      renderer.drawRect(barX, barY, barWidth, barHeight);
+    } else {
+      renderer.drawLine(barX, baselineY - 1, barX + barWidth, baselineY - 1);
+    }
+
+    if (bars[index].bottomLabel.empty()) {
+      continue;
+    }
+
+    if (rotateBottomLabels) {
+      const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, bars[index].bottomLabel.c_str(), EpdFontFamily::REGULAR);
+      const int rotatedX = barX + (barWidth - renderer.getTextHeight(SMALL_FONT_ID)) / 2;
+      const int rotatedY = bottomLabelY + (bottomLabelAreaHeight + labelWidth) / 2;
+      renderer.drawTextRotated90CW(SMALL_FONT_ID, rotatedX, rotatedY, bars[index].bottomLabel.c_str());
+    } else {
+      const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, bars[index].bottomLabel.c_str(), EpdFontFamily::REGULAR);
+      renderer.drawText(SMALL_FONT_ID, barX + (barWidth - labelWidth) / 2, bottomLabelY + 2,
+                        bars[index].bottomLabel.c_str());
+    }
+  }
+}
+
+bool isLeapYear(const int year) { return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0); }
+
+unsigned getDaysInMonth(const int year, const unsigned month) {
+  static constexpr unsigned DAYS_PER_MONTH[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (month == 2) {
+    return isLeapYear(year) ? 29U : 28U;
+  }
+  if (month < 1 || month > 12) {
+    return 30;
+  }
+  return DAYS_PER_MONTH[month - 1];
+}
+
+void resolveReferenceMonth(int& year, unsigned& month) {
+  const uint32_t referenceDayOrdinal = getDisplayReferenceDayOrdinal();
+  unsigned day = 0;
+  if (referenceDayOrdinal != 0 && TimeUtils::getDateFromDayOrdinal(referenceDayOrdinal, year, month, day)) {
+    return;
+  }
+  if (READING_STATS.hasReadingDays() &&
+      TimeUtils::getDateFromDayOrdinal(READING_STATS.getReadingDays().back().dayOrdinal, year, month, day)) {
+    return;
+  }
+  year = 2026;
+  month = 1;
+}
+
+int getHeatLevel(const uint64_t readingMs) {
+  if (readingMs == 0) {
+    return 0;
+  }
+  const uint64_t totalMinutes = readingMs / 60000ULL;
+  if (totalMinutes < 15ULL) {
+    return 0;
+  }
+  if (totalMinutes < 30ULL) {
+    return 1;
+  }
+  if (totalMinutes < 60ULL) {
+    return 2;
+  }
+  if (totalMinutes < 120ULL) {
+    return 3;
+  }
+  if (totalMinutes < 240ULL) {
+    return 4;
+  }
+  return 5;
+}
+
+MonthSummary buildMonthSummary(const int year, const unsigned month) {
+  MonthSummary summary;
+  const uint32_t monthStart = TimeUtils::getDayOrdinalForDate(year, month, 1);
+  const uint32_t monthEnd = TimeUtils::getDayOrdinalForDate(year, month, getDaysInMonth(year, month));
+
+  for (const auto& day : READING_STATS.getReadingDays()) {
+    int dayYear = 0;
+    unsigned dayMonth = 0;
+    unsigned dayOfMonth = 0;
+    if (!TimeUtils::getDateFromDayOrdinal(day.dayOrdinal, dayYear, dayMonth, dayOfMonth)) {
+      continue;
+    }
+
+    if (dayYear == year) {
+      summary.yearTotalReadingMs += day.readingMs;
+    }
+
+    if (day.dayOrdinal < monthStart || day.dayOrdinal > monthEnd) {
+      continue;
+    }
+
+    summary.monthTotalReadingMs += day.readingMs;
+    if (day.readingMs > 0) {
+      summary.monthDaysRead++;
+    }
+    if (day.readingMs > summary.bestDayReadingMs) {
+      summary.bestDayReadingMs = day.readingMs;
+      summary.bestDayOfMonth = dayOfMonth;
+    }
+  }
+
+  return summary;
+}
+
+std::array<HeatmapCell, 42> buildHeatmapCells(const int year, const unsigned month, const uint32_t referenceDayOrdinal) {
+  std::array<HeatmapCell, 42> cells{};
+  const uint32_t firstDayOrdinal = TimeUtils::getDayOrdinalForDate(year, month, 1);
+  const int firstWeekday = static_cast<int>((firstDayOrdinal + 3U) % 7U);  // Monday = 0
+  const uint32_t gridStartOrdinal = firstDayOrdinal - static_cast<uint32_t>(firstWeekday);
+
+  for (size_t index = 0; index < cells.size(); ++index) {
+    auto& cell = cells[index];
+    cell.dayOrdinal = gridStartOrdinal + static_cast<uint32_t>(index);
+    int cellYear = 0;
+    unsigned cellMonth = 0;
+    unsigned cellDay = 0;
+    TimeUtils::getDateFromDayOrdinal(cell.dayOrdinal, cellYear, cellMonth, cellDay);
+    cell.day = cellDay;
+    cell.inViewedMonth = cellYear == year && cellMonth == month;
+    cell.isReferenceDay = cell.inViewedMonth && referenceDayOrdinal != 0 && cell.dayOrdinal == referenceDayOrdinal;
+  }
+
+  size_t readingIndex = 0;
+  const auto& readingDays = READING_STATS.getReadingDays();
+  for (auto& cell : cells) {
+    while (readingIndex < readingDays.size() && readingDays[readingIndex].dayOrdinal < cell.dayOrdinal) {
+      readingIndex++;
+    }
+    if (readingIndex < readingDays.size() && readingDays[readingIndex].dayOrdinal == cell.dayOrdinal) {
+      cell.readingMs = readingDays[readingIndex].readingMs;
+    }
+  }
+
+  return cells;
+}
+
+void drawHeatCell(GfxRenderer& renderer, const Rect& rect, const HeatmapCell& cell) {
+  const int level = cell.inViewedMonth ? getHeatLevel(cell.readingMs) : 0;
+  const Rect fillRect{rect.x + 1, rect.y + 1, std::max(0, rect.width - 2), std::max(0, rect.height - 2)};
+  bool textBlack = true;
+
+  switch (level) {
+    case 1:
+    case 2:
+      renderer.fillRectDither(fillRect.x, fillRect.y, fillRect.width, fillRect.height, Color::LightGray);
+      break;
+    case 3:
+    case 4:
+      renderer.fillRectDither(fillRect.x, fillRect.y, fillRect.width, fillRect.height, Color::DarkGray);
+      textBlack = (level < 4);
+      break;
+    case 5:
+      renderer.fillRect(fillRect.x, fillRect.y, fillRect.width, fillRect.height);
+      textBlack = false;
+      break;
+    default:
+      break;
+  }
+
+  renderer.drawRect(rect.x, rect.y, rect.width, rect.height);
+
+  if (cell.day > 0) {
+    const std::string dayText = std::to_string(cell.day);
+    renderer.drawText(SMALL_FONT_ID, rect.x + 6, rect.y + 5, dayText.c_str(), textBlack,
+                      cell.inViewedMonth ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+  }
+
+  if (cell.isReferenceDay) {
+    renderer.drawRect(rect.x + 2, rect.y + 2, rect.width - 4, rect.height - 4, level >= 4 ? false : true);
+  }
+}
+
+void drawLegendSwatch(GfxRenderer& renderer, const Rect& rect, const int level) {
+  const Rect heatRect{rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2};
+  switch (level) {
+    case 1:
+    case 2:
+      renderer.fillRectDither(heatRect.x, heatRect.y, heatRect.width, heatRect.height, Color::LightGray);
+      break;
+    case 3:
+    case 4:
+      renderer.fillRectDither(heatRect.x, heatRect.y, heatRect.width, heatRect.height, Color::DarkGray);
+      break;
+    case 5:
+      renderer.fillRect(heatRect.x, heatRect.y, heatRect.width, heatRect.height);
+      break;
+    default:
+      break;
+  }
+  renderer.drawRect(rect.x, rect.y, rect.width, rect.height);
+}
+
+void drawLegend(GfxRenderer& renderer, const Rect& rect) {
+  struct LegendLevel {
+    int level;
+    const char* label;
+  };
+  static constexpr LegendLevel LEVELS[] = {
+      {1, "15m+"}, {2, "30m+"}, {3, "60m+"}, {4, "120m+"}, {5, "240m+"}};
+  constexpr int LEVEL_COUNT = sizeof(LEVELS) / sizeof(LEVELS[0]);
+
+  const int itemWidth = rect.width / LEVEL_COUNT;
+  for (int index = 0; index < LEVEL_COUNT; ++index) {
+    const int itemX = rect.x + index * itemWidth;
+    const Rect swatch{itemX + 6, rect.y + 3, LEGEND_SWATCH_SIZE, LEGEND_SWATCH_SIZE};
+    drawLegendSwatch(renderer, swatch, LEVELS[index].level);
+    renderer.drawText(SMALL_FONT_ID, itemX + 28, rect.y + 6, LEVELS[index].label);
+  }
+}
 }  // namespace
-
-// ---- Background compute task ----
-
-void ReadingStatsActivity::computeTaskFunc(void* param) {
-  auto* self = static_cast<ReadingStatsActivity*>(param);
-
-  // Brief delay so the main task can render [Loading] before we start heavy I/O.
-  vTaskDelay(pdMS_TO_TICKS(100));
-
-  uint64_t total = 0;
-  int64_t freeB = -1;
-  int epubs = 0;
-
-  // Fast path: try the persisted file cache from a previous boot session
-  if (!tryLoadFileCache(total, freeB, epubs)) {
-    // Slow path: compute fresh (freeClusterCount scans the FAT — can take seconds)
-    total = Storage.totalBytes();
-    freeB = Storage.freeBytes();
-    epubs = countEpubsOnDevice();
-    saveFileCache(total, freeB, epubs);
-    LOG_DBG("Stats", "Computed fresh: total=%llu free=%lld epubs=%d", static_cast<unsigned long long>(total),
-            static_cast<long long>(freeB), epubs);
-  } else {
-    LOG_DBG("Stats", "Loaded stats from file cache");
-  }
-
-  // Commit to static cache — all writes before setting hasCachedData
-  sCachedTotalBytes = total;
-  sCachedFreeBytes = freeB;
-  sCachedEpubCount = epubs;
-  hasCachedData = true;
-
-  self->isLoading = false;
-  // requestUpdate() BEFORE taskCompleted — onExit() may free self at any point after taskCompleted=true
-  self->requestUpdate();
-  self->taskCompleted = true;
-  vTaskDelete(nullptr);
-}
-
-void ReadingStatsActivity::startComputeTask() {
-  if (computeTaskHandle != nullptr && !taskCompleted) return;  // already running
-  isLoading = true;
-  taskCompleted = false;
-  xTaskCreate(computeTaskFunc, "stats_cmp", 3072, this, 1, &computeTaskHandle);
-}
-
-// ---- Activity lifecycle ----
 
 void ReadingStatsActivity::onEnter() {
   Activity::onEnter();
-  if (hasCachedData) {
-    isLoading = false;  // instant — no I/O
-  } else {
-    startComputeTask();
+  captureFirstStatsAccessDate();
+
+  currentPage = PAGE_OVERVIEW;
+  selectedBookIndex = 0;
+  resolveReferenceMonth(viewedYear, viewedMonth);
+
+  waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+  waitForBackRelease = false;
+  requestUpdate();
+}
+
+void ReadingStatsActivity::onExit() { Activity::onExit(); }
+
+void ReadingStatsActivity::changePage(const int delta) {
+  currentPage += delta;
+  while (currentPage < 0) {
+    currentPage += TOTAL_STATS_PAGES;
+  }
+  while (currentPage >= TOTAL_STATS_PAGES) {
+    currentPage -= TOTAL_STATS_PAGES;
   }
   requestUpdate();
 }
 
-void ReadingStatsActivity::onExit() {
-  // Only vTaskDelete if the task hasn't already self-deleted.
-  // taskCompleted is set true AFTER requestUpdate() and BEFORE vTaskDelete(nullptr) in the task,
-  // so if true the handle is already invalid — do not touch it.
-  if (computeTaskHandle != nullptr && !taskCompleted) {
-    vTaskDelete(computeTaskHandle);
+void ReadingStatsActivity::changeViewedMonth(const int delta) {
+  int month = static_cast<int>(viewedMonth) + delta;
+  int year = viewedYear;
+  while (month < 1) {
+    month += 12;
+    year--;
   }
-  computeTaskHandle = nullptr;
-  taskCompleted = false;
-  Activity::onExit();
+  while (month > 12) {
+    month -= 12;
+    year++;
+  }
+  viewedYear = year;
+  viewedMonth = static_cast<unsigned>(month);
+  requestUpdate();
 }
 
 void ReadingStatsActivity::loop() {
-  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-    activityManager.goHome();
+  if (waitForBackRelease) {
+    if (!mappedInput.isPressed(MappedInputManager::Button::Back) &&
+        !mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      waitForBackRelease = false;
+    }
     return;
   }
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm) && !isLoading) {
-    // Force recompute: clear both caches
-    hasCachedData = false;
-    Storage.remove(STATS_CACHE_PATH);
-    startComputeTask();
-    requestUpdate();
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    finish();
+    return;
+  }
+
+  if (waitForConfirmRelease) {
+    if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
+      waitForConfirmRelease = false;
+    }
+    return;
+  }
+
+  const bool leftReleased  = mappedInput.wasReleased(MappedInputManager::Button::Left);
+  const bool rightReleased = mappedInput.wasReleased(MappedInputManager::Button::Right);
+  const bool upReleased    = mappedInput.wasReleased(MappedInputManager::Button::Up);
+  const bool downReleased  = mappedInput.wasReleased(MappedInputManager::Button::Down);
+  const bool anyDir = leftReleased || rightReleased || upReleased || downReleased;
+  const bool isLongPress = mappedInput.getHeldTime() >= PAGE_SWITCH_LONG_PRESS_MS;
+
+  // Long press on any direction always switches stats page (directional).
+  if (anyDir && isLongPress) {
+    if (leftReleased || upReleased) {
+      changePage(-1);
+    } else {
+      changePage(1);
+    }
+    return;
+  }
+
+  // Short press: page-specific handling.
+  if (currentPage == PAGE_STARTED_BOOKS) {
+    const int bookCount = static_cast<int>(getUnfinishedBooks().size());
+    if (bookCount <= 0) {
+      selectedBookIndex = 0;
+      return;
+    }
+    selectedBookIndex = std::clamp(selectedBookIndex, 0, bookCount - 1);
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (mappedInput.getHeldTime() >= BOOK_LONG_PRESS_MS) {
+        confirmRemoveSelectedBook();
+      } else {
+        openSelectedBook();
+      }
+      return;
+    }
+
+    if (upReleased || leftReleased) {
+      const int nextIndex = std::max(0, selectedBookIndex - 1);
+      if (nextIndex != selectedBookIndex) {
+        selectedBookIndex = nextIndex;
+        requestUpdate();
+      }
+      return;
+    }
+    if (downReleased || rightReleased) {
+      const int nextIndex = std::min(bookCount - 1, selectedBookIndex + 1);
+      if (nextIndex != selectedBookIndex) {
+        selectedBookIndex = nextIndex;
+        requestUpdate();
+      }
+      return;
+    }
+    return;
+  }
+
+  if (currentPage == PAGE_MONTHLY) {
+    // btn3/btn4 hints are labeled "Up"/"Down" and map to logical Left/Right (front buttons).
+    // Side Up/Down buttons also navigate months for convenience.
+    if (leftReleased || upReleased) { changeViewedMonth(-1); return; }
+    if (rightReleased || downReleased) { changeViewedMonth(1); return; }
+    return;
+  }
+
+  // All other pages: any short directional press advances/retreats the stats page.
+  if (anyDir) {
+    if (leftReleased || upReleased) {
+      changePage(-1);
+    } else {
+      changePage(1);
+    }
+    return;
   }
 }
+
+void ReadingStatsActivity::openSelectedBook() {
+  const auto books = getUnfinishedBooks();
+  if (selectedBookIndex < 0 || selectedBookIndex >= static_cast<int>(books.size())) {
+    return;
+  }
+
+  startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, books[selectedBookIndex]->path),
+                         [this](const ActivityResult&) {
+                           guardBackReturn();
+                           requestUpdate();
+                         });
+}
+
+void ReadingStatsActivity::confirmRemoveSelectedBook() {
+  const auto books = getUnfinishedBooks();
+  if (selectedBookIndex < 0 || selectedBookIndex >= static_cast<int>(books.size())) {
+    return;
+  }
+
+  const ReadingBookStats selectedBook = *books[selectedBookIndex];
+  const int currentSelection = selectedBookIndex;
+  startActivityForResult(
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_STATS_ENTRY), getBookTitle(selectedBook)),
+      [this, selectedBook, currentSelection](const ActivityResult& result) {
+        if (!result.isCancelled && READING_STATS.removeBook(selectedBook.path)) {
+          const int bookCount = static_cast<int>(getUnfinishedBooks().size());
+          if (bookCount == 0) {
+            selectedBookIndex = 0;
+          } else {
+            selectedBookIndex = std::min(currentSelection, bookCount - 1);
+          }
+        }
+
+        guardBackReturn();
+        requestUpdate(true);
+      });
+}
+
+void ReadingStatsActivity::guardBackReturn() { waitForBackRelease = true; }
 
 void ReadingStatsActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
-
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS));
-
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  const int sidePadding = metrics.contentSidePadding;
+  const int contentWidth = pageWidth - sidePadding * 2;
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  const int contentBottom = pageHeight - metrics.buttonHintsHeight - PAGE_INDICATOR_HEIGHT - 4;
 
-  char timeBuf[16];
-  formatDuration(READING_STATS.totalReadingTimeSeconds, timeBuf, sizeof(timeBuf));
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS), nullptr);
 
-  char pagesBuf[12];
-  snprintf(pagesBuf, sizeof(pagesBuf), "%lu", static_cast<unsigned long>(READING_STATS.totalPagesRead));
+  if (currentPage == PAGE_OVERVIEW) {
+    const uint64_t todayReadingMs = READING_STATS.getTodayReadingMs();
+    int annualReadingYear = 0;
+    const auto annualReadingBars = getAnnualReadingBars(annualReadingYear);
+    const std::string annualReadingTitle = formatAnnualReadingTitle(annualReadingYear);
+    const std::string dailyGoalValue = ReadingStatsAnalytics::formatDurationHm(todayReadingMs) + " / " +
+                                       ReadingStatsAnalytics::formatDurationHm(getDailyReadingGoalMs());
 
-  char finishedBuf[12];
-  snprintf(finishedBuf, sizeof(finishedBuf), "%lu", static_cast<unsigned long>(READING_STATS.booksFinished));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop, contentWidth, SUMMARY_ROW_HEIGHT}, Streak24Icon, tr(STR_STREAK),
+                  std::to_string(READING_STATS.getCurrentStreakDays()));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT}, Confetti24Icon,
+                  tr(STR_MAX_STREAK), std::to_string(READING_STATS.getMaxStreakDays()));
+    drawMetricRow(renderer,
+                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT}, Checkbox24Icon,
+                  tr(STR_DAILY_GOAL), dailyGoalValue);
+    drawMetricRow(renderer,
+                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Readingtime24Icon,
+                  tr(STR_READING_TIME), ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()));
+    drawMetricRow(renderer,
+                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 4, contentWidth, SUMMARY_ROW_HEIGHT}, Check24Icon,
+                  tr(STR_BOOKS_FINISHED), std::to_string(READING_STATS.getBooksFinishedCount()));
+    drawMetricRow(renderer,
+                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 5, contentWidth, SUMMARY_ROW_HEIGHT}, Files24Icon,
+                  tr(STR_BOOKS_STARTED), std::to_string(READING_STATS.getBooksStartedCount()));
 
-  char sessionsBuf[12];
-  snprintf(sessionsBuf, sizeof(sessionsBuf), "%lu", static_cast<unsigned long>(READING_STATS.totalSessions));
+    const int chartHeaderTop = contentTop + SUMMARY_ROW_HEIGHT * 6 + SUMMARY_GAP * 2;
+    const int chartTop = chartHeaderTop + CHART_HEADER_HEIGHT + CHART_TOP_GAP;
+    const int chartHeight = std::max(96, contentBottom - chartTop);
+    GUI.drawSubHeader(renderer, Rect{0, chartHeaderTop, pageWidth, CHART_HEADER_HEIGHT}, annualReadingTitle.c_str(),
+                      nullptr);
+    drawReadingChart(renderer, Rect{sidePadding, chartTop, contentWidth, chartHeight}, annualReadingBars, false);
+  } else if (currentPage == PAGE_STARTED_BOOKS) {
+    const auto books = getUnfinishedBooks();
+    const int bookCount = static_cast<int>(books.size());
+    const int clampedSelected = (bookCount > 0) ? std::clamp(selectedBookIndex, 0, bookCount - 1) : 0;
+    if (bookCount > 0 && clampedSelected != selectedBookIndex) {
+      selectedBookIndex = clampedSelected;
+    }
 
-  char avgSessionBuf[16];
-  if (READING_STATS.totalSessions > 0) {
-    formatDuration(READING_STATS.totalReadingTimeSeconds / READING_STATS.totalSessions, avgSessionBuf,
-                   sizeof(avgSessionBuf));
-  } else {
-    snprintf(avgSessionBuf, sizeof(avgSessionBuf), "--");
+    const int totalPages = std::max(1, (bookCount + BOOKS_PER_PAGE - 1) / BOOKS_PER_PAGE);
+    const int currentBooksPage = bookCount == 0 ? 1 : (selectedBookIndex / BOOKS_PER_PAGE) + 1;
+    const std::string booksPageLabel = std::to_string(currentBooksPage) + "/" + std::to_string(totalPages);
+    const std::string startedBooksLabel =
+        std::string(tr(STR_STARTED_BOOKS)) + " (" + std::to_string(READING_STATS.getBooksStartedCount()) + ")";
+    GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, startedBooksLabel.c_str(),
+                      booksPageLabel.c_str());
+
+    const int listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
+    if (books.empty()) {
+      renderer.drawText(UI_10_FONT_ID, sidePadding, listTop + 20, tr(STR_NO_READING_STATS));
+    } else {
+      const int maxListHeight = std::max(0, contentBottom - listTop);
+      const int targetListHeight = metrics.listWithSubtitleRowHeight * BOOKS_PER_PAGE;
+      const int listHeight = std::min(maxListHeight, targetListHeight);
+      GUI.drawList(renderer, Rect{0, listTop, pageWidth, listHeight}, bookCount, selectedBookIndex,
+                   [&](const int index) { return getBookTitle(*books[index]); },
+                   [&](const int index) {
+                     return getBookSubtitle(*books[index]) + " | " +
+                            ReadingStatsAnalytics::formatDurationHm(books[index]->totalReadingMs);
+                   }, nullptr,
+                   [&](const int index) { return std::to_string(books[index]->lastProgressPercent) + "%"; }, false);
+    }
+  } else if (currentPage == PAGE_WEEKLY) {
+    const std::vector<ChartBar> weekBars = getRecentDailyReadingBars();
+    const uint64_t last7DaysValueMs = READING_STATS.getRecentReadingMs(7);
+    const uint64_t last30DaysValueMs = READING_STATS.getRecentReadingMs(30);
+
+    uint32_t daysRead = 0;
+    uint32_t goalDays = 0;
+    uint64_t bestDayMs = 0;
+    std::string bestDayLabel = "-";
+    for (const auto& bar : weekBars) {
+      if (bar.readingMs > 0) {
+        daysRead++;
+      }
+      if (bar.readingMs >= getDailyReadingGoalMs()) {
+        goalDays++;
+      }
+      if (bar.readingMs > bestDayMs) {
+        bestDayMs = bar.readingMs;
+        bestDayLabel = bar.bottomLabel;
+      }
+    }
+
+    const uint64_t avgDayMs = last7DaysValueMs / 7ULL;
+    drawMetricRow(renderer, Rect{sidePadding, contentTop, contentWidth, SUMMARY_ROW_HEIGHT}, Last7days24Icon,
+            tr(STR_LAST_7D),
+                  ReadingStatsAnalytics::formatDurationHm(last7DaysValueMs));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT},
+            Last30days24Icon, tr(STR_LAST_30D), ReadingStatsAnalytics::formatDurationHm(last30DaysValueMs));
+    drawMetricRow(renderer,
+                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT}, Book24Icon,
+                  tr(STR_DAY_TOTAL), ReadingStatsAnalytics::formatDurationHm(avgDayMs));
+    drawMetricRow(renderer,
+                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT}, Check24Icon,
+                  tr(STR_DAYS_READ), std::to_string(daysRead));
+    drawMetricRow(renderer,
+                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 4, contentWidth, SUMMARY_ROW_HEIGHT}, Checkbox24Icon,
+                  tr(STR_DAILY_GOAL), std::to_string(goalDays) + "/7");
+
+    const std::string bestDayValue = (bestDayMs == 0) ? std::string("-") :
+        (bestDayLabel + " (" + ReadingStatsAnalytics::formatDurationHm(bestDayMs) + ")");
+    drawMetricRow(renderer,
+            Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 5, contentWidth, SUMMARY_ROW_HEIGHT}, Award24Icon,
+                  tr(STR_BEST_DAY), bestDayValue);
+
+    const int chartHeaderTop = contentTop + SUMMARY_ROW_HEIGHT * 6 + SUMMARY_GAP * 2;
+    const int chartTop = chartHeaderTop + CHART_HEADER_HEIGHT + CHART_TOP_GAP;
+    const int chartHeight = std::max(96, contentBottom - chartTop);
+    GUI.drawSubHeader(renderer, Rect{0, chartHeaderTop, pageWidth, CHART_HEADER_HEIGHT}, tr(STR_DAILY_READING), nullptr);
+    drawReadingChart(renderer, Rect{sidePadding, chartTop, contentWidth, chartHeight}, weekBars, true);
+  } else if (currentPage == PAGE_MONTHLY) {
+    const uint32_t referenceDayOrdinal = getDisplayReferenceDayOrdinal();
+    const auto monthSummary = buildMonthSummary(viewedYear, viewedMonth);
+    const auto cells = buildHeatmapCells(viewedYear, viewedMonth, referenceDayOrdinal);
+    const std::string monthLabel = ReadingStatsAnalytics::formatMonthLabel(viewedYear, viewedMonth);
+
+    GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, MONTH_HEADER_HEIGHT}, monthLabel.c_str(), nullptr);
+
+    const int summaryTop = contentTop + MONTH_HEADER_HEIGHT + 4;
+    const std::string bestDayValue =
+        monthSummary.bestDayOfMonth > 0
+            ? ReadingStatsAnalytics::formatDurationHm(monthSummary.bestDayReadingMs) + " (" +
+                  std::to_string(monthSummary.bestDayOfMonth) + ")"
+            : ReadingStatsAnalytics::formatDurationHm(monthSummary.bestDayReadingMs);
+
+    drawMetricRow(renderer, Rect{sidePadding, summaryTop, contentWidth, SUMMARY_ROW_HEIGHT}, Receipttotal24Icon,
+            tr(STR_MONTH_TOTAL),
+                  ReadingStatsAnalytics::formatDurationHm(monthSummary.monthTotalReadingMs));
+    drawMetricRow(renderer, Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT}, Check24Icon,
+                  tr(STR_DAYS_READ), std::to_string(monthSummary.monthDaysRead));
+    drawMetricRow(renderer,
+            Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT}, Award24Icon,
+            tr(STR_BEST_DAY), bestDayValue);
+    drawMetricRow(renderer,
+            Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
+            Last30days24Icon,
+                  tr(STR_YEAR), ReadingStatsAnalytics::formatDurationHm(monthSummary.yearTotalReadingMs));
+
+    const int gridTop = summaryTop + SUMMARY_ROW_HEIGHT * 4 + SECTION_GAP;
+    const int legendTop = contentBottom - LEGEND_HEIGHT - 4;
+    const int gridHeight = std::max(100, legendTop - gridTop - SECTION_GAP);
+    const int cellWidth = (contentWidth - HEATMAP_GRID_GAP * 6) / 7;
+    const int cellHeight = (gridHeight - HEATMAP_GRID_GAP * 5) / 6;
+
+    for (int index = 0; index < 42; ++index) {
+      const int row = index / 7;
+      const int col = index % 7;
+      const int x = sidePadding + col * (cellWidth + HEATMAP_GRID_GAP);
+      const int y = gridTop + row * (cellHeight + HEATMAP_GRID_GAP);
+      drawHeatCell(renderer, Rect{x, y, cellWidth, cellHeight}, cells[static_cast<size_t>(index)]);
+    }
+
+    drawLegend(renderer, Rect{sidePadding, legendTop, contentWidth, LEGEND_HEIGHT});
   }
 
-  char speedBuf[16];
-  if (SETTINGS.readingSpeedSecondsPerPage == 0) {
-    snprintf(speedBuf, sizeof(speedBuf), "--");
-  } else if (SETTINGS.readingSpeedSecondsPerPage < 60) {
-    snprintf(speedBuf, sizeof(speedBuf), "~%us/pg", static_cast<unsigned>(SETTINGS.readingSpeedSecondsPerPage));
-  } else {
-    snprintf(speedBuf, sizeof(speedBuf), "~%um/pg", static_cast<unsigned>(SETTINGS.readingSpeedSecondsPerPage / 60));
+  drawBottomPageIndicator(renderer, metrics, currentPage + 1, TOTAL_STATS_PAGES);
+
+  std::string btn2;
+  std::string btn3 = tr(STR_DIR_LEFT);
+  std::string btn4 = tr(STR_DIR_RIGHT);
+  if (currentPage == PAGE_STARTED_BOOKS) {
+    btn2 = tr(STR_SELECT);
+    btn3 = tr(STR_DIR_UP);
+    btn4 = tr(STR_DIR_DOWN);
+  } else if (currentPage == PAGE_MONTHLY) {
+    btn3 = tr(STR_DIR_UP);
+    btn4 = tr(STR_DIR_DOWN);
   }
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), btn2.c_str(), btn3.c_str(), btn4.c_str());
+  drawLyraStyleButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
-  int inProgressCount = 0;
-  for (const auto& book : RECENT_BOOKS.getBooks()) {
-    if (book.progressPercent > 0 && book.progressPercent < 90) inProgressCount++;
-  }
-  char inProgressBuf[8];
-  snprintf(inProgressBuf, sizeof(inProgressBuf), "%d", inProgressCount);
-
-  // Storage stats — "---" placeholder until background task completes
-  char storageTotalBuf[12];
-  char storageUsedBuf[12];
-  char storageFreeBuf[12];
-  char epubCountBuf[12];
-
-  if (isLoading) {
-    snprintf(storageTotalBuf, sizeof(storageTotalBuf), "---");
-    snprintf(storageUsedBuf, sizeof(storageUsedBuf), "---");
-    snprintf(storageFreeBuf, sizeof(storageFreeBuf), "---");
-    snprintf(epubCountBuf, sizeof(epubCountBuf), "---");
-  } else {
-    const int64_t usedBytes = (sCachedFreeBytes >= 0 && sCachedTotalBytes > 0)
-                                  ? static_cast<int64_t>(sCachedTotalBytes) - sCachedFreeBytes
-                                  : -1;
-    formatStorageSize(static_cast<int64_t>(sCachedTotalBytes), storageTotalBuf, sizeof(storageTotalBuf));
-    formatStorageSize(usedBytes, storageUsedBuf, sizeof(storageUsedBuf));
-    formatStorageSize(sCachedFreeBytes, storageFreeBuf, sizeof(storageFreeBuf));
-    snprintf(epubCountBuf, sizeof(epubCountBuf), "%d", sCachedEpubCount);
-  }
-
-  const char* labels[] = {tr(STR_STATS_READING_TIME),      tr(STR_STATS_PAGES_READ),  tr(STR_STATS_BOOKS_FINISHED),
-                          tr(STR_STATS_SESSIONS),          tr(STR_STATS_AVG_SESSION), tr(STR_STATS_READING_SPEED),
-                          tr(STR_STATS_BOOKS_IN_PROGRESS), tr(STR_STATS_EPUB_COUNT),  tr(STR_STATS_STORAGE_TOTAL),
-                          tr(STR_STATS_STORAGE_USED),      tr(STR_STATS_STORAGE_FREE)};
-  const char* values[] = {timeBuf,       pagesBuf,     finishedBuf,     sessionsBuf,    avgSessionBuf, speedBuf,
-                          inProgressBuf, epubCountBuf, storageTotalBuf, storageUsedBuf, storageFreeBuf};
-  constexpr int ROW_COUNT = 11;
-
-  GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, ROW_COUNT, -1,
-      [&labels](int i) { return std::string(labels[i]); }, nullptr, nullptr,
-      [&values](int i) { return std::string(values[i]); });
-
-  const auto hints = mappedInput.mapLabels(tr(STR_BACK), isLoading ? "" : tr(STR_REFRESH), "", "");
-  GUI.drawButtonHints(renderer, hints.btn1, hints.btn2, hints.btn3, hints.btn4);
-
-  if (SETTINGS.darkMode) renderer.invertScreen();
-  if (isLoading) {
-    GUI.drawPopup(renderer, tr(STR_INDEXING));
-  } else {
-    renderer.displayBuffer();
-  }
+  const auto refreshMode = (currentPage == PAGE_STARTED_BOOKS) ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH;
+  renderer.displayBuffer(refreshMode);
 }

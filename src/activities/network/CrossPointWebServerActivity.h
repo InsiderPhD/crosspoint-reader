@@ -52,8 +52,13 @@ class CrossPointWebServerActivity final : public Activity {
   // Cached signal-strength bracket (0..4) for the WiFi indicator.
   int lastWifiBars = 0;
 
+  // Throttle e-ink redraws during upload. -1 = currently rendering the
+  // normal QR/IP screen; 0..100 = the 10% band last drawn for an upload.
+  int lastUploadPercentShown = -1;
+
   void renderServerRunning() const;
   void renderWifiIndicator(int subHeaderTop) const;
+  void renderUploadProgress(const CrossPointWebServer::WsUploadStatus& status) const;
 
   void onNetworkModeSelected(NetworkMode mode);
   void onWifiSelectionComplete(bool connected);

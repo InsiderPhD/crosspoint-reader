@@ -45,6 +45,7 @@ void XtcReaderActivity::onEnter() {
   APP_STATE.openEpubPath = xtc->getPath();
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
+  READING_STATS.beginSession(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
 
   readingSessionStartMs = millis();
   sessionPageTurns = 0;
@@ -61,27 +62,19 @@ void XtcReaderActivity::onExit() {
   if (SETTINGS.readingSpeedSecondsPerPage > 0) {
     SETTINGS.saveToFile();
   }
-  if (readingSessionStartMs > 0) {
-    const unsigned long elapsedMs = millis() - readingSessionStartMs;
-    if (elapsedMs >= 5000UL) {
-      READING_STATS.addReadingTime(elapsedMs / 1000UL);
-      READING_STATS.addSession();
-    }
+  if (xtc && xtc->getPageCount() > 1) {
+    const int clampedPage = static_cast<int>(std::min<uint32_t>(currentPage, xtc->getPageCount() - 1));
+    const int progressPercent = static_cast<int>((clampedPage * 100) / (xtc->getPageCount() - 1));
+    READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)), progressPercent >= 90);
   }
-  if (sessionPageTurns > 0) {
-    READING_STATS.addPageTurns(sessionPageTurns);
-  }
-  if (xtc && currentPage >= xtc->getPageCount() - 1 && xtc->getPageCount() > 1) {
-    READING_STATS.addBookFinished();
-  }
-  if (readingSessionStartMs > 0 || sessionPageTurns > 0) {
-    READING_STATS.saveToFile();
-  }
+  READING_STATS.endSession();
 
   xtc.reset();
 }
 
 void XtcReaderActivity::loop() {
+  READING_STATS.tickActiveSession();
+
   // Enter chapter selection activity
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (xtc && xtc->hasChapters() && !xtc->getChapters().empty()) {
@@ -129,6 +122,7 @@ void XtcReaderActivity::loop() {
 
   ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
   sessionPageTurns++;
+  READING_STATS.noteActivity();
 
   // At end of the book, forward button goes home and back button returns to last page
   if (currentPage >= xtc->getPageCount()) {
@@ -157,6 +151,12 @@ void XtcReaderActivity::loop() {
       currentPage = xtc->getPageCount();  // Allow showing "End of book"
     }
     requestUpdate();
+  }
+
+  if (xtc && xtc->getPageCount() > 1) {
+    const int clampedPage = static_cast<int>(std::min<uint32_t>(currentPage, xtc->getPageCount() - 1));
+    const int progressPercent = static_cast<int>((clampedPage * 100) / (xtc->getPageCount() - 1));
+    READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)), progressPercent >= 90);
   }
 }
 

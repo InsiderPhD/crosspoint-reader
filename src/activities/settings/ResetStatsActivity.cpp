@@ -6,7 +6,6 @@
 
 #include "MappedInputManager.h"
 #include "ReadingStatsStore.h"
-#include "activities/home/ReadingStatsActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -72,20 +71,7 @@ void ResetStatsActivity::render(RenderLock&&) {
 void ResetStatsActivity::resetStats() {
   LOG_DBG("RESET_STATS", "Resetting reading stats to zero");
 
-  READING_STATS.totalReadingTimeSeconds = 0;
-  READING_STATS.totalPagesRead = 0;
-  READING_STATS.booksFinished = 0;
-  READING_STATS.totalSessions = 0;
-
-  if (!READING_STATS.saveToFile()) {
-    LOG_ERR("RESET_STATS", "Failed to save reset stats to file");
-    state = FAILED;
-    requestUpdate();
-    return;
-  }
-
-  // Invalidate the in-memory stats cache so ReadingStatsActivity reflects the reset
-  ReadingStatsActivity::invalidateCache();
+  READING_STATS.reset();
 
   LOG_DBG("RESET_STATS", "Stats reset successfully");
   state = SUCCESS;

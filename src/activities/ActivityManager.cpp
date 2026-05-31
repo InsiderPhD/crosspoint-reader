@@ -10,6 +10,7 @@
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
 #include "home/LibraryActivity.h"
+#include "home/ReadingHeatmapActivity.h"
 #include "home/ReadingStatsActivity.h"
 #include "home/RecentBooksActivity.h"
 #include "network/CrossPointWebServerActivity.h"

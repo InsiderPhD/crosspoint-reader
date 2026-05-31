@@ -7,6 +7,8 @@
 #include <Serialization.h>
 #include <Utf8.h>
 
+#include <algorithm>
+
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
@@ -40,6 +42,7 @@ void TxtReaderActivity::onEnter() {
   APP_STATE.openEpubPath = filePath;
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(filePath, fileName, "", "");
+  READING_STATS.beginSession(filePath, fileName, "", "");
 
   readingSessionStartMs = millis();
   sessionPageTurns = 0;
@@ -62,27 +65,16 @@ void TxtReaderActivity::onExit() {
     SETTINGS.saveToFile();
   }
 
-  if (readingSessionStartMs > 0) {
-    const unsigned long elapsedMs = millis() - readingSessionStartMs;
-    if (elapsedMs >= 5000UL) {
-      READING_STATS.addReadingTime(elapsedMs / 1000UL);
-      READING_STATS.addSession();
-    }
-  }
-  if (sessionPageTurns > 0) {
-    READING_STATS.addPageTurns(sessionPageTurns);
-  }
-  if (currentPage >= totalPages - 1 && totalPages > 1) {
-    READING_STATS.addBookFinished();
-  }
-  if (readingSessionStartMs > 0 || sessionPageTurns > 0) {
-    READING_STATS.saveToFile();
-  }
+  const int progressPercent = (totalPages > 1) ? static_cast<int>((currentPage * 100) / (totalPages - 1)) : 0;
+  READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)), progressPercent >= 90);
+  READING_STATS.endSession();
 
   txt.reset();
 }
 
 void TxtReaderActivity::loop() {
+  READING_STATS.tickActiveSession();
+
   // Long press BACK (1s+) goes to file selection
   if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= ReaderUtils::GO_HOME_MS) {
     activityManager.goToFileBrowser(txt ? txt->getPath() : "");
@@ -105,13 +97,18 @@ void TxtReaderActivity::loop() {
 
   ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
   sessionPageTurns++;
+  READING_STATS.noteActivity();
 
   if (prevTriggered && currentPage > 0) {
     currentPage--;
+    const int progressPercent = (totalPages > 1) ? static_cast<int>((currentPage * 100) / (totalPages - 1)) : 0;
+    READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)), progressPercent >= 90);
     requestUpdate();
   } else if (nextTriggered) {
     if (currentPage < totalPages - 1) {
       currentPage++;
+      const int progressPercent = (totalPages > 1) ? static_cast<int>((currentPage * 100) / (totalPages - 1)) : 0;
+      READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)), progressPercent >= 90);
       requestUpdate();
     } else {
       onGoHome();

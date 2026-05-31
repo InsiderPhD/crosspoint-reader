@@ -6,6 +6,7 @@ class WifiCredentialStore;
 class KOReaderCredentialStore;
 class BookFusionTokenStore;
 class RecentBooksStore;
+class ReadingStatsStore;
 
 namespace JsonSettingsIO {
 
@@ -32,5 +33,10 @@ bool loadBookFusion(BookFusionTokenStore& store, const char* json);
 // RecentBooksStore
 bool saveRecentBooks(const RecentBooksStore& store, const char* path);
 bool loadRecentBooks(RecentBooksStore& store, const char* json);
+
+// ReadingStatsStore
+bool saveReadingStats(const ReadingStatsStore& store, const char* path);
+bool loadReadingStats(ReadingStatsStore& store, const char* json);
+bool loadReadingStatsFromFile(ReadingStatsStore& store, const char* path);
 
 }  // namespace JsonSettingsIO

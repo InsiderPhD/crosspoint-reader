@@ -293,6 +293,7 @@ void EpubReaderActivity::onEnter() {
   APP_STATE.openEpubPath = epub->getPath();
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+  READING_STATS.beginSession(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
 
   readingSessionStartMs = millis();
   sessionPageTurns = 0;
@@ -315,28 +316,15 @@ void EpubReaderActivity::onExit() {
     SETTINGS.saveToFile();
   }
 
-  // Persist reading stats for this session
-  if (readingSessionStartMs > 0) {
-    const unsigned long elapsedMs = millis() - readingSessionStartMs;
-    if (elapsedMs >= 5000UL) {  // ignore sessions under 5s (accidental opens)
-      READING_STATS.addReadingTime(elapsedMs / 1000UL);
-      READING_STATS.addSession();
-    }
-  }
-  if (sessionPageTurns > 0) {
-    READING_STATS.addPageTurns(sessionPageTurns);
-  }
   if (!bookFinishedRecorded && epub && epub->getBookSize() > 0 && section && section->pageCount > 0) {
     const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
     const int progress = static_cast<int>(epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f + 0.5f);
     if (progress >= 90) {
       bookFinishedRecorded = true;
-      READING_STATS.addBookFinished();
+      READING_STATS.updateProgress(100, true);
     }
   }
-  if (readingSessionStartMs > 0 || sessionPageTurns > 0 || bookFinishedRecorded) {
-    READING_STATS.saveToFile();
-  }
+  READING_STATS.endSession();
 
   section.reset();
   epub.reset();
@@ -348,6 +336,8 @@ void EpubReaderActivity::loop() {
     finish();
     return;
   }
+
+  READING_STATS.tickActiveSession();
 
   if (automaticPageTurnActive) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
@@ -679,8 +669,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       }
       if (!bookFinishedRecorded) {
         bookFinishedRecorded = true;
-        READING_STATS.addBookFinished();
-        READING_STATS.saveToFile();
+        READING_STATS.updateProgress(100, true);
       }
       onGoHome();
       return;
@@ -863,6 +852,7 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
   sessionPageTurns++;
+  READING_STATS.noteActivity();
   if (isForwardTurn) {
     if (section->currentPage < section->pageCount - 1) {
       section->currentPage++;
@@ -912,8 +902,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (currentSpineIndex == epub->getSpineItemsCount()) {
     if (!bookFinishedRecorded) {
       bookFinishedRecorded = true;
-      READING_STATS.addBookFinished();
-      READING_STATS.saveToFile();
+      READING_STATS.updateProgress(100, true);
     }
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_END_OF_BOOK), true, EpdFontFamily::BOLD);
@@ -1132,6 +1121,10 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   const float chapterProgress =
       (pageCount > 0) ? static_cast<float>(currentPage) / static_cast<float>(pageCount) : 0.0f;
   const auto progressPercent = static_cast<int8_t>(epub->calculateProgress(spineIndex, chapterProgress) * 100.0f);
+  READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)),
+                   progressPercent >= 90, "",
+                               static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f),
+                                                               0, 100)));
   RECENT_BOOKS.updateProgress(epub->getPath(), progressPercent);
 }
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,

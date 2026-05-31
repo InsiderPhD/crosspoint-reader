@@ -29,6 +29,15 @@ constexpr uint8_t AP_MAX_CONNECTIONS = 4;
 constexpr int QR_CODE_WIDTH = 198;
 constexpr int QR_CODE_HEIGHT = 198;
 
+// Wall-clock cap on each handleClient batch. With MAX_ITERATIONS=500 and no
+// time cap, a heavy WS upload kept loop() running for ~3.5 s in a single call
+// (observed in serial logs), which starves main.cpp's outer-loop input poll —
+// both the per-activity Back check and the global long-press-home gesture
+// (main.cpp:482-490) ride on that outer loop. Bounding to 50 ms gives the
+// outer loop ~20 Hz responsiveness during uploads without meaningfully
+// hurting throughput.
+constexpr unsigned long HANDLE_CLIENT_BUDGET_MS = 50;
+
 // DNS server for captive portal (redirects all DNS queries to our IP)
 DNSServer* dnsServer = nullptr;
 constexpr uint16_t DNS_PORT = 53;
@@ -326,22 +335,33 @@ void CrossPointWebServerActivity::loop() {
       // Reset watchdog BEFORE processing - HTTP header parsing can be slow
       esp_task_wdt_reset();
 
-      // Process HTTP requests in tight loop for maximum throughput
-      // More iterations = more data processed per main loop cycle
+      // Catch a Back press that arrived before the batch — otherwise the user
+      // waits up to a full handleClient pass before exit fires.
+      mappedInput.update();
+      if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+        onGoHome();
+        return;
+      }
+
+      // Process HTTP requests with a wall-clock budget. A single handleClient()
+      // call can take 100s of ms (one synchronous HTTP request handler), so
+      // the budget MUST be checked after every call — checking every 16th
+      // iteration would let a slow handler block input polling for >1 s.
+      // The iteration cap is just a safety net against unbounded looping.
       constexpr int MAX_ITERATIONS = 500;
+      const unsigned long batchStart = millis();
       for (int i = 0; i < MAX_ITERATIONS && webServer->isRunning(); i++) {
         webServer->handleClient();
-        // Reset watchdog every 32 iterations
+        if (millis() - batchStart >= HANDLE_CLIENT_BUDGET_MS) break;
         if ((i & 0x1F) == 0x1F) {
           esp_task_wdt_reset();
         }
-        // Yield and check for exit button every 64 iterations
-        if ((i & 0x3F) == 0x3F) {
+        // Every 16 iters: yield and sample Back so a tap during a long-ish
+        // batch (lots of small-fast requests) still exits without waiting for
+        // the batch to drain.
+        if ((i & 0x0F) == 0x0F) {
           yield();
-          // Force trigger an update of which buttons are being pressed so be have accurate state
-          // for back button checking
           mappedInput.update();
-          // Check for exit button inside loop for responsiveness
           if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
             onGoHome();
             return;
@@ -349,9 +369,29 @@ void CrossPointWebServerActivity::loop() {
         }
       }
       lastHandleClientTime = millis();
+
+      // Show upload progress, but only repaint when the 10% band changes —
+      // an e-ink full refresh costs ~1 s and can stall the websocket.
+      const auto uploadStatus = webServer->getWsUploadStatus();
+      if (uploadStatus.inProgress) {
+        const int percent =
+            (uploadStatus.total > 0)
+                ? static_cast<int>((static_cast<uint64_t>(uploadStatus.received) * 100) / uploadStatus.total)
+                : 0;
+        const int band = (percent / 10) * 10;
+        if (band != lastUploadPercentShown) {
+          lastUploadPercentShown = band;
+          requestUpdate();
+        }
+      } else if (lastUploadPercentShown >= 0) {
+        // Upload just finished — repaint once to bring the QR/URL screen back.
+        lastUploadPercentShown = -1;
+        requestUpdate();
+      }
     }
 
-    // Handle exit on Back button (also check outside loop)
+    // Handle exit on Back button (also check outside loop). Long-press
+    // goes-home is handled globally by main.cpp:482-490.
     if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
       onGoHome();
       return;
@@ -396,6 +436,14 @@ void CrossPointWebServerActivity::renderServerRunning() const {
 
   if (!isApMode) {
     renderWifiIndicator(metrics.topPadding + metrics.headerHeight);
+  }
+
+  if (webServer) {
+    const auto uploadStatus = webServer->getWsUploadStatus();
+    if (uploadStatus.inProgress) {
+      renderUploadProgress(uploadStatus);
+      return;
+    }
   }
 
   int startY = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing * 2;
@@ -458,6 +506,74 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     std::string hostnameUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + AP_HOSTNAME + ".local/";
     renderer.drawCenteredText(SMALL_FONT_ID, startY, hostnameUrl.c_str(), true);
   }
+
+  const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
+namespace {
+void formatBytes(size_t bytes, char* out, size_t outLen) {
+  if (bytes >= 1024UL * 1024UL) {
+    snprintf(out, outLen, "%.1f MB", bytes / (1024.0 * 1024.0));
+  } else if (bytes >= 1024UL) {
+    snprintf(out, outLen, "%.1f KB", bytes / 1024.0);
+  } else {
+    snprintf(out, outLen, "%u B", static_cast<unsigned>(bytes));
+  }
+}
+}  // namespace
+
+void CrossPointWebServerActivity::renderUploadProgress(const CrossPointWebServer::WsUploadStatus& status) const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
+  const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
+  const int margin = metrics.contentSidePadding;
+  const int textMaxWidth = pageWidth - margin * 2;
+
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing * 2;
+  const int yLimit = pageHeight - metrics.buttonHintsHeight - 4;
+
+  const int percent = (status.total > 0)
+                          ? static_cast<int>((static_cast<uint64_t>(status.received) * 100) / status.total)
+                          : 0;
+
+  int y = contentTop;
+
+  renderer.drawCenteredText(UI_10_FONT_ID, y, "Uploading…", true, EpdFontFamily::BOLD);
+  y += lineH + metrics.verticalSpacing;
+
+  if (!status.filename.empty()) {
+    auto truncated = renderer.truncatedText(UI_10_FONT_ID, status.filename.c_str(), textMaxWidth);
+    renderer.drawCenteredText(UI_10_FONT_ID, y, truncated.c_str());
+    y += lineH + metrics.verticalSpacing;
+  }
+
+  char receivedBuf[24];
+  char totalBuf[24];
+  formatBytes(status.received, receivedBuf, sizeof(receivedBuf));
+  formatBytes(status.total, totalBuf, sizeof(totalBuf));
+  char bytesLine[64];
+  snprintf(bytesLine, sizeof(bytesLine), "%s of %s", receivedBuf, totalBuf);
+  renderer.drawCenteredText(UI_10_FONT_ID, y, bytesLine);
+  y += lineH + metrics.verticalSpacing * 2;
+
+  // Progress bar: outline + filled portion proportional to percent.
+  constexpr int BAR_HEIGHT = 16;
+  const int barX = margin;
+  const int barW = pageWidth - margin * 2;
+  if (y + BAR_HEIGHT <= yLimit) {
+    renderer.drawRect(barX, y, barW, BAR_HEIGHT, true);
+    const int innerW = (barW - 4) * percent / 100;
+    if (innerW > 0) {
+      renderer.fillRect(barX + 2, y + 2, innerW, BAR_HEIGHT - 4, true);
+    }
+    y += BAR_HEIGHT + metrics.verticalSpacing;
+  }
+
+  char percentBuf[8];
+  snprintf(percentBuf, sizeof(percentBuf), "%d%%", percent);
+  renderer.drawCenteredText(UI_10_FONT_ID, y, percentBuf, true, EpdFontFamily::BOLD);
 
   const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
