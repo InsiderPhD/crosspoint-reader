@@ -10,16 +10,20 @@
 #include <algorithm>
 #include <ctime>
 
+#include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "util/BookIdentity.h"
 #include "util/TimeUtils.h"
+
+uint64_t getDailyReadingGoalMs() {
+  return SETTINGS.getDailyGoalMs();
+}
 
 namespace {
 constexpr char READING_STATS_FILE_JSON[] = "/.crosspoint/reading_stats.json";
 constexpr unsigned long MAX_READING_GAP_MS = 30UL * 60UL * 1000UL;
 constexpr unsigned long SESSION_HEARTBEAT_MS = 60UL * 1000UL;
 constexpr unsigned long DEFERRED_SAVE_INTERVAL_MS = 30UL * 1000UL;
-constexpr uint64_t MIN_SESSION_READING_MS = 3ULL * 60ULL * 1000ULL;
 constexpr size_t MAX_SESSION_LOG_ENTRIES = 256;
 constexpr uint32_t STATS_RETENTION_DAYS = 366;
 
@@ -1017,7 +1021,7 @@ void ReadingStatsStore::endSession() {
   noteActivity();
 
   auto& book = books[activeSession.bookIndex];
-  const bool countedSession = activeSession.accumulatedMs >= MIN_SESSION_READING_MS;
+  const bool countedSession = activeSession.accumulatedMs >= SETTINGS.getMinSessionMs();
   const uint32_t sessionMs = (activeSession.accumulatedMs > static_cast<uint64_t>(UINT32_MAX))
                                  ? UINT32_MAX
                                  : static_cast<uint32_t>(activeSession.accumulatedMs);

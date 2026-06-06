@@ -4,10 +4,9 @@
 #include <string>
 #include <vector>
 
-inline uint64_t getDailyReadingGoalMs() {
-  // Hardcoded goal for stats UI and streak logic.
-  return 30ULL * 60ULL * 1000ULL;
-}
+// Returns the user-configured daily reading goal in milliseconds.
+// Implemented in ReadingStatsStore.cpp; reads from CrossPointSettings.
+uint64_t getDailyReadingGoalMs();
 
 struct ReadingDayStats {
   uint32_t dayOrdinal = 0;

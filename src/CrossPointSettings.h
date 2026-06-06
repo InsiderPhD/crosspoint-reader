@@ -164,6 +164,24 @@ class CrossPointSettings {
     LONG_PRESS_ACTION_COUNT
   };
 
+  // Daily reading goal
+  enum DAILY_GOAL {
+    DAILY_GOAL_5_MIN = 0,
+    DAILY_GOAL_10_MIN = 1,
+    DAILY_GOAL_15_MIN = 2,
+    DAILY_GOAL_30_MIN = 3,
+    DAILY_GOAL_60_MIN = 4,
+    DAILY_GOAL_COUNT
+  };
+
+  // Minimum session length before it counts toward stats
+  enum MIN_SESSION {
+    MIN_SESSION_1_MIN = 0,
+    MIN_SESSION_3_MIN = 1,
+    MIN_SESSION_5_MIN = 2,
+    MIN_SESSION_COUNT
+  };
+
 
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
@@ -248,6 +266,10 @@ class CrossPointSettings {
   uint8_t longPressAction = LONG_PRESS_REFRESH;
   // Dark mode (inverts entire UI except images)
   uint8_t darkMode = DARK_MODE_OFF;
+  // Daily reading goal (index into DAILY_GOAL enum; default 30 min)
+  uint8_t dailyReadingGoal = DAILY_GOAL_30_MIN;
+  // Minimum reading session length before it counts toward stats (index into MIN_SESSION enum; default 3 min)
+  uint8_t minSessionMinutes = MIN_SESSION_3_MIN;
   ~CrossPointSettings() = default;
 
   // Get singleton instance
@@ -255,6 +277,16 @@ class CrossPointSettings {
 
   uint16_t getPowerButtonDuration() const {
     return (shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP) ? 10 : 400;
+  }
+  uint64_t getDailyGoalMs() const {
+    static constexpr uint32_t MINUTES[] = {5, 10, 15, 30, 60};
+    const uint8_t idx = (dailyReadingGoal < DAILY_GOAL_COUNT) ? dailyReadingGoal : DAILY_GOAL_30_MIN;
+    return static_cast<uint64_t>(MINUTES[idx]) * 60ULL * 1000ULL;
+  }
+  uint32_t getMinSessionMs() const {
+    static constexpr uint32_t MINUTES[] = {1, 3, 5};
+    const uint8_t idx = (minSessionMinutes < MIN_SESSION_COUNT) ? minSessionMinutes : MIN_SESSION_3_MIN;
+    return MINUTES[idx] * 60UL * 1000UL;
   }
   int getReaderFontId() const;
   int getCodeFontId() const;

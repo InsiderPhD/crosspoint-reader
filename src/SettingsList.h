@@ -104,6 +104,13 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                         "sleepTimeout", StrId::STR_CAT_SYSTEM),
       SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                           StrId::STR_CAT_SYSTEM),
+      SettingInfo::Enum(StrId::STR_DAILY_READING_GOAL, &CrossPointSettings::dailyReadingGoal,
+                        {StrId::STR_MIN_5, StrId::STR_MIN_10, StrId::STR_MIN_15, StrId::STR_MIN_30,
+                         StrId::STR_MIN_60},
+                        "dailyReadingGoal", StrId::STR_CAT_SYSTEM),
+      SettingInfo::Enum(StrId::STR_MIN_SESSION_THRESHOLD, &CrossPointSettings::minSessionMinutes,
+                        {StrId::STR_MIN_1, StrId::STR_MIN_3, StrId::STR_MIN_5},
+                        "minSessionMinutes", StrId::STR_CAT_SYSTEM),
       // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
       SettingInfo::DynamicString(
           StrId::STR_KOREADER_USERNAME, [] { return KOREADER_STORE.getUsername(); },

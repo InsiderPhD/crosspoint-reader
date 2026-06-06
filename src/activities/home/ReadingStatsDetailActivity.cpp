@@ -34,6 +34,12 @@ constexpr uint8_t MIN_ESTIMATE_PROGRESS_PERCENT = 5;
 constexpr uint64_t MIN_ESTIMATE_AVG_SESSION_MS = 5ULL * 60ULL * 1000ULL;
 constexpr uint64_t ESTIMATE_ROUNDING_MS = 5ULL * 60ULL * 1000ULL;
 
+struct BookCommitmentStats {
+  uint32_t currentStreakDays = 0;
+  uint32_t maxStreakDays = 0;
+  uint8_t stickinessPercent = 0;
+};
+
 struct ResolvedCoverCacheEntry {
   std::string bookPath;
   std::string coverBmpPath;
@@ -287,6 +293,35 @@ std::string buildEstimatedTimeLeftText(const ReadingBookStats& book) {
   return estimateText;
 }
 
+BookCommitmentStats buildBookCommitmentStats(const ReadingBookStats& book) {
+  BookCommitmentStats stats;
+
+  if (!book.readingDays.empty()) {
+    uint32_t run = 1;
+    uint32_t best = 1;
+    for (size_t index = 1; index < book.readingDays.size(); ++index) {
+      if (book.readingDays[index].dayOrdinal == book.readingDays[index - 1].dayOrdinal + 1) {
+        run++;
+      } else {
+        run = 1;
+      }
+      if (run > best) {
+        best = run;
+      }
+    }
+    stats.currentStreakDays = run;
+    stats.maxStreakDays = best;
+  }
+
+  const uint64_t totalReadingMs = READING_STATS.getTotalReadingMs();
+  if (totalReadingMs > 0) {
+    const uint64_t percent = (book.totalReadingMs * 100ULL) / totalReadingMs;
+    stats.stickinessPercent = static_cast<uint8_t>(std::min<uint64_t>(percent, 100ULL));
+  }
+
+  return stats;
+}
+
 void drawMetricCard(GfxRenderer& renderer, const Rect& rect, const char* label, const std::string& value) {
   constexpr int rowPadX = 14;
   constexpr int labelY = 10;
@@ -525,6 +560,7 @@ void ReadingStatsDetailActivity::render(RenderLock&&) {
   scrollOffset = 0;
   const int scrollDy = 0;
   const Rect coverRect = offsetRect(coverBaseRect, scrollDy);
+  const BookCommitmentStats commitmentStats = buildBookCommitmentStats(*book);
 
   const bool baseScreenRestored = restoreBaseScreenBuffer();
   if (!baseScreenRestored) {
@@ -571,11 +607,13 @@ void ReadingStatsDetailActivity::render(RenderLock&&) {
     drawMetricCard(renderer,
                    Rect{metrics.contentSidePadding + cardWidth + METRIC_CARD_GAP,
                         drawCardsTop + METRIC_CARD_HEIGHT + METRIC_CARD_GAP, cardWidth, METRIC_CARD_HEIGHT},
-                   tr(STR_STATUS), book->completed ? std::string(tr(STR_DONE)) : std::string(tr(STR_IN_PROGRESS)));
+              tr(STR_BOOK_STREAK),
+              std::to_string(commitmentStats.currentStreakDays) + " / " +
+               std::to_string(commitmentStats.maxStreakDays));
     drawMetricCard(renderer,
                    Rect{metrics.contentSidePadding, drawCardsTop + (METRIC_CARD_HEIGHT + METRIC_CARD_GAP) * 2,
                         pageWidth - metrics.contentSidePadding * 2, METRIC_CARD_HEIGHT},
-                   tr(STR_LAST_READ_DATE), formatDate(book->lastReadAt));
+              tr(STR_BOOK_STICKINESS), std::to_string(commitmentStats.stickinessPercent) + "%");
     drawMetricCard(renderer,
                    Rect{metrics.contentSidePadding, drawCardsTop + (METRIC_CARD_HEIGHT + METRIC_CARD_GAP) * 3,
                         pageWidth - metrics.contentSidePadding * 2, METRIC_CARD_HEIGHT},
