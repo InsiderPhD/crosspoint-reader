@@ -17,6 +17,10 @@
 #include <cstring>
 #include <limits>
 
+#include "BookFusionBookIdStore.h"
+#include "BookFusionSyncActivity.h"
+#include "BookFusionSyncClient.h"
+#include "BookFusionTokenStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "EpubReaderChapterSelectionActivity.h"
@@ -25,10 +29,6 @@
 #include "KOReaderCredentialStore.h"
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
-#include "BookFusionBookIdStore.h"
-#include "BookFusionSyncActivity.h"
-#include "BookFusionSyncClient.h"
-#include "BookFusionTokenStore.h"
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
 #include "ReadingStatsStore.h"
@@ -339,6 +339,13 @@ void EpubReaderActivity::loop() {
 
   READING_STATS.tickActiveSession();
 
+  // Record book completion here (main task) rather than in render() (render task), which would
+  // race the stats store. Triggered once when the reader reaches the end-of-book position.
+  if (!bookFinishedRecorded && currentSpineIndex >= epub->getSpineItemsCount()) {
+    bookFinishedRecorded = true;
+    READING_STATS.updateProgress(100, true);
+  }
+
   if (automaticPageTurnActive) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
         mappedInput.wasReleased(MappedInputManager::Button::Back)) {
@@ -366,10 +373,8 @@ void EpubReaderActivity::loop() {
   }
 
   // Long-press Confirm: immediate action when threshold is reached (hold-based, not release-based)
-  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
-      mappedInput.getHeldTime() >= skipChapterMs &&
+  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= skipChapterMs &&
       !longPressFeedbackShown) {
-
     longPressFeedbackShown = true;  // Prevent action spam
 
     if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_SYNC) {
@@ -721,26 +726,26 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
             [this, bookId, spineIndex, currentPage, totalPages, bfDirection](const ActivityResult& result) {
               if (result.isCancelled) return;
-              startActivityForResult(std::make_unique<BookFusionSyncActivity>(renderer, mappedInput, epub, bookId,
-                                                                              spineIndex, currentPage, totalPages,
-                                                                              bfDirection),
-                                     [this](const ActivityResult& syncResult) {
-                                       if (syncResult.isCancelled) return;
-                                       const auto& sync = std::get<SyncResult>(syncResult.data);
-                                       RenderLock lock(*this);
-                                       currentSpineIndex = sync.spineIndex;
-                                       nextPageNumber = 0;
-                                       cachedChapterTotalPageCount = 0;
-                                       pendingPageJump.reset();
-                                       if (sync.intraSpineProgress >= 0.0f) {
-                                         pendingSpineProgress = sync.intraSpineProgress;
-                                         pendingPercentJump = true;
-                                       } else {
-                                         nextPageNumber = sync.page;
-                                       }
-                                       section.reset();
-                                       pagesUntilFullRefresh = 1;  // full refresh on the post-sync redraw
-                                     });
+              startActivityForResult(
+                  std::make_unique<BookFusionSyncActivity>(renderer, mappedInput, epub, bookId, spineIndex, currentPage,
+                                                           totalPages, bfDirection),
+                  [this](const ActivityResult& syncResult) {
+                    if (syncResult.isCancelled) return;
+                    const auto& sync = std::get<SyncResult>(syncResult.data);
+                    RenderLock lock(*this);
+                    currentSpineIndex = sync.spineIndex;
+                    nextPageNumber = 0;
+                    cachedChapterTotalPageCount = 0;
+                    pendingPageJump.reset();
+                    if (sync.intraSpineProgress >= 0.0f) {
+                      pendingSpineProgress = sync.intraSpineProgress;
+                      pendingPercentJump = true;
+                    } else {
+                      nextPageNumber = sync.page;
+                    }
+                    section.reset();
+                    pagesUntilFullRefresh = 1;  // full refresh on the post-sync redraw
+                  });
             });
       } else if (KOREADER_STORE.hasCredentials()) {
         // KOReader fallback. KOReaderSyncActivity already runs its own full-
@@ -756,26 +761,24 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             paragraphIndex = *pIdx;
           }
         }
-        const auto direction =
-            isPush ? KOReaderSyncActivity::Direction::PUSH : KOReaderSyncActivity::Direction::PULL;
-        startActivityForResult(std::make_unique<KOReaderSyncActivity>(renderer, mappedInput, epub, epub->getPath(),
-                                                                      currentSpineIndex, currentPage, totalPages,
-                                                                      paragraphIndex, direction),
-                               [this](const ActivityResult& result) {
-                                 if (!result.isCancelled) {
-                                   const auto& sync = std::get<SyncResult>(result.data);
-                                   if (currentSpineIndex != sync.spineIndex ||
-                                       (section && section->currentPage != sync.page)) {
-                                     RenderLock lock(*this);
-                                     currentSpineIndex = sync.spineIndex;
-                                     nextPageNumber = sync.page;
-                                     cachedChapterTotalPageCount = 0;
-                                     pendingPageJump.reset();
-                                     saveProgress(currentSpineIndex, nextPageNumber, 0);
-                                     section.reset();
-                                   }
-                                 }
-                               });
+        const auto direction = isPush ? KOReaderSyncActivity::Direction::PUSH : KOReaderSyncActivity::Direction::PULL;
+        startActivityForResult(
+            std::make_unique<KOReaderSyncActivity>(renderer, mappedInput, epub, epub->getPath(), currentSpineIndex,
+                                                   currentPage, totalPages, paragraphIndex, direction),
+            [this](const ActivityResult& result) {
+              if (!result.isCancelled) {
+                const auto& sync = std::get<SyncResult>(result.data);
+                if (currentSpineIndex != sync.spineIndex || (section && section->currentPage != sync.page)) {
+                  RenderLock lock(*this);
+                  currentSpineIndex = sync.spineIndex;
+                  nextPageNumber = sync.page;
+                  cachedChapterTotalPageCount = 0;
+                  pendingPageJump.reset();
+                  saveProgress(currentSpineIndex, nextPageNumber, 0);
+                  section.reset();
+                }
+              }
+            });
       }
       break;
     }
@@ -879,6 +882,16 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
       }
     }
   }
+
+  // Persist reading-stats progress every few turns, on the main task (never from render(), which
+  // races the stats store). updateProgress() debounces the actual SD write, so this only bounds
+  // the calculateProgress() recompute. `section` is null right after a cross-spine turn — skip
+  // those; the next in-section turn (or onExit) records. onExit() captures the final exact value.
+  static constexpr uint32_t STATS_PROGRESS_EVERY_N_TURNS = 3;
+  if (section && (sessionPageTurns % STATS_PROGRESS_EVERY_N_TURNS) == 0) {
+    recordStatsProgress();
+  }
+
   lastPageTurnTime = millis();
   requestUpdate();
 }
@@ -898,12 +911,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     currentSpineIndex = epub->getSpineItemsCount();
   }
 
-  // Show end of book screen
+  // Show end of book screen. Do NOT record stats here: render() runs on the render task, and
+  // mutating/saving READING_STATS off the main task races it and trips the storageMutex
+  // priority-disinherit assert. Completion is recorded from loop() (main task) instead.
   if (currentSpineIndex == epub->getSpineItemsCount()) {
-    if (!bookFinishedRecorded) {
-      bookFinishedRecorded = true;
-      READING_STATS.updateProgress(100, true);
-    }
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_END_OF_BOOK), true, EpdFontFamily::BOLD);
     if (SETTINGS.darkMode) renderer.invertScreen();
@@ -1093,11 +1104,10 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   }
 
   LOG_DBG("ERS", "Silently indexing next chapter: %d", nextSpineIndex);
-  if (!nextSection.createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(),
-                                     SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
-                                     SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
-                                     SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
-                                     SETTINGS.footnoteDisplay)) {
+  if (!nextSection.createSectionFile(
+          SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(), SETTINGS.getReaderLineCompression(),
+          SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
+          SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering, SETTINGS.footnoteDisplay)) {
     LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
   }
 }
@@ -1121,12 +1131,30 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   const float chapterProgress =
       (pageCount > 0) ? static_cast<float>(currentPage) / static_cast<float>(pageCount) : 0.0f;
   const auto progressPercent = static_cast<int8_t>(epub->calculateProgress(spineIndex, chapterProgress) * 100.0f);
-  READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)),
-                   progressPercent >= 90, "",
-                               static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f),
-                                                               0, 100)));
+  // saveProgress() is called from render() (render task) on every page. Mutating/saving
+  // READING_STATS there races the main task and crashes (storageMutex priority-disinherit), so
+  // only record stats progress from the main task. Reaching/ending the book is still recorded
+  // via loop() and onExit(); reading time accrues via noteActivity() on page turns.
+  if (!activityManager.isOnRenderTask()) {
+    READING_STATS.updateProgress(
+        static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)), progressPercent >= 90, "",
+        static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f), 0, 100)));
+  }
   RECENT_BOOKS.updateProgress(epub->getPath(), progressPercent);
 }
+
+void EpubReaderActivity::recordStatsProgress() {
+  if (!epub || !section || section->pageCount == 0) {
+    return;
+  }
+  const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
+  const auto progressPercent =
+      static_cast<int8_t>(epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f);
+  READING_STATS.updateProgress(
+      static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)), progressPercent >= 90, "",
+      static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f), 0, 100)));
+}
+
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
@@ -1392,7 +1420,8 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     // No saved networks, show error popup
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "No WiFi networks configured.\nPlease set up WiFi in Settings first.");
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync",
+                                     "No WiFi networks configured.\nPlease set up WiFi in Settings first.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -1405,7 +1434,8 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     // Network found but no credentials
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "WiFi credentials not found.\nPlease reconnect in Settings.");
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync",
+                                     "WiFi credentials not found.\nPlease reconnect in Settings.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -1428,7 +1458,7 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
 
   // Wait for connection with timeout
   int attempts = 0;
-  const int maxAttempts = 100; // 10 seconds
+  const int maxAttempts = 100;  // 10 seconds
 
   while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
     vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -1438,7 +1468,7 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     if (attempts % 10 == 0) {
       RenderLock lock(*this);
       char statusMsg[64];
-      snprintf(statusMsg, sizeof(statusMsg), "Connecting to WiFi...\n(%d/%d)", attempts/10, maxAttempts/10);
+      snprintf(statusMsg, sizeof(statusMsg), "Connecting to WiFi...\n(%d/%d)", attempts / 10, maxAttempts / 10);
       UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", statusMsg);
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
@@ -1466,7 +1496,8 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     // Show failure popup
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "WiFi connection failed.\nPlease check your settings.");
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync",
+                                     "WiFi connection failed.\nPlease check your settings.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -1524,7 +1555,8 @@ void EpubReaderActivity::performBookFusionSync() {
   char lastSyncAt[40] = {};
   const bool hasLastSyncAt = BookFusionBookIdStore::loadLastSyncAt(epubPath.c_str(), lastSyncAt, sizeof(lastSyncAt));
   BookFusionStoredPosition lastSyncedPosition;
-  const bool hasLastSyncedPosition = BookFusionBookIdStore::loadLastSyncedPosition(epubPath.c_str(), lastSyncedPosition);
+  const bool hasLastSyncedPosition =
+      BookFusionBookIdStore::loadLastSyncedPosition(epubPath.c_str(), lastSyncedPosition);
 
   {
     RenderLock lock(*this);
@@ -1568,11 +1600,10 @@ void EpubReaderActivity::performBookFusionSync() {
     // newer timestamp on a behind-position is most often a stale write from
     // another device that opened the book without advancing.
     const bool shouldApplyRemote =
-        !localIsFurtherAhead &&
-        ((canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) ||
-         (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync && !internetTimeSynced &&
-          remoteIsFurtherAhead) ||
-         (!canCompareSyncState && remoteIsFurtherAhead));
+        !localIsFurtherAhead && ((canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) ||
+                                 (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync &&
+                                  !internetTimeSynced && remoteIsFurtherAhead) ||
+                                 (!canCompareSyncState && remoteIsFurtherAhead));
 
     if (shouldApplyRemote) {
       if (canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) {
@@ -1717,7 +1748,6 @@ void EpubReaderActivity::performBookFusionSync() {
   pagesUntilFullRefresh = 1;
   requestUpdateAndWait();
 }
-
 
 ScreenshotInfo EpubReaderActivity::getScreenshotInfo() const {
   ScreenshotInfo info;

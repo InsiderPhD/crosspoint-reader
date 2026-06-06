@@ -424,6 +424,11 @@ uint32_t ReadingStatsStore::getReferenceTimestamp(const uint32_t preferredTimest
     return preferredTimestamp;
   }
 
+  const uint32_t currentValidTimestamp = TimeUtils::getCurrentValidTimestamp();
+  if (isClockValid(currentValidTimestamp)) {
+    return currentValidTimestamp;
+  }
+
   if (isClockValid(APP_STATE.lastKnownValidTimestamp)) {
     return APP_STATE.lastKnownValidTimestamp;
   }
@@ -1164,6 +1169,14 @@ uint32_t ReadingStatsStore::getDisplayTimestamp(bool* usedFallback) const {
       *usedFallback = false;
     }
     return authoritativeTimestamp;
+  }
+
+  const uint32_t currentValidTimestamp = TimeUtils::getCurrentValidTimestamp();
+  if (isClockValid(currentValidTimestamp)) {
+    if (usedFallback) {
+      *usedFallback = true;
+    }
+    return currentValidTimestamp;
   }
 
   const uint32_t latestKnownTimestamp = getLatestKnownTimestamp();

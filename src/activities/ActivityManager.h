@@ -74,6 +74,11 @@ class ActivityManager {
   void begin();
   void loop();
 
+  // True when the caller is running on the render task. Used to keep render-time code paths
+  // from mutating shared state or doing SD writes that must only happen on the main task —
+  // doing so races the main task and trips the storageMutex priority-disinherit assert.
+  bool isOnRenderTask() const { return xTaskGetCurrentTaskHandle() == renderTaskHandle; }
+
   // Will replace currentActivity and drop all activities on stack
   void replaceActivity(std::unique_ptr<Activity>&& newActivity);
 

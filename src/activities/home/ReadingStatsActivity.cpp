@@ -434,23 +434,36 @@ int getHeatLevel(const uint64_t readingMs) {
   if (readingMs == 0) {
     return 0;
   }
-  const uint64_t totalMinutes = readingMs / 60000ULL;
-  if (totalMinutes < 15ULL) {
+
+  const uint64_t goalMs = getDailyReadingGoalMs();
+  const uint64_t level1Ms = (goalMs + 1ULL) / 2ULL;
+  const uint64_t level2Ms = goalMs;
+  const uint64_t level3Ms = goalMs * 2ULL;
+  const uint64_t level4Ms = goalMs * 4ULL;
+  const uint64_t level5Ms = goalMs * 8ULL;
+
+  if (readingMs < level1Ms) {
     return 0;
   }
-  if (totalMinutes < 30ULL) {
+  if (readingMs < level2Ms) {
     return 1;
   }
-  if (totalMinutes < 60ULL) {
+  if (readingMs < level3Ms) {
     return 2;
   }
-  if (totalMinutes < 120ULL) {
+  if (readingMs < level4Ms) {
     return 3;
   }
-  if (totalMinutes < 240ULL) {
+  if (readingMs < level5Ms) {
     return 4;
   }
   return 5;
+}
+
+uint32_t toHeatmapMinutes(const uint64_t readingMs) { return static_cast<uint32_t>((readingMs + 59999ULL) / 60000ULL); }
+
+void formatHeatmapLabel(const uint64_t readingMs, char* buffer, const size_t bufferSize) {
+  snprintf(buffer, bufferSize, "%um+", toHeatmapMinutes(readingMs));
 }
 
 MonthSummary buildMonthSummary(const int year, const unsigned month) {
@@ -578,10 +591,20 @@ void drawLegendSwatch(GfxRenderer& renderer, const Rect& rect, const int level) 
 void drawLegend(GfxRenderer& renderer, const Rect& rect) {
   struct LegendLevel {
     int level;
-    const char* label;
+    char label[12];
   };
-  static constexpr LegendLevel LEVELS[] = {
-      {1, "15m+"}, {2, "30m+"}, {3, "60m+"}, {4, "120m+"}, {5, "240m+"}};
+  const uint64_t goalMs = getDailyReadingGoalMs();
+  static LegendLevel LEVELS[5];
+  formatHeatmapLabel((goalMs + 1ULL) / 2ULL, LEVELS[0].label, sizeof(LEVELS[0].label));
+  formatHeatmapLabel(goalMs, LEVELS[1].label, sizeof(LEVELS[1].label));
+  formatHeatmapLabel(goalMs * 2ULL, LEVELS[2].label, sizeof(LEVELS[2].label));
+  formatHeatmapLabel(goalMs * 4ULL, LEVELS[3].label, sizeof(LEVELS[3].label));
+  formatHeatmapLabel(goalMs * 8ULL, LEVELS[4].label, sizeof(LEVELS[4].label));
+  LEVELS[0].level = 1;
+  LEVELS[1].level = 2;
+  LEVELS[2].level = 3;
+  LEVELS[3].level = 4;
+  LEVELS[4].level = 5;
   constexpr int LEVEL_COUNT = sizeof(LEVELS) / sizeof(LEVELS[0]);
 
   const int itemWidth = rect.width / LEVEL_COUNT;

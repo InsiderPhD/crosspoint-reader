@@ -34,7 +34,7 @@ class EpubReaderActivity final : public Activity {
   bool pendingScreenshot = false;
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool automaticPageTurnActive = false;
-  bool autoPageTurnMode = false;  // True when using calibrated reading speed
+  bool autoPageTurnMode = false;        // True when using calibrated reading speed
   bool longPressFeedbackShown = false;  // Track if long press visual feedback has been shown
 
   // Footnote support
@@ -59,6 +59,10 @@ class EpubReaderActivity final : public Activity {
   void renderStatusBar() const;
   void silentIndexNextChapterIfNeeded(uint16_t viewportWidth, uint16_t viewportHeight);
   void saveProgress(int spineIndex, int currentPage, int pageCount);
+  // Record reading-stats progress from the current section. MUST be called on the main task
+  // only (never render()): see ActivityManager::isOnRenderTask. The SD write is debounced
+  // inside READING_STATS.updateProgress().
+  void recordStatsProgress();
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
