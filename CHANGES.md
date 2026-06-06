@@ -48,18 +48,23 @@ Reading Stats is now accessible directly from the Home screen menu (previously i
 
 ---
 
-### Reading Stats — Extended Metrics
-The Reading Stats screen now shows 7 metrics instead of 3:
+### Reading Stats — Full System Overhaul
+Reading Stats was rebuilt from a small counter screen into a multi-page analytics system with a dedicated data model, per-book/day aggregation, and resilient date handling for X4 deep-sleep clock drift.
 
-| Metric | Description |
-|---|---|
-| Reading Time | Total accumulated reading time |
-| Pages Read | Total pages turned across all sessions |
-| Books Finished | Count of completed books |
-| Sessions | Number of reading sessions started |
-| Avg. Session | Average session duration (Reading Time ÷ Sessions) |
-| Reading Speed | Your calibrated seconds-per-page speed |
-| In Progress | Number of books with 1–89% progress |
+**UI overhaul (4 pages)**:
+- **Overview**: streak, max streak, daily goal progress, total reading time, books finished, books started, and annual reading chart.
+- **Started Books**: paginated list of in-progress books with title/author, reading time, and progress; short-press Confirm opens details; long-press Confirm removes the selected stats entry.
+- **Weekly**: last 7 days vs 30 days totals, average day, days read, goal days, best day, plus daily bar chart.
+- **Monthly**: month summary (month total, days read, best day, year total) plus calendar-style heatmap and legend.
+
+**Store/data overhaul**:
+- Added normalized `ReadingBookStats` + `ReadingDayStats` structures and summary caching for quick reads of today/7-day/30-day/streak metrics.
+- Session lifecycle now tracks active reading with heartbeat/deferred-save behavior, per-session snapshots, and capped session logs.
+- Added retention pruning and aggregation rebuild paths so stale day buckets are removed and totals stay consistent.
+
+**Clock resilience for X4**:
+- Date-sensitive stats use a reference timestamp fallback chain: authoritative/NTP-synced time, then last known valid app timestamp, then latest known book timestamp, then latest recorded day ordinal.
+- Invalid clocks are ignored for day attribution, avoiding corrupted streak/day data when waking from deep sleep with an unset RTC.
 
 **Files changed**: `ReadingStatsActivity.cpp`, `ReadingStatsStore.h`, `ReadingStatsStore.cpp`, `english.yaml`
 
@@ -79,14 +84,13 @@ The percentage is read from the in-memory Recent Books store (`RECENT_BOOKS.getB
 ---
 
 ### Session Tracking Across All Reader Types
-Reading sessions are now tracked for `.epub`, `.txt`, and `.xtc` files. Each `onExit()` saves:
+Reading sessions are now tracked for `.epub`, `.txt`, and `.xtc` files through the unified Reading Stats store.
 
-- Reading time (if session was ≥5 seconds)
-- Page turns
-- Books finished (if last page reached)
-- Session count increment
+- Reading time accrues continuously while the session is active.
+- Session logs/session-count increments are recorded for substantial sessions (minimum duration threshold in the stats store).
+- Completion/progress updates are persisted through the same shared path.
 
-Previously only EPUB tracked sessions.
+Previously only EPUB had end-to-end session tracking.
 
 **Files changed**: `TxtReaderActivity.cpp`, `XtcReaderActivity.cpp`, `ReadingStatsStore.h`, `ReadingStatsStore.cpp`
 
@@ -409,7 +413,36 @@ The third tile on the home screen under the Lyra Library theme used to be labell
 
 ---
 
+### Reading Stats — Icon Updates
+
+The Overview and Weekly stats pages now use more descriptive icons:
+
+| Metric | Old icon | New icon |
+|---|---|---|
+| Max Goal Streak (Overview) | Streak flame | Confetti |
+| Daily Goal (Overview) | Book | Checkbox |
+| Daily Goal (Weekly) | Check mark | Checkbox |
+
+Icons are 24×24 1bpp, generated from Tabler SVGs via `scripts/convert_icon.py`.
+
+**Files added**: `src/components/icons/confetti24.h`, `src/components/icons/checkbox24.h`
+
+**Files changed**: `src/activities/home/ReadingStatsActivity.cpp`
+
+---
+
 ### Bug Fixes (this session)
+
+#### Reading Stats — Pagination and Monthly Navigation
+**Bug**: Directional navigation was inconsistent after the multi-page stats overhaul. Side buttons (Up/Down) did not reliably page on Overview/Weekly/Monthly, and Monthly short-press actions could page-switch instead of month-switch.
+
+**Cause**: The `loop()` input handler had a single branch for all pages that mapped short-press directional inputs to `changePage()`, ignoring per-page navigation semantics. The Monthly page was never given its own short-press handler for `changeViewedMonth()`.
+
+**Fix**: Rewrote the `loop()` input decision tree. Long-press on any direction always changes stats page. Short-press on Monthly now calls `changeViewedMonth(-1/+1)` (left/up = previous month, right/down = next month), while non-Monthly/non-Started-Books pages use short directional presses for page switching.
+
+**Files changed**: `src/activities/home/ReadingStatsActivity.cpp`
+
+---
 
 #### "Back Twice to Exit" in Library / Recents / File Browser
 **Bug**: After interacting with the Sort Menu in any list activity (even just opening and dismissing it), the next Back press was silently swallowed — users had to press Back twice to actually exit the activity.

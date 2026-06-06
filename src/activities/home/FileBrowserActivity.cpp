@@ -2,10 +2,10 @@
 
 #include <Epub.h>
 #include <FsHelpers.h>
-#include <Xtc.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Xtc.h>
 
 #include <algorithm>
 
@@ -49,9 +49,14 @@ void FileBrowserActivity::loadFiles() {
       folderEntries.emplace_back(std::string(name) + "/");
     } else {
       std::string_view filename{name};
-      if (FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
-          FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
-          FsHelpers::hasBmpExtension(filename)) {
+      if (mode == Mode::PickFirmware) {
+        // Firmware picker: only show .bin files.
+        if (FsHelpers::checkFileExtension(filename, ".bin")) {
+          fileEntries.emplace_back(filename);
+        }
+      } else if (FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
+                 FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
+                 FsHelpers::hasBmpExtension(filename)) {
         fileEntries.emplace_back(filename);
       }
     }
@@ -169,7 +174,8 @@ void FileBrowserActivity::onEnter() {
 
   selectorIndex = 0;
   // Pull last-chosen sort from settings (shared across all list activities).
-  currentSort = (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
+  currentSort =
+      (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
 
   auto root = Storage.open(basepath.c_str());
   if (!root) {
@@ -241,10 +247,9 @@ void FileBrowserActivity::loop() {
   // Long press on a book file → context menu
   if (!showingBookOptions && !longPressBookTriggered && !files.empty() && selectorIndex < files.size()) {
     const std::string& entry = files[selectorIndex];
-    const bool isBook = entry.back() != '/' &&
-                        (FsHelpers::hasEpubExtension(entry) || FsHelpers::hasXtcExtension(entry));
-    if (isBook && mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
-        mappedInput.getHeldTime() >= 700UL) {
+    const bool isBook =
+        entry.back() != '/' && (FsHelpers::hasEpubExtension(entry) || FsHelpers::hasXtcExtension(entry));
+    if (isBook && mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= 700UL) {
       longPressBookTriggered = true;
       showingBookOptions = true;
       awaitingBookOptionsRelease = true;
@@ -314,18 +319,17 @@ void FileBrowserActivity::loop() {
         }
         reload();
       } else if (bookOptionsIndex == UITheme::BOOK_OPT_DELETE) {
-        startActivityForResult(
-            std::make_unique<ConfirmationActivity>(renderer, mappedInput,
-                                                   tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
-            [this, path, reload](const ActivityResult& res) mutable {
-              if (!res.isCancelled) {
-                if (FsHelpers::hasEpubExtension(path)) Epub(path, "/.crosspoint").clearCache();
-                Storage.remove(path.c_str());
-                RECENT_BOOKS.removeBook(path);
-                RECENT_BOOKS.saveToFile();
-                reload();
-              }
-            });
+        startActivityForResult(std::make_unique<ConfirmationActivity>(
+                                   renderer, mappedInput, tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
+                               [this, path, reload](const ActivityResult& res) mutable {
+                                 if (!res.isCancelled) {
+                                   if (FsHelpers::hasEpubExtension(path)) Epub(path, "/.crosspoint").clearCache();
+                                   Storage.remove(path.c_str());
+                                   RECENT_BOOKS.removeBook(path);
+                                   RECENT_BOOKS.saveToFile();
+                                   reload();
+                                 }
+                               });
       }
       return;
     }
@@ -348,7 +352,18 @@ void FileBrowserActivity::loop() {
     const std::string& entry = files[selectorIndex];
     bool isDirectory = (entry.back() == '/');
 
-    if (mappedInput.getHeldTime() >= GO_HOME_MS) {
+    // Firmware picker: selecting a file returns its path to the caller; directories navigate normally.
+    if (mode == Mode::PickFirmware && !isDirectory) {
+      std::string cleanBasePath = basepath;
+      if (cleanBasePath.back() != '/') cleanBasePath += "/";
+      ActivityResult res{FilePathResult{cleanBasePath + entry}};
+      res.isCancelled = false;
+      setResult(std::move(res));
+      finish();
+      return;
+    }
+
+    if (mode == Mode::Books && mappedInput.getHeldTime() >= GO_HOME_MS) {
       // --- LONG PRESS ACTION: DELETE FILE OR FOLDER ---
       std::string cleanBasePath = basepath;
       if (cleanBasePath.back() != '/') cleanBasePath += "/";
@@ -412,6 +427,12 @@ void FileBrowserActivity::loop() {
         selectorIndex = findEntry(dirName);
 
         requestUpdate();
+      } else if (mode == Mode::PickFirmware) {
+        // Firmware picker at root: cancel back to the caller instead of going home.
+        ActivityResult res;
+        res.isCancelled = true;
+        setResult(std::move(res));
+        finish();
       } else {
         onGoHome();
       }
@@ -419,26 +440,26 @@ void FileBrowserActivity::loop() {
   }
 
   // Process normal navigation
-    int listSize = static_cast<int>(files.size());
-    buttonNavigator.onNextPress([this, listSize] {
-      selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), listSize);
-      requestUpdate();
-    });
+  int listSize = static_cast<int>(files.size());
+  buttonNavigator.onNextPress([this, listSize] {
+    selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), listSize);
+    requestUpdate();
+  });
 
-    buttonNavigator.onPreviousPress([this, listSize] {
-      selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), listSize);
-      requestUpdate();
-    });
+  buttonNavigator.onPreviousPress([this, listSize] {
+    selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), listSize);
+    requestUpdate();
+  });
 
-    buttonNavigator.onNextContinuous([this, listSize, pageItems] {
-      selectorIndex = ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
-      requestUpdate();
-    });
+  buttonNavigator.onNextContinuous([this, listSize, pageItems] {
+    selectorIndex = ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
+    requestUpdate();
+  });
 
-    buttonNavigator.onPreviousContinuous([this, listSize, pageItems] {
-      selectorIndex = ButtonNavigator::previousPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
-      requestUpdate();
-    });
+  buttonNavigator.onPreviousContinuous([this, listSize, pageItems] {
+    selectorIndex = ButtonNavigator::previousPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
+    requestUpdate();
+  });
 }
 
 std::string getFileName(std::string filename) {
@@ -491,7 +512,8 @@ void FileBrowserActivity::render(RenderLock&&) {
   const int contentHeight =
       pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing - pathReserved;
   if (files.empty()) {
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, tr(STR_NO_FILES_FOUND));
+    const char* emptyMsg = (mode == Mode::PickFirmware) ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
+    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, emptyMsg);
   } else {
     GUI.drawList(
         renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), selectorIndex,
@@ -503,8 +525,7 @@ void FileBrowserActivity::render(RenderLock&&) {
           if (filesIsBookFusion[index]) return UIIcon::BookFusion;
           return UITheme::getFileIcon(files[index]);
         },
-        nullptr,
-        false);
+        nullptr, false);
   }
 
   // Full path display
@@ -535,10 +556,15 @@ void FileBrowserActivity::render(RenderLock&&) {
   }
 
   // Help text
+  // In PickFirmware mode Confirm returns the chosen .bin (not "open"), and Back at root cancels
+  // rather than going Home — reflect both in the hints.
+  const bool selectingFirmwareFile = mode == Mode::PickFirmware && !files.empty() && files[selectorIndex].back() != '/';
+  const char* backLabel = (basepath == "/") ? (mode == Mode::PickFirmware ? tr(STR_BACK) : tr(STR_HOME)) : tr(STR_BACK);
+  const char* confirmLabel = files.empty() ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
   const auto labels = showingBookOptions
-      ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
-      : mappedInput.mapLabels(basepath == "/" ? tr(STR_HOME) : tr(STR_BACK), files.empty() ? "" : tr(STR_OPEN),
-                              files.empty() ? "" : tr(STR_DIR_UP), files.empty() ? "" : tr(STR_DIR_DOWN));
+                          ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                          : mappedInput.mapLabels(backLabel, confirmLabel, files.empty() ? "" : tr(STR_DIR_UP),
+                                                  files.empty() ? "" : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   if (showingBookOptions) {

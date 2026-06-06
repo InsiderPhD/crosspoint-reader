@@ -10,6 +10,7 @@
 #include "CalibreSettingsActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
+#include "DownloadUpdateFromUrlActivity.h"
 #include "FontDownloadActivity.h"
 #include "FontSelectionActivity.h"
 #include "KOReaderSettingsActivity.h"
@@ -18,6 +19,7 @@
 #include "OtaUpdateActivity.h"
 #include "ResetStatsActivity.h"
 #include "SdCardFontGlobals.h"
+#include "SdFirmwareUpdateActivity.h"
 #include "SettingsList.h"
 #include "StatusBarSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -64,6 +66,8 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_RESET_READING_STATS, SettingAction::ResetStats));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_DOWNLOAD_FROM_URL, SettingAction::DownloadFromUrl));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_FAMILY, SettingAction::FontFamily));
@@ -207,6 +211,12 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::CheckForUpdates:
         startActivityForResult(std::make_unique<OtaUpdateActivity>(renderer, mappedInput), resultHandler);
         break;
+      case SettingAction::SdFirmwareUpdate:
+        startActivityForResult(std::make_unique<SdFirmwareUpdateActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::DownloadFromUrl:
+        startActivityForResult(std::make_unique<DownloadUpdateFromUrlActivity>(renderer, mappedInput), resultHandler);
+        break;
       case SettingAction::Language:
         startActivityForResult(std::make_unique<LanguageSelectActivity>(renderer, mappedInput), resultHandler);
         break;
@@ -214,12 +224,11 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<ResetStatsActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::FontFamily:
-        startActivityForResult(
-            std::make_unique<FontSelectionActivity>(renderer, mappedInput, &sdFontSystem.registry()),
-            [this](const ActivityResult&) {
-              SETTINGS.saveToFile();
-              ensureSdFontLoaded();
-            });
+        startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, &sdFontSystem.registry()),
+                               [this](const ActivityResult&) {
+                                 SETTINGS.saveToFile();
+                                 ensureSdFontLoaded();
+                               });
         break;
       case SettingAction::FontDownload:
         startActivityForResult(std::make_unique<FontDownloadActivity>(renderer, mappedInput),
@@ -279,8 +288,8 @@ void SettingsActivity::render(RenderLock&&) {
           if (SETTINGS.sdFontFamilyName[0] != '\0') {
             valueText = SETTINGS.sdFontFamilyName;
           } else {
-            static const StrId builtinFontNames[] = {StrId::STR_BOOKERLY, StrId::STR_INTER,
-                                                     StrId::STR_OPEN_DYSLEXIC, StrId::STR_MONOSPACE};
+            static const StrId builtinFontNames[] = {StrId::STR_BOOKERLY, StrId::STR_INTER, StrId::STR_OPEN_DYSLEXIC,
+                                                     StrId::STR_MONOSPACE};
             const uint8_t f = SETTINGS.fontFamily;
             if (f < sizeof(builtinFontNames) / sizeof(builtinFontNames[0])) {
               valueText = I18N.get(builtinFontNames[f]);

@@ -13,6 +13,13 @@ class OtaUpdater {
  public:
   using ProgressCallback = void (*)(void* ctx);
 
+ private:
+  // UI progress callback + context, stashed during installUpdate() so the C-style
+  // FirmwareFlasher progress trampoline (which only carries a void*) can forward ticks.
+  ProgressCallback uiProgressCb = nullptr;
+  void* uiProgressCtx = nullptr;
+
+ public:
   enum OtaUpdaterError {
     OK = 0,
     NO_UPDATE,

@@ -60,8 +60,13 @@ struct BookContextResult {
   enum class Action { MarkAsRead, RemoveFromRecents } action;
 };
 
-using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult,
-                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult, BookContextResult>;
+struct FilePathResult {
+  std::string path;
+};
+
+using ResultVariant =
+    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult, PageResult,
+                 SyncResult, NetworkModeResult, FootnoteResult, BookContextResult, FilePathResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

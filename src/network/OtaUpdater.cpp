@@ -1,18 +1,17 @@
 #include "OtaUpdater.h"
 
+#include <HalStorage.h>
 #include <Logging.h>
 #include <ReleaseJsonParser.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
-#include <esp_https_ota.h>
 #include <esp_wifi.h>
 
-namespace {
-constexpr char latestReleaseUrl[] = "https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/latest";
+#include "FirmwareFlasher.h"
+#include "HttpDownloader.h"
 
-esp_err_t http_client_set_header_cb(esp_http_client_handle_t http_client) {
-  return esp_http_client_set_header(http_client, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
-}
+namespace {
+constexpr char latestReleaseUrl[] = "https://api.github.com/repos/InsiderPhD/crosspoint-reader/releases/latest";
 
 size_t totalBytesReceived = 0;
 
@@ -100,14 +99,23 @@ bool OtaUpdater::isUpdateNewer() const {
     return false;
   }
 
-  int currentMajor, currentMinor, currentPatch;
-  int latestMajor, latestMinor, latestPatch;
-
   const auto currentVersion = CROSSPOINT_VERSION;
 
-  // semantic version check (only match on 3 segments)
-  sscanf(latestVersion.c_str(), "%d.%d.%d", &latestMajor, &latestMinor, &latestPatch);
-  sscanf(currentVersion, "%d.%d.%d", &currentMajor, &currentMinor, &currentPatch);
+  // Parse "major.minor.patch", tolerating a leading "v" (and any other leading non-digits) and
+  // ignoring trailing suffixes like "-rc+hash" / "-slim" / "-<branch>". Release tags omit the
+  // "v" (e.g. "1.5.3") while CROSSPOINT_VERSION carries it ("v1.5.3"); sscanf on the "v" form
+  // fails and, with uninitialised locals, made this comparison non-deterministic. Always zero
+  // the outputs and skip to the first digit so both forms parse the same way.
+  auto parseSemver = [](const char* s, int& major, int& minor, int& patch) {
+    major = minor = patch = 0;
+    while (*s && (*s < '0' || *s > '9')) ++s;
+    sscanf(s, "%d.%d.%d", &major, &minor, &patch);
+  };
+
+  int currentMajor, currentMinor, currentPatch;
+  int latestMajor, latestMinor, latestPatch;
+  parseSemver(latestVersion.c_str(), latestMajor, latestMinor, latestPatch);
+  parseSemver(currentVersion, currentMajor, currentMinor, currentPatch);
 
   /*
    * Compare major versions.
@@ -144,66 +152,66 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
   if (!isUpdateNewer()) {
     return UPDATE_OLDER_ERROR;
   }
-
-  esp_https_ota_handle_t ota_handle = NULL;
-  esp_err_t esp_err;
-
-  esp_http_client_config_t client_config = {
-      .url = otaUrl.c_str(),
-      .timeout_ms = 15000,
-      /* Default HTTP client buffer size 512 byte only
-       * not sufficent to handle URL redirection cases or
-       * parsing of large HTTP headers.
-       */
-      .buffer_size = 8192,
-      .buffer_size_tx = 8192,
-      .skip_cert_common_name_check = true,
-      .crt_bundle_attach = esp_crt_bundle_attach,
-      .keep_alive_enable = true,
-  };
-
-  esp_https_ota_config_t ota_config = {
-      .http_config = &client_config,
-      .http_client_init_cb = http_client_set_header_cb,
-  };
-
-  /* For better timing and connectivity, we disable power saving for WiFi */
-  esp_wifi_set_ps(WIFI_PS_NONE);
-
-  esp_err = esp_https_ota_begin(&ota_config, &ota_handle);
-  if (esp_err != ESP_OK) {
-    LOG_DBG("OTA", "HTTP OTA Begin Failed: %s", esp_err_to_name(esp_err));
+  if (otaUrl.empty()) {
+    LOG_ERR("OTA", "No firmware URL to install");
     return INTERNAL_UPDATE_ERROR;
   }
 
-  do {
-    esp_err = esp_https_ota_perform(ota_handle);
-    processedSize = esp_https_ota_get_image_len_read(ota_handle);
-    if (onProgress) onProgress(ctx);
-    delay(100);  // TODO: should we replace this with something better?
-  } while (esp_err == ESP_ERR_HTTPS_OTA_IN_PROGRESS);
+  // X3/X4 units reject otherwise-valid images via esp_image_verify (bogus efuse-blk-rev),
+  // so the streaming esp_https_ota path fails at finish on those devices. Instead download
+  // the .bin to SD, then raw-write the OTA partition + switch otadata, which bypasses the
+  // runtime verify (same scheme as SD recovery and the web flasher — see OtaBootSwitch.h).
+  uiProgressCb = onProgress;
+  uiProgressCtx = ctx;
 
-  /* Return back to default power saving for WiFi in case of failing */
+  // Reuse the SD recovery temp slot. Kept on SD root so a failed/interrupted flash leaves an
+  // obvious artifact rather than silently consuming hidden space.
+  static constexpr char kTmpPath[] = "/firmware_ota.bin";
+
+  /* Disable WiFi power saving for a stable download. */
+  esp_wifi_set_ps(WIFI_PS_NONE);
+
+  // Phase 1: download firmware.bin to SD. allowConfiguredAuth=false: never attach OPDS Basic
+  // auth to a firmware fetch.
+  totalSize = otaSize;
+  processedSize = 0;
+  const auto dlResult = HttpDownloader::downloadToFile(
+      otaUrl, kTmpPath,
+      [this, onProgress, ctx](size_t downloaded, size_t total) {
+        processedSize = downloaded;
+        totalSize = total > 0 ? total : otaSize;
+        if (onProgress) onProgress(ctx);
+      },
+      /*allowConfiguredAuth=*/false);
+
   esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 
-  if (esp_err != ESP_OK) {
-    LOG_ERR("OTA", "esp_https_ota_perform Failed: %s", esp_err_to_name(esp_err));
-    esp_https_ota_finish(ota_handle);
+  if (dlResult != HttpDownloader::OK) {
+    LOG_ERR("OTA", "Firmware download failed: %d", dlResult);
+    Storage.remove(kTmpPath);
     return HTTP_ERROR;
   }
 
-  if (!esp_https_ota_is_complete_data_received(ota_handle)) {
-    LOG_ERR("OTA", "esp_https_ota_is_complete_data_received Failed: %s", esp_err_to_name(esp_err));
-    esp_https_ota_finish(ota_handle);
+  // Phase 2: raw-write + otadata switch. flashFromSdPath re-validates the image (header /
+  // segment table / XOR / SHA trailer) before writing.
+  processedSize = 0;
+  const auto flashResult = firmware_flash::flashFromSdPath(
+      kTmpPath,
+      +[](size_t written, size_t total, void* c) {
+        auto* self = static_cast<OtaUpdater*>(c);
+        self->processedSize = written;
+        self->totalSize = total;
+        if (self->uiProgressCb) self->uiProgressCb(self->uiProgressCtx);
+      },
+      this);
+
+  Storage.remove(kTmpPath);
+
+  if (flashResult != firmware_flash::Result::OK) {
+    LOG_ERR("OTA", "Raw flash failed: %s", firmware_flash::resultName(flashResult));
     return INTERNAL_UPDATE_ERROR;
   }
 
-  esp_err = esp_https_ota_finish(ota_handle);
-  if (esp_err != ESP_OK) {
-    LOG_ERR("OTA", "esp_https_ota_finish Failed: %s", esp_err_to_name(esp_err));
-    return INTERNAL_UPDATE_ERROR;
-  }
-
-  LOG_INF("OTA", "Update completed");
+  LOG_INF("OTA", "Update completed (raw-write)");
   return OK;
 }
