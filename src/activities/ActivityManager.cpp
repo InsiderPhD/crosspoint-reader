@@ -291,25 +291,31 @@ void ActivityManager::requestUpdateAndWait() {
 // RenderLock
 
 RenderLock::RenderLock() {
-  xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
-  isLocked = true;
+  isLocked = (xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY) == pdTRUE);
 }
 
 RenderLock::RenderLock([[maybe_unused]] Activity&) {
-  xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
-  isLocked = true;
+  isLocked = (xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY) == pdTRUE);
 }
 
 RenderLock::~RenderLock() {
   if (isLocked) {
-    xSemaphoreGive(activityManager.renderingMutex);
+    if (xSemaphoreGetMutexHolder(activityManager.renderingMutex) == xTaskGetCurrentTaskHandle()) {
+      xSemaphoreGive(activityManager.renderingMutex);
+    } else {
+      LOG_ERR("ACT", "RenderLock destructor owner mismatch; skipping give");
+    }
     isLocked = false;
   }
 }
 
 void RenderLock::unlock() {
   if (isLocked) {
-    xSemaphoreGive(activityManager.renderingMutex);
+    if (xSemaphoreGetMutexHolder(activityManager.renderingMutex) == xTaskGetCurrentTaskHandle()) {
+      xSemaphoreGive(activityManager.renderingMutex);
+    } else {
+      LOG_ERR("ACT", "RenderLock::unlock owner mismatch; skipping give");
+    }
     isLocked = false;
   }
 }

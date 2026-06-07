@@ -161,6 +161,7 @@ class CrossPointSettings {
     LONG_PRESS_REFRESH = 0,
     LONG_PRESS_SYNC = 1,
     LONG_PRESS_NONE = 2,
+    LONG_PRESS_BOOKMARK = 3,
     LONG_PRESS_ACTION_COUNT
   };
 
@@ -262,7 +263,7 @@ class CrossPointSettings {
   uint8_t imageRendering = IMAGES_DISPLAY;
   // Footnote display mode (0 = render at bottom of page, 1 = show in popup menu)
   uint8_t footnoteDisplay = FOOTNOTE_ON_PAGE;
-  // Long press confirm button action (0 = refresh screen, 1 = BookFusion sync)
+  // Long press confirm button action (0 = refresh, 1 = sync, 2 = none, 3 = bookmark)
   uint8_t longPressAction = LONG_PRESS_REFRESH;
   // Dark mode (inverts entire UI except images)
   uint8_t darkMode = DARK_MODE_OFF;

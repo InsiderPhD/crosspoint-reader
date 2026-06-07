@@ -21,14 +21,21 @@
 #include "BookFusionSyncActivity.h"
 #include "BookFusionSyncClient.h"
 #include "BookFusionTokenStore.h"
+#include "BookmarkEntry.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "EpubReaderBookmarksActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderFootnotesActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
+#include "JsonSettingsIO.h"
 #include "KOReaderCredentialStore.h"
+#include "KOReaderDocumentId.h"
 #include "KOReaderSyncActivity.h"
+#include "KOReaderSyncClient.h"
+#include "KOReaderSyncStateStore.h"
 #include "MappedInputManager.h"
+#include "ProgressMapper.h"
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
 #include "ReadingStatsStore.h"
@@ -37,6 +44,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
 
 // NOTE: This file used to wrap its helpers in an anonymous namespace.
@@ -48,6 +56,7 @@
 
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
 constexpr unsigned long skipChapterMs = 700;
+constexpr unsigned long bookmarkMessageDurationMs = 1500;
 // pages per minute, first item is 1 to prevent division by zero if accessed
 // Index 0 = Off, 1 = Auto (uses readingSpeedSecondsPerPage), 2+ = fixed durations
 const std::vector<unsigned long> PAGE_TURN_DURATIONS_MS = {0,       0,       60000UL, 50000UL, 40000UL,
@@ -162,6 +171,28 @@ bool sameBookFusionPosition(const BookFusionStoredPosition& stored, const BookFu
   static constexpr float PERCENTAGE_EPSILON = 0.05f;
   return std::fabs(stored.pagePositionInBook - pos.pagePositionInBook) <= PAGE_POSITION_EPSILON &&
          std::fabs(stored.percentage - pos.percentage) <= PERCENTAGE_EPSILON;
+}
+
+bool sameKOReaderPosition(const KOReaderStoredPosition& stored, const KOReaderPosition& pos, int localSpineIndex,
+                          int localPageNumber, int localTotalPages) {
+  if (stored.spineIndex != localSpineIndex) return false;
+  if (stored.pageNumber >= 0 && stored.totalPages > 0 && localPageNumber >= 0 && localTotalPages > 0) {
+    if (stored.totalPages == localTotalPages) {
+      return stored.pageNumber == localPageNumber;
+    }
+  }
+  static constexpr float KO_PERCENT_EPSILON = 0.0005f;
+  return std::fabs(stored.percentage - pos.percentage) <= KO_PERCENT_EPSILON;
+}
+
+bool localEpochSeconds(int64_t& outEpoch) {
+  outEpoch = 0;
+  time_t now = time(nullptr);
+  struct tm tm_utc;
+  if (!gmtime_r(&now, &tm_utc)) return false;
+  if (tm_utc.tm_year + 1900 < 2024) return false;
+  outEpoch = static_cast<int64_t>(now);
+  return true;
 }
 
 // Format the current device clock as an ISO 8601 UTC timestamp matching the
@@ -372,18 +403,26 @@ void EpubReaderActivity::loop() {
     }
   }
 
+  if (showBookmarkMessage && (millis() - bookmarkMessageTime) >= bookmarkMessageDurationMs) {
+    showBookmarkMessage = false;
+    requestUpdate();
+  }
+
   // Long-press Confirm: immediate action when threshold is reached (hold-based, not release-based)
   if (mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= skipChapterMs &&
       !longPressFeedbackShown) {
     longPressFeedbackShown = true;  // Prevent action spam
 
     if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_SYNC) {
-      // Try BookFusion sync if this is a BookFusion book
-      // WiFi connection and sync will show their own popup feedback
-      connectWifiForSyncWithPopup([this]() {
-        // WiFi connected, perform BookFusion sync
-        performBookFusionSync();
-      });
+      performLongPressSync();
+    } else if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_BOOKMARK) {
+      const auto bookmarkResult = addBookmark();
+      if (bookmarkResult != BookmarkToggleResult::None) {
+        bookmarkMessageWasRemoval = (bookmarkResult == BookmarkToggleResult::Removed);
+        showBookmarkMessage = true;
+        bookmarkMessageTime = millis();
+        requestUpdate();
+      }
     } else if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_NONE) {
       // No-op. longPressFeedbackShown stays true so the matching release won't
       // open the reader menu — holding Confirm with this setting means "do
@@ -637,6 +676,33 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               jumpToPercent(std::get<PercentResult>(result.data).percent);
             }
           });
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::BOOKMARKS: {
+      const int currentSpinePageCount = section ? section->pageCount : 0;
+      startActivityForResult(
+          std::make_unique<EpubReaderBookmarksActivity>(renderer, mappedInput, epub, epub->getPath(), currentSpineIndex,
+                                                        currentSpinePageCount),
+                             [this](const ActivityResult& result) {
+                               if (!result.isCancelled) {
+                                 const auto& jump = std::get<SyncResult>(result.data);
+                                 RenderLock lock(*this);
+                                 currentSpineIndex = jump.spineIndex;
+                                 nextPageNumber = jump.page;
+                                 section.reset();
+                               }
+                               requestUpdate();
+                             });
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::ADD_BOOKMARK: {
+      const auto bookmarkResult = addBookmark();
+      if (bookmarkResult != BookmarkToggleResult::None) {
+        bookmarkMessageWasRemoval = (bookmarkResult == BookmarkToggleResult::Removed);
+        showBookmarkMessage = true;
+        bookmarkMessageTime = millis();
+        requestUpdate();
+      }
       break;
     }
     case EpubReaderMenuActivity::MenuAction::DISPLAY_QR: {
@@ -1078,6 +1144,14 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     pendingScreenshot = false;
     ScreenshotUtil::takeScreenshot(renderer);
   }
+
+  if (showBookmarkMessage) {
+    GUI.drawPopup(renderer, bookmarkMessageWasRemoval ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED));
+    if (SETTINGS.darkMode) {
+      renderer.invertScreen();
+    }
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  }
 }
 
 void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportWidth, const uint16_t viewportHeight) {
@@ -1141,6 +1215,99 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
         static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f), 0, 100)));
   }
   RECENT_BOOKS.updateProgress(epub->getPath(), progressPercent);
+}
+
+EpubReaderActivity::BookmarkToggleResult EpubReaderActivity::addBookmark() {
+  // Bookmark toggle reads/writes SD files and page data; serialize with render()
+  // to avoid storage mutex races between main and render tasks.
+  if (activityManager.isOnRenderTask()) {
+    LOG_ERR("ERS", "addBookmark() called on render task; ignoring");
+    return BookmarkToggleResult::None;
+  }
+
+  RenderLock lock(*this);
+
+  if (!section || !epub) {
+    return BookmarkToggleResult::None;
+  }
+
+  const int currentPage = section->currentPage;
+  const int pageCount = section->pageCount;
+  if (currentPage < 0 || currentPage >= pageCount || pageCount <= 0) {
+    return BookmarkToggleResult::None;
+  }
+
+  std::string pageText;
+  if (auto page = section->loadPageFromSectionFile()) {
+    for (const auto& el : page->elements) {
+      if (el->getTag() != TAG_PageLine) {
+        continue;
+      }
+      const auto& line = static_cast<const PageLine&>(*el);
+      if (!line.getBlock()) {
+        continue;
+      }
+      const auto& words = line.getBlock()->getWords();
+      for (const auto& word : words) {
+        if (!pageText.empty()) {
+          pageText += " ";
+        }
+        pageText += word;
+      }
+      if (pageText.size() > 300) {
+        break;
+      }
+    }
+  }
+
+  CrossPointPosition pos = {currentSpineIndex, currentPage, pageCount};
+  const KOReaderPosition koPos = ProgressMapper::toKOReader(epub, pos);
+
+  BookmarkEntry entry;
+  entry.percentage = koPos.percentage;
+  entry.xpath = koPos.xpath;
+  entry.summary = BookmarkUtil::sanitizeBookmarkSummary(pageText);
+  entry.computedSpineIndex = static_cast<uint16_t>(std::max(0, currentSpineIndex));
+  entry.computedChapterPageCount = static_cast<uint16_t>(std::max(0, pageCount));
+  entry.computedChapterProgress = static_cast<uint16_t>(std::max(0, currentPage));
+
+  const std::string path = BookmarkUtil::getBookmarkPath(epub->getPath());
+  Storage.mkdir(BookmarkUtil::getBookmarksDir().c_str());
+
+  std::vector<BookmarkEntry> bookmarks;
+  if (Storage.exists(path.c_str())) {
+    String json = Storage.readFile(path.c_str());
+    if (!json.isEmpty()) {
+      JsonSettingsIO::loadBookmarks(bookmarks, json.c_str());
+    }
+  }
+
+  auto isSameBookmark = [&entry](const BookmarkEntry& existing) {
+    if (!entry.xpath.empty() && !existing.xpath.empty()) {
+      return existing.xpath == entry.xpath;
+    }
+
+    // Fallback for legacy/partial entries: compare normalized book percentage.
+    static constexpr float BOOKMARK_PERCENT_EPSILON = 0.0005f;
+    return std::fabs(existing.percentage - entry.percentage) <= BOOKMARK_PERCENT_EPSILON;
+  };
+
+  const auto existingIt = std::find_if(bookmarks.begin(), bookmarks.end(), isSameBookmark);
+  if (existingIt != bookmarks.end()) {
+    bookmarks.erase(existingIt);
+    if (!JsonSettingsIO::saveBookmarks(bookmarks, path.c_str())) {
+      LOG_ERR("ERS", "Failed to save bookmark to %s", path.c_str());
+      return BookmarkToggleResult::None;
+    }
+    return BookmarkToggleResult::Removed;
+  } else {
+    bookmarks.insert(bookmarks.begin(), entry);
+    if (!JsonSettingsIO::saveBookmarks(bookmarks, path.c_str())) {
+      LOG_ERR("ERS", "Failed to save bookmark to %s", path.c_str());
+      return BookmarkToggleResult::None;
+    }
+    return BookmarkToggleResult::Added;
+  }
 }
 
 void EpubReaderActivity::recordStatsProgress() {
@@ -1402,11 +1569,236 @@ void EpubReaderActivity::restoreSavedPosition() {
   requestUpdate();
 }
 
-void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuccess) {
+void EpubReaderActivity::performLongPressSync() {
+  const std::string epubPath = epub ? epub->getPath() : std::string();
+  const uint32_t bookId = epubPath.empty() ? 0 : BookFusionBookIdStore::loadBookId(epubPath.c_str());
+
+  if (bookId != 0 && BF_TOKEN_STORE.hasToken()) {
+    // Keep existing quick-sync behavior for BookFusion-linked books.
+    connectWifiForSyncWithPopup([this]() { performBookFusionSync(); });
+    return;
+  }
+
+  if (KOREADER_STORE.hasCredentials()) {
+    // Run KOReader quick sync inline so long-press remains a one-gesture action
+    // (same UX pattern as BookFusion quick sync).
+    connectWifiForSyncWithPopup([this]() { performKOReaderQuickSync(); }, tr(STR_KOREADER_SYNC));
+    return;
+  }
+
+  // No sync provider configured for this book/account state: preserve legacy
+  // long-press behavior by doing a full refresh.
+  RenderLock lock;
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+}
+
+void EpubReaderActivity::performKOReaderQuickSync() {
+  if (!epub || !KOREADER_STORE.hasCredentials()) {
+    LOG_DBG("KRS", "KOReader quick sync unavailable, performing refresh instead");
+    RenderLock lock;
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+    return;
+  }
+
+  const std::string epubPath = epub->getPath();
+  std::string documentHash;
+  if (KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME) {
+    documentHash = KOReaderDocumentId::calculateFromFilename(epubPath);
+  } else {
+    documentHash = KOReaderDocumentId::calculate(epubPath);
+  }
+  if (documentHash.empty()) {
+    LOG_DBG("KRS", "Failed to compute KOReader document hash, performing refresh instead");
+    RenderLock lock;
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+    return;
+  }
+
+  const int currentPage = section ? section->currentPage : nextPageNumber;
+  const int totalPages = section ? section->pageCount : cachedChapterTotalPageCount;
+  std::optional<uint16_t> paragraphIndex;
+  if (section && currentPage >= 0 && currentPage < section->pageCount) {
+    const uint16_t paragraphPage =
+        currentPage > 0 ? static_cast<uint16_t>(currentPage - 1) : static_cast<uint16_t>(currentPage);
+    if (const auto pIdx = section->getParagraphIndexForPage(paragraphPage)) {
+      paragraphIndex = *pIdx;
+    }
+  }
+
+  CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPages};
+  if (paragraphIndex.has_value()) {
+    localPos.paragraphIndex = *paragraphIndex;
+    localPos.hasParagraphIndex = true;
+  }
+  const KOReaderPosition localKoPos = ProgressMapper::toKOReader(epub, localPos);
+
+  int64_t lastSyncTimestamp = 0;
+  const bool hasLastSyncTimestamp = KOReaderSyncStateStore::loadLastSyncTimestamp(epubPath.c_str(), lastSyncTimestamp);
+  KOReaderStoredPosition lastSyncedPosition;
+  const bool hasLastSyncedPosition =
+      KOReaderSyncStateStore::loadLastSyncedPosition(epubPath.c_str(), lastSyncedPosition);
+
+  {
+    RenderLock lock(*this);
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "Fetching current time...");
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+  }
+  const bool internetTimeSynced = syncBookFusionTimeWithNTP();
+
+  {
+    RenderLock lock(*this);
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), tr(STR_FETCH_PROGRESS));
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+  }
+
+  KOReaderProgress remoteProgress;
+  const auto downloadResult = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
+
+  bool shouldUploadProgress = true;
+  bool appliedRemoteProgress = false;
+  bool alreadyUpToDate = false;
+  if (downloadResult == KOReaderSyncClient::OK) {
+    const bool canCompareTimestamp = hasLastSyncTimestamp && remoteProgress.timestamp > 0;
+    const bool canCompareSyncState = canCompareTimestamp && hasLastSyncedPosition;
+    const bool remoteIsNewer = canCompareTimestamp && remoteProgress.timestamp > lastSyncTimestamp;
+    const bool remoteIsFurtherAhead = remoteProgress.percentage > localKoPos.percentage + 0.01f;
+    const bool localIsFurtherAhead = localKoPos.percentage > remoteProgress.percentage + 0.01f;
+    const bool localChangedSinceLastSync =
+        hasLastSyncedPosition && !sameKOReaderPosition(lastSyncedPosition, localKoPos, currentSpineIndex, currentPage, totalPages);
+
+    if (canCompareSyncState) {
+      LOG_DBG("KRS", "Last sync ts=%lld; remote ts=%lld; local changed=%d; localAhead=%d",
+              static_cast<long long>(lastSyncTimestamp), static_cast<long long>(remoteProgress.timestamp),
+              localChangedSinceLastSync ? 1 : 0, localIsFurtherAhead ? 1 : 0);
+    } else if (canCompareTimestamp) {
+      LOG_DBG("KRS", "Have sync timestamp but no stored sync position; falling back to furthest-ahead rule");
+    } else {
+      LOG_DBG("KRS", "No comparable sync timestamp; falling back to furthest-ahead rule");
+    }
+
+    const bool shouldApplyRemote =
+        !localIsFurtherAhead && ((canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) ||
+                                 (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync &&
+                                  !internetTimeSynced && remoteIsFurtherAhead) ||
+                                 (!canCompareSyncState && remoteIsFurtherAhead));
+
+    if (shouldApplyRemote) {
+      KOReaderPosition remoteKoPos = {remoteProgress.progress, remoteProgress.percentage};
+      const CrossPointPosition remotePos =
+          ProgressMapper::toCrossPoint(epub, remoteKoPos, currentSpineIndex, std::max(1, totalPages));
+
+      {
+        RenderLock lock(*this);
+        char msg[72];
+        snprintf(msg, sizeof(msg), "Applying remote progress (%.0f%%)...", remoteProgress.percentage * 100.0f);
+        UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), msg);
+        if (SETTINGS.darkMode) renderer.invertScreen();
+        renderer.displayBuffer();
+      }
+
+      currentSpineIndex = remotePos.spineIndex;
+      nextPageNumber = std::max(0, remotePos.pageNumber);
+      cachedChapterTotalPageCount = 0;
+      pendingPageJump.reset();
+      section.reset();
+      shouldUploadProgress = false;
+      appliedRemoteProgress = true;
+      if (remoteProgress.timestamp > 0) {
+        KOReaderSyncStateStore::saveLastSyncTimestamp(epubPath.c_str(), remoteProgress.timestamp);
+      } else if (internetTimeSynced) {
+        int64_t localTs = 0;
+        if (localEpochSeconds(localTs)) {
+          KOReaderSyncStateStore::saveLastSyncTimestamp(epubPath.c_str(), localTs);
+        }
+      }
+      KOReaderStoredPosition stored;
+      stored.percentage = remoteProgress.percentage;
+      stored.spineIndex = remotePos.spineIndex;
+      stored.pageNumber = remotePos.pageNumber;
+      stored.totalPages = 0;
+      KOReaderSyncStateStore::saveLastSyncedPosition(epubPath.c_str(), stored);
+    } else if (canCompareSyncState && !remoteIsNewer && !localChangedSinceLastSync) {
+      shouldUploadProgress = false;
+      alreadyUpToDate = true;
+    } else if (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync && internetTimeSynced) {
+      LOG_DBG("KRS", "Local position changed; uploading local progress with synced device time");
+    } else if (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync) {
+      LOG_DBG("KRS", "Local and remote changed without internet time; using furthest-ahead fallback");
+    } else if (localIsFurtherAhead && remoteIsNewer) {
+      LOG_DBG("KRS", "Remote timestamp is newer but remote position is behind local; uploading local");
+    }
+  } else if (downloadResult == KOReaderSyncClient::NOT_FOUND) {
+    LOG_DBG("KRS", "No remote KOReader progress found, uploading local position");
+  } else {
+    LOG_DBG("KRS", "Failed to fetch KOReader progress: %s", KOReaderSyncClient::errorString(downloadResult));
+  }
+
+  KOReaderSyncClient::Error uploadResult = KOReaderSyncClient::OK;
+  if (shouldUploadProgress) {
+    {
+      RenderLock lock(*this);
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), tr(STR_UPLOAD_PROGRESS));
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+
+    KOReaderProgress uploadProgress;
+    uploadProgress.document = documentHash;
+    uploadProgress.progress = localKoPos.xpath;
+    uploadProgress.percentage = localKoPos.percentage;
+    uploadResult = KOReaderSyncClient::updateProgress(uploadProgress);
+    if (uploadResult == KOReaderSyncClient::OK) {
+      if (internetTimeSynced) {
+        int64_t localTs = 0;
+        if (localEpochSeconds(localTs)) {
+          KOReaderSyncStateStore::saveLastSyncTimestamp(epubPath.c_str(), localTs);
+        }
+      }
+      KOReaderStoredPosition stored;
+      stored.percentage = localKoPos.percentage;
+      stored.spineIndex = currentSpineIndex;
+      stored.pageNumber = currentPage;
+      stored.totalPages = totalPages;
+      KOReaderSyncStateStore::saveLastSyncedPosition(epubPath.c_str(), stored);
+    }
+  }
+
+  {
+    RenderLock lock(*this);
+    if (appliedRemoteProgress) {
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "Pulled remote progress to device");
+    } else if (alreadyUpToDate) {
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "Progress already up to date.");
+    } else if (uploadResult == KOReaderSyncClient::OK) {
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "Pushed local progress to server");
+    } else {
+      char errorMsg[96];
+      snprintf(errorMsg, sizeof(errorMsg), "%s:\n%s", tr(STR_SYNC_FAILED_MSG),
+               KOReaderSyncClient::errorString(uploadResult));
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), errorMsg);
+    }
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+  }
+
+  vTaskDelay(1200 / portTICK_PERIOD_MS);
+
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  delay(100);
+
+  pagesUntilFullRefresh = 1;
+  requestUpdateAndWait();
+}
+
+void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuccess, const char* syncTitle) {
+  const char* title = (syncTitle && syncTitle[0] != '\0') ? syncTitle : "BookFusion Sync";
   // Show connecting popup
   {
     RenderLock lock(*this);
-    UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Connecting to WiFi...");
+    UITheme::drawSyncProgressPopup(renderer, title, "Connecting to WiFi...");
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
   }
@@ -1420,7 +1812,7 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     // No saved networks, show error popup
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync",
+      UITheme::drawSyncProgressPopup(renderer, title,
                                      "No WiFi networks configured.\nPlease set up WiFi in Settings first.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
@@ -1434,7 +1826,7 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     // Network found but no credentials
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync",
+      UITheme::drawSyncProgressPopup(renderer, title,
                                      "WiFi credentials not found.\nPlease reconnect in Settings.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
@@ -1469,7 +1861,7 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
       RenderLock lock(*this);
       char statusMsg[64];
       snprintf(statusMsg, sizeof(statusMsg), "Connecting to WiFi...\n(%d/%d)", attempts / 10, maxAttempts / 10);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", statusMsg);
+      UITheme::drawSyncProgressPopup(renderer, title, statusMsg);
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -1481,7 +1873,7 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     // Show success popup briefly
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "WiFi connected!");
+      UITheme::drawSyncProgressPopup(renderer, title, "WiFi connected!");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -1496,7 +1888,7 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     // Show failure popup
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync",
+      UITheme::drawSyncProgressPopup(renderer, title,
                                      "WiFi connection failed.\nPlease check your settings.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();

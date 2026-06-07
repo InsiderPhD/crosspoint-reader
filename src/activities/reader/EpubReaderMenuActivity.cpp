@@ -34,6 +34,8 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});
   items.push_back({MenuAction::READING_SPEED, StrId::STR_READING_SPEED});
   items.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
+  items.push_back({MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS});
+  items.push_back({MenuAction::ADD_BOOKMARK, StrId::STR_CREATE_BOOKMARK});
   items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
   items.push_back({MenuAction::MARK_AS_COMPLETED, StrId::STR_MARK_AS_COMPLETED});

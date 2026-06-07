@@ -18,6 +18,8 @@ class EpubReaderMenuActivity final : public Activity {
     AUTO_PAGE_TURN,
     READING_SPEED,
     ROTATE_SCREEN,
+    BOOKMARKS,
+    ADD_BOOKMARK,
     SCREENSHOT,
     DISPLAY_QR,
     MARK_AS_COMPLETED,

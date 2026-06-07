@@ -36,6 +36,11 @@ class EpubReaderActivity final : public Activity {
   bool automaticPageTurnActive = false;
   bool autoPageTurnMode = false;        // True when using calibrated reading speed
   bool longPressFeedbackShown = false;  // Track if long press visual feedback has been shown
+  bool showBookmarkMessage = false;
+  bool bookmarkMessageWasRemoval = false;
+  unsigned long bookmarkMessageTime = 0UL;
+
+  enum class BookmarkToggleResult { None, Added, Removed };
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
@@ -59,6 +64,7 @@ class EpubReaderActivity final : public Activity {
   void renderStatusBar() const;
   void silentIndexNextChapterIfNeeded(uint16_t viewportWidth, uint16_t viewportHeight);
   void saveProgress(int spineIndex, int currentPage, int pageCount);
+  BookmarkToggleResult addBookmark();
   // Record reading-stats progress from the current section. MUST be called on the main task
   // only (never render()): see ActivityManager::isOnRenderTask. The SD write is debounced
   // inside READING_STATS.updateProgress().
@@ -77,8 +83,10 @@ class EpubReaderActivity final : public Activity {
   // BookFusion sync — bidirectional auto-merge used by the long-press Confirm
   // "quick sync". The reader-menu Push/Pull entries use BookFusionSyncActivity
   // instead (full-screen flow), not this method.
+  void performLongPressSync();
+  void performKOReaderQuickSync();
   void performBookFusionSync();
-  void connectWifiForSyncWithPopup(std::function<void()> onSuccess);
+  void connectWifiForSyncWithPopup(std::function<void()> onSuccess, const char* syncTitle = "BookFusion Sync");
 
  public:
   explicit EpubReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Epub> epub)
