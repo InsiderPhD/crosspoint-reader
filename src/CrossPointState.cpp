@@ -31,6 +31,12 @@ void CrossPointState::pushRecentSleep(uint16_t idx) {
   if (recentSleepFill < SLEEP_RECENT_COUNT) recentSleepFill++;
 }
 
+void CrossPointState::registerValidTimeSync(const uint32_t validTimestamp) {
+  if (validTimestamp > 0) {
+    lastKnownValidTimestamp = validTimestamp;
+  }
+}
+
 bool CrossPointState::saveToFile() const {
   Storage.mkdir("/.crosspoint");
   return JsonSettingsIO::saveState(*this, STATE_FILE_JSON);

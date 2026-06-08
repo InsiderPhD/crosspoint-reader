@@ -4,12 +4,17 @@
 #include <esp_sntp.h>
 
 #include <algorithm>
+#include <climits>
 #include <ctime>
 #include <sys/time.h>
+
+#include "CrossPointSettings.h"
+#include "TimeZoneRegistry.h"
 
 namespace {
 constexpr uint32_t VALID_CLOCK_THRESHOLD = 1704067200UL;  // 2024-01-01 UTC
 bool syncedThisBoot = false;
+uint8_t configuredTimeZonePreset = UINT8_MAX;
 
 bool isLeapYear(const int year) { return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0); }
 
@@ -58,7 +63,15 @@ void civilFromDays(int z, int& year, unsigned& month, unsigned& day) {
 }
 }  // namespace
 
-void TimeUtils::configureTimezone() { tzset(); }
+void TimeUtils::configureTimezone() {
+  const uint8_t preset = TimeZoneRegistry::clampPresetIndex(SETTINGS.timeZonePreset);
+  if (configuredTimeZonePreset == preset) {
+    return;
+  }
+  setenv("TZ", TimeZoneRegistry::getPresetPosixTz(preset), 1);
+  tzset();
+  configuredTimeZonePreset = preset;
+}
 
 void TimeUtils::stopNtp() {
   if (esp_sntp_enabled()) {
@@ -175,7 +188,7 @@ bool TimeUtils::getDateFromDayOrdinal(const uint32_t dayOrdinal, int& year, unsi
 bool TimeUtils::wasTimeSyncedThisBoot() { return syncedThisBoot; }
 
 const char* TimeUtils::getCurrentTimeZoneLabel() {
-  return "System";
+  return TimeZoneRegistry::getPresetLabel(TimeZoneRegistry::clampPresetIndex(SETTINGS.timeZonePreset));
 }
 
 std::string TimeUtils::formatDate(const uint32_t epochSeconds, const bool appendBang) {

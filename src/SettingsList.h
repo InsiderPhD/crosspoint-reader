@@ -12,6 +12,93 @@
 // Each entry has a key (for JSON API) and category (for grouping).
 // ACTION-type entries and entries without a key are device-only.
 inline const std::vector<SettingInfo>& getSettingsList() {
+  static const std::vector<StrId> sharedReaderButtonActions = {
+      StrId::STR_SYNC_WITH_BOOKFUSION,
+      StrId::STR_PAGE_TURN,
+      StrId::STR_REFRESH_SCREEN,
+      StrId::STR_SLEEP,
+      StrId::STR_CREATE_BOOKMARK,
+  };
+
+  auto getLongPressActionIndex = []() -> uint8_t {
+    switch (SETTINGS.longPressAction) {
+      case CrossPointSettings::LONG_PRESS_SYNC:
+        return 0;
+      case CrossPointSettings::LONG_PRESS_PAGE_TURN:
+        return 1;
+      case CrossPointSettings::LONG_PRESS_REFRESH:
+      case CrossPointSettings::LONG_PRESS_NONE:  // legacy value: "none" no longer exposed in UI
+        return 2;
+      case CrossPointSettings::LONG_PRESS_SLEEP:
+        return 3;
+      case CrossPointSettings::LONG_PRESS_BOOKMARK:
+        return 4;
+      default:
+        return 2;
+    }
+  };
+
+  auto setLongPressActionIndex = [](const uint8_t index) {
+    switch (index) {
+      case 0:
+        SETTINGS.longPressAction = CrossPointSettings::LONG_PRESS_SYNC;
+        break;
+      case 1:
+        SETTINGS.longPressAction = CrossPointSettings::LONG_PRESS_PAGE_TURN;
+        break;
+      case 2:
+        SETTINGS.longPressAction = CrossPointSettings::LONG_PRESS_REFRESH;
+        break;
+      case 3:
+        SETTINGS.longPressAction = CrossPointSettings::LONG_PRESS_SLEEP;
+        break;
+      case 4:
+        SETTINGS.longPressAction = CrossPointSettings::LONG_PRESS_BOOKMARK;
+        break;
+      default:
+        break;
+    }
+  };
+
+  auto getShortPowerActionIndex = []() -> uint8_t {
+    switch (SETTINGS.shortPwrBtn) {
+      case CrossPointSettings::PAGE_TURN:
+        return 1;
+      case CrossPointSettings::SLEEP:
+        return 3;
+      case CrossPointSettings::FORCE_REFRESH:
+        return 2;
+      case CrossPointSettings::SHORT_PWRBTN_SYNC:
+        return 0;
+      case CrossPointSettings::SHORT_PWRBTN_BOOKMARK:
+        return 4;
+      default:
+        return 1;
+    }
+  };
+
+  auto setShortPowerActionIndex = [](const uint8_t index) {
+    switch (index) {
+      case 0:
+        SETTINGS.shortPwrBtn = CrossPointSettings::SHORT_PWRBTN_SYNC;
+        break;
+      case 1:
+        SETTINGS.shortPwrBtn = CrossPointSettings::PAGE_TURN;
+        break;
+      case 2:
+        SETTINGS.shortPwrBtn = CrossPointSettings::FORCE_REFRESH;
+        break;
+      case 3:
+        SETTINGS.shortPwrBtn = CrossPointSettings::SLEEP;
+        break;
+      case 4:
+        SETTINGS.shortPwrBtn = CrossPointSettings::SHORT_PWRBTN_BOOKMARK;
+        break;
+      default:
+        break;
+    }
+  };
+
   static const std::vector<SettingInfo> list = {
       // --- Display ---
       SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
@@ -81,13 +168,10 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                         {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV}, "sideButtonLayout", StrId::STR_CAT_CONTROLS),
       SettingInfo::Toggle(StrId::STR_LONG_PRESS_SKIP, &CrossPointSettings::longPressChapterSkip, "longPressChapterSkip",
                           StrId::STR_CAT_CONTROLS),
-      SettingInfo::Enum(StrId::STR_LONG_PRESS_ACTION, &CrossPointSettings::longPressAction,
-                        {StrId::STR_REFRESH_SCREEN, StrId::STR_SYNC_WITH_BOOKFUSION, StrId::STR_NONE_OPT,
-                         StrId::STR_CREATE_BOOKMARK},
-                        "longPressAction", StrId::STR_CAT_CONTROLS),
-      SettingInfo::Enum(StrId::STR_SHORT_PWR_BTN, &CrossPointSettings::shortPwrBtn,
-                        {StrId::STR_PAGE_TURN, StrId::STR_SLEEP, StrId::STR_FORCE_REFRESH},
-                        "shortPwrBtn", StrId::STR_CAT_CONTROLS),
+      SettingInfo::DynamicEnum(StrId::STR_LONG_PRESS_ACTION, sharedReaderButtonActions, getLongPressActionIndex,
+               setLongPressActionIndex, "longPressAction", StrId::STR_CAT_CONTROLS),
+      SettingInfo::DynamicEnum(StrId::STR_SHORT_PWR_BTN, sharedReaderButtonActions, getShortPowerActionIndex,
+               setShortPowerActionIndex, "shortPwrBtn", StrId::STR_CAT_CONTROLS),
       // Persisted last-chosen sort. Hidden from the settings UI (no category set) —
       // edited only via the in-activity sort menu. Listed here so JsonSettingsIO
       // round-trips it through settings.json. The enumValues just exist for
@@ -105,13 +189,19 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                         "sleepTimeout", StrId::STR_CAT_SYSTEM),
       SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                           StrId::STR_CAT_SYSTEM),
+      // --- Stats tab ---
       SettingInfo::Enum(StrId::STR_DAILY_READING_GOAL, &CrossPointSettings::dailyReadingGoal,
                         {StrId::STR_MIN_5, StrId::STR_MIN_10, StrId::STR_MIN_15, StrId::STR_MIN_30,
                          StrId::STR_MIN_60},
-                        "dailyReadingGoal", StrId::STR_CAT_SYSTEM),
+                        "dailyReadingGoal", StrId::STR_CAT_STATS),
       SettingInfo::Enum(StrId::STR_MIN_SESSION_THRESHOLD, &CrossPointSettings::minSessionMinutes,
                         {StrId::STR_MIN_1, StrId::STR_MIN_3, StrId::STR_MIN_5},
-                        "minSessionMinutes", StrId::STR_CAT_SYSTEM),
+                        "minSessionMinutes", StrId::STR_CAT_STATS),
+      // Persisted time-zone preset (index into TimeZoneRegistry). Hidden from the
+      // device tab UI (no category) — selection happens via the Time Zone Action
+      // entry, which launches TimeZoneSelectActivity. Listed here so JsonSettingsIO
+      // round-trips it through settings.json.
+      SettingInfo::Value(StrId::STR_TIME_ZONE, &CrossPointSettings::timeZonePreset, {0, 28, 1}, "timeZonePreset"),
       // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
       SettingInfo::DynamicString(
           StrId::STR_KOREADER_USERNAME, [] { return KOREADER_STORE.getUsername(); },

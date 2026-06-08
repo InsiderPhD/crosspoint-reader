@@ -46,8 +46,15 @@ struct ReadingSessionSnapshot {
 };
 
 struct ReadingSessionLogEntry {
+  // 0 means "no date yet" — the clock was invalid at session-end and the user
+  // hasn't manually assigned a date via the Sessions UI yet. Display this as
+  // "Date not set" and let the user pick a date to reattribute the time.
   uint32_t dayOrdinal = 0;
   uint32_t sessionMs = 0;
+  // Identifies which book this session belonged to. v6 sessions didn't store
+  // this; loadReadingStats fills it in with a best-effort match (the book with
+  // the most reading on that day). Empty when even best-effort can't guess.
+  std::string bookId;
 };
 
 class ReadingStatsStore;
@@ -118,7 +125,9 @@ class ReadingStatsStore {
   uint32_t getReferenceDayOrdinal() const;
   void updateBookReadTimestamp(ReadingBookStats& book, uint32_t preferredTimestamp);
   void recordReadingTime(ReadingBookStats& book, uint32_t epochSeconds, uint64_t readingMs);
-  void appendSessionLogEntry(uint32_t dayOrdinal, uint32_t sessionMs);
+  // bookId may be empty (legacy paths) and dayOrdinal may be 0 (no date yet).
+  // The MAX_SESSION_LOG_ENTRIES cap is still applied.
+  void appendSessionLogEntry(uint32_t dayOrdinal, uint32_t sessionMs, const std::string& bookId);
   bool convertLegacyReadingDaysToUnassigned();
   uint32_t resolveCurrentMonthReferenceDayOrdinal() const;
   bool pruneToCurrentMonth(uint32_t referenceDayOrdinal);
@@ -152,6 +161,14 @@ class ReadingStatsStore {
                       uint8_t chapterProgressPercent = 0);
   void endSession();
   bool adjustBookReadingTime(const std::string& path, uint32_t dayOrdinal, int32_t deltaMs);
+  // Reassigns a sessionLog entry to a different calendar day. Moves the
+  // session's sessionMs from its previous dayOrdinal (if any) to newDayOrdinal
+  // in the owning book's readingDays vector, then rebuilds the aggregated
+  // readingDays. Used by the Sessions UI when the user dates an unsynced
+  // session or corrects a stale one. Returns false if the index is out of
+  // range, newDayOrdinal is 0, the session has no bookId we can match, or
+  // nothing actually changed.
+  bool editSessionDate(size_t index, uint32_t newDayOrdinal);
   bool updateBookMetadata(const std::string& path, const std::string& title, const std::string& author,
                           const std::string& coverBmpPath);
   bool updateBookPath(const std::string& oldKey, const std::string& newPath, const std::string& title = "",

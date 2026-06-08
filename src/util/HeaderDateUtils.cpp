@@ -1,7 +1,6 @@
 #include "HeaderDateUtils.h"
 
 #include <GfxRenderer.h>
-#include <HalPowerManager.h>
 #include <I18n.h>
 
 #include <ctime>
@@ -14,38 +13,16 @@
 #include "util/TimeUtils.h"
 
 namespace {
-void drawHeaderTopLine(const GfxRenderer& renderer, const ThemeMetrics& metrics, const int pageWidth,
-                       const std::string& dateText, const std::string& reminderText) {
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  const int batteryX = pageWidth - 12 - metrics.batteryWidth;
-  int rightEdge = batteryX - 8;
-
-  if (showBatteryPercentage) {
-    const std::string batteryText = std::to_string(powerManager.getBatteryPercentage()) + "%";
-    rightEdge -= renderer.getTextWidth(SMALL_FONT_ID, batteryText.c_str()) + 4;
-  }
-
-  int dateX = rightEdge;
-  if (!dateText.empty()) {
-    const int dateWidth = renderer.getTextWidth(SMALL_FONT_ID, dateText.c_str());
-    dateX = std::max(metrics.contentSidePadding, rightEdge - dateWidth);
-    renderer.drawText(SMALL_FONT_ID, dateX, metrics.topPadding + 5, dateText.c_str());
-  }
-
-  if (!reminderText.empty()) {
-    const int reminderX = metrics.contentSidePadding;
-    const int maxReminderWidth = std::max(0, dateX - reminderX - 12);
-    if (maxReminderWidth > 0) {
-      const std::string truncated = renderer.truncatedText(SMALL_FONT_ID, reminderText.c_str(), maxReminderWidth);
-      renderer.drawText(SMALL_FONT_ID, reminderX, metrics.topPadding + 5, truncated.c_str());
-    }
-  }
-}
-
+// Formats the date as "dd/mm/yyyy" with a leading "?" when the source is a stale
+// fallback (no fresh NTP/manual-date this boot). The "?" is the user-visible cue
+// that any reading recorded right now will be attributed to a date the device
+// can't actually verify is correct — see the step-4 date-correctness plan.
 std::string formatHeaderDateText(const uint32_t timestamp, const bool usedFallback) {
-  (void)usedFallback;
-  return TimeUtils::formatDate(timestamp, false);
+  const std::string body = TimeUtils::formatDate(timestamp, false);
+  if (body.empty()) {
+    return "";
+  }
+  return usedFallback ? ("?" + body) : body;
 }
 }  // namespace
 
@@ -70,19 +47,22 @@ std::string HeaderDateUtils::getDisplayDateText() {
   return formatHeaderDateText(info.timestamp, info.usedFallback);
 }
 
-std::string HeaderDateUtils::getSyncDayReminderText() {
-  return "";
-}
-
-void HeaderDateUtils::drawTopLine(GfxRenderer& renderer, const std::string& dateText) {
+void HeaderDateUtils::drawTopLine(GfxRenderer& renderer) {
+  const std::string dateText = getDisplayDateText();
+  if (dateText.empty()) {
+    return;
+  }
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int pageWidth = renderer.getScreenWidth();
-  drawHeaderTopLine(renderer, metrics, pageWidth, dateText, getSyncDayReminderText());
+  // Draw on the LEFT, vertically aligned with battery-percentage on the right.
+  // The "+5" matches the y-offset the themes use for battery text.
+  renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, metrics.topPadding + 5, dateText.c_str());
 }
 
 void HeaderDateUtils::drawHeaderWithDate(GfxRenderer& renderer, const char* title, const char* subtitle) {
+  // Thin wrapper kept for callers that want a one-call header+date. drawHeader
+  // already overlays the date itself (both BaseTheme and LyraTheme call
+  // drawTopLine internally), so no second pass is needed here.
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, title, subtitle);
-  drawHeaderTopLine(renderer, metrics, pageWidth, getDisplayDateText(), getSyncDayReminderText());
 }

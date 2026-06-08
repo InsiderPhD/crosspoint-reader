@@ -12,6 +12,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/WifiTimeSync.h"
 
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
@@ -691,6 +692,14 @@ void WifiSelectionActivity::renderForgetPrompt() const {
 }
 
 void WifiSelectionActivity::onComplete(const bool connected) {
+  // Opportunistic NTP sync the moment we know WiFi is up. This is the single
+  // chokepoint for every "user connected" flow (book sync, web upload,
+  // BookFusion download, OPDS), so hooking here covers all of them without
+  // touching every caller. No-op if the boot is already clock-valid.
+  if (connected) {
+    WifiTimeSync::attemptIfStale();
+  }
+
   ActivityResult result;
   result.isCancelled = !connected;
   if (connected) {

@@ -4,8 +4,9 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
-#include <esp_sntp.h>
 #include <esp_wifi.h>
+
+#include "util/WifiTimeSync.h"
 
 #include <algorithm>
 #include <cassert>
@@ -34,29 +35,10 @@ CrossPointPosition makeLocalPositionWithParagraph(const int spineIndex, const in
 }
 
 void syncTimeWithNTP() {
-  // Stop SNTP if already running (can't reconfigure while running)
-  if (esp_sntp_enabled()) {
-    esp_sntp_stop();
-  }
-
-  // Configure SNTP
-  esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-  esp_sntp_setservername(0, "pool.ntp.org");
-  esp_sntp_init();
-
-  // Wait for time to sync (with timeout)
-  int retry = 0;
-  const int maxRetries = 50;  // 5 seconds max
-  while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && retry < maxRetries) {
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    retry++;
-  }
-
-  if (retry < maxRetries) {
-    LOG_DBG("KOSync", "NTP time synced");
-  } else {
-    LOG_DBG("KOSync", "NTP sync timeout, using fallback");
-  }
+  // Delegates to the shared helper so the lastKnownValidTimestamp gets
+  // persisted to APP_STATE — important so a later boot without NTP can still
+  // render a sensible header date instead of falling back through readingDays.
+  WifiTimeSync::attemptIfStale();
 }
 }  // namespace
 

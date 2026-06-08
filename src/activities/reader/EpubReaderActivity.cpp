@@ -5,12 +5,14 @@
 #include <FontCacheManager.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <WiFi.h>
-#include <esp_sntp.h>
 #include <esp_system.h>
+
+#include "util/WifiTimeSync.h"
 
 #include <algorithm>
 #include <cmath>
@@ -61,6 +63,17 @@ constexpr unsigned long bookmarkMessageDurationMs = 1500;
 // Index 0 = Off, 1 = Auto (uses readingSpeedSecondsPerPage), 2+ = fixed durations
 const std::vector<unsigned long> PAGE_TURN_DURATIONS_MS = {0,       0,       60000UL, 50000UL, 40000UL,
                                                            35000UL, 30000UL, 25000UL, 20000UL};
+
+void enterDeepSleepFromReaderAction() {
+  HalPowerManager::Lock powerLock;
+  APP_STATE.lastSleepFromReader = true;
+  APP_STATE.saveToFile();
+
+  activityManager.goToSleep();
+  display.deepSleep();
+  LOG_DBG("READER", "Entering deep sleep from reader action");
+  powerManager.startDeepSleep(gpio);
+}
 
 int clampPercent(int percent) {
   if (percent < 0) {
@@ -214,28 +227,15 @@ bool formatLocalSyncTimestamp(char* out, size_t outLen) {
 }
 
 bool syncBookFusionTimeWithNTP() {
-  if (esp_sntp_enabled()) {
-    esp_sntp_stop();
-  }
-
-  esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-  esp_sntp_setservername(0, "pool.ntp.org");
-  esp_sntp_init();
-
-  int retry = 0;
-  constexpr int MAX_RETRIES = 50;
-  while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && retry < MAX_RETRIES) {
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    retry++;
-  }
-
-  const bool ok = retry < MAX_RETRIES;
-  if (ok) {
-    LOG_DBG("BFS", "Internet time synced");
-  } else {
-    LOG_DBG("BFS", "Internet time sync timeout");
-  }
-  return ok;
+  // Delegate to the shared helper. Critical reason: this function used to call
+  // esp_sntp_init() directly, which DID update the system clock (time(nullptr)
+  // would return the synced time) but never flipped TimeUtils::syncedThisBoot
+  // or persisted APP_STATE.lastKnownValidTimestamp. The result was that the
+  // header date kept showing the "?" stale-clock prefix even after a
+  // successful sync, because getAuthoritativeTimestamp() returned 0 and we
+  // fell through to the persisted (now stale) timestamp. attemptIfStale() goes
+  // through TimeUtils::syncTimeWithNtp which sets both.
+  return WifiTimeSync::attemptIfStale();
 }
 
 void EpubReaderActivity::buildBookPageCache() {
@@ -415,6 +415,10 @@ void EpubReaderActivity::loop() {
 
     if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_SYNC) {
       performLongPressSync();
+    } else if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_PAGE_TURN) {
+      pageTurn(true);
+    } else if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_SLEEP) {
+      enterDeepSleepFromReaderAction();
     } else if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_BOOKMARK) {
       const auto bookmarkResult = addBookmark();
       if (bookmarkResult != BookmarkToggleResult::None) {
@@ -516,6 +520,27 @@ void EpubReaderActivity::loop() {
     }
     onGoHome();
     return;
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Power)) {
+    if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN_SYNC) {
+      performLongPressSync();
+      return;
+    }
+    if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN_BOOKMARK) {
+      const auto bookmarkResult = addBookmark();
+      if (bookmarkResult != BookmarkToggleResult::None) {
+        bookmarkMessageWasRemoval = (bookmarkResult == BookmarkToggleResult::Removed);
+        showBookmarkMessage = true;
+        bookmarkMessageTime = millis();
+        requestUpdate();
+      }
+      return;
+    }
+    if (SETTINGS.shortPwrBtn == CrossPointSettings::SLEEP) {
+      enterDeepSleepFromReaderAction();
+      return;
+    }
   }
 
   if (ReaderUtils::detectAndApplyForceRefresh(mappedInput, renderer)) return;
@@ -1879,6 +1904,12 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     }
 
     vTaskDelay(500 / portTICK_PERIOD_MS);
+
+    // Catch the NTP sync at the earliest possible moment after the connect.
+    // performBookFusionSync also calls attemptIfStale later, but doing it here
+    // means quick-syncs that fail mid-flow still leave us with a fresh
+    // wall-clock for the rest of the boot.
+    WifiTimeSync::attemptIfStale();
 
     // Proceed with sync
     onSuccess();

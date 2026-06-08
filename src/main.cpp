@@ -30,6 +30,7 @@
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
+#include "util/WifiTimeSync.h"
 
 MappedInputManager mappedInputManager(gpio);
 GfxRenderer renderer(display);
@@ -378,6 +379,12 @@ void setup() {
   RECENT_BOOKS.loadFromFile();
   READING_STATS.loadFromFile();
   BF_TOKEN_STORE.loadFromFile();
+
+  // Silent NTP attempt against the last-connected WiFi network, on a background
+  // task — non-blocking. Up to 3 SNTP retries, ~10s worst case, no UI shown.
+  // If it succeeds, the header date "?" disappears and any reading recorded
+  // during this boot lands on the correct calendar day.
+  WifiTimeSync::startSilentBootAttempt();
 
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.

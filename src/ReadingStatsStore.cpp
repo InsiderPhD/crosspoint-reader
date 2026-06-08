@@ -496,12 +496,19 @@ void ReadingStatsStore::recordReadingTime(ReadingBookStats& book, const uint32_t
   getOrCreateReadingDay(epochSeconds).readingMs += readingMs;
 }
 
-void ReadingStatsStore::appendSessionLogEntry(const uint32_t dayOrdinal, const uint32_t sessionMs) {
-  if (dayOrdinal == 0 || sessionMs == 0) {
+void ReadingStatsStore::appendSessionLogEntry(const uint32_t dayOrdinal, const uint32_t sessionMs,
+                                              const std::string& bookId) {
+  // dayOrdinal == 0 is a valid "no date yet" sentinel since v7 — the user can
+  // assign a date from the Sessions UI later. Reject only zero-length entries.
+  if (sessionMs == 0) {
     return;
   }
 
-  sessionLog.push_back(ReadingSessionLogEntry{dayOrdinal, sessionMs});
+  ReadingSessionLogEntry entry;
+  entry.dayOrdinal = dayOrdinal;
+  entry.sessionMs = sessionMs;
+  entry.bookId = bookId;
+  sessionLog.push_back(std::move(entry));
   if (sessionLog.size() > MAX_SESSION_LOG_ENTRIES) {
     sessionLog.erase(sessionLog.begin(),
                      sessionLog.begin() + static_cast<std::ptrdiff_t>(sessionLog.size() - MAX_SESSION_LOG_ENTRIES));
@@ -1033,10 +1040,14 @@ void ReadingStatsStore::endSession() {
   if (countedSession) {
     book.sessions++;
     book.lastSessionMs = sessionMs;
+    // Always record the session — even with an invalid clock. The user can
+    // assign a date later from the Sessions UI. dayOrdinal=0 is the
+    // "no date yet" sentinel; bookId pins which book it was so the editor can
+    // still show context and apply the credit to the right book's per-day
+    // bucket once the user picks a date.
     const uint32_t sessionTimestamp = getReferenceTimestamp(TimeUtils::getAuthoritativeTimestamp(), book.lastReadAt);
-    if (isClockValid(sessionTimestamp)) {
-      appendSessionLogEntry(TimeUtils::getLocalDayOrdinal(sessionTimestamp), sessionMs);
-    }
+    const uint32_t dayOrdinal = isClockValid(sessionTimestamp) ? TimeUtils::getLocalDayOrdinal(sessionTimestamp) : 0;
+    appendSessionLogEntry(dayOrdinal, sessionMs, book.bookId);
     markDirty();
   }
 
@@ -1092,6 +1103,76 @@ bool ReadingStatsStore::adjustBookReadingTime(const std::string& path, const uin
 
   rebuildAggregatedReadingDays();
   markDirty();
+  return saveToFile();
+}
+
+bool ReadingStatsStore::editSessionDate(const size_t index, const uint32_t newDayOrdinal) {
+  // newDayOrdinal == 0 (unassign) isn't supported — the user always picks a
+  // real date in the editor. Refusing it also keeps book.totalReadingMs in
+  // lockstep with sum(book.readingDays), which pruneToCurrentMonth relies on.
+  if (newDayOrdinal == 0 || index >= sessionLog.size()) {
+    return false;
+  }
+  auto& session = sessionLog[index];
+  if (session.dayOrdinal == newDayOrdinal) {
+    return false;
+  }
+
+  // Sessions migrated from v6 may have no bookId if no book had reading on
+  // that day. Without a bookId we can't move per-book reading time, so the
+  // edit would only relabel the session without affecting any stats — refuse
+  // and let the UI surface that.
+  if (session.bookId.empty()) {
+    return false;
+  }
+
+  ReadingBookStats* book = nullptr;
+  for (auto& candidate : books) {
+    if (candidate.bookId == session.bookId) {
+      book = &candidate;
+      break;
+    }
+  }
+  if (book == nullptr) {
+    return false;
+  }
+
+  const uint64_t sessionMs = session.sessionMs;
+  const uint32_t oldDay = session.dayOrdinal;
+
+  // Subtract from the old day. For sessions that came in with dayOrdinal=0
+  // (clock invalid at endSession), the day-bucket was never populated, so
+  // there is nothing to subtract — only the add-side runs.
+  if (oldDay != 0) {
+    auto it = std::lower_bound(
+        book->readingDays.begin(), book->readingDays.end(), oldDay,
+        [](const ReadingDayStats& day, const uint32_t ordinal) { return day.dayOrdinal < ordinal; });
+    if (it != book->readingDays.end() && it->dayOrdinal == oldDay) {
+      const uint64_t removeMs = std::min(sessionMs, it->readingMs);
+      it->readingMs -= removeMs;
+      if (it->readingMs == 0) {
+        book->readingDays.erase(it);
+      }
+    }
+  }
+
+  // Add to the new day. When the old day was 0, this also closes the gap
+  // between book.totalReadingMs (which already credited the session via
+  // noteActivity) and sum(book.readingDays).
+  addReadingToDays(book->readingDays, newDayOrdinal, sessionMs);
+
+  // If we were previously un-dated, the session's time wasn't reflected in
+  // book.totalReadingMs's day-sum either — but it WAS in book.totalReadingMs
+  // itself, so the sum now catches up without us touching totalReadingMs.
+  // For reassignment between two real days, totalReadingMs is unchanged.
+
+  session.dayOrdinal = newDayOrdinal;
+  updateBookReadTimestamp(*book, getReferenceTimestamp(TimeUtils::getAuthoritativeTimestamp(), book->lastReadAt));
+
+  rebuildAggregatedReadingDays();
+  markDirty();
+  invalidateSummaryCache();
+  refreshLegacyCounters();
   return saveToFile();
 }
 

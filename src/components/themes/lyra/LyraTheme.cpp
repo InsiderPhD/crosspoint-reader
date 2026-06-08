@@ -13,6 +13,7 @@
 #include "BookFusionBookIdStore.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
+#include "util/HeaderDateUtils.h"
 #include "components/icons/arrow24.h"
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
@@ -168,6 +169,10 @@ void LyraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   drawBatteryRight(renderer,
                    Rect{batteryX, rect.y + 5, LyraMetrics::values.batteryWidth, LyraMetrics::values.batteryHeight},
                    showBatteryPercentage);
+
+  // Date on the left of the header's top line — same one drawHeader hook as the
+  // base theme. Excludes the reader (it uses drawStatusBar instead).
+  HeaderDateUtils::drawTopLine(const_cast<GfxRenderer&>(renderer));
 
   int maxTitleWidth =
       rect.width - LyraMetrics::values.contentSidePadding * 2 - (subtitle != nullptr ? maxSubtitleWidth : 0);

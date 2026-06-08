@@ -141,7 +141,14 @@ class CrossPointSettings {
 
   // Short power button press actions (reader scope only — outside the reader Power
   // short-press opens the sort menu unconditionally).
-  enum SHORT_PWRBTN { PAGE_TURN = 0, SLEEP = 1, FORCE_REFRESH = 2, SHORT_PWRBTN_COUNT };
+  enum SHORT_PWRBTN {
+    PAGE_TURN = 0,
+    SLEEP = 1,
+    FORCE_REFRESH = 2,
+    SHORT_PWRBTN_SYNC = 3,
+    SHORT_PWRBTN_BOOKMARK = 4,
+    SHORT_PWRBTN_COUNT
+  };
 
   // Hide battery percentage
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
@@ -162,6 +169,8 @@ class CrossPointSettings {
     LONG_PRESS_SYNC = 1,
     LONG_PRESS_NONE = 2,
     LONG_PRESS_BOOKMARK = 3,
+    LONG_PRESS_PAGE_TURN = 4,
+    LONG_PRESS_SLEEP = 5,
     LONG_PRESS_ACTION_COUNT
   };
 
@@ -271,6 +280,8 @@ class CrossPointSettings {
   uint8_t dailyReadingGoal = DAILY_GOAL_30_MIN;
   // Minimum reading session length before it counts toward stats (index into MIN_SESSION enum; default 3 min)
   uint8_t minSessionMinutes = MIN_SESSION_3_MIN;
+  // Index into TimeZoneRegistry preset table; default UTC (0). Applied via TimeUtils::configureTimezone().
+  uint8_t timeZonePreset = 0;
   ~CrossPointSettings() = default;
 
   // Get singleton instance

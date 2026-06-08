@@ -14,6 +14,7 @@
 #include "ReadingDayDetailActivity.h"
 #include "ReadingStatsDetailActivity.h"
 #include "ReadingStatsStore.h"
+#include "SessionDateEditActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "components/icons/award24.h"
@@ -34,12 +35,41 @@
 
 namespace {
 constexpr unsigned long BOOK_LONG_PRESS_MS = 1000;
-constexpr unsigned long PAGE_SWITCH_LONG_PRESS_MS = 700;
-constexpr int TOTAL_STATS_PAGES = 4;
+constexpr int TOTAL_STATS_PAGES = 5;
 constexpr int PAGE_OVERVIEW = 0;
 constexpr int PAGE_STARTED_BOOKS = 1;
 constexpr int PAGE_WEEKLY = 2;
 constexpr int PAGE_MONTHLY = 3;
+constexpr int PAGE_SESSIONS = 4;
+
+// Tab labels in display order — index matches the PAGE_* enum values above.
+constexpr StrId TAB_NAMES[TOTAL_STATS_PAGES] = {
+    StrId::STR_STATS_TAB_OVERVIEW,
+    StrId::STR_STATS_TAB_BOOKS,
+    StrId::STR_STATS_TAB_WEEKLY,
+    StrId::STR_STATS_TAB_MONTHLY,
+    StrId::STR_STATS_TAB_SESSIONS,
+};
+
+// Sessions tab is capped at one screenful like the Books tab.
+constexpr int SESSIONS_PER_PAGE = 4;
+
+// Collects sessionLog indices for entries that don't yet have a date
+// assigned. The Sessions tab is intentionally a "needs your input" inbox —
+// once the user picks a date for a session via the editor, editSessionDate
+// sets dayOrdinal != 0 and the entry drops out of this list. Returned in
+// reverse order so the most recently recorded ones surface at the top.
+std::vector<size_t> collectUndatedSessionIndices() {
+  const auto& log = READING_STATS.getSessionLog();
+  std::vector<size_t> indices;
+  indices.reserve(log.size());
+  for (size_t i = log.size(); i-- > 0;) {
+    if (log[i].dayOrdinal == 0) {
+      indices.push_back(i);
+    }
+  }
+  return indices;
+}
 
 constexpr int SUMMARY_ROW_HEIGHT = 34;
 constexpr int SUMMARY_GAP = 8;
@@ -56,7 +86,6 @@ constexpr int MONTH_HEADER_HEIGHT = 34;
 constexpr int HEATMAP_GRID_GAP = 6;
 constexpr int LEGEND_HEIGHT = 30;
 constexpr int LEGEND_SWATCH_SIZE = 16;
-constexpr int PAGE_INDICATOR_HEIGHT = 30;
 
 constexpr int SELECTION_SIDE_WIDTH = 8;
 constexpr int SELECTION_CAP_HEIGHT = 8;
@@ -134,20 +163,6 @@ void drawMetricRow(GfxRenderer& renderer, const Rect& rect, const uint8_t* icon,
   renderer.drawText(UI_10_FONT_ID, rect.x + rect.width - valueWidth, rect.y + textY, value.c_str(), true,
                     EpdFontFamily::BOLD);
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1);
-}
-
-void drawBottomPageIndicator(GfxRenderer& renderer, const ThemeMetrics& metrics, const int currentPage,
-                             const int totalPages) {
-  char indicator[24];
-  snprintf(indicator, sizeof(indicator), "%d / %d", currentPage, totalPages);
-
-  const int screenW = renderer.getScreenWidth();
-  const int screenH = renderer.getScreenHeight();
-  const int lineH = renderer.getLineHeight(SMALL_FONT_ID);
-  const int indicatorW = renderer.getTextWidth(SMALL_FONT_ID, indicator);
-  const int stripTop = screenH - metrics.buttonHintsHeight - PAGE_INDICATOR_HEIGHT;
-  const int y = stripTop + (PAGE_INDICATOR_HEIGHT - lineH) / 2;
-  renderer.drawText(SMALL_FONT_ID, (screenW - indicatorW) / 2, y, indicator, true);
 }
 
 void drawLyraStyleButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
@@ -622,7 +637,7 @@ void ReadingStatsActivity::onEnter() {
   captureFirstStatsAccessDate();
 
   currentPage = PAGE_OVERVIEW;
-  selectedBookIndex = 0;
+  selectedItemIndex = 0;
   resolveReferenceMonth(viewedYear, viewedMonth);
 
   waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
@@ -640,6 +655,9 @@ void ReadingStatsActivity::changePage(const int delta) {
   while (currentPage >= TOTAL_STATS_PAGES) {
     currentPage -= TOTAL_STATS_PAGES;
   }
+  // Confirm-on-ribbon advanced the tab; stay on the ribbon so successive
+  // confirms keep cycling tabs (matches SettingsActivity::loop's path).
+  selectedItemIndex = 0;
   requestUpdate();
 }
 
@@ -680,33 +698,25 @@ void ReadingStatsActivity::loop() {
     return;
   }
 
-  const bool leftReleased  = mappedInput.wasReleased(MappedInputManager::Button::Left);
-  const bool rightReleased = mappedInput.wasReleased(MappedInputManager::Button::Right);
-  const bool upReleased    = mappedInput.wasReleased(MappedInputManager::Button::Up);
-  const bool downReleased  = mappedInput.wasReleased(MappedInputManager::Button::Down);
-  const bool anyDir = leftReleased || rightReleased || upReleased || downReleased;
-  const bool isLongPress = mappedInput.getHeldTime() >= PAGE_SWITCH_LONG_PRESS_MS;
+  // Mirrors SettingsActivity's controls so the two tabbed screens behave
+  // identically. The "ribbon" is selectedItemIndex == 0 (the tab bar at
+  // the top); positions 1..N are the content rows on the current page.
+  //   Confirm on ribbon         → advance to next tab
+  //   Confirm on item           → page-specific action (open book, edit session)
+  //   Back on item              → return to ribbon
+  //   Back on ribbon            → exit Stats
+  //   short Up/Down/Left/Right  → cycle selection through {ribbon + items}
+  //   long  Up/Down/Left/Right  → cycle to adjacent tab directly
+  // Monthly is the one special case: it has zero content items, so Up/Down
+  // is repurposed to step the viewed month while selectedItemIndex stays 0.
+  bool hasChangedPage = false;
 
-  // Long press on any direction always switches stats page (directional).
-  if (anyDir && isLongPress) {
-    if (leftReleased || upReleased) {
-      changePage(-1);
-    } else {
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    if (selectedItemIndex == 0) {
       changePage(1);
-    }
-    return;
-  }
-
-  // Short press: page-specific handling.
-  if (currentPage == PAGE_STARTED_BOOKS) {
-    const int bookCount = static_cast<int>(getUnfinishedBooks().size());
-    if (bookCount <= 0) {
-      selectedBookIndex = 0;
       return;
     }
-    selectedBookIndex = std::clamp(selectedBookIndex, 0, bookCount - 1);
-
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    if (currentPage == PAGE_STARTED_BOOKS) {
       if (mappedInput.getHeldTime() >= BOOK_LONG_PRESS_MS) {
         confirmRemoveSelectedBook();
       } else {
@@ -714,52 +724,117 @@ void ReadingStatsActivity::loop() {
       }
       return;
     }
-
-    if (upReleased || leftReleased) {
-      const int nextIndex = std::max(0, selectedBookIndex - 1);
-      if (nextIndex != selectedBookIndex) {
-        selectedBookIndex = nextIndex;
-        requestUpdate();
-      }
+    if (currentPage == PAGE_SESSIONS) {
+      openSelectedSessionEditor();
       return;
     }
-    if (downReleased || rightReleased) {
-      const int nextIndex = std::min(bookCount - 1, selectedBookIndex + 1);
-      if (nextIndex != selectedBookIndex) {
-        selectedBookIndex = nextIndex;
-        requestUpdate();
-      }
-      return;
-    }
+    // Pages without per-item actions (Overview/Weekly/Monthly): no-op on
+    // content positions. selectedItemIndex stays at 0 on those pages anyway
+    // because currentPageItemCount() returns 0.
     return;
   }
 
-  if (currentPage == PAGE_MONTHLY) {
-    // btn3/btn4 hints are labeled "Up"/"Down" and map to logical Left/Right (front buttons).
-    // Side Up/Down buttons also navigate months for convenience.
-    if (leftReleased || upReleased) { changeViewedMonth(-1); return; }
-    if (rightReleased || downReleased) { changeViewedMonth(1); return; }
-    return;
-  }
-
-  // All other pages: any short directional press advances/retreats the stats page.
-  if (anyDir) {
-    if (leftReleased || upReleased) {
-      changePage(-1);
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    if (selectedItemIndex > 0) {
+      selectedItemIndex = 0;
+      requestUpdate();
     } else {
-      changePage(1);
+      finish();
     }
     return;
+  }
+
+  // Monthly's month-stepper hijacks short Up/Down. Doing this before the
+  // generic navigator keeps the controls familiar: pressing Up/Down on the
+  // Monthly heatmap steps months even when nothing is "selected" inside it.
+  if (currentPage == PAGE_MONTHLY && selectedItemIndex == 0) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Up)) {
+      changeViewedMonth(-1);
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Down)) {
+      changeViewedMonth(1);
+      return;
+    }
+  }
+
+  const int pageItemCount = currentPageItemCount();
+  const int navTotal = pageItemCount + 1;  // +1 for the ribbon
+
+  buttonNavigator.onNextRelease([this, navTotal] {
+    selectedItemIndex = ButtonNavigator::nextIndex(selectedItemIndex, navTotal);
+    requestUpdate();
+  });
+  buttonNavigator.onPreviousRelease([this, navTotal] {
+    selectedItemIndex = ButtonNavigator::previousIndex(selectedItemIndex, navTotal);
+    requestUpdate();
+  });
+
+  buttonNavigator.onNextContinuous([this, &hasChangedPage] {
+    hasChangedPage = true;
+    currentPage = ButtonNavigator::nextIndex(currentPage, TOTAL_STATS_PAGES);
+    requestUpdate();
+  });
+  buttonNavigator.onPreviousContinuous([this, &hasChangedPage] {
+    hasChangedPage = true;
+    currentPage = ButtonNavigator::previousIndex(currentPage, TOTAL_STATS_PAGES);
+    requestUpdate();
+  });
+
+  if (hasChangedPage) {
+    // Same rule as SettingsActivity: keep the ribbon focus on the ribbon, or
+    // hop to the first content row of the new tab if the user was already in
+    // the list (clamped to the new page's actual count).
+    const int newItemCount = currentPageItemCount();
+    if (selectedItemIndex == 0 || newItemCount == 0) {
+      selectedItemIndex = 0;
+    } else {
+      selectedItemIndex = 1;
+    }
+  }
+}
+
+int ReadingStatsActivity::currentPageItemCount() const {
+  switch (currentPage) {
+    case PAGE_STARTED_BOOKS: {
+      const int totalBooks = static_cast<int>(getUnfinishedBooks().size());
+      return std::min(totalBooks, BOOKS_PER_PAGE);
+    }
+    case PAGE_SESSIONS: {
+      const int undated = static_cast<int>(collectUndatedSessionIndices().size());
+      return std::min(undated, SESSIONS_PER_PAGE);
+    }
+    default:
+      return 0;
   }
 }
 
 void ReadingStatsActivity::openSelectedBook() {
   const auto books = getUnfinishedBooks();
-  if (selectedBookIndex < 0 || selectedBookIndex >= static_cast<int>(books.size())) {
+  // selectedItemIndex == 0 is the ribbon; content rows start at 1.
+  const int bookRow = selectedItemIndex - 1;
+  if (bookRow < 0 || bookRow >= static_cast<int>(books.size())) {
     return;
   }
 
-  startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, books[selectedBookIndex]->path),
+  startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, books[bookRow]->path),
+                         [this](const ActivityResult&) {
+                           guardBackReturn();
+                           requestUpdate();
+                         });
+}
+
+void ReadingStatsActivity::openSelectedSessionEditor() {
+  // The Sessions tab only shows undated entries. Resolve the display row to a
+  // real sessionLog index via the same helper used at render time.
+  const auto undated = collectUndatedSessionIndices();
+  const int sessionCount = std::min(static_cast<int>(undated.size()), SESSIONS_PER_PAGE);
+  const int sessionRow = selectedItemIndex - 1;
+  if (sessionCount <= 0 || sessionRow < 0 || sessionRow >= sessionCount) {
+    return;
+  }
+  const size_t logIndex = undated[static_cast<size_t>(sessionRow)];
+  startActivityForResult(std::make_unique<SessionDateEditActivity>(renderer, mappedInput, logIndex),
                          [this](const ActivityResult&) {
                            guardBackReturn();
                            requestUpdate();
@@ -768,21 +843,24 @@ void ReadingStatsActivity::openSelectedBook() {
 
 void ReadingStatsActivity::confirmRemoveSelectedBook() {
   const auto books = getUnfinishedBooks();
-  if (selectedBookIndex < 0 || selectedBookIndex >= static_cast<int>(books.size())) {
+  const int bookRow = selectedItemIndex - 1;
+  if (bookRow < 0 || bookRow >= static_cast<int>(books.size())) {
     return;
   }
 
-  const ReadingBookStats selectedBook = *books[selectedBookIndex];
-  const int currentSelection = selectedBookIndex;
+  const ReadingBookStats selectedBook = *books[bookRow];
+  const int currentSelection = bookRow;
   startActivityForResult(
       std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_STATS_ENTRY), getBookTitle(selectedBook)),
       [this, selectedBook, currentSelection](const ActivityResult& result) {
         if (!result.isCancelled && READING_STATS.removeBook(selectedBook.path)) {
-          const int bookCount = static_cast<int>(getUnfinishedBooks().size());
+          const int bookCount = std::min(static_cast<int>(getUnfinishedBooks().size()), BOOKS_PER_PAGE);
           if (bookCount == 0) {
-            selectedBookIndex = 0;
+            selectedItemIndex = 0;
           } else {
-            selectedBookIndex = std::min(currentSelection, bookCount - 1);
+            // Keep cursor on a valid content row (clamped to the new count).
+            const int newRow = std::min(currentSelection, bookCount - 1);
+            selectedItemIndex = newRow + 1;
           }
         }
 
@@ -801,10 +879,21 @@ void ReadingStatsActivity::render(RenderLock&&) {
   const int pageHeight = renderer.getScreenHeight();
   const int sidePadding = metrics.contentSidePadding;
   const int contentWidth = pageWidth - sidePadding * 2;
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentBottom = pageHeight - metrics.buttonHintsHeight - PAGE_INDICATOR_HEIGHT - 4;
+  // Tab bar lives directly below the header. Page content starts after the tab
+  // bar; the bottom-of-screen N/N indicator is gone now so we no longer
+  // reserve PAGE_INDICATOR_HEIGHT — only buttonHints and a small gap.
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
+  const int contentBottom = pageHeight - metrics.buttonHintsHeight - 4;
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS), nullptr);
+
+  std::vector<TabInfo> tabs;
+  tabs.reserve(TOTAL_STATS_PAGES);
+  for (int i = 0; i < TOTAL_STATS_PAGES; ++i) {
+    tabs.push_back({I18N.get(TAB_NAMES[i]), currentPage == i});
+  }
+  GUI.drawTabBar(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight}, tabs,
+                 selectedItemIndex == 0);
 
   if (currentPage == PAGE_OVERVIEW) {
     const uint64_t todayReadingMs = READING_STATS.getTodayReadingMs();
@@ -840,19 +929,16 @@ void ReadingStatsActivity::render(RenderLock&&) {
     drawReadingChart(renderer, Rect{sidePadding, chartTop, contentWidth, chartHeight}, annualReadingBars, false);
   } else if (currentPage == PAGE_STARTED_BOOKS) {
     const auto books = getUnfinishedBooks();
-    const int bookCount = static_cast<int>(books.size());
-    const int clampedSelected = (bookCount > 0) ? std::clamp(selectedBookIndex, 0, bookCount - 1) : 0;
-    if (bookCount > 0 && clampedSelected != selectedBookIndex) {
-      selectedBookIndex = clampedSelected;
-    }
+    const int totalBooks = static_cast<int>(books.size());
+    // Books tab is capped at one screenful — clamp both the visible-count and
+    // the selection so we don't paginate within the tab. Users see the top
+    // BOOKS_PER_PAGE titles; older ones are reachable via the per-book detail
+    // screen (TODO if we ever need a longer list).
+    const int bookCount = std::min(totalBooks, BOOKS_PER_PAGE);
 
-    const int totalPages = std::max(1, (bookCount + BOOKS_PER_PAGE - 1) / BOOKS_PER_PAGE);
-    const int currentBooksPage = bookCount == 0 ? 1 : (selectedBookIndex / BOOKS_PER_PAGE) + 1;
-    const std::string booksPageLabel = std::to_string(currentBooksPage) + "/" + std::to_string(totalPages);
     const std::string startedBooksLabel =
         std::string(tr(STR_STARTED_BOOKS)) + " (" + std::to_string(READING_STATS.getBooksStartedCount()) + ")";
-    GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, startedBooksLabel.c_str(),
-                      booksPageLabel.c_str());
+    GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, startedBooksLabel.c_str(), nullptr);
 
     const int listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
     if (books.empty()) {
@@ -861,7 +947,9 @@ void ReadingStatsActivity::render(RenderLock&&) {
       const int maxListHeight = std::max(0, contentBottom - listTop);
       const int targetListHeight = metrics.listWithSubtitleRowHeight * BOOKS_PER_PAGE;
       const int listHeight = std::min(maxListHeight, targetListHeight);
-      GUI.drawList(renderer, Rect{0, listTop, pageWidth, listHeight}, bookCount, selectedBookIndex,
+      // -1 highlights no row, which is what we want when the ribbon is focused.
+      const int highlightedRow = (selectedItemIndex > 0) ? (selectedItemIndex - 1) : -1;
+      GUI.drawList(renderer, Rect{0, listTop, pageWidth, listHeight}, bookCount, highlightedRow,
                    [&](const int index) { return getBookTitle(*books[index]); },
                    [&](const int index) {
                      return getBookSubtitle(*books[index]) + " | " +
@@ -961,14 +1049,64 @@ void ReadingStatsActivity::render(RenderLock&&) {
     }
 
     drawLegend(renderer, Rect{sidePadding, legendTop, contentWidth, LEGEND_HEIGHT});
+  } else if (currentPage == PAGE_SESSIONS) {
+    // The Sessions tab is an "undated inbox" — only sessions that endSession
+    // couldn't date (because the clock was invalid at the time) show up here,
+    // most-recent first. Picking a date in the editor moves the session out
+    // of this list and into the per-book reading-days bucket for that day.
+    const auto& fullSessions = READING_STATS.getSessionLog();
+    const auto undated = collectUndatedSessionIndices();
+    const int totalUndated = static_cast<int>(undated.size());
+    const int sessionCount = std::min(totalUndated, SESSIONS_PER_PAGE);
+
+    const std::string sessionsLabel =
+        std::string(tr(STR_DATE_NOT_SET)) + " (" + std::to_string(totalUndated) + ")";
+    GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, sessionsLabel.c_str(), nullptr);
+
+    const int listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
+    if (sessionCount == 0) {
+      renderer.drawText(UI_10_FONT_ID, sidePadding, listTop + 20, tr(STR_NO_READING_STATS));
+    } else {
+      const int maxListHeight = std::max(0, contentBottom - listTop);
+      const int targetListHeight = metrics.listWithSubtitleRowHeight * SESSIONS_PER_PAGE;
+      const int listHeight = std::min(maxListHeight, targetListHeight);
+
+      // Helper closures resolve session metadata via the undated-indices view.
+      auto sessionAt = [&fullSessions, &undated](const int displayIndex) -> const ReadingSessionLogEntry& {
+        return fullSessions[undated[static_cast<size_t>(displayIndex)]];
+      };
+      auto resolveBookTitle = [](const std::string& bookId) -> std::string {
+        if (bookId.empty()) {
+          return std::string(tr(STR_UNKNOWN));
+        }
+        for (const auto& b : READING_STATS.getBooks()) {
+          if (b.bookId == bookId) {
+            return b.title.empty() ? b.path : b.title;
+          }
+        }
+        return std::string(tr(STR_UNKNOWN));
+      };
+
+      // -1 highlights no row when the ribbon is focused.
+      const int highlightedRow = (selectedItemIndex > 0) ? (selectedItemIndex - 1) : -1;
+      GUI.drawList(
+          renderer, Rect{0, listTop, pageWidth, listHeight}, sessionCount, highlightedRow,
+          [&](const int index) { return resolveBookTitle(sessionAt(index).bookId); },
+          [&](const int /*index*/) { return std::string(tr(STR_DATE_NOT_SET)); }, nullptr,
+          [&](const int index) {
+            return ReadingStatsAnalytics::formatDurationHm(static_cast<uint64_t>(sessionAt(index).sessionMs));
+          },
+          false);
+    }
   }
 
-  drawBottomPageIndicator(renderer, metrics, currentPage + 1, TOTAL_STATS_PAGES);
+  // The bottom-of-screen "N/N" indicator is gone — the tab bar at the top is
+  // the canonical position indicator now.
 
   std::string btn2;
   std::string btn3 = tr(STR_DIR_LEFT);
   std::string btn4 = tr(STR_DIR_RIGHT);
-  if (currentPage == PAGE_STARTED_BOOKS) {
+  if (currentPage == PAGE_STARTED_BOOKS || currentPage == PAGE_SESSIONS) {
     btn2 = tr(STR_SELECT);
     btn3 = tr(STR_DIR_UP);
     btn4 = tr(STR_DIR_DOWN);
@@ -979,6 +1117,10 @@ void ReadingStatsActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), btn2.c_str(), btn3.c_str(), btn4.c_str());
   drawLyraStyleButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
-  const auto refreshMode = (currentPage == PAGE_STARTED_BOOKS) ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH;
-  renderer.displayBuffer(refreshMode);
+  // Match SettingsActivity — partial (FAST) refresh on every tab transition.
+  // The earlier HALF_REFRESH on non-Books pages was a leftover from when each
+  // tab change effectively redrew the whole screen via the bottom N/N
+  // pagination; with the top tab bar in place the diff between pages is
+  // small enough that FAST keeps the e-ink updates snappy without ghosting.
+  renderer.displayBuffer();
 }

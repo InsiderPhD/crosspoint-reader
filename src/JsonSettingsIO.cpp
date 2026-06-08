@@ -146,6 +146,15 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["frontButtonRight"] = s.frontButtonRight;
   doc["readingSpeedSecondsPerPage"] = s.readingSpeedSecondsPerPage;
 
+  // longPressAction and shortPwrBtn live in CrossPointSettings but appear in the
+  // SettingsList as DynamicEnum (the UI display order doesn't match the storage
+  // enum order). The generic loop above skips Dynamic entries because the
+  // KOReader/OPDS ones are backed by their own stores — these two are special:
+  // backed by SETTINGS but accessed via setter/getter shims. Persist them
+  // directly so reboots don't snap them back to the defaults.
+  doc["longPressAction"] = s.longPressAction;
+  doc["shortPwrBtn"] = s.shortPwrBtn;
+
   String json;
   serializeJson(doc, json);
   return Storage.writeFile(path, json);
@@ -225,6 +234,15 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
       clamp(doc["frontButtonRight"] | (uint8_t)S::FRONT_HW_RIGHT, S::FRONT_BUTTON_HARDWARE_COUNT, S::FRONT_HW_RIGHT);
   CrossPointSettings::validateFrontButtonMapping(s);
   s.readingSpeedSecondsPerPage = doc["readingSpeedSecondsPerPage"] | (uint16_t)0;
+
+  // Counterpart to the explicit save above: pull longPressAction / shortPwrBtn
+  // directly because their SettingInfo entries are DynamicEnum (no valuePtr,
+  // skipped by the generic loop). Clamp against the LONG_PRESS_ACTION_COUNT
+  // and SHORT_PWRBTN_COUNT enums so a corrupted/stale value can't escape the
+  // valid range.
+  s.longPressAction =
+      clamp(doc["longPressAction"] | (uint8_t)S::LONG_PRESS_REFRESH, S::LONG_PRESS_ACTION_COUNT, S::LONG_PRESS_REFRESH);
+  s.shortPwrBtn = clamp(doc["shortPwrBtn"] | (uint8_t)S::PAGE_TURN, S::SHORT_PWRBTN_COUNT, S::PAGE_TURN);
 
   LOG_DBG("CPS", "Settings loaded from file");
 
@@ -365,7 +383,10 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
 
 bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, const char* path) {
   JsonDocument doc;
-  doc["formatVersion"] = 6;
+  // v7 adds per-session bookId so the Sessions UI can show which book each
+  // session was for, and allows dayOrdinal=0 entries for sessions recorded
+  // without a valid clock (user can later set the date from the UI).
+  doc["formatVersion"] = 7;
 
   JsonArray days = doc["readingDays"].to<JsonArray>();
   for (const auto& day : store.getReadingDays()) {
@@ -386,6 +407,9 @@ bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, const char
     JsonObject sessionObj = sessionLog.add<JsonObject>();
     sessionObj["dayOrdinal"] = session.dayOrdinal;
     sessionObj["sessionMs"] = session.sessionMs;
+    if (!session.bookId.empty()) {
+      sessionObj["bookId"] = session.bookId;
+    }
   }
 
   JsonArray books = doc["books"].to<JsonArray>();
@@ -472,9 +496,19 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
       ReadingSessionLogEntry session;
       session.dayOrdinal = sessionObj["dayOrdinal"] | static_cast<uint32_t>(0);
       session.sessionMs = sessionObj["sessionMs"] | static_cast<uint32_t>(0);
-      if (session.dayOrdinal != 0 && session.sessionMs != 0) {
-        store.sessionLog.push_back(session);
+      // v7 added bookId; pre-v7 falls back to empty and gets filled in by the
+      // best-effort migration below once we've loaded all the books.
+      session.bookId = sessionObj["bookId"] | std::string("");
+      if (session.sessionMs == 0) {
+        continue;  // 0-duration is meaningless either way
       }
+      // v7+ allows dayOrdinal=0 (unsynced session, user can date it later).
+      // For older formats we kept the old drop-if-no-date guard so we don't
+      // surface entries that the writer would have rejected.
+      if (formatVersion < 7 && session.dayOrdinal == 0) {
+        continue;
+      }
+      store.sessionLog.push_back(session);
     }
   } else {
     store.dirty = true;
@@ -520,6 +554,33 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
     store.convertLegacyReadingDaysToUnassigned();
     store.dirty = true;
   }
+
+  // v6 sessionLog entries didn't carry a bookId. Best-effort: attach the book
+  // that had the most reading on that day, so the Sessions UI has something
+  // sensible to show. Leaves bookId empty when no book matched the day at all
+  // (the UI renders that as "Unknown book").
+  if (formatVersion < 7) {
+    for (auto& session : store.sessionLog) {
+      if (!session.bookId.empty() || session.dayOrdinal == 0) {
+        continue;
+      }
+      const ReadingBookStats* best = nullptr;
+      uint64_t bestMs = 0;
+      for (const auto& book : store.books) {
+        for (const auto& day : book.readingDays) {
+          if (day.dayOrdinal == session.dayOrdinal && day.readingMs > bestMs) {
+            bestMs = day.readingMs;
+            best = &book;
+          }
+        }
+      }
+      if (best != nullptr) {
+        session.bookId = best->bookId;
+      }
+    }
+    store.dirty = true;
+  }
+
   store.rebuildAggregatedReadingDays();
   LOG_DBG("RST", "Reading stats loaded from file (%d books)", static_cast<int>(store.books.size()));
   return true;

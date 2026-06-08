@@ -15,6 +15,7 @@
 #include "FontSelectionActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "LanguageSelectActivity.h"
+#include "ManualDateActivity.h"
 #include "MappedInputManager.h"
 #include "OtaUpdateActivity.h"
 #include "ResetStatsActivity.h"
@@ -22,12 +23,14 @@
 #include "SdFirmwareUpdateActivity.h"
 #include "SettingsList.h"
 #include "StatusBarSettingsActivity.h"
+#include "TimeZoneSelectActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
 const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
-                                                              StrId::STR_CAT_CONTROLS, StrId::STR_CAT_SYSTEM};
+                                                              StrId::STR_CAT_STATS, StrId::STR_CAT_CONTROLS,
+                                                              StrId::STR_CAT_SYSTEM};
 
 void SettingsActivity::onEnter() {
   Activity::onEnter();
@@ -35,6 +38,7 @@ void SettingsActivity::onEnter() {
   // Build per-category vectors from the shared settings list
   displaySettings.clear();
   readerSettings.clear();
+  statsSettings.clear();
   controlsSettings.clear();
   systemSettings.clear();
 
@@ -48,6 +52,8 @@ void SettingsActivity::onEnter() {
       displaySettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_READER) {
       readerSettings.push_back(setting);
+    } else if (setting.category == StrId::STR_CAT_STATS) {
+      statsSettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_CONTROLS) {
       controlsSettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_SYSTEM) {
@@ -64,11 +70,16 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BF_SYNC, SettingAction::BookFusionSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_BROWSER, SettingAction::OPDSBrowser));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_RESET_READING_STATS, SettingAction::ResetStats));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_DOWNLOAD_FROM_URL, SettingAction::DownloadFromUrl));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
+  // Stats tab device-only actions (date/timezone pickers + reset). The daily
+  // goal + min-session-length Enum entries are already populated above from
+  // SettingsList — these actions go below them.
+  statsSettings.push_back(SettingInfo::Action(StrId::STR_SET_DATE, SettingAction::SetDate));
+  statsSettings.push_back(SettingInfo::Action(StrId::STR_TIME_ZONE, SettingAction::TimeZone));
+  statsSettings.push_back(SettingInfo::Action(StrId::STR_RESET_READING_STATS, SettingAction::ResetStats));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_FAMILY, SettingAction::FontFamily));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_DOWNLOAD, SettingAction::FontDownload));
@@ -151,9 +162,12 @@ void SettingsActivity::loop() {
         currentSettings = &readerSettings;
         break;
       case 2:
-        currentSettings = &controlsSettings;
+        currentSettings = &statsSettings;
         break;
       case 3:
+        currentSettings = &controlsSettings;
+        break;
+      case 4:
         currentSettings = &systemSettings;
         break;
     }
@@ -173,9 +187,16 @@ void SettingsActivity::toggleCurrentSetting() {
     // Toggle the boolean value using the member pointer
     const bool currentValue = SETTINGS.*(setting.valuePtr);
     SETTINGS.*(setting.valuePtr) = !currentValue;
-  } else if (setting.type == SettingType::ENUM && setting.valuePtr != nullptr) {
-    const uint8_t currentValue = SETTINGS.*(setting.valuePtr);
-    SETTINGS.*(setting.valuePtr) = (currentValue + 1) % static_cast<uint8_t>(setting.enumValues.size());
+  } else if (setting.type == SettingType::ENUM) {
+    if (setting.valuePtr != nullptr) {
+      const uint8_t currentValue = SETTINGS.*(setting.valuePtr);
+      SETTINGS.*(setting.valuePtr) = (currentValue + 1) % static_cast<uint8_t>(setting.enumValues.size());
+    } else if (setting.valueGetter && setting.valueSetter) {
+      const uint8_t currentValue = setting.valueGetter();
+      setting.valueSetter((currentValue + 1) % static_cast<uint8_t>(setting.enumValues.size()));
+    } else {
+      return;
+    }
   } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
     const int8_t currentValue = SETTINGS.*(setting.valuePtr);
     if (currentValue + setting.valueRange.step > setting.valueRange.max) {
@@ -222,6 +243,12 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::ResetStats:
         startActivityForResult(std::make_unique<ResetStatsActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::SetDate:
+        startActivityForResult(std::make_unique<ManualDateActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::TimeZone:
+        startActivityForResult(std::make_unique<TimeZoneSelectActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::FontFamily:
         startActivityForResult(std::make_unique<FontSelectionActivity>(renderer, mappedInput, &sdFontSystem.registry()),
@@ -279,9 +306,16 @@ void SettingsActivity::render(RenderLock&&) {
         if (setting.type == SettingType::TOGGLE && setting.valuePtr != nullptr) {
           const bool value = SETTINGS.*(setting.valuePtr);
           valueText = value ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-        } else if (setting.type == SettingType::ENUM && setting.valuePtr != nullptr) {
-          const uint8_t value = SETTINGS.*(setting.valuePtr);
-          valueText = I18N.get(setting.enumValues[value]);
+        } else if (setting.type == SettingType::ENUM) {
+          uint8_t value = 0;
+          if (setting.valuePtr != nullptr) {
+            value = SETTINGS.*(setting.valuePtr);
+          } else if (setting.valueGetter) {
+            value = setting.valueGetter();
+          }
+          if (value < setting.enumValues.size()) {
+            valueText = I18N.get(setting.enumValues[value]);
+          }
         } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
           valueText = std::to_string(SETTINGS.*(setting.valuePtr));
         } else if (setting.type == SettingType::ACTION && setting.action == SettingAction::FontFamily) {

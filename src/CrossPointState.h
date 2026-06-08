@@ -22,6 +22,11 @@ class CrossPointState {
   bool isRecentSleep(uint16_t idx, uint8_t checkCount) const;
 
   void pushRecentSleep(uint16_t idx);
+
+  // Persist a freshly-validated wall-clock timestamp so future boots can fall back to it
+  // for header date display when NTP isn't available this boot. Caller must still saveToFile().
+  void registerValidTimeSync(uint32_t validTimestamp);
+
   ~CrossPointState() = default;
 
   // Get singleton instance

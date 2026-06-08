@@ -13,6 +13,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/HeaderDateUtils.h"
 
 // Internal constants
 namespace {
@@ -339,6 +340,11 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   drawBatteryRight(renderer,
                    Rect{batteryX, rect.y + 5, BaseMetrics::values.batteryWidth, BaseMetrics::values.batteryHeight},
                    showBatteryPercentage);
+
+  // Date on the left of the header's top line. Only fires for screens that go
+  // through drawHeader (home/library/recent/stats/settings) — the reader uses
+  // drawStatusBar and is therefore unaffected.
+  HeaderDateUtils::drawTopLine(const_cast<GfxRenderer&>(renderer));
 
   if (title) {
     int padding = rect.width - batteryX + BaseMetrics::values.batteryWidth;
