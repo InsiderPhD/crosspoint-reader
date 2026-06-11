@@ -13,17 +13,29 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   }
 
   const int effectiveFontId = blockStyle.fontOverride != 0 ? blockStyle.fontOverride : fontId;
-
+  const int ascender = renderer.getFontAscenderSize(effectiveFontId);
   for (size_t i = 0; i < words.size(); i++) {
     const int wordX = wordXpos[i] + x;
     const EpdFontFamily::Style currentStyle = wordStyles[i];
-    renderer.drawText(effectiveFontId, wordX, y, words[i].c_str(), true, currentStyle);
+
+    // SUP/SUB shift the baseline passed to drawText; the glyph is also scaled 50% inside
+    // drawText, so these offsets are chosen relative to the full-size ascender:
+    //   SUP: raise by 40% of ascender — sits clearly above the cap-height
+    //   SUB: lower by 25% of ascender — descends below baseline without clashing with ascenders below
+    int wordY = y;
+    if ((currentStyle & EpdFontFamily::SUP) != 0) {
+      wordY -= ascender * 2 / 5;
+    } else if ((currentStyle & EpdFontFamily::SUB) != 0) {
+      wordY += ascender / 4;
+    }
+
+    renderer.drawText(effectiveFontId, wordX, wordY, words[i].c_str(), true, currentStyle);
 
     if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
       const std::string& w = words[i];
       const int fullWordWidth = renderer.getTextWidth(effectiveFontId, w.c_str(), currentStyle);
       // y is the top of the text line; add ascender to reach baseline, then offset 2px below
-      const int underlineY = y + renderer.getFontAscenderSize(effectiveFontId) + 2;
+      const int underlineY = wordY + ascender + 2;
 
       int startX = wordX;
       int underlineWidth = fullWordWidth;
