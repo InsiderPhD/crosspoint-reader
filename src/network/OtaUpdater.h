@@ -19,7 +19,6 @@ class OtaUpdater {
   ProgressCallback uiProgressCb = nullptr;
   void* uiProgressCtx = nullptr;
 
- public:
   enum OtaUpdaterError {
     OK = 0,
     NO_UPDATE,
