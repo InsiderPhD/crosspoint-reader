@@ -91,7 +91,7 @@ class ActivityManager {
   void goToLibrary();
   void goToBrowser();
   void goToReader(std::string path);
-  void goToSleep();
+  void goToSleep(bool fromTimeout = false);
   void goToBoot();
   void goToFullScreenMessage(std::string message, EpdFontFamily::Style style = EpdFontFamily::REGULAR);
   void goToCrashReport();

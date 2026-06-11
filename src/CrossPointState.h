@@ -16,6 +16,7 @@ class CrossPointState {
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
   uint32_t lastKnownValidTimestamp = 0;
+  bool showBootScreen = true;
 
   // Returns true if idx was shown within the last checkCount picks.
   // Walks backwards from the most recently written slot.

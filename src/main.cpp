@@ -28,6 +28,7 @@
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "images/LoadingIcon.h"
 #include "util/ButtonNavigator.h"
 #include "util/ScreenshotUtil.h"
 #include "util/WifiTimeSync.h"
@@ -38,6 +39,7 @@ ActivityManager activityManager(renderer, mappedInputManager);
 FontDecompressor fontDecompressor;
 SdCardFontSystem sdFontSystem;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts());
+static unsigned long allowSleepAt = 0;
 
 void ensureSdFontLoaded() { sdFontSystem.ensureLoaded(renderer); }
 
@@ -223,13 +225,46 @@ void waitForPowerRelease() {
   }
 }
 
+constexpr char SLEEP_FRAME_FILE[] = "/.crosspoint/sleep_frame.bin";
+
+static void saveSleepFrameBuffer() {
+  FsFile file;
+  if (!Storage.openFileForWrite("SLP", SLEEP_FRAME_FILE, file)) return;
+  file.write(renderer.getFrameBuffer(), renderer.getBufferSize());
+  file.close();
+}
+
+static bool loadSleepFrameBuffer() {
+  FsFile file;
+  if (!Storage.openFileForRead("SLP", SLEEP_FRAME_FILE, file)) return false;
+  const size_t bufferSize = display.getBufferSize();
+  const size_t bytesRead = file.read(display.getFrameBuffer(), bufferSize);
+  file.close();
+  if (bytesRead != bufferSize) {
+    Storage.remove(SLEEP_FRAME_FILE);
+    return false;
+  }
+  Storage.remove(SLEEP_FRAME_FILE);
+  return true;
+}
+
 // Enter deep sleep mode
-void enterDeepSleep() {
+void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+
+  const bool isSeamless = SETTINGS.seamlessSleepScreen == CrossPointSettings::SEAMLESS_SLEEP_SCREEN::SEAMLESS_ALWAYS ||
+                          (fromTimeout && SETTINGS.seamlessSleepScreen ==
+                                              CrossPointSettings::SEAMLESS_SLEEP_SCREEN::SEAMLESS_AFTER_TIMEOUT);
+  APP_STATE.showBootScreen = !isSeamless;
+
   APP_STATE.saveToFile();
 
-  activityManager.goToSleep();
+  activityManager.goToSleep(fromTimeout);
+
+  if (isSeamless) {
+    saveSleepFrameBuffer();
+  }
 
   display.deepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
@@ -237,8 +272,8 @@ void enterDeepSleep() {
   powerManager.startDeepSleep(gpio);
 }
 
-void setupDisplayAndFonts() {
-  display.begin();
+void setupDisplayAndFonts(bool seamless = false) {
+  display.begin(seamless);
   renderer.begin();
   activityManager.begin();
   LOG_DBG("MAIN", "Display initialized");
@@ -321,6 +356,8 @@ void setup() {
   HalSystem::checkPanic();
 
   SETTINGS.loadFromFile();
+  APP_STATE.loadFromFile();
+  RECENT_BOOKS.loadFromFile();
   I18N.loadSettings();
   KOREADER_STORE.loadFromFile();
   UITheme::getInstance().reload();
@@ -367,16 +404,28 @@ void setup() {
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
 
-  setupDisplayAndFonts();
+  setupDisplayAndFonts(/*seamless=*/!APP_STATE.showBootScreen);
 
   // First paint after silent reboot is HALF_REFRESH (SDK forces it after begin()'s
   // panel reset); subsequent paints FAST.
   if (!isSilentReboot) {
-    activityManager.goToBoot();
+    if (APP_STATE.showBootScreen) {
+      activityManager.goToBoot();
+    } else if (loadSleepFrameBuffer()) {
+      // Seamless wake: buffer restored, replace moon icon with loading icon
+      const auto pageHeight = renderer.getScreenHeight();
+      renderer.drawImage(LoadingIcon, 0, pageHeight - LOADINGICON_HEIGHT, LOADINGICON_WIDTH, LOADINGICON_HEIGHT);
+      renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+      APP_STATE.showBootScreen = true;
+      APP_STATE.saveToFile();
+    } else {
+      // Frame buffer file missing — fall back to normal boot screen
+      APP_STATE.showBootScreen = true;
+      APP_STATE.saveToFile();
+      activityManager.goToBoot();
+    }
   }
 
-  APP_STATE.loadFromFile();
-  RECENT_BOOKS.loadFromFile();
   READING_STATS.loadFromFile();
   BF_TOKEN_STORE.loadFromFile();
 
@@ -385,6 +434,7 @@ void setup() {
   // If it succeeds, the header date "?" disappears and any reading recorded
   // during this boot lands on the correct calendar day.
   WifiTimeSync::startSilentBootAttempt();
+
 
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
@@ -416,6 +466,7 @@ void setup() {
 
   // Ensure we're not still holding the power button before leaving setup
   waitForPowerRelease();
+  allowSleepAt = millis() + 2000;
 }
 
 void loop() {
@@ -486,12 +537,13 @@ void loop() {
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
   if (millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
-    enterDeepSleep();
+    enterDeepSleep(true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
     return;
   }
 
-  if (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getHeldTime() > SETTINGS.getPowerButtonDuration()) {
+  if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) &&
+      gpio.getHeldTime() > SETTINGS.getPowerButtonDuration()) {
     // If the screenshot combination is potentially being pressed, don't sleep
     if (gpio.isPressed(HalGPIO::BTN_DOWN)) {
       return;
