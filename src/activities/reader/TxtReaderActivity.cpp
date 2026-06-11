@@ -90,7 +90,7 @@ void TxtReaderActivity::loop() {
 
   if (ReaderUtils::detectAndApplyForceRefresh(mappedInput, renderer)) return;
 
-  auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
+  auto [prevTriggered, nextTriggered, fromTilt] = ReaderUtils::detectPageTurn(mappedInput);
   if (!prevTriggered && !nextTriggered) {
     return;
   }

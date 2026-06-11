@@ -201,6 +201,8 @@ class CrossPointSettings {
     SEAMLESS_SLEEP_SCREEN_COUNT
   };
 
+  enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
+
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
   // Sleep screen cover mode settings
@@ -293,6 +295,8 @@ class CrossPointSettings {
   uint8_t timeZonePreset = 0;
   // Seamless sleep: keep current content visible with moon icon instead of showing sleep screen
   uint8_t seamlessSleepScreen = SEAMLESS_NEVER;
+  // Tilt-based page turning (X3 only — requires QMI8658 IMU)
+  uint8_t tiltPageTurn = TILT_OFF;
   ~CrossPointSettings() = default;
 
   // Get singleton instance

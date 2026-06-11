@@ -546,7 +546,7 @@ void EpubReaderActivity::loop() {
 
   if (ReaderUtils::detectAndApplyForceRefresh(mappedInput, renderer)) return;
 
-  auto [prevTriggered, nextTriggered] = ReaderUtils::detectPageTurn(mappedInput);
+  auto [prevTriggered, nextTriggered, fromTilt] = ReaderUtils::detectPageTurn(mappedInput);
   if (!prevTriggered && !nextTriggered) {
     return;
   }
@@ -564,7 +564,7 @@ void EpubReaderActivity::loop() {
     return;
   }
 
-  const bool skipChapter = SETTINGS.longPressChapterSkip && mappedInput.getHeldTime() > skipChapterMs;
+  const bool skipChapter = !fromTilt && SETTINGS.longPressChapterSkip && mappedInput.getHeldTime() > skipChapterMs;
 
   // Don't skip chapter after screenshot
   if (gpio.wasReleased(HalGPIO::BTN_POWER) && gpio.wasReleased(HalGPIO::BTN_DOWN)) {

@@ -3,6 +3,7 @@
 #include <CrossPointSettings.h>
 #include <GfxRenderer.h>
 #include <HalDisplay.h>
+#include <HalTiltSensor.h>
 #include <Logging.h>
 
 #include "MappedInputManager.h"
@@ -33,26 +34,29 @@ inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
 struct PageTurnResult {
   bool prev;
   bool next;
+  bool fromTilt;
 };
 
 inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   const bool usePress = !SETTINGS.longPressChapterSkip;
+  const bool tiltNext = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedForward();
+  const bool tiltPrev = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedBack();
   const bool swapFront =
       SETTINGS.frontButtonFollowOrientation && (SETTINGS.orientation == CrossPointSettings::INVERTED ||
                                                 SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
   const auto prevButton = swapFront ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
   const auto nextButton = swapFront ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
-  const bool prev = usePress ? (input.wasPressed(MappedInputManager::Button::PageBack) ||
-                                input.wasPressed(prevButton))
-                             : (input.wasReleased(MappedInputManager::Button::PageBack) ||
-                                input.wasReleased(prevButton));
+  const bool prev = tiltPrev || (usePress ? (input.wasPressed(MappedInputManager::Button::PageBack) ||
+                                             input.wasPressed(prevButton))
+                                          : (input.wasReleased(MappedInputManager::Button::PageBack) ||
+                                             input.wasReleased(prevButton)));
   const bool powerTurn = SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::PAGE_TURN &&
                          input.wasReleased(MappedInputManager::Button::Power);
-  const bool next = usePress ? (input.wasPressed(MappedInputManager::Button::PageForward) || powerTurn ||
-                                input.wasPressed(nextButton))
-                             : (input.wasReleased(MappedInputManager::Button::PageForward) || powerTurn ||
-                                input.wasReleased(nextButton));
-  return {prev, next};
+  const bool next = tiltNext || (usePress ? (input.wasPressed(MappedInputManager::Button::PageForward) || powerTurn ||
+                                             input.wasPressed(nextButton))
+                                          : (input.wasReleased(MappedInputManager::Button::PageForward) || powerTurn ||
+                                             input.wasReleased(nextButton)));
+  return {prev, next, tiltPrev || tiltNext};
 }
 
 // If the user has Power short-press mapped to FORCE_REFRESH and Power was just released,

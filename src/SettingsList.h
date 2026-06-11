@@ -1,5 +1,6 @@
 #pragma once
 
+#include <HalTiltSensor.h>
 #include <I18n.h>
 
 #include <vector>
@@ -99,7 +100,8 @@ inline const std::vector<SettingInfo>& getSettingsList() {
     }
   };
 
-  static const std::vector<SettingInfo> list = {
+  static const std::vector<SettingInfo> list = [&] {
+    std::vector<SettingInfo> v = {
       // --- Display ---
       SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
                         {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER, StrId::STR_NONE_OPT,
@@ -151,7 +153,8 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                         "paragraphAlignment", StrId::STR_CAT_READER),
       SettingInfo::Toggle(StrId::STR_EMBEDDED_STYLE, &CrossPointSettings::embeddedStyle, "embeddedStyle",
                           StrId::STR_CAT_READER),
-      SettingInfo::Toggle(StrId::STR_HYPHENATION, &CrossPointSettings::hyphenationEnabled, "hyphenationEnabled",
+        SettingInfo::Enum(StrId::STR_FONT_SIZE, &CrossPointSettings::fontSize,
+                          {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE, StrId::STR_X_LARGE}, "fontSize",
                           StrId::STR_CAT_READER),
       SettingInfo::Enum(StrId::STR_ORIENTATION, &CrossPointSettings::orientation,
                         {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED, StrId::STR_LANDSCAPE_CCW},
@@ -265,6 +268,20 @@ inline const std::vector<SettingInfo>& getSettingsList() {
       SettingInfo::Enum(StrId::STR_TIME_LEFT, &CrossPointSettings::statusBarTimeLeft,
                         {StrId::STR_HIDE, StrId::STR_CHAPTER, StrId::STR_BOOK}, "statusBarTimeLeft",
                         StrId::STR_CUSTOMISE_STATUS_BAR),
-  };
+    };
+    // Only show tilt page turn setting when the QMI8658 IMU is present (X3)
+    if (halTiltSensor.isAvailable()) {
+      // Insert after the short power button setting (end of Controls section)
+      for (auto it = v.begin(); it != v.end(); ++it) {
+        if (it->nameId == StrId::STR_SHORT_PWR_BTN) {
+          v.insert(it + 1, SettingInfo::Enum(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn,
+                                             {StrId::STR_STATE_OFF, StrId::STR_NORMAL, StrId::STR_INVERTED},
+                                             "tiltPageTurn", StrId::STR_CAT_CONTROLS));
+          break;
+        }
+      }
+    }
+    return v;
+  }();
   return list;
 }
