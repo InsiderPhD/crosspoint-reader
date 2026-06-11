@@ -1557,6 +1557,9 @@ void CrossPointWebServer::handleFontUploadData() {
     case UPLOAD_FILE_START: {
       esp_task_wdt_reset();
       String family = server->arg("family");
+      fontUpload.file = HalFile();
+      fontUpload.familyName.clear();
+      fontUpload.filePath.clear();
       fontUpload.valid = false;
       fontUpload.magicChecked = false;
       fontUpload.bytesWritten = 0;
@@ -1639,7 +1642,9 @@ void CrossPointWebServer::handleFontUploadData() {
         fontUpload.bytesWritten += fontUpload.bufferPos;
         fontUpload.bufferPos = 0;
       }
-      fontUpload.file.close();
+      if (fontUpload.file.isOpen()) {
+        fontUpload.file.close();
+      }
 
       if (!fontUpload.valid && !fontUpload.filePath.empty()) {
         Storage.remove(fontUpload.filePath.c_str());
