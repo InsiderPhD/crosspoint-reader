@@ -177,6 +177,10 @@ void FileBrowserActivity::onEnter() {
   currentSort =
       (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
 
+  // If Confirm was held while this activity opened (typical when launched from a menu), ignore
+  // its release — otherwise we'd immediately auto-open whatever is at index 0.
+  lockNextConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+
   auto root = Storage.open(basepath.c_str());
   if (!root) {
     basepath = "/";
@@ -212,6 +216,16 @@ void FileBrowserActivity::clearFileMetadata(const std::string& fullPath) {
 }
 
 void FileBrowserActivity::loop() {
+  // Long press BACK (1s+) goes to root folder (Books mode only).
+  // In firmware-pick mode we keep navigation simple: short Back = up dir / cancel.
+  if (mode == Mode::Books && mappedInput.isPressed(MappedInputManager::Button::Back) &&
+      mappedInput.getHeldTime() >= GO_HOME_MS && basepath != "/" && !lockLongPressBack) {
+    basepath = "/";
+    loadFiles();
+    selectorIndex = 0;
+    requestUpdate();
+    return;
+  }
   // Power short-press → sort menu. Suppressed during book-options modal and while
   // a sort rebuild is pending.
   if (!showingBookOptions && !pendingSortRebuild && sortMenu.checkTrigger(mappedInput, currentSort)) {
@@ -347,12 +361,16 @@ void FileBrowserActivity::loop() {
   const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false, pathReserved);
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    if (lockNextConfirmRelease) {
+      lockNextConfirmRelease = false;
+      return;
+    }
     if (files.empty()) return;
 
     const std::string& entry = files[selectorIndex];
     bool isDirectory = (entry.back() == '/');
 
-    // Firmware picker: selecting a file returns its path to the caller; directories navigate normally.
+    // Firmware picker: select file -> return path; navigate into directories normally.
     if (mode == Mode::PickFirmware && !isDirectory) {
       std::string cleanBasePath = basepath;
       if (cleanBasePath.back() != '/') cleanBasePath += "/";
@@ -500,11 +518,13 @@ void FileBrowserActivity::render(RenderLock&&) {
   const auto pageHeight = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
-  std::string folderName = (basepath == "/") ? tr(STR_SD_CARD) : basepath.substr(basepath.rfind('/') + 1);
-
-  // Show folder name in header; right side shows the active sort label.
+  std::string folderName =
+      (mode == Mode::PickFirmware)
+          ? std::string(tr(STR_SELECT_FIRMWARE_FILE))
+          : ((basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1));
+  // Show folder name in header; right side shows the active sort label (Books mode only).
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str(),
-                 sortModeLabel(currentSort));
+                 (mode == Mode::Books) ? sortModeLabel(currentSort) : nullptr);
 
   const int pathLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
   const int pathReserved = pathLineHeight + metrics.verticalSpacing;
@@ -556,10 +576,10 @@ void FileBrowserActivity::render(RenderLock&&) {
   }
 
   // Help text
-  // In PickFirmware mode Confirm returns the chosen .bin (not "open"), and Back at root cancels
-  // rather than going Home — reflect both in the hints.
-  const bool selectingFirmwareFile = mode == Mode::PickFirmware && !files.empty() && files[selectorIndex].back() != '/';
   const char* backLabel = (basepath == "/") ? (mode == Mode::PickFirmware ? tr(STR_BACK) : tr(STR_HOME)) : tr(STR_BACK);
+  // In PickFirmware mode, Confirm on a .bin returns the path to the caller (not "open"); show
+  // STR_SELECT instead. Directories in the same picker still descend, so keep STR_OPEN there.
+  const bool selectingFirmwareFile = mode == Mode::PickFirmware && !files.empty() && files[selectorIndex].back() != '/';
   const char* confirmLabel = files.empty() ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
   const auto labels = showingBookOptions
                           ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))

@@ -387,14 +387,14 @@ void setup() {
       break;
   }
 
-  // Recovery firmware mode: hold the left side button (BTN_UP) together with the power button at
+  // Recovery firmware mode: hold left side button (BTN_UP) together with the power button at
   // boot to skip directly to the SD-card firmware update screen. Useful on devices where USB
   // flashing has been locked down (e.g. recent X3 firmware).
   bool recoveryFirmwareMode = false;
   if (wakeupReason == HalGPIO::WakeupReason::PowerButton) {
-    // Refresh the cached button state for the full settle window — isPressed() needs ~half a
-    // second to settle after boot per the HalGPIO contract. Use a millis-based deadline so the
-    // wait holds even if the loop body runs long on a slow boot.
+    // Refresh the cached button state a few times — isPressed() needs ~half a second to settle
+    // after boot per the HalGPIO contract. Use a millis-based deadline so we always wait the full
+    // settle window even if the loop body takes longer than expected on slow boots.
     const unsigned long settleStart = millis();
     while (millis() - settleStart < 500) {
       gpio.update();
@@ -439,7 +439,6 @@ void setup() {
   // If it succeeds, the header date "?" disappears and any reading recorded
   // during this boot lands on the correct calendar day.
   WifiTimeSync::startSilentBootAttempt();
-
 
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
