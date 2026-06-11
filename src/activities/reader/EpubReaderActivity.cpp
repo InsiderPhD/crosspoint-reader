@@ -9,6 +9,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <WiFi.h>
 #include <esp_system.h>
 
@@ -1412,59 +1413,115 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   }
   const auto tDisplay = millis();
 
-  // Save bw buffer to reset buffer state after grayscale data sync.
-  // If allocation fails (heap fragmentation, typically after WiFi/sync ops),
-  // skip the grayscale pass entirely — running it without a saved BW buffer
-  // leaves the screen in a half-grayscale state (visible ghosting).
-  const bool bwStored = renderer.storeBwBuffer();
-  const auto tBwStore = millis();
+  // Tiled grayscale: render each plane band-by-band into a small scratch and
+  // stream straight to the controller, leaving the BW framebuffer intact so no
+  // full-frame storeBwBuffer is needed; controller RAM is re-synced from the
+  // live framebuffer afterward. The page is re-rendered ceil(H/STRIP_ROWS) times
+  // per plane, but renderCharImpl culls out-of-band glyphs before decode so the
+  // cost stays close to one render. Both text (drawPixel) and images
+  // (DirectPixelWriter) honor the active strip target.
+  // Skipped in dark mode — AA LUT is computed for black-on-white.
+  if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode && renderer.supportsStripGrayscale()) {
+    constexpr int STRIP_ROWS = 80;
+    const int gh = renderer.getDisplayHeight();
+    const int gwBytes = renderer.getDisplayWidthBytes();
 
-  // grayscale rendering — skipped in dark mode (AA LUT was computed for black-on-white)
-  // TODO: Only do this if font supports it
-  if (bwStored && SETTINGS.textAntiAliasing && !SETTINGS.darkMode) {
-    renderer.clearScreen(0x00);
-    renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-    page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-    if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
-      page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
-    renderer.copyGrayscaleLsbBuffers();
-    const auto tGrayLsb = millis();
+    auto scratch = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(gwBytes) * STRIP_ROWS);
+    if (!scratch) {
+      LOG_ERR("ERS", "OOM: grayscale strip scratch (%d bytes); skipping AA this page", gwBytes * STRIP_ROWS);
+    } else {
+      // Bands may be streamed in any order: X4 windows each via setRamArea, X3
+      // via PTL.
+      renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
+      for (int y = 0; y < gh; y += STRIP_ROWS) {
+        const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
+        renderer.beginStripTarget(scratch.get(), y, rows);
+        renderer.clearScreen(0x00);
+        page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+        if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+          page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+        renderer.endStripTarget();
+        renderer.writeGrayscalePlaneStrip(true, scratch.get(), y, rows);
+      }
+      const auto tGrayLsb = millis();
 
-    // Render and copy to MSB buffer
-    renderer.clearScreen(0x00);
-    renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-    page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-    if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
-      page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
-    renderer.copyGrayscaleMsbBuffers();
-    const auto tGrayMsb = millis();
+      // MSB plane.
+      renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
+      for (int y = 0; y < gh; y += STRIP_ROWS) {
+        const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
+        renderer.beginStripTarget(scratch.get(), y, rows);
+        renderer.clearScreen(0x00);
+        page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+        if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+          page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+        renderer.endStripTarget();
+        renderer.writeGrayscalePlaneStrip(false, scratch.get(), y, rows);
+      }
+      const auto tGrayMsb = millis();
 
-    // display grayscale part
-    renderer.displayGrayBuffer();
-    const auto tGrayDisplay = millis();
-    renderer.setRenderMode(GfxRenderer::BW);
-    fcm->logStats("gray");
+      renderer.setRenderMode(GfxRenderer::BW);
+      renderer.displayGrayBuffer();
+      const auto tGrayDisplay = millis();
 
-    // restore the bw data
-    renderer.restoreBwBuffer();
-    const auto tBwRestore = millis();
+      // BW framebuffer is intact; re-sync controller RAM for the next
+      // differential page turn directly from it.
+      renderer.cleanupGrayscaleWithFrameBuffer();
+      const auto tCleanup = millis();
 
-    const auto tEnd = millis();
-    LOG_DBG("ERS",
-            "Page render: prewarm=%lums bw_render=%lums display=%lums bw_store=%lums "
-            "gray_lsb=%lums gray_msb=%lums gray_display=%lums bw_restore=%lums total=%lums",
-            tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tBwStore - tDisplay, tGrayLsb - tBwStore,
-            tGrayMsb - tGrayLsb, tGrayDisplay - tGrayMsb, tBwRestore - tGrayDisplay, tEnd - t0);
+      const auto tEnd = millis();
+      LOG_DBG("ERS",
+              "Page render (tiled): prewarm=%lums bw_render=%lums display=%lums gray_lsb=%lums "
+              "gray_msb=%lums gray_display=%lums cleanup=%lums total=%lums",
+              tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tGrayLsb - tDisplay, tGrayMsb - tGrayLsb,
+              tGrayDisplay - tGrayMsb, tCleanup - tGrayDisplay, tEnd - t0);
+    }
   } else {
-    // restore the bw data
-    renderer.restoreBwBuffer();
-    const auto tBwRestore = millis();
+    // Fallback path for a controller without strip support. grayscale rendering
+    // Skipped in dark mode — AA LUT is computed for black-on-white.
+    // TODO: Only do this if font supports it
+    if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode) {
+      // Save the BW frame before the grayscale passes overwrite it, restore
+      // after. Only needed when grayscale actually renders.
+      renderer.storeBwBuffer();
+      const auto tBwStore = millis();
 
-    const auto tEnd = millis();
-    LOG_DBG("ERS",
-            "Page render: prewarm=%lums bw_render=%lums display=%lums bw_store=%lums bw_restore=%lums total=%lums",
-            tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tBwStore - tDisplay, tBwRestore - tBwStore,
-            tEnd - t0);
+      renderer.clearScreen(0x00);
+      renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
+      page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+      if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+        page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+      renderer.copyGrayscaleLsbBuffers();
+      const auto tGrayLsb = millis();
+
+      // Render and copy to MSB buffer
+      renderer.clearScreen(0x00);
+      renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
+      page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+      if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+        page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+      renderer.copyGrayscaleMsbBuffers();
+      const auto tGrayMsb = millis();
+
+      // display grayscale part
+      renderer.displayGrayBuffer();
+      const auto tGrayDisplay = millis();
+      renderer.setRenderMode(GfxRenderer::BW);
+      renderer.restoreBwBuffer();
+      const auto tBwRestore = millis();
+
+      const auto tEnd = millis();
+      LOG_DBG("ERS",
+              "Page render: prewarm=%lums bw_render=%lums display=%lums bw_store=%lums "
+              "gray_lsb=%lums gray_msb=%lums gray_display=%lums bw_restore=%lums total=%lums",
+              tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, tBwStore - tDisplay, tGrayLsb - tBwStore,
+              tGrayMsb - tGrayLsb, tGrayDisplay - tGrayMsb, tBwRestore - tGrayDisplay, tEnd - t0);
+    } else {
+      // No anti-aliasing: BW frame already displayed above, no grayscale to
+      // render, so no save/restore.
+      const auto tEnd = millis();
+      LOG_DBG("ERS", "Page render: prewarm=%lums bw_render=%lums display=%lums total=%lums", tPrewarm - t0,
+              tBwRender - tPrewarm, tDisplay - tBwRender, tEnd - t0);
+    }
   }
 }
 
