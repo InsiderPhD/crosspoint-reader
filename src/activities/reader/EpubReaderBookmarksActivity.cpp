@@ -170,10 +170,10 @@ void EpubReaderBookmarksActivity::render(RenderLock&&) {
   const auto getBookmarkTitle = [this](int index) { return bookmarks.at(index).summary; };
 
   const auto getBookmarkSubtitle = [this](int index) {
-    const auto bookmark = bookmarks.at(index);
-    const int tocIndex = epub->getTocIndexForSpineIndex(bookmark.computedSpineIndex);
-    const auto tocTitle = (tocIndex >= 0) ? epub->getTocItem(tocIndex).title : std::string(tr(STR_UNNAMED));
-    return std::to_string(static_cast<int>(std::clamp(bookmark.percentage, 0.0f, 1.0f) * 100.0f + 0.5f)) + "% - " +
+    auto bookmark = bookmarks.at(confirmingDelete >= DELETE_MODE_DISPLAY ? selectorIndex : index);
+    auto tocIndex = epub->getTocIndexForSpineIndex(bookmark.computedSpineIndex);
+    auto tocTitle = (tocIndex >= 0) ? (epub->getTocItem(tocIndex)).title : tr(STR_UNNAMED);
+    return std::to_string((int)(std::clamp(bookmark.percentage, 0.0f, 1.0f) * 100.0f + 0.5f)) + "% - " +
            std::to_string(bookmark.computedChapterProgress + 1) + "/" +
            std::to_string(bookmark.computedChapterPageCount) + " - " + tocTitle;
   };
