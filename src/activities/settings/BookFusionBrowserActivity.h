@@ -34,6 +34,7 @@ class BookFusionBrowserActivity final : public Activity {
   ButtonNavigator buttonNavigator;
 
   BookFusionSearchResult searchResult;  // Current page of 10 books plus cover URLs (~5 KB)
+  bool downloadedFlags[BookFusionSearchResult::MAX_BOOKS] = {};  // true if the book file already exists on SD
   int selectedIndex = 0;
   int currentPage = 1;
 

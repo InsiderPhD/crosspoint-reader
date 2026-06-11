@@ -56,6 +56,23 @@ bool bookFusionFormatIsEpub(const BookFusionBook& book) {
   return strcasecmp(book.format, "epub") == 0;
 }
 
+std::string bookFusionExpectedFilename(const BookFusionBook& book) {
+  std::string baseName = book.title;
+  if (book.authors[0] != '\0') {
+    baseName += " - ";
+    baseName += book.authors;
+  }
+  char ext[8] = "epub";
+  if (book.format[0] != '\0') {
+    size_t i = 0;
+    for (; i < sizeof(ext) - 1 && book.format[i] != '\0'; i++) {
+      ext[i] = static_cast<char>(tolower(static_cast<unsigned char>(book.format[i])));
+    }
+    ext[i] = '\0';
+  }
+  return "/" + StringUtils::sanitizeFilename(baseName) + "." + ext;
+}
+
 enum class CoverImageType { Unknown, Jpeg, Png };
 
 std::string normalizeBookFusionCoverUrl(const char* coverUrl) {
@@ -320,6 +337,10 @@ void BookFusionBrowserActivity::loadPage(int page) {
     return;
   }
 
+  for (int i = 0; i < searchResult.count; ++i) {
+    downloadedFlags[i] = Storage.exists(bookFusionExpectedFilename(searchResult.books[i]).c_str());
+  }
+
   {
     RenderLock lock(*this);
     state = BROWSING;
@@ -522,6 +543,8 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
 
   LOG_DBG("BFB", "Download complete, cache cleared and cover regenerated for book_id=%lu",
           static_cast<unsigned long>(book.id));
+
+  downloadedFlags[bookIndex] = true;
 
   {
     RenderLock lock(*this);
@@ -890,7 +913,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
       renderer, Rect{0, contentTop, pageWidth, contentHeight}, searchResult.count, selectedIndex,
       [this](int index) -> std::string { return std::string(searchResult.books[index].title); },
       [this](int index) -> std::string { return std::string(searchResult.books[index].authors); },
-      [](int /*index*/) { return UIIcon::BookFusion; }, nullptr, false);
+      [this](int index) { return downloadedFlags[index] ? UIIcon::Check : UIIcon::BookFusion; }, nullptr, false);
 
   // Overlay a strike-through on rows whose book isn't an EPUB so the user can
   // see the book exists but at a glance knows it can't be opened here. We

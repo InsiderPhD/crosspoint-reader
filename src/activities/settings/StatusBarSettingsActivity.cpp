@@ -182,7 +182,10 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
     title = tr(STR_EXAMPLE_CHAPTER);
   }
 
-  GUI.drawStatusBar(renderer, 75, 8, 32, title, verticalPreviewPadding);
+  // Mock time-left for the preview so the element renders when enabled (the real
+  // value is derived from reading speed, unavailable here). ~2h5m.
+  constexpr uint32_t PREVIEW_TIME_LEFT_SECONDS = 7500;
+  GUI.drawStatusBar(renderer, 75, 8, 32, title, verticalPreviewPadding, 0, PREVIEW_TIME_LEFT_SECONDS);
 
   renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding,
                     renderer.getScreenHeight() - UITheme::getInstance().getStatusBarHeight() - verticalPreviewPadding -

@@ -744,7 +744,10 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 
   // Draw Progress Text
   const auto screenHeight = renderer.getScreenHeight();
-  auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom - 4;
+  // getStatusBarHeight() now includes statusBarContentGap to reserve breathing room above the
+  // bar in the body layout; add it back here so the bar text stays anchored to the bottom.
+  auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom - 4 +
+               metrics.statusBarContentGap;
   int progressTextWidth = 0;
 
   const std::string timeLeftStr =

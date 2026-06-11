@@ -20,6 +20,7 @@
 #include "components/icons/bookfusion24.h"
 #include "components/icons/bookfusion32.h"
 #include "components/icons/check24.h"
+#include "components/icons/check32.h"
 #include "components/icons/cover.h"
 #include "components/icons/file24.h"
 #include "components/icons/files24.h"
@@ -120,6 +121,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return HotspotIcon;
       case UIIcon::BookFusion:
         return BookFusion32Icon;
+      case UIIcon::Check:
+        return Check32Icon;
       default:
         return nullptr;
     }

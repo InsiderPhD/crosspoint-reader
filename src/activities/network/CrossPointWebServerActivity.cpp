@@ -112,8 +112,22 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
 
   if (mode == NetworkMode::BOOKFUSION) {
-    // Launch BookFusion browser directly
-    activityManager.replaceActivity(std::make_unique<BookFusionBrowserActivity>(renderer, mappedInput));
+    // Use startActivityForResult so pressing Back in the browser returns to mode
+    // selection rather than going all the way to the home screen. replaceActivity
+    // would clear the stack and leave nowhere to pop back to.
+    startActivityForResult(
+        std::make_unique<BookFusionBrowserActivity>(renderer, mappedInput),
+        [this](const ActivityResult&) {
+          state = WebServerActivityState::MODE_SELECTION;
+          startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
+                                 [this](const ActivityResult& result) {
+                                   if (result.isCancelled) {
+                                     onGoHome();
+                                   } else {
+                                     onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
+                                   }
+                                 });
+        });
     return;
   }
 

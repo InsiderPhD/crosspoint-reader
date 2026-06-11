@@ -56,6 +56,9 @@ struct ThemeMetrics {
   int progressBarMarginTop;
   int statusBarHorizontalMargin;
   int statusBarVerticalMargin;
+  // Extra gap reserved above the status bar (lifts body content up); the bar text
+  // itself stays anchored to the bottom (see BaseTheme::drawStatusBar).
+  int statusBarContentGap;
 
   int keyboardKeyWidth;
   int keyboardKeyHeight;
@@ -121,6 +124,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .progressBarMarginTop = 1,
                                  .statusBarHorizontalMargin = 5,
                                  .statusBarVerticalMargin = 19,
+                                 .statusBarContentGap = 3,
                                  .keyboardKeyWidth = 22,
                                  .keyboardKeyHeight = 40,
                                  .keyboardKeySpacing = 0,
