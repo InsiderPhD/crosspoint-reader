@@ -130,3 +130,7 @@ void renderAntiAliased(GfxRenderer& renderer, RenderFn&& renderFn) {
 }
 
 }  // namespace ReaderUtils
+
+// Shared by all reader activities: saves APP_STATE and enters deep sleep.
+// Defined in EpubReaderActivity.cpp; declared here so other readers can call it.
+void enterDeepSleepFromReaderAction();

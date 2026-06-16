@@ -103,6 +103,15 @@ void XtcReaderActivity::loop() {
 
   if (ReaderUtils::detectAndApplyForceRefresh(mappedInput, renderer)) return;
 
+  // Long-pressing power while it is mapped to PAGE_TURN should sleep rather than
+  // falling through to the page-turn detection where skipPages would fire instead.
+  if (SETTINGS.shortPwrBtn == CrossPointSettings::PAGE_TURN && SETTINGS.longPressChapterSkip &&
+      mappedInput.wasReleased(MappedInputManager::Button::Power) &&
+      mappedInput.getHeldTime() > skipPageMs) {
+    enterDeepSleepFromReaderAction();
+    return;
+  }
+
   // When long-press chapter skip is disabled, turn pages on press instead of release.
   const bool usePressForPageTurn = !SETTINGS.longPressChapterSkip;
   const bool tiltNext = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedForward();

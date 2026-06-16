@@ -524,6 +524,13 @@ void EpubReaderActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Power)) {
+    // Long-pressing power while it is mapped to PAGE_TURN should sleep rather than
+    // falling through to detectPageTurn where skipChapter would fire instead.
+    if (SETTINGS.shortPwrBtn == CrossPointSettings::PAGE_TURN && SETTINGS.longPressChapterSkip &&
+        mappedInput.getHeldTime() > skipChapterMs) {
+      enterDeepSleepFromReaderAction();
+      return;
+    }
     if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN_SYNC) {
       performLongPressSync();
       return;
