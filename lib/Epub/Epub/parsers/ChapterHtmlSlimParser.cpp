@@ -253,7 +253,7 @@ constexpr int NUM_SKIP_TAGS = sizeof(SKIP_TAGS) / sizeof(SKIP_TAGS[0]);
 bool isWhitespace(const char c) { return c == ' ' || c == '\r' || c == '\n' || c == '\t'; }
 
 // given the start and end of a tag, check to see if it matches a known tag
-bool matches(const char* tag_name, const char* possible_tags[], const int possible_tag_count) {
+bool matches(const char* tag_name, const char* const possible_tags[], const int possible_tag_count) {
   for (int i = 0; i < possible_tag_count; i++) {
     if (strcmp(tag_name, possible_tags[i]) == 0) {
       return true;
@@ -303,6 +303,8 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   effectiveItalic = currentCssStyle.hasFontStyle() && currentCssStyle.fontStyle == CssFontStyle::Italic;
   effectiveUnderline =
       currentCssStyle.hasTextDecoration() && currentCssStyle.textDecoration == CssTextDecoration::Underline;
+  effectiveDirectionDefined = currentCssStyle.hasDirection();
+  effectiveDirection = currentCssStyle.direction;
   effectiveSup = false;
   effectiveSub = false;
 
@@ -316,6 +318,10 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
     }
     if (entry.hasUnderline) {
       effectiveUnderline = entry.underline;
+    }
+    if (entry.hasDirection) {
+      effectiveDirectionDefined = true;
+      effectiveDirection = entry.direction;
     }
     if (entry.hasSup) {
       effectiveSup = entry.sup;
@@ -485,6 +491,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   // Extract class, style, and id attributes
   std::string classAttr;
   std::string styleAttr;
+  std::string dirAttr;
   if (atts != nullptr) {
     for (int i = 0; atts[i]; i += 2) {
       if (strcmp(atts[i], "class") == 0) {
@@ -524,6 +531,22 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       CssStyle inlineStyle = CssParser::parseInlineStyle(styleAttr);
       cssStyle.applyOver(inlineStyle);
     }
+  }
+
+  // HTML dir attribute overrides CSS direction (case-insensitive per HTML spec)
+  if (!dirAttr.empty()) {
+    if (strcasecmp(dirAttr.c_str(), "rtl") == 0) {
+      cssStyle.direction = CssTextDirection::Rtl;
+      cssStyle.defined.direction = 1;
+    } else if (strcasecmp(dirAttr.c_str(), "ltr") == 0) {
+      cssStyle.direction = CssTextDirection::Ltr;
+      cssStyle.defined.direction = 1;
+    }
+  }
+  // Direction is inherited. If this element does not define one, carry the active inherited direction.
+  if (!cssStyle.hasDirection() && self->effectiveDirectionDefined) {
+    cssStyle.direction = self->effectiveDirection;
+    cssStyle.defined.direction = 1;
   }
 
   // Skip elements with display:none before all fast paths (tables, links, etc.).

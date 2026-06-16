@@ -8,6 +8,12 @@
 
 #include "FontCacheManager.h"
 
+namespace {
+uint8_t resolveSdCardStyle(const SdCardFont& font, const EpdFontFamily::Style style) {
+  return font.resolveStyle(static_cast<uint8_t>(style));
+}
+}  // namespace
+
 const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const EpdGlyph* glyph) const {
   if (fontData->groups != nullptr) {
     auto* fd = fontCacheManager_ ? fontCacheManager_->getDecompressor() : nullptr;

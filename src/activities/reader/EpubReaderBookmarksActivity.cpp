@@ -15,6 +15,9 @@
 
 namespace {
 constexpr int ENTER_DELETE_MODE_MS = 700;
+constexpr int DELETE_MODE_OFF = 0;
+constexpr int DELETE_MODE_DISPLAY = 1;
+constexpr int DELETE_MODE_CONFIRM = 2;
 constexpr int LINE_HEIGHT = 60;
 
 int getPageItemsForBookmarkList(const GfxRenderer& renderer, const int listHeight) {

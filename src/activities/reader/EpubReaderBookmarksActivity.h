@@ -17,6 +17,7 @@ class EpubReaderBookmarksActivity final : public Activity {
   int currentSpinePageCount = 0;
   int selectorIndex = 0;
   std::vector<BookmarkEntry> bookmarks;
+  int confirmingDelete = 0;  // 0 = hide dialog, 1 = show dialog, 2 = allow confirmation to delete
   bool deleteHoldTriggered = false;
 
  public:

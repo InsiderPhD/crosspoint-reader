@@ -13,12 +13,6 @@ class OtaUpdater {
  public:
   using ProgressCallback = void (*)(void* ctx);
 
- private:
-  // UI progress callback + context, stashed during installUpdate() so the C-style
-  // FirmwareFlasher progress trampoline (which only carries a void*) can forward ticks.
-  ProgressCallback uiProgressCb = nullptr;
-  void* uiProgressCtx = nullptr;
-
   enum OtaUpdaterError {
     OK = 0,
     NO_UPDATE,
@@ -40,4 +34,10 @@ class OtaUpdater {
   const std::string& getLatestVersion() const;
   OtaUpdaterError checkForUpdate();
   OtaUpdaterError installUpdate(ProgressCallback onProgress = nullptr, void* ctx = nullptr);
+
+ private:
+  // UI progress callback + context, stashed during installUpdate() so the C-style
+  // FirmwareFlasher progress trampoline (which only carries a void*) can forward ticks.
+  ProgressCallback uiProgressCb = nullptr;
+  void* uiProgressCtx = nullptr;
 };
