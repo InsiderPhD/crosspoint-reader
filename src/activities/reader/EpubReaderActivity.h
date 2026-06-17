@@ -5,6 +5,7 @@
 
 #include <optional>
 
+#include "CrossPointSettings.h"
 #include "EpubReaderMenuActivity.h"
 #include "activities/Activity.h"
 
@@ -35,7 +36,12 @@ class EpubReaderActivity final : public Activity {
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool automaticPageTurnActive = false;
   bool autoPageTurnMode = false;        // True when using calibrated reading speed
-  bool longPressFeedbackShown = false;  // Track if long press visual feedback has been shown
+  bool longPressFeedbackShown = false;
+  bool longPressBackFired = false;
+  bool longPressLeftFired = false;
+  bool longPressRightFired = false;
+  bool longPressPageBackFired = false;
+  bool longPressPageForwardFired = false;
   bool showBookmarkMessage = false;
   bool bookmarkMessageWasRemoval = false;
   unsigned long bookmarkMessageTime = 0UL;
@@ -79,6 +85,14 @@ class EpubReaderActivity final : public Activity {
   // Footnote navigation
   void navigateToHref(const std::string& href, bool savePosition = false);
   void restoreSavedPosition();
+
+  // Dispatch a reader action (from the per-button settings) to its implementation.
+  // Returns true if the action was terminal (i.e. the activity is exiting and the
+  // caller should return immediately).
+  bool executeReaderAction(CrossPointSettings::READER_ACTION action);
+
+  // Helper: open the reader menu (the full complex sub-activity launch).
+  void openReaderMenu();
 
   // BookFusion sync — bidirectional auto-merge used by the long-press Confirm
   // "quick sync". The reader-menu Push/Pull entries use BookFusionSyncActivity

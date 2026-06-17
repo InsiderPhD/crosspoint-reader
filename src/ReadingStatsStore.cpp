@@ -824,11 +824,17 @@ void ReadingStatsStore::beginSession(const std::string& path, const std::string&
   auto& book = books[0];
   activeSession.startProgressPercent = book.lastProgressPercent;
   activeSession.startCompleted = book.completed;
-  book.lastProgressPercent = clampPercent(progressPercent);
-  book.chapterTitle = chapterTitle;
-  book.chapterProgressPercent = clampPercent(chapterProgressPercent);
-  if (book.lastProgressPercent >= 100) {
-    book.completed = true;
+  if (progressPercent > 0) {
+    book.lastProgressPercent = clampPercent(progressPercent);
+    if (book.lastProgressPercent >= 100) {
+      book.completed = true;
+    }
+  }
+  if (!chapterTitle.empty()) {
+    book.chapterTitle = chapterTitle;
+  }
+  if (chapterProgressPercent > 0) {
+    book.chapterProgressPercent = clampPercent(chapterProgressPercent);
   }
 
   updateBookReadTimestamp(book, TimeUtils::getAuthoritativeTimestamp());
@@ -896,7 +902,7 @@ void ReadingStatsStore::updateProgress(const uint8_t progressPercent, const bool
   const uint8_t clampedBookProgress = clampPercent(progressPercent);
   const uint8_t clampedChapterProgress = clampPercent(chapterProgressPercent);
   const bool progressChanged = book.lastProgressPercent != clampedBookProgress;
-  const bool chapterTitleChanged = book.chapterTitle != chapterTitle;
+  const bool chapterTitleChanged = !chapterTitle.empty() && book.chapterTitle != chapterTitle;
   const bool chapterProgressChanged = book.chapterProgressPercent != clampedChapterProgress;
   const bool completionChanged = !book.completed && (completed || clampedBookProgress >= 100);
 
@@ -905,7 +911,9 @@ void ReadingStatsStore::updateProgress(const uint8_t progressPercent, const bool
   }
 
   book.lastProgressPercent = clampedBookProgress;
-  book.chapterTitle = chapterTitle;
+  if (!chapterTitle.empty()) {
+    book.chapterTitle = chapterTitle;
+  }
   book.chapterProgressPercent = clampedChapterProgress;
   if (completed || clampedBookProgress >= 100) {
     book.completed = true;

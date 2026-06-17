@@ -171,16 +171,18 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                         {StrId::STR_FOOTNOTE_ON_PAGE, StrId::STR_FOOTNOTE_IN_MENU}, "footnoteDisplay",
                         StrId::STR_CAT_READER),
       // --- Controls ---
-      SettingInfo::Enum(StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,
-                        {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV}, "sideButtonLayout", StrId::STR_CAT_CONTROLS),
       SettingInfo::Toggle(StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION, &CrossPointSettings::frontButtonFollowOrientation,
-                          "frontButtonFollowOrientation", StrId::STR_CAT_CONTROLS),
-      SettingInfo::Toggle(StrId::STR_LONG_PRESS_SKIP, &CrossPointSettings::longPressChapterSkip, "longPressChapterSkip",
-                          StrId::STR_CAT_CONTROLS),
+                          "frontButtonFollowOrientation", StrId::STR_CAT_SYSTEM),
+      // Legacy settings: kept for JSON round-trip / migration only (no category = hidden from UI).
+      SettingInfo::Enum(StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,
+                        {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV}, "sideButtonLayout"),
+      SettingInfo::Toggle(StrId::STR_LONG_PRESS_SKIP, &CrossPointSettings::longPressChapterSkip, "longPressChapterSkip"),
       SettingInfo::DynamicEnum(StrId::STR_LONG_PRESS_ACTION, sharedReaderButtonActions, getLongPressActionIndex,
-               setLongPressActionIndex, "longPressAction", StrId::STR_CAT_CONTROLS),
+               setLongPressActionIndex, "longPressAction"),
       SettingInfo::DynamicEnum(StrId::STR_SHORT_PWR_BTN, sharedReaderButtonActions, getShortPowerActionIndex,
-               setShortPowerActionIndex, "shortPwrBtn", StrId::STR_CAT_CONTROLS),
+               setShortPowerActionIndex, "shortPwrBtn"),
+      // Per-button reader actions are persisted directly in JsonSettingsIO (not via SettingsList)
+      // to allow proper clamping against READER_ACTION_COUNT.
       // Persisted last-chosen sort. Hidden from the settings UI (no category set) —
       // edited only via the in-activity sort menu. Listed here so JsonSettingsIO
       // round-trips it through settings.json. The enumValues just exist for
@@ -290,7 +292,7 @@ inline const std::vector<SettingInfo>& getSettingsList() {
         if (it->nameId == StrId::STR_SHORT_PWR_BTN) {
           v.insert(it + 1, SettingInfo::Enum(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn,
                                              {StrId::STR_STATE_OFF, StrId::STR_NORMAL, StrId::STR_INVERTED},
-                                             "tiltPageTurn", StrId::STR_CAT_CONTROLS));
+                                             "tiltPageTurn", StrId::STR_CAT_SYSTEM));
           break;
         }
       }

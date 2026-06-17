@@ -11,6 +11,7 @@
 namespace ReaderUtils {
 
 constexpr unsigned long GO_HOME_MS = 1000;
+constexpr int FOOTNOTE_HINT_HEIGHT = 20;
 
 inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
   switch (orientation) {

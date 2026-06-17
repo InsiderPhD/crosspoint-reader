@@ -60,6 +60,66 @@ void applyLegacyFrontButtonLayout(CrossPointSettings& settings) {
 
 }  // namespace
 
+void CrossPointSettings::migrateReaderActions(CrossPointSettings& settings) {
+  if (settings.readerActionsMigrated) return;
+  settings.readerActionsMigrated = 1;
+
+  // Map legacy longPressAction → readerLongPressConfirm
+  switch (static_cast<LONG_PRESS_ACTION>(settings.longPressAction)) {
+    case LONG_PRESS_SYNC:
+      settings.readerLongPressConfirm = READER_ACTION_SYNC;
+      break;
+    case LONG_PRESS_PAGE_TURN:
+      settings.readerLongPressConfirm = READER_ACTION_PAGE_FORWARD;
+      break;
+    case LONG_PRESS_NONE:
+      settings.readerLongPressConfirm = READER_ACTION_NONE;
+      break;
+    case LONG_PRESS_BOOKMARK:
+      settings.readerLongPressConfirm = READER_ACTION_BOOKMARK;
+      break;
+    case LONG_PRESS_SLEEP:
+      settings.readerLongPressConfirm = READER_ACTION_SLEEP;
+      break;
+    default:  // LONG_PRESS_REFRESH
+      settings.readerLongPressConfirm = READER_ACTION_FORCE_REFRESH;
+      break;
+  }
+
+  // Map legacy shortPwrBtn → readerShortPressPower
+  switch (static_cast<SHORT_PWRBTN>(settings.shortPwrBtn)) {
+    case SLEEP:
+      settings.readerShortPressPower = READER_ACTION_SLEEP;
+      break;
+    case FORCE_REFRESH:
+      settings.readerShortPressPower = READER_ACTION_FORCE_REFRESH;
+      break;
+    case SHORT_PWRBTN_SYNC:
+      settings.readerShortPressPower = READER_ACTION_SYNC;
+      break;
+    case SHORT_PWRBTN_BOOKMARK:
+      settings.readerShortPressPower = READER_ACTION_BOOKMARK;
+      break;
+    default:  // PAGE_TURN
+      settings.readerShortPressPower = READER_ACTION_PAGE_FORWARD;
+      break;
+  }
+
+  // Map legacy sideButtonLayout → side button actions (NEXT_PREV swaps Up/Down)
+  if (settings.sideButtonLayout == NEXT_PREV) {
+    settings.readerShortPressSideUp = READER_ACTION_PAGE_FORWARD;
+    settings.readerLongPressSideUp = READER_ACTION_SKIP_CHAPTER_FORWARD;
+    settings.readerShortPressSideDown = READER_ACTION_PAGE_BACK;
+    settings.readerLongPressSideDown = READER_ACTION_SKIP_CHAPTER_BACK;
+  }
+
+  // Map legacy longPressChapterSkip = 0 → remove long-press chapter skip
+  if (!settings.longPressChapterSkip) {
+    settings.readerLongPressSideUp = READER_ACTION_NONE;
+    settings.readerLongPressSideDown = READER_ACTION_NONE;
+  }
+}
+
 void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings) {
   const uint8_t mapping[] = {settings.frontButtonBack, settings.frontButtonConfirm, settings.frontButtonLeft,
                              settings.frontButtonRight};
@@ -88,6 +148,10 @@ bool CrossPointSettings::loadFromFile() {
     if (!json.isEmpty()) {
       bool resave = false;
       bool result = JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
+      if (result) {
+        migrateReaderActions(*this);
+        resave = true;
+      }
       if (result && resave) {
         if (saveToFile()) {
           LOG_DBG("CPS", "Resaved settings to update format");

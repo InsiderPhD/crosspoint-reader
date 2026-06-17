@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 
+#include "CrossPointSettings.h"
 #include "activities/Activity.h"
 
 class XtcReaderActivity final : public Activity {
@@ -22,6 +23,11 @@ class XtcReaderActivity final : public Activity {
   unsigned long readingSpeedLastTurnMs = 0UL;
   unsigned long readingSessionStartMs = 0UL;
   uint32_t sessionPageTurns = 0;
+  bool longPressBackFired = false;
+  bool longPressLeftFired = false;
+  bool longPressRightFired = false;
+  bool longPressPageBackFired = false;
+  bool longPressPageForwardFired = false;
 
   enum class StatusBarOverlayPosition { Bottom, Top };
   struct StatusBarInfo {
@@ -35,6 +41,7 @@ class XtcReaderActivity final : public Activity {
   StatusBarInfo getStatusBarInfo() const;
   void saveProgress() const;
   void loadProgress();
+  bool executeReaderAction(CrossPointSettings::READER_ACTION action);
 
  public:
   explicit XtcReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Xtc> xtc)

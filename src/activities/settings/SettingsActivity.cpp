@@ -7,6 +7,7 @@
 
 #include "BookFusionSettingsActivity.h"
 #include "ButtonRemapActivity.h"
+#include "ReaderControlsActivity.h"
 #include "CalibreSettingsActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
@@ -29,8 +30,7 @@
 #include "fontIds.h"
 
 const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
-                                                              StrId::STR_CAT_STATS, StrId::STR_CAT_CONTROLS,
-                                                              StrId::STR_CAT_SYSTEM};
+                                                              StrId::STR_CAT_STATS, StrId::STR_CAT_SYSTEM};
 
 void SettingsActivity::onEnter() {
   Activity::onEnter();
@@ -39,7 +39,6 @@ void SettingsActivity::onEnter() {
   displaySettings.clear();
   readerSettings.clear();
   statsSettings.clear();
-  controlsSettings.clear();
   systemSettings.clear();
 
   for (const auto& setting : getSettingsList()) {
@@ -54,17 +53,17 @@ void SettingsActivity::onEnter() {
       readerSettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_STATS) {
       statsSettings.push_back(setting);
-    } else if (setting.category == StrId::STR_CAT_CONTROLS) {
-      controlsSettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_SYSTEM) {
       systemSettings.push_back(setting);
     }
     // Web-only categories (KOReader Sync, OPDS Browser) are skipped for device UI
   }
 
-  // Append device-only ACTION items
-  controlsSettings.insert(controlsSettings.begin(),
-                          SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons));
+  // Append device-only ACTION items — reader controls actions go first in System
+  systemSettings.insert(systemSettings.begin(),
+                        SettingInfo::Action(StrId::STR_READER_CONTROLS, SettingAction::ReaderControls));
+  systemSettings.insert(systemSettings.begin(),
+                        SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BF_SYNC, SettingAction::BookFusionSync));
@@ -165,9 +164,6 @@ void SettingsActivity::loop() {
         currentSettings = &statsSettings;
         break;
       case 3:
-        currentSettings = &controlsSettings;
-        break;
-      case 4:
         currentSettings = &systemSettings;
         break;
     }
@@ -210,6 +206,9 @@ void SettingsActivity::toggleCurrentSetting() {
     switch (setting.action) {
       case SettingAction::RemapFrontButtons:
         startActivityForResult(std::make_unique<ButtonRemapActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::ReaderControls:
+        startActivityForResult(std::make_unique<ReaderControlsActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::CustomiseStatusBar:
         startActivityForResult(std::make_unique<StatusBarSettingsActivity>(renderer, mappedInput), resultHandler);

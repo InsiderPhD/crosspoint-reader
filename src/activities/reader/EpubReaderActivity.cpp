@@ -348,14 +348,7 @@ void EpubReaderActivity::onExit() {
     SETTINGS.saveToFile();
   }
 
-  if (!bookFinishedRecorded && epub && epub->getBookSize() > 0 && section && section->pageCount > 0) {
-    const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
-    const int progress = static_cast<int>(epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f + 0.5f);
-    if (progress >= 90) {
-      bookFinishedRecorded = true;
-      READING_STATS.updateProgress(100, true);
-    }
-  }
+  recordStatsProgress();
   READING_STATS.endSession();
 
   section.reset();
@@ -364,40 +357,28 @@ void EpubReaderActivity::onExit() {
 
 void EpubReaderActivity::loop() {
   if (!epub) {
-    // Should never happen
     finish();
     return;
   }
 
   READING_STATS.tickActiveSession();
 
-  // Record book completion here (main task) rather than in render() (render task), which would
-  // race the stats store. Triggered once when the reader reaches the end-of-book position.
+  // Record book completion on the main task (not render task) to avoid racing stats store.
   if (!bookFinishedRecorded && currentSpineIndex >= epub->getSpineItemsCount()) {
     bookFinishedRecorded = true;
     READING_STATS.updateProgress(100, true);
   }
 
+  // ── Automatic page turn ──────────────────────────────────────────────────
   if (automaticPageTurnActive) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
         mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       automaticPageTurnActive = false;
-      // updates chapter title space to indicate page turn disabled
       requestUpdate();
       return;
     }
-
-    if (!section) {
-      requestUpdate();
-      return;
-    }
-
-    // Skips page turn if renderingMutex is busy
-    if (RenderLock::peek()) {
-      lastPageTurnTime = millis();
-      return;
-    }
-
+    if (!section) { requestUpdate(); return; }
+    if (RenderLock::peek()) { lastPageTurnTime = millis(); return; }
     if ((millis() - lastPageTurnTime) >= pageTurnDuration) {
       pageTurn(true);
       return;
@@ -409,198 +390,168 @@ void EpubReaderActivity::loop() {
     requestUpdate();
   }
 
-  // Long-press Confirm: immediate action when threshold is reached (hold-based, not release-based)
-  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= skipChapterMs &&
-      !longPressFeedbackShown) {
-    longPressFeedbackShown = true;  // Prevent action spam
-
-    if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_SYNC) {
-      performLongPressSync();
-    } else if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_PAGE_TURN) {
-      pageTurn(true);
-    } else if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_SLEEP) {
-      enterDeepSleepFromReaderAction();
-    } else if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_BOOKMARK) {
-      const auto bookmarkResult = addBookmark();
-      if (bookmarkResult != BookmarkToggleResult::None) {
-        bookmarkMessageWasRemoval = (bookmarkResult == BookmarkToggleResult::Removed);
-        showBookmarkMessage = true;
-        bookmarkMessageTime = millis();
-        requestUpdate();
-      }
-    } else if (SETTINGS.longPressAction == CrossPointSettings::LONG_PRESS_NONE) {
-      // No-op. longPressFeedbackShown stays true so the matching release won't
-      // open the reader menu — holding Confirm with this setting means "do
-      // nothing, keep reading".
-    } else {
-      // Default: full e-ink refresh to clear ghosting
-      RenderLock lock;
-      renderer.displayBuffer(HalDisplay::FULL_REFRESH);
-    }
+  // ── Power: long press always sleeps; short press = configured action ──────
+  if (mappedInput.isPressed(MappedInputManager::Button::Power) && mappedInput.getHeldTime() >= skipChapterMs) {
+    enterDeepSleepFromReaderAction();
     return;
   }
+  // Guard against Power+Down screenshot combo (main.cpp:520) consuming the Power release.
+  if (mappedInput.wasReleased(MappedInputManager::Button::Power) && !gpio.wasReleased(HalGPIO::BTN_DOWN)) {
+    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressPower))) return;
+  }
 
-  // Snapshot before the reset below so we can tell whether the upcoming release
-  // event terminates a long-press action (sync / refresh) — in that case the
-  // release should NOT also open the reader menu; the user wants to stay on the
-  // text and keep reading.
-  const bool longPressActionConsumedRelease = longPressFeedbackShown;
-
-  // Reset action flag when button is not pressed
+  // ── Confirm: long press (hold-based, single-fire) ─────────────────────────
+  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
+      mappedInput.getHeldTime() >= skipChapterMs && !longPressFeedbackShown) {
+    longPressFeedbackShown = true;
+    executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressConfirm));
+    return;
+  }
+  const bool longPressConfirmConsumed = longPressFeedbackShown;
   if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
     longPressFeedbackShown = false;
   }
 
-  // Enter reader menu activity (only on a short-press release).
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && !longPressActionConsumedRelease) {
-    const int currentPage = section ? section->currentPage + 1 : 0;
-    const int totalPages = section ? section->pageCount : 0;
-    float bookProgress = 0.0f;
-    if (epub->getBookSize() > 0 && section && section->pageCount > 0) {
-      const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
-      bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
-    }
-    const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
-
-    uint32_t timeLeftChapter = 0;
-    uint32_t timeLeftBook = 0;
-    if (SETTINGS.readingSpeedSecondsPerPage > 0 && section) {
-      const int pagesLeftChapter = totalPages - currentPage;
-      if (pagesLeftChapter > 0) {
-        timeLeftChapter = static_cast<uint32_t>(pagesLeftChapter) * SETTINGS.readingSpeedSecondsPerPage;
-      }
-      if (!spinePageCountCache.empty() && cachedTotalBookPages > 0) {
-        int pagesBeforeChapter = 0;
-        for (int i = 0; i < currentSpineIndex && i < static_cast<int>(spinePageCountCache.size()); i++) {
-          pagesBeforeChapter += spinePageCountCache[i];
-        }
-        const int pagesLeftBook = cachedTotalBookPages - pagesBeforeChapter - currentPage;
-        if (pagesLeftBook > 0) {
-          timeLeftBook = static_cast<uint32_t>(pagesLeftBook) * SETTINGS.readingSpeedSecondsPerPage;
-        }
-      } else {
-        // Fallback: estimate from current chapter's byte fraction of the book
-        const float sectionStart = epub->calculateProgress(currentSpineIndex, 0.0f);
-        const float sectionEnd = epub->calculateProgress(currentSpineIndex, 1.0f);
-        const float sectionFraction = sectionEnd - sectionStart;
-        const int pagesLeftBook = (sectionFraction > 0.001f)
-                                      ? static_cast<int>((1.0f - bookProgress / 100.0f) / sectionFraction * totalPages)
-                                      : pagesLeftChapter;
-        if (pagesLeftBook > 0) {
-          timeLeftBook = static_cast<uint32_t>(pagesLeftBook) * SETTINGS.readingSpeedSecondsPerPage;
-        }
-      }
-    }
-
-    startActivityForResult(std::make_unique<EpubReaderMenuActivity>(
-                               renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent,
-                               SETTINGS.orientation, !currentPageFootnotes.empty(), timeLeftChapter, timeLeftBook),
-                           [this](const ActivityResult& result) {
-                             // Always apply orientation change even if the menu was cancelled
-                             const auto& menu = std::get<MenuResult>(result.data);
-                             applyOrientation(menu.orientation);
-                             toggleAutoPageTurn(menu.pageTurnOption);
-                             if (!result.isCancelled) {
-                               onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
-                             }
-                           });
+  // ── Confirm: short press ─────────────────────────────────────────────────
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && !longPressConfirmConsumed) {
+    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressConfirm))) return;
   }
 
-  // Long press BACK (1s+) goes to file selection
-  if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= ReaderUtils::GO_HOME_MS) {
-    activityManager.goToFileBrowser(epub ? epub->getPath() : "");
+  // ── Back: long press (hold-based, single-fire) ───────────────────────────
+  if (mappedInput.isPressed(MappedInputManager::Button::Back) &&
+      mappedInput.getHeldTime() >= skipChapterMs && !longPressBackFired) {
+    longPressBackFired = true;
+    executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressBack));
     return;
   }
+  const bool longPressBackConsumed = longPressBackFired;
+  if (!mappedInput.isPressed(MappedInputManager::Button::Back)) {
+    longPressBackFired = false;
+  }
 
-  // Short press BACK goes directly to home (or restores position if viewing footnote)
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back) &&
-      mappedInput.getHeldTime() < ReaderUtils::GO_HOME_MS) {
+  // ── Back: short press (footnote aware) ───────────────────────────────────
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back) && !longPressBackConsumed) {
     if (footnoteDepth > 0) {
       restoreSavedPosition();
       return;
     }
-    onGoHome();
-    return;
+    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressBack))) return;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Power)) {
-    // Long-pressing power while it is mapped to PAGE_TURN should sleep rather than
-    // falling through to detectPageTurn where skipChapter would fire instead.
-    if (SETTINGS.shortPwrBtn == CrossPointSettings::PAGE_TURN && SETTINGS.longPressChapterSkip &&
-        mappedInput.getHeldTime() > skipChapterMs) {
-      enterDeepSleepFromReaderAction();
+  // Resolve Left/Right actions, swapping when frontButtonFollowOrientation is active.
+  const bool swapFront = SETTINGS.frontButtonFollowOrientation &&
+                         (SETTINGS.orientation == CrossPointSettings::INVERTED ||
+                          SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
+  const auto shortPressLeft = static_cast<CrossPointSettings::READER_ACTION>(
+      swapFront ? SETTINGS.readerShortPressRight : SETTINGS.readerShortPressLeft);
+  const auto longPressLeft = static_cast<CrossPointSettings::READER_ACTION>(
+      swapFront ? SETTINGS.readerLongPressRight : SETTINGS.readerLongPressLeft);
+  const auto shortPressRight = static_cast<CrossPointSettings::READER_ACTION>(
+      swapFront ? SETTINGS.readerShortPressLeft : SETTINGS.readerShortPressRight);
+  const auto longPressRight = static_cast<CrossPointSettings::READER_ACTION>(
+      swapFront ? SETTINGS.readerLongPressLeft : SETTINGS.readerLongPressRight);
+
+  // ── Left: long press / short press ───────────────────────────────────────
+  if (longPressLeft != CrossPointSettings::READER_ACTION_NONE) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Left) &&
+        mappedInput.getHeldTime() >= skipChapterMs && !longPressLeftFired) {
+      longPressLeftFired = true;
+      executeReaderAction(longPressLeft);
       return;
     }
-    if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN_SYNC) {
-      performLongPressSync();
-      return;
+    if (!mappedInput.isPressed(MappedInputManager::Button::Left)) {
+      longPressLeftFired = false;
     }
-    if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN_BOOKMARK) {
-      const auto bookmarkResult = addBookmark();
-      if (bookmarkResult != BookmarkToggleResult::None) {
-        bookmarkMessageWasRemoval = (bookmarkResult == BookmarkToggleResult::Removed);
-        showBookmarkMessage = true;
-        bookmarkMessageTime = millis();
-        requestUpdate();
-      }
-      return;
+    if (mappedInput.wasReleased(MappedInputManager::Button::Left) && mappedInput.getHeldTime() < skipChapterMs) {
+      if (executeReaderAction(shortPressLeft)) return;
     }
-    if (SETTINGS.shortPwrBtn == CrossPointSettings::SLEEP) {
-      enterDeepSleepFromReaderAction();
-      return;
-    }
-  }
-
-  if (ReaderUtils::detectAndApplyForceRefresh(mappedInput, renderer)) return;
-
-  auto [prevTriggered, nextTriggered, fromTilt] = ReaderUtils::detectPageTurn(mappedInput);
-  if (!prevTriggered && !nextTriggered) {
-    return;
-  }
-
-  // At end of the book, forward button goes home and back button returns to last page
-  if (currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount()) {
-    if (nextTriggered) {
-      onGoHome();
-    } else {
-      currentSpineIndex = epub->getSpineItemsCount() - 1;
-      nextPageNumber = 0;
-      pendingPageJump = std::numeric_limits<uint16_t>::max();
-      requestUpdate();
-    }
-    return;
-  }
-
-  const bool skipChapter = !fromTilt && SETTINGS.longPressChapterSkip && mappedInput.getHeldTime() > skipChapterMs;
-
-  // Don't skip chapter after screenshot
-  if (gpio.wasReleased(HalGPIO::BTN_POWER) && gpio.wasReleased(HalGPIO::BTN_DOWN)) {
-    return;
-  }
-
-  if (skipChapter) {
-    lastPageTurnTime = millis();
-    // We don't want to delete the section mid-render, so grab the semaphore
-    {
-      RenderLock lock(*this);
-      nextPageNumber = 0;
-      currentSpineIndex = nextTriggered ? currentSpineIndex + 1 : currentSpineIndex - 1;
-      section.reset();
-    }
-    requestUpdate();
-    return;
-  }
-
-  // No current section, attempt to rerender the book
-  if (!section) {
-    requestUpdate();
-    return;
-  }
-
-  if (prevTriggered) {
-    pageTurn(false);
   } else {
-    pageTurn(true);
+    if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+      if (executeReaderAction(shortPressLeft)) return;
+    }
+  }
+
+  // ── Right: long press / short press ──────────────────────────────────────
+  if (longPressRight != CrossPointSettings::READER_ACTION_NONE) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Right) &&
+        mappedInput.getHeldTime() >= skipChapterMs && !longPressRightFired) {
+      longPressRightFired = true;
+      executeReaderAction(longPressRight);
+      return;
+    }
+    if (!mappedInput.isPressed(MappedInputManager::Button::Right)) {
+      longPressRightFired = false;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Right) && mappedInput.getHeldTime() < skipChapterMs) {
+      if (executeReaderAction(shortPressRight)) return;
+    }
+  } else {
+    if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+      if (executeReaderAction(shortPressRight)) return;
+    }
+  }
+
+  // ── Side Up (PageBack): long press / short press ─────────────────────────
+  {
+    const auto shortPressSideUp =
+        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideUp);
+    const auto longPressSideUp =
+        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideUp);
+    if (longPressSideUp != CrossPointSettings::READER_ACTION_NONE) {
+      if (mappedInput.isPressed(MappedInputManager::Button::PageBack) &&
+          mappedInput.getHeldTime() >= skipChapterMs && !longPressPageBackFired) {
+        longPressPageBackFired = true;
+        executeReaderAction(longPressSideUp);
+        return;
+      }
+      if (!mappedInput.isPressed(MappedInputManager::Button::PageBack)) {
+        longPressPageBackFired = false;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::PageBack) &&
+          mappedInput.getHeldTime() < skipChapterMs) {
+        if (executeReaderAction(shortPressSideUp)) return;
+      }
+    } else {
+      if (mappedInput.wasPressed(MappedInputManager::Button::PageBack)) {
+        if (executeReaderAction(shortPressSideUp)) return;
+      }
+    }
+  }
+
+  // ── Side Down (PageForward): long press / short press ────────────────────
+  {
+    const auto shortPressSideDown =
+        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideDown);
+    const auto longPressSideDown =
+        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideDown);
+    if (longPressSideDown != CrossPointSettings::READER_ACTION_NONE) {
+      if (mappedInput.isPressed(MappedInputManager::Button::PageForward) &&
+          mappedInput.getHeldTime() >= skipChapterMs && !longPressPageForwardFired) {
+        longPressPageForwardFired = true;
+        executeReaderAction(longPressSideDown);
+        return;
+      }
+      if (!mappedInput.isPressed(MappedInputManager::Button::PageForward)) {
+        longPressPageForwardFired = false;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::PageForward) &&
+          mappedInput.getHeldTime() < skipChapterMs) {
+        if (executeReaderAction(shortPressSideDown)) return;
+      }
+    } else {
+      if (mappedInput.wasPressed(MappedInputManager::Button::PageForward)) {
+        if (executeReaderAction(shortPressSideDown)) return;
+      }
+    }
+  }
+
+  // ── Tilt sensor: always page forward/back regardless of button mapping ───
+  if (SETTINGS.tiltPageTurn) {
+    if (halTiltSensor.wasTiltedForward()) {
+      executeReaderAction(CrossPointSettings::READER_ACTION_PAGE_FORWARD);
+    } else if (halTiltSensor.wasTiltedBack()) {
+      executeReaderAction(CrossPointSettings::READER_ACTION_PAGE_BACK);
+    }
   }
 }
 
@@ -1350,8 +1301,14 @@ void EpubReaderActivity::recordStatsProgress() {
   const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
   const auto progressPercent =
       static_cast<int8_t>(epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f);
+  std::string chapterTitle;
+  const int tocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);
+  if (tocIndex != -1) {
+    chapterTitle = epub->getTocItem(tocIndex).title;
+  }
   READING_STATS.updateProgress(
-      static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)), progressPercent >= 90, "",
+      static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)), progressPercent >= 90,
+      chapterTitle,
       static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f), 0, 100)));
 }
 
@@ -1603,6 +1560,16 @@ void EpubReaderActivity::renderStatusBar() const {
   }
 
   GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, timeLeftSeconds);
+
+  if (footnoteDepth > 0) {
+    int ot, or_, ob, ol;
+    renderer.getOrientedViewableTRBL(&ot, &or_, &ob, &ol);
+    const int statusH = UITheme::getInstance().getStatusBarHeight();
+    const int hintH = std::max(statusH, ReaderUtils::FOOTNOTE_HINT_HEIGHT);
+    const int y = renderer.getScreenHeight() - ob - hintH;
+    renderer.fillRect(0, y, renderer.getScreenWidth(), hintH, true);
+    renderer.drawCenteredText(UI_10_FONT_ID, y + (hintH - 12) / 2, tr(STR_FOOTNOTE_RETURN), false);
+  }
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {
@@ -1662,6 +1629,209 @@ void EpubReaderActivity::restoreSavedPosition() {
     section.reset();
   }
   requestUpdate();
+}
+
+void EpubReaderActivity::openReaderMenu() {
+  const int currentPage = section ? section->currentPage + 1 : 0;
+  const int totalPages = section ? section->pageCount : 0;
+  float bookProgress = 0.0f;
+  if (epub->getBookSize() > 0 && section && section->pageCount > 0) {
+    const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
+    bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+  }
+  const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
+
+  uint32_t timeLeftChapter = 0;
+  uint32_t timeLeftBook = 0;
+  if (SETTINGS.readingSpeedSecondsPerPage > 0 && section) {
+    const int pagesLeftChapter = totalPages - currentPage;
+    if (pagesLeftChapter > 0) {
+      timeLeftChapter = static_cast<uint32_t>(pagesLeftChapter) * SETTINGS.readingSpeedSecondsPerPage;
+    }
+    if (!spinePageCountCache.empty() && cachedTotalBookPages > 0) {
+      int pagesBeforeChapter = 0;
+      for (int i = 0; i < currentSpineIndex && i < static_cast<int>(spinePageCountCache.size()); i++) {
+        pagesBeforeChapter += spinePageCountCache[i];
+      }
+      const int pagesLeftBook = cachedTotalBookPages - pagesBeforeChapter - currentPage;
+      if (pagesLeftBook > 0) {
+        timeLeftBook = static_cast<uint32_t>(pagesLeftBook) * SETTINGS.readingSpeedSecondsPerPage;
+      }
+    } else {
+      const float sectionStart = epub->calculateProgress(currentSpineIndex, 0.0f);
+      const float sectionEnd = epub->calculateProgress(currentSpineIndex, 1.0f);
+      const float sectionFraction = sectionEnd - sectionStart;
+      const int pagesLeftBook = (sectionFraction > 0.001f)
+                                    ? static_cast<int>((1.0f - bookProgress / 100.0f) / sectionFraction * totalPages)
+                                    : pagesLeftChapter;
+      if (pagesLeftBook > 0) {
+        timeLeftBook = static_cast<uint32_t>(pagesLeftBook) * SETTINGS.readingSpeedSecondsPerPage;
+      }
+    }
+  }
+
+  startActivityForResult(
+      std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), currentPage, totalPages,
+                                              bookProgressPercent, SETTINGS.orientation,
+                                              !currentPageFootnotes.empty(), timeLeftChapter, timeLeftBook),
+      [this](const ActivityResult& result) {
+        const auto& menu = std::get<MenuResult>(result.data);
+        applyOrientation(menu.orientation);
+        toggleAutoPageTurn(menu.pageTurnOption);
+        if (!result.isCancelled) {
+          onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
+        }
+      });
+}
+
+bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION action) {
+  using A = CrossPointSettings;
+  switch (action) {
+    case A::READER_ACTION_NONE:
+      return false;
+
+    case A::READER_ACTION_PAGE_FORWARD:
+      if (currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount()) {
+        onGoHome();
+        return true;
+      }
+      if (!section) { requestUpdate(); return false; }
+      pageTurn(true);
+      return false;
+
+    case A::READER_ACTION_PAGE_BACK:
+      if (currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount()) {
+        RenderLock lock(*this);
+        currentSpineIndex = epub->getSpineItemsCount() - 1;
+        nextPageNumber = 0;
+        pendingPageJump = std::numeric_limits<uint16_t>::max();
+        section.reset();
+        requestUpdate();
+        return false;
+      }
+      if (!section) { requestUpdate(); return false; }
+      pageTurn(false);
+      return false;
+
+    case A::READER_ACTION_SKIP_CHAPTER_FORWARD: {
+      if (currentSpineIndex >= epub->getSpineItemsCount()) {
+        onGoHome();
+        return true;
+      }
+      lastPageTurnTime = millis();
+      RenderLock lock(*this);
+      nextPageNumber = 0;
+      currentSpineIndex++;
+      section.reset();
+      requestUpdate();
+      return false;
+    }
+
+    case A::READER_ACTION_SKIP_CHAPTER_BACK: {
+      if (currentSpineIndex > 0) {
+        lastPageTurnTime = millis();
+        RenderLock lock(*this);
+        nextPageNumber = 0;
+        currentSpineIndex--;
+        section.reset();
+        requestUpdate();
+      }
+      return false;
+    }
+
+    case A::READER_ACTION_OPEN_MENU:
+      openReaderMenu();
+      return false;
+
+    case A::READER_ACTION_GO_HOME:
+      onGoHome();
+      return true;
+
+    case A::READER_ACTION_FILE_BROWSER:
+      activityManager.goToFileBrowser(epub ? epub->getPath() : "");
+      return true;
+
+    case A::READER_ACTION_SLEEP:
+      enterDeepSleepFromReaderAction();
+      return true;
+
+    case A::READER_ACTION_SYNC:
+      performLongPressSync();
+      return false;
+
+    case A::READER_ACTION_BOOKMARK: {
+      const auto result = addBookmark();
+      if (result != BookmarkToggleResult::None) {
+        bookmarkMessageWasRemoval = (result == BookmarkToggleResult::Removed);
+        showBookmarkMessage = true;
+        bookmarkMessageTime = millis();
+        requestUpdate();
+      }
+      return false;
+    }
+
+    case A::READER_ACTION_FORCE_REFRESH: {
+      RenderLock lock;
+      renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+      return false;
+    }
+
+    case A::READER_ACTION_DARK_MODE:
+      SETTINGS.darkMode = !SETTINGS.darkMode;
+      SETTINGS.saveToFile();
+      requestUpdate();
+      return false;
+
+    case A::READER_ACTION_SCREENSHOT: {
+      RenderLock lock(*this);
+      pendingScreenshot = true;
+      requestUpdate();
+      return false;
+    }
+
+    case A::READER_ACTION_MARK_FINISHED:
+      if (epub) {
+        RECENT_BOOKS.updateProgress(epub->getPath(), 100);
+        RECENT_BOOKS.saveToFile();
+      }
+      if (!bookFinishedRecorded) {
+        bookFinishedRecorded = true;
+        READING_STATS.updateProgress(100, true);
+      }
+      onGoHome();
+      return true;
+
+    case A::READER_ACTION_FOOTNOTES:
+      if (!currentPageFootnotes.empty()) {
+        startActivityForResult(
+            std::make_unique<EpubReaderFootnotesActivity>(renderer, mappedInput, currentPageFootnotes),
+            [this](const ActivityResult& fnResult) {
+              if (!fnResult.isCancelled) {
+                navigateToHref(std::get<FootnoteResult>(fnResult.data).href, true);
+              }
+              requestUpdate();
+            });
+      }
+      return false;
+
+    case A::READER_ACTION_AUTO_PAGE_TURN:
+      if (automaticPageTurnActive) {
+        toggleAutoPageTurn(0);
+      } else if (SETTINGS.readingSpeedSecondsPerPage > 0) {
+        toggleAutoPageTurn(1);
+      } else {
+        toggleAutoPageTurn(2);
+      }
+      requestUpdate();
+      return false;
+
+    case A::READER_ACTION_READING_STATS:
+      activityManager.goToStats();
+      return true;
+
+    default:
+      return false;
+  }
 }
 
 void EpubReaderActivity::performLongPressSync() {
@@ -2065,6 +2235,7 @@ void EpubReaderActivity::performBookFusionSync() {
   bool shouldUploadProgress = true;
   bool appliedRemoteProgress = false;
   bool alreadyUpToDate = false;
+  bool skippedUploadForReread = false;
   if (downloadResult == BookFusionSyncClient::OK) {
     LOG_DBG("BFS", "Remote progress: %.2f%%, Local progress: %.2f%%", remoteBfPos.percentage, localBfPos.percentage);
 
@@ -2078,10 +2249,17 @@ void EpubReaderActivity::performBookFusionSync() {
     const bool localIsFurtherAhead = localBfPos.percentage > remoteBfPos.percentage + 1.0f;
     const bool localChangedSinceLastSync =
         hasLastSyncedPosition && !sameBookFusionPosition(lastSyncedPosition, localBfPos, currentPage, totalPages);
+    // True when the user deliberately navigated backward on this device since
+    // the last sync — e.g. returning to the start of a chapter to re-read.
+    // We preserve local and leave the server unchanged so the other device's
+    // further-ahead position remains as a bookmark for when the re-read ends.
+    const bool localWentBackIntentionally =
+        hasLastSyncedPosition && lastSyncedPosition.percentage > localBfPos.percentage + 1.0f;
 
     if (canCompareSyncState) {
-      LOG_DBG("BFS", "Last synced at %s; remote updated_at=%s; local changed=%d; localAhead=%d", lastSyncAt,
-              remoteBfPos.updatedAt, localChangedSinceLastSync ? 1 : 0, localIsFurtherAhead ? 1 : 0);
+      LOG_DBG("BFS", "Last synced at %s; remote updated_at=%s; local changed=%d; localAhead=%d; wentBack=%d",
+              lastSyncAt, remoteBfPos.updatedAt, localChangedSinceLastSync ? 1 : 0, localIsFurtherAhead ? 1 : 0,
+              localWentBackIntentionally ? 1 : 0);
     } else if (canCompareUpdatedAt) {
       LOG_DBG("BFS", "Have sync timestamp but no stored sync position; falling back to furthest-ahead rule");
     } else {
@@ -2092,17 +2270,20 @@ void EpubReaderActivity::performBookFusionSync() {
     // local and upload. This overrides the "remote newer wins" rule because a
     // newer timestamp on a behind-position is most often a stale write from
     // another device that opened the book without advancing.
+    // Also skip when the user intentionally went back (re-read): the NTP flag
+    // was previously gating remote-apply here, but that incorrectly suppressed
+    // it even when remote was further ahead.
     const bool shouldApplyRemote =
-        !localIsFurtherAhead && ((canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) ||
-                                 (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync &&
-                                  !internetTimeSynced && remoteIsFurtherAhead) ||
-                                 (!canCompareSyncState && remoteIsFurtherAhead));
+        !localIsFurtherAhead && !localWentBackIntentionally &&
+        ((canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) ||
+         (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync && remoteIsFurtherAhead) ||
+         (!canCompareSyncState && remoteIsFurtherAhead));
 
     if (shouldApplyRemote) {
       if (canCompareSyncState && remoteIsNewer && !localChangedSinceLastSync) {
         LOG_DBG("BFS", "Remote progress is newer and local is unchanged, updating local position");
       } else if (canCompareSyncState) {
-        LOG_DBG("BFS", "Internet time unavailable; remote is further ahead, updating local position");
+        LOG_DBG("BFS", "Remote is further ahead; applying remote position");
       } else {
         LOG_DBG("BFS", "Remote progress ahead, updating local position");
       }
@@ -2152,11 +2333,18 @@ void EpubReaderActivity::performBookFusionSync() {
       alreadyUpToDate = true;
       LOG_DBG("BFS", "BookFusion progress already up to date");
     } else if (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync && internetTimeSynced) {
-      LOG_DBG("BFS", "Local position changed; using freshly synced internet time and uploading local progress");
+      LOG_DBG("BFS", "Local changed; remote not further ahead; uploading local");
     } else if (canCompareSyncState && remoteIsNewer && localChangedSinceLastSync) {
-      LOG_DBG("BFS", "Local and remote both changed without internet time; keeping furthest-ahead fallback");
+      LOG_DBG("BFS", "Local and remote both changed; remote not further ahead; uploading local");
     } else if (localIsFurtherAhead && remoteIsNewer) {
       LOG_DBG("BFS", "Remote updated_at is newer but remote position is behind local; uploading local");
+    }
+
+    if (localWentBackIntentionally && !shouldApplyRemote && !alreadyUpToDate) {
+      shouldUploadProgress = false;
+      skippedUploadForReread = true;
+      LOG_DBG("BFS", "Local went back %.1f%% since last sync; preserving re-read position locally, leaving server unchanged",
+              lastSyncedPosition.percentage - localBfPos.percentage);
     }
   } else if (downloadResult == BookFusionSyncClient::NOT_FOUND) {
     LOG_DBG("BFS", "No remote progress found, will upload current position");
@@ -2207,6 +2395,8 @@ void EpubReaderActivity::performBookFusionSync() {
       UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
     } else if (alreadyUpToDate) {
       UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Progress already up to date.");
+    } else if (skippedUploadForReread) {
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Re-reading detected.\nProgress preserved locally.");
     } else if (uploadResult == BookFusionSyncClient::OK) {
       LOG_DBG("BFS", "Progress uploaded successfully");
       char msg[80];

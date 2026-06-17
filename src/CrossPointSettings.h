@@ -203,6 +203,29 @@ class CrossPointSettings {
 
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
 
+  // Reader button action — assignable to any button/press-type in the reader context.
+  enum READER_ACTION : uint8_t {
+    READER_ACTION_NONE = 0,
+    READER_ACTION_PAGE_FORWARD = 1,
+    READER_ACTION_PAGE_BACK = 2,
+    READER_ACTION_SKIP_CHAPTER_FORWARD = 3,
+    READER_ACTION_SKIP_CHAPTER_BACK = 4,
+    READER_ACTION_OPEN_MENU = 5,
+    READER_ACTION_GO_HOME = 6,
+    READER_ACTION_FILE_BROWSER = 7,
+    READER_ACTION_SLEEP = 8,
+    READER_ACTION_SYNC = 9,
+    READER_ACTION_BOOKMARK = 10,
+    READER_ACTION_FORCE_REFRESH = 11,
+    READER_ACTION_DARK_MODE = 12,
+    READER_ACTION_SCREENSHOT = 13,
+    READER_ACTION_MARK_FINISHED = 14,
+    READER_ACTION_FOOTNOTES = 15,
+    READER_ACTION_AUTO_PAGE_TURN = 16,
+    READER_ACTION_READING_STATS = 17,
+    READER_ACTION_COUNT
+  };
+
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
   // Sleep screen cover mode settings
@@ -308,6 +331,25 @@ class CrossPointSettings {
   uint8_t seamlessSleepScreen = SEAMLESS_NEVER;
   // Tilt-based page turning (X3 only — requires QMI8658 IMU)
   uint8_t tiltPageTurn = TILT_OFF;
+
+  // Per-button reader actions (short and long press for each logical button).
+  // Defaults match legacy hard-coded behaviour so existing users see no change.
+  uint8_t readerShortPressBack = READER_ACTION_GO_HOME;
+  uint8_t readerLongPressBack = READER_ACTION_FILE_BROWSER;
+  uint8_t readerShortPressConfirm = READER_ACTION_OPEN_MENU;
+  uint8_t readerLongPressConfirm = READER_ACTION_FORCE_REFRESH;
+  uint8_t readerShortPressLeft = READER_ACTION_PAGE_BACK;
+  uint8_t readerLongPressLeft = READER_ACTION_NONE;
+  uint8_t readerShortPressRight = READER_ACTION_PAGE_FORWARD;
+  uint8_t readerLongPressRight = READER_ACTION_NONE;
+  uint8_t readerShortPressSideUp = READER_ACTION_PAGE_BACK;
+  uint8_t readerLongPressSideUp = READER_ACTION_SKIP_CHAPTER_BACK;
+  uint8_t readerShortPressSideDown = READER_ACTION_PAGE_FORWARD;
+  uint8_t readerLongPressSideDown = READER_ACTION_SKIP_CHAPTER_FORWARD;
+  uint8_t readerShortPressPower = READER_ACTION_PAGE_FORWARD;
+  // Migration flag: 0 = old settings not yet applied to new per-button fields.
+  uint8_t readerActionsMigrated = 0;
+
   ~CrossPointSettings() = default;
 
   // Get singleton instance
@@ -336,6 +378,10 @@ class CrossPointSettings {
   bool loadFromFile();
 
   static void validateFrontButtonMapping(CrossPointSettings& settings);
+
+  // One-time migration: applies legacy per-action settings (longPressAction, shortPwrBtn,
+  // longPressChapterSkip, sideButtonLayout) to the new per-button action fields.
+  static void migrateReaderActions(CrossPointSettings& settings);
 
  private:
   bool loadFromBinaryFile();

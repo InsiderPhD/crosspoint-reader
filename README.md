@@ -17,7 +17,7 @@ Everything below has been added or significantly reworked on top of the upstream
 - **Inline footnotes** — new "On page" Footnotes mode renders footnote text at the bottom of the page that references it, beneath a horizontal rule. Space is reserved during layout so the footnote block never overlaps page text.
 - **Auto-Turn in seconds-per-page** — replaces the older pages-per-minute setting. Options: Off / Auto / 60s / 30s / 10s / 5s. Auto uses your calibrated reading speed; the menu shows the estimate inline, e.g. `Auto (~45s)`.
 - **Typography** — new X-Small font size across Bookerly / NotoSans / OpenDyslexic; new **Monospace** family (JetBrains Mono 6/8/10/12 pt) for code-heavy EPUBs. Bold-italic and 18 pt variants removed to reclaim flash.
-- **Global long-press Back → Home** — holding Back for 1 second returns to Home from anywhere in the firmware.
+- **Per-button Reader Controls** — every button event in the reader (13 configurable: short and long press for Back, Confirm, Left, Right, Side Up, Side Down, and Power short press) can be independently bound to one of 18 actions: page turn, chapter skip, open menu, go home, file browser, sleep, force refresh, dark mode, bookmark, sync, screenshot, footnotes, auto page turn, reading stats, and more. Power long press is fixed to Sleep. Configured in Settings → System → Reader Controls. Note: Reader Controls binds actions to *logical* button roles — if you also use Remap Front Buttons to change which physical button is "Back", the Back reader action moves with it.
 - **File Browser progress column** — right-aligned `X` (finished, ≥90%), `21%` (in progress), or blank (unopened/directory) on every row.
 
 ## Original CrossPoint features (still here)

@@ -157,6 +157,22 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["longPressAction"] = s.longPressAction;
   doc["shortPwrBtn"] = s.shortPwrBtn;
 
+  // Per-button reader actions — managed by ReaderControlsActivity, not SettingsList.
+  doc["readerShortPressBack"] = s.readerShortPressBack;
+  doc["readerLongPressBack"] = s.readerLongPressBack;
+  doc["readerShortPressConfirm"] = s.readerShortPressConfirm;
+  doc["readerLongPressConfirm"] = s.readerLongPressConfirm;
+  doc["readerShortPressLeft"] = s.readerShortPressLeft;
+  doc["readerLongPressLeft"] = s.readerLongPressLeft;
+  doc["readerShortPressRight"] = s.readerShortPressRight;
+  doc["readerLongPressRight"] = s.readerLongPressRight;
+  doc["readerShortPressSideUp"] = s.readerShortPressSideUp;
+  doc["readerLongPressSideUp"] = s.readerLongPressSideUp;
+  doc["readerShortPressSideDown"] = s.readerShortPressSideDown;
+  doc["readerLongPressSideDown"] = s.readerLongPressSideDown;
+  doc["readerShortPressPower"] = s.readerShortPressPower;
+  doc["readerActionsMigrated"] = s.readerActionsMigrated;
+
   String json;
   serializeJson(doc, json);
   return Storage.writeFile(path, json);
@@ -245,6 +261,25 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.longPressAction =
       clamp(doc["longPressAction"] | (uint8_t)S::LONG_PRESS_REFRESH, S::LONG_PRESS_ACTION_COUNT, S::LONG_PRESS_REFRESH);
   s.shortPwrBtn = clamp(doc["shortPwrBtn"] | (uint8_t)S::PAGE_TURN, S::SHORT_PWRBTN_COUNT, S::PAGE_TURN);
+
+  // Per-button reader actions — clamped to READER_ACTION_COUNT so stale/corrupt values don't escape.
+  const auto clampAction = [&clamp](uint8_t v, uint8_t def) -> uint8_t {
+    return clamp(v, S::READER_ACTION_COUNT, def);
+  };
+  s.readerShortPressBack = clampAction(doc["readerShortPressBack"] | (uint8_t)S::READER_ACTION_GO_HOME, S::READER_ACTION_GO_HOME);
+  s.readerLongPressBack = clampAction(doc["readerLongPressBack"] | (uint8_t)S::READER_ACTION_FILE_BROWSER, S::READER_ACTION_FILE_BROWSER);
+  s.readerShortPressConfirm = clampAction(doc["readerShortPressConfirm"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
+  s.readerLongPressConfirm = clampAction(doc["readerLongPressConfirm"] | (uint8_t)S::READER_ACTION_FORCE_REFRESH, S::READER_ACTION_FORCE_REFRESH);
+  s.readerShortPressLeft = clampAction(doc["readerShortPressLeft"] | (uint8_t)S::READER_ACTION_PAGE_BACK, S::READER_ACTION_PAGE_BACK);
+  s.readerLongPressLeft = clampAction(doc["readerLongPressLeft"] | (uint8_t)S::READER_ACTION_NONE, S::READER_ACTION_NONE);
+  s.readerShortPressRight = clampAction(doc["readerShortPressRight"] | (uint8_t)S::READER_ACTION_PAGE_FORWARD, S::READER_ACTION_PAGE_FORWARD);
+  s.readerLongPressRight = clampAction(doc["readerLongPressRight"] | (uint8_t)S::READER_ACTION_NONE, S::READER_ACTION_NONE);
+  s.readerShortPressSideUp = clampAction(doc["readerShortPressSideUp"] | (uint8_t)S::READER_ACTION_PAGE_BACK, S::READER_ACTION_PAGE_BACK);
+  s.readerLongPressSideUp = clampAction(doc["readerLongPressSideUp"] | (uint8_t)S::READER_ACTION_SKIP_CHAPTER_BACK, S::READER_ACTION_SKIP_CHAPTER_BACK);
+  s.readerShortPressSideDown = clampAction(doc["readerShortPressSideDown"] | (uint8_t)S::READER_ACTION_PAGE_FORWARD, S::READER_ACTION_PAGE_FORWARD);
+  s.readerLongPressSideDown = clampAction(doc["readerLongPressSideDown"] | (uint8_t)S::READER_ACTION_SKIP_CHAPTER_FORWARD, S::READER_ACTION_SKIP_CHAPTER_FORWARD);
+  s.readerShortPressPower = clampAction(doc["readerShortPressPower"] | (uint8_t)S::READER_ACTION_PAGE_FORWARD, S::READER_ACTION_PAGE_FORWARD);
+  s.readerActionsMigrated = doc["readerActionsMigrated"] | (uint8_t)0;
 
   LOG_DBG("CPS", "Settings loaded from file");
 
