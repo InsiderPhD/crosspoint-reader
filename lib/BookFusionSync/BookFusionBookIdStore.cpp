@@ -175,6 +175,39 @@ bool BookFusionBookIdStore::saveLastSyncAt(const char* epubPath, const char* upd
   return ok;
 }
 
+uint64_t BookFusionBookIdStore::loadLastSyncedReadingMs(const char* epubPath) {
+  char sidecarPath[64];
+  buildSidecarPath(epubPath, sidecarPath, sizeof(sidecarPath));
+  if (!Storage.exists(sidecarPath)) return 0;
+  String json = Storage.readFile(sidecarPath);
+  if (json.isEmpty()) return 0;
+  JsonDocument doc;
+  if (deserializeJson(doc, json) != DeserializationError::Ok) return 0;
+  const uint32_t syncedSeconds = doc["synced_reading_s"] | (uint32_t)0;
+  return static_cast<uint64_t>(syncedSeconds) * 1000u;
+}
+
+bool BookFusionBookIdStore::saveLastSyncedReadingMs(const char* epubPath, const uint64_t totalReadingMs) {
+  char sidecarPath[64];
+  buildSidecarPath(epubPath, sidecarPath, sizeof(sidecarPath));
+  Storage.mkdir("/.crosspoint");
+  JsonDocument doc;
+  if (Storage.exists(sidecarPath)) {
+    String existing = Storage.readFile(sidecarPath);
+    if (!existing.isEmpty()) deserializeJson(doc, existing);
+  }
+  doc["synced_reading_s"] = static_cast<uint32_t>(totalReadingMs / 1000u);
+  String json;
+  serializeJson(doc, json);
+  const bool ok = Storage.writeFile(sidecarPath, json);
+  if (ok) {
+    LOG_DBG("BFS", "Saved synced_reading_s=%lu for %s", static_cast<unsigned long>(totalReadingMs / 1000u), epubPath);
+  } else {
+    LOG_ERR("BFS", "Failed to save synced_reading_s sidecar: %s", sidecarPath);
+  }
+  return ok;
+}
+
 bool BookFusionBookIdStore::saveLastSyncedPosition(const char* epubPath, const BookFusionStoredPosition& position) {
   char sidecarPath[64];
   buildSidecarPath(epubPath, sidecarPath, sizeof(sidecarPath));

@@ -42,6 +42,13 @@ class BookFusionBookIdStore {
   static bool loadLastSyncedPosition(const char* epubPath, BookFusionStoredPosition& out);
   static bool saveLastSyncedPosition(const char* epubPath, const BookFusionStoredPosition& position);
 
+  // Track how many milliseconds of reading time have already been pushed to
+  // the BookFusion reading-time endpoint. Stored as whole seconds in the sidecar
+  // under "synced_reading_s"; returned as milliseconds for direct comparison
+  // with ReadingBookStats::totalReadingMs. Returns 0 if nothing has been sent yet.
+  static uint64_t loadLastSyncedReadingMs(const char* epubPath);
+  static bool saveLastSyncedReadingMs(const char* epubPath, uint64_t totalReadingMs);
+
  private:
   // Derives /.crosspoint/bookfusion_<32hexchars>.json from the epub path.
   static void buildSidecarPath(const char* epubPath, char* outPath, size_t maxLen);

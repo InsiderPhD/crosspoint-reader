@@ -12,6 +12,7 @@
 #include "BookFusionSyncClient.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -138,6 +139,34 @@ void BookFusionSyncActivity::performPush() {
   BookFusionPosition uploadedBfPos = localBfPos;
   const auto result = BookFusionSyncClient::setProgress(bookId, localBfPos, &uploadedBfPos);
 
+  // Reading-time tracking: compute unsent delta and push it to the track endpoint.
+  // This is best-effort — a tracking failure doesn't fail the overall push.
+  uint32_t readingTimeSentSeconds = 0;
+  if (result == BookFusionSyncClient::OK) {
+    const std::string epubPath = epub->getPath();
+    const ReadingBookStats* bookStats = READING_STATS.findBook(epubPath);
+    if (bookStats && bookStats->totalReadingMs > 0) {
+      const uint64_t currentTotalMs = bookStats->totalReadingMs;
+      const uint64_t lastSyncedMs = BookFusionBookIdStore::loadLastSyncedReadingMs(epubPath.c_str());
+      if (currentTotalMs > lastSyncedMs) {
+        const uint32_t durationSeconds = static_cast<uint32_t>((currentTotalMs - lastSyncedMs) / 1000u);
+        if (durationSeconds >= 5) {
+          char loggedAt[40] = {};
+          if (formatLocalSyncTimestamp(loggedAt, sizeof(loggedAt))) {
+            const auto trackResult = BookFusionSyncClient::trackReadingTime(bookId, durationSeconds, loggedAt);
+            if (trackResult == BookFusionSyncClient::OK) {
+              BookFusionBookIdStore::saveLastSyncedReadingMs(epubPath.c_str(), currentTotalMs);
+              readingTimeSentSeconds = durationSeconds;
+            } else {
+              LOG_DBG("BFS", "Reading time tracking failed (non-fatal): %s",
+                      BookFusionSyncClient::errorString(trackResult));
+            }
+          }
+        }
+      }
+    }
+  }
+
   RenderLock lock(*this);
   if (result == BookFusionSyncClient::OK) {
     const std::string epubPath = epub->getPath();
@@ -156,7 +185,22 @@ void BookFusionSyncActivity::performPush() {
 
     state = RESULT_OK;
     resultTitle = "Pushed to BookFusion";
-    resultDetail.clear();
+    if (readingTimeSentSeconds > 0) {
+      char timeBuf[48];
+      const uint32_t h = readingTimeSentSeconds / 3600u;
+      const uint32_t m = (readingTimeSentSeconds % 3600u) / 60u;
+      const uint32_t s = readingTimeSentSeconds % 60u;
+      if (h > 0) {
+        snprintf(timeBuf, sizeof(timeBuf), "Reading time synced: %uh %um", h, m);
+      } else if (m > 0) {
+        snprintf(timeBuf, sizeof(timeBuf), "Reading time synced: %um %us", m, s);
+      } else {
+        snprintf(timeBuf, sizeof(timeBuf), "Reading time synced: %us", s);
+      }
+      resultDetail = timeBuf;
+    } else {
+      resultDetail.clear();
+    }
   } else {
     state = RESULT_FAILED;
     resultTitle = "Push failed";

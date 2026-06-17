@@ -36,6 +36,12 @@ struct BookFusionBook {
   char authors[48] = {};
   char format[8] = {};  // "EPUB", "PDF", etc.
   char coverUrl[384] = {};
+  // BookFusion organisational metadata that is NOT embedded in the EPUB file
+  // (unlike series/tags/publisher), so it's the only API metadata worth
+  // persisting. Each is a ", "-joined list, truncated to the buffer.
+  char categories[96] = {};
+  char bookshelves[96] = {};
+  char lists[96] = {};
 };
 
 /**
@@ -46,9 +52,9 @@ struct BookFusionBook {
 struct BookFusionSearchResult {
   static constexpr int MAX_BOOKS = 10;
   BookFusionBook books[MAX_BOOKS];
-  int count = 0;        // Books in this page.
-  int totalCount = 0;   // Total books across all pages (from the Total-Count
-                        // response header). 0 means the server didn't tell us.
+  int count = 0;       // Books in this page.
+  int totalCount = 0;  // Total books across all pages (from the Total-Count
+                       // response header). 0 means the server didn't tell us.
   int currentPage = 0;
   bool hasMore = false;
 };
@@ -129,6 +135,12 @@ class BookFusionSyncClient {
   // Returns the user's custom shelves. POSTs `{}` to /api/user/bookshelves/search.
   // The plugin source treats this as un-paginated; we accept that.
   static Error searchBookshelves(BookFusionBookshelfList& out);
+
+  // --- Reading Time ---
+  // Sends a single reading-time record to POST /api/user/reading/track.
+  // durationSeconds must be >= 5 (BookFusion minimum; caller enforces this).
+  // loggedAtUtcIso must be UTC ISO-8601: "2026-06-17T14:30:05Z" (trailing Z).
+  static Error trackReadingTime(uint32_t bookId, uint32_t durationSeconds, const char* loggedAtUtcIso);
 
   static const char* errorString(Error error);
 

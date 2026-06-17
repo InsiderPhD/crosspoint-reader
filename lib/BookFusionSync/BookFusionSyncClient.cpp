@@ -50,6 +50,16 @@ void appendAuthor(BookFusionBook& book, const char* name, size_t len) {
   safeAppendToken(book.authors, sizeof(book.authors), name, len);
 }
 
+// Append one value to a ", "-joined fixed buffer (used for categories / bookshelves
+// / lists). Overflow is truncated by safeAppendToken.
+void appendJoined(char* buf, size_t size, const char* value, size_t len) {
+  if (len == 0) return;
+  if (buf[0] != '\0') {
+    safeAppendToken(buf, size, ", ", 2);
+  }
+  safeAppendToken(buf, size, value, len);
+}
+
 void readBookFusionPosition(JsonDocument& doc, BookFusionPosition& out) {
   out.percentage = doc["percentage"] | 0.0f;
   out.chapterIndex = doc["chapter_index"] | 0;
@@ -94,7 +104,14 @@ class BookFusionSearchJsonStream final : public Stream {
     COVER_URL,
     AUTHORS,
     AUTHOR_NAME,
+    CATEGORIES,
+    BOOKSHELVES,
+    LISTS,
+    LIST_ITEM_NAME,
   };
+
+  // Which of the three organisational arrays we're currently inside.
+  enum class ListField : uint8_t { NONE, CATEGORIES, BOOKSHELVES, LISTS };
 
   static void sOnKey(void* ctx, const char* key, size_t len) {
     static_cast<BookFusionSearchJsonStream*>(ctx)->onKey(key, len);
@@ -136,11 +153,20 @@ class BookFusionSearchJsonStream final : public Stream {
         lastKey_ = LastKey::COVER;
       } else if (keyEquals(key, len, "authors")) {
         lastKey_ = LastKey::AUTHORS;
+      } else if (keyEquals(key, len, "categories")) {
+        lastKey_ = LastKey::CATEGORIES;
+      } else if (keyEquals(key, len, "bookshelves")) {
+        lastKey_ = LastKey::BOOKSHELVES;
+      } else if (keyEquals(key, len, "lists")) {
+        lastKey_ = LastKey::LISTS;
       }
     } else if (inCover_ && depth_ == coverDepth_ && keyEquals(key, len, "url")) {
       lastKey_ = LastKey::COVER_URL;
     } else if (inAuthor_ && depth_ == authorDepth_ && keyEquals(key, len, "name")) {
       lastKey_ = LastKey::AUTHOR_NAME;
+    } else if (inListItem_ && depth_ == listItemDepth_ &&
+               (keyEquals(key, len, "name") || keyEquals(key, len, "title"))) {
+      lastKey_ = LastKey::LIST_ITEM_NAME;
     }
   }
 
@@ -161,7 +187,15 @@ class BookFusionSearchJsonStream final : public Stream {
       case LastKey::AUTHOR_NAME:
         appendAuthor(currentBook_, value, len);
         break;
+      case LastKey::LIST_ITEM_NAME:
+        appendToCurrentList(value, len);
+        break;
       default:
+        // Direct string element inside one of the organisational arrays
+        // (i.e. ["a","b"] rather than [{"name":"a"}]).
+        if (inList_ && !inListItem_ && depth_ == listDepth_) {
+          appendToCurrentList(value, len);
+        }
         break;
     }
     lastKey_ = LastKey::NONE;
@@ -183,6 +217,9 @@ class BookFusionSearchJsonStream final : public Stream {
     } else if (inAuthors_ && depth_ == authorsDepth_) {
       inAuthor_ = true;
       authorDepth_ = depth_ + 1;
+    } else if (inList_ && !inListItem_ && depth_ == listDepth_) {
+      inListItem_ = true;
+      listItemDepth_ = depth_ + 1;
     }
     ++depth_;
     lastKey_ = LastKey::NONE;
@@ -195,6 +232,9 @@ class BookFusionSearchJsonStream final : public Stream {
     } else if (inCover_ && depth_ == coverDepth_) {
       inCover_ = false;
       coverDepth_ = 0;
+    } else if (inListItem_ && depth_ == listItemDepth_) {
+      inListItem_ = false;
+      listItemDepth_ = 0;
     } else if (inBook_ && depth_ == bookDepth_) {
       commitBook();
       inBook_ = false;
@@ -210,6 +250,13 @@ class BookFusionSearchJsonStream final : public Stream {
     } else if (inBook_ && lastKey_ == LastKey::AUTHORS && depth_ == bookDepth_) {
       inAuthors_ = true;
       authorsDepth_ = depth_ + 1;
+    } else if (inBook_ && depth_ == bookDepth_ &&
+               (lastKey_ == LastKey::CATEGORIES || lastKey_ == LastKey::BOOKSHELVES || lastKey_ == LastKey::LISTS)) {
+      inList_ = true;
+      listDepth_ = depth_ + 1;
+      currentList_ = (lastKey_ == LastKey::CATEGORIES)    ? ListField::CATEGORIES
+                     : (lastKey_ == LastKey::BOOKSHELVES) ? ListField::BOOKSHELVES
+                                                          : ListField::LISTS;
     }
     ++depth_;
     lastKey_ = LastKey::NONE;
@@ -219,12 +266,32 @@ class BookFusionSearchJsonStream final : public Stream {
     if (inAuthors_ && depth_ == authorsDepth_) {
       inAuthors_ = false;
       authorsDepth_ = 0;
+    } else if (inList_ && depth_ == listDepth_) {
+      inList_ = false;
+      listDepth_ = 0;
+      currentList_ = ListField::NONE;
     }
     if (rootArraySeen_ && depth_ == 1) {
       rootArrayClosed_ = true;
     }
     if (depth_ > 0) --depth_;
     lastKey_ = LastKey::NONE;
+  }
+
+  void appendToCurrentList(const char* value, size_t len) {
+    switch (currentList_) {
+      case ListField::CATEGORIES:
+        appendJoined(currentBook_.categories, sizeof(currentBook_.categories), value, len);
+        break;
+      case ListField::BOOKSHELVES:
+        appendJoined(currentBook_.bookshelves, sizeof(currentBook_.bookshelves), value, len);
+        break;
+      case ListField::LISTS:
+        appendJoined(currentBook_.lists, sizeof(currentBook_.lists), value, len);
+        break;
+      default:
+        break;
+    }
   }
 
   void beginBook(uint8_t bookDepth) {
@@ -254,12 +321,17 @@ class BookFusionSearchJsonStream final : public Stream {
   uint8_t coverDepth_ = 0;
   uint8_t authorsDepth_ = 0;
   uint8_t authorDepth_ = 0;
+  uint8_t listDepth_ = 0;
+  uint8_t listItemDepth_ = 0;
   bool rootArraySeen_ = false;
   bool rootArrayClosed_ = false;
   bool inBook_ = false;
   bool inCover_ = false;
   bool inAuthors_ = false;
   bool inAuthor_ = false;
+  bool inList_ = false;
+  bool inListItem_ = false;
+  ListField currentList_ = ListField::NONE;
 };
 
 class BookFusionBookshelfJsonStream final : public Stream {
@@ -837,10 +909,10 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBookshelves(BookFusionBo
     LOG_DBG("BFS", "searchBookshelves: page %d added %d shelves (total now %d, server total=%d)", page, pageCount,
             out.count, totalCount);
 
-    if (pageCount == 0) break;                  // empty response — defensive
-    if (pageCount < SHELVES_PER_PAGE) break;    // short page = last page
+    if (pageCount == 0) break;                                           // empty response — defensive
+    if (pageCount < SHELVES_PER_PAGE) break;                             // short page = last page
     if (totalCount > 0 && page * SHELVES_PER_PAGE >= totalCount) break;  // header says we're done
-    if (responseStream.capped()) break;         // stream hit MAX_SHELVES mid-page
+    if (responseStream.capped()) break;                                  // stream hit MAX_SHELVES mid-page
   }
 
   if (totalCount > 0 && out.count < totalCount) {
@@ -848,6 +920,46 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBookshelves(BookFusionBo
   }
   LOG_DBG("BFS", "searchBookshelves: loaded %d shelves", out.count);
   return OK;
+}
+
+BookFusionSyncClient::Error BookFusionSyncClient::trackReadingTime(const uint32_t bookId,
+                                                                      const uint32_t durationSeconds,
+                                                                      const char* loggedAtUtcIso) {
+  if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
+
+  char url[128];
+  snprintf(url, sizeof(url), "%s/api/user/reading/track", BASE_URL);
+  LOG_DBG("BFS", "trackReadingTime: book=%lu duration=%lus logged_at=%s", (unsigned long)bookId,
+          (unsigned long)durationSeconds, loggedAtUtcIso);
+
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure();
+  HTTPClient http;
+  http.begin(secureClient, url);
+  addAuthHeaders(http);
+  http.addHeader("Content-Type", "application/json");
+
+  JsonDocument body;
+  JsonArray records = body["records"].to<JsonArray>();
+  JsonObject record = records.add<JsonObject>();
+  record["book_id"] = bookId;
+  record["duration"] = durationSeconds;
+  record["logged_at"] = loggedAtUtcIso;
+  record["online"] = true;
+  record["foreground"] = true;
+
+  String bodyStr;
+  serializeJson(body, bodyStr);
+
+  const int httpCode = http.POST(bodyStr);
+  http.end();
+
+  LOG_DBG("BFS", "trackReadingTime response: %d", httpCode);
+
+  if (httpCode == 200 || httpCode == 201) return OK;
+  if (httpCode == 401) return AUTH_FAILED;
+  if (httpCode < 0) return NETWORK_ERROR;
+  return SERVER_ERROR;
 }
 
 const char* BookFusionSyncClient::errorString(Error error) {
