@@ -27,15 +27,21 @@ class UITheme {
 
   // Book context menu — shared across HomeActivity, FileBrowserActivity,
   // and RecentBooksActivity.
-  static constexpr int BOOK_OPTIONS_COUNT = 5;
+  static constexpr int BOOK_OPTIONS_COUNT = 6;
   static constexpr int BOOK_OPT_MARK_READ = 0;
   static constexpr int BOOK_OPT_RESET_PROGRESS = 1;
   static constexpr int BOOK_OPT_SHELVE = 2;
   static constexpr int BOOK_OPT_DELETE = 3;
   static constexpr int BOOK_OPT_REINDEX = 4;
+  static constexpr int BOOK_OPT_BOOK_INFO = 5;
 
-  static void drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author,
-                                   const char* folderPath, int progressPercent, int selectedOptionIndex);
+  // Fills ids[] with the BOOK_OPT_* values currently visible (honoring Dev Mode —
+  // Delete Book Cache is hidden when Dev Mode is off) and returns the count. Used by
+  // both drawBookOptionsPopup (labels) and the host activities (index -> option id).
+  static int getVisibleBookOptions(int* ids, int maxIds);
+
+  static void drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author, const char* folderPath,
+                                   int progressPercent, int selectedOptionIndex);
 
   static void drawSyncProgressPopup(GfxRenderer& renderer, const char* title, const char* statusMessage);
 

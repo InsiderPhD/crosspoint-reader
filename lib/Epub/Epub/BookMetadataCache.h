@@ -14,6 +14,15 @@ class BookMetadataCache {
     std::string language;
     std::string coverItemHref;
     std::string textReferenceHref;
+    // Short Calibre metadata, safe to keep inline in book.bin / coreMetadata.
+    // The (potentially large) description is NOT here — it lives in a lazy sidecar.
+    std::string tags;
+    std::string seriesName;
+    std::string seriesIndex;
+    std::string publisher;
+    std::string pubDate;    // dc:date, as written (formatted for display by Epub::getPublishedDate)
+    std::string rating;     // calibre:rating, 0-10 scale (formatted by Epub::getRating)
+    std::string bookshelf;  // BookFusion "bookshelf" Calibre custom column value
   };
 
   struct SpineEntry {

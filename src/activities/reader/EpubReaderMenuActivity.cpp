@@ -36,13 +36,20 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   items.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
   items.push_back({MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS});
   items.push_back({MenuAction::ADD_BOOKMARK, StrId::STR_CREATE_BOOKMARK});
-  items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
+  // Screenshot is a developer/testing action — only surface it in Dev Mode.
+  if (SETTINGS.devMode) {
+    items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
+  }
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
   items.push_back({MenuAction::MARK_AS_COMPLETED, StrId::STR_MARK_AS_COMPLETED});
-  items.push_back({MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON});
   items.push_back({MenuAction::SYNC_PUSH, StrId::STR_SYNC_PUSH_PROGRESS});
   items.push_back({MenuAction::SYNC_PULL, StrId::STR_SYNC_PULL_PROGRESS});
-  items.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
+  // Delete Book Cache is a testing aid — only surface it in Dev Mode.
+  if (SETTINGS.devMode) {
+    items.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
+  }
+  // Go Home sits last so it's always the final entry in the menu.
+  items.push_back({MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON});
   return items;
 }
 

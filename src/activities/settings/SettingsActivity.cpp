@@ -7,7 +7,6 @@
 
 #include "BookFusionSettingsActivity.h"
 #include "ButtonRemapActivity.h"
-#include "ReaderControlsActivity.h"
 #include "CalibreSettingsActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
@@ -19,6 +18,7 @@
 #include "ManualDateActivity.h"
 #include "MappedInputManager.h"
 #include "OtaUpdateActivity.h"
+#include "ReaderControlsActivity.h"
 #include "ResetStatsActivity.h"
 #include "SdCardFontGlobals.h"
 #include "SdFirmwareUpdateActivity.h"
@@ -68,17 +68,27 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BF_SYNC, SettingAction::BookFusionSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_BROWSER, SettingAction::OPDSBrowser));
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
+  // Clear Reading Cache: testing aid, hidden unless Dev Mode is on.
+  if (SETTINGS.devMode) {
+    systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
+  }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_DOWNLOAD_FROM_URL, SettingAction::DownloadFromUrl));
+  // Download Update from URL: raw-writes firmware (bypasses image verify) — bricking
+  // risk for casual users, so gate it behind Dev Mode.
+  if (SETTINGS.devMode) {
+    systemSettings.push_back(SettingInfo::Action(StrId::STR_DOWNLOAD_FROM_URL, SettingAction::DownloadFromUrl));
+  }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   // Stats tab device-only actions (date/timezone pickers + reset). The daily
   // goal + min-session-length Enum entries are already populated above from
   // SettingsList — these actions go below them.
   statsSettings.push_back(SettingInfo::Action(StrId::STR_SET_DATE, SettingAction::SetDate));
   statsSettings.push_back(SettingInfo::Action(StrId::STR_TIME_ZONE, SettingAction::TimeZone));
-  statsSettings.push_back(SettingInfo::Action(StrId::STR_RESET_READING_STATS, SettingAction::ResetStats));
+  // Reset Reading Stats: testing aid, hidden unless Dev Mode is on.
+  if (SETTINGS.devMode) {
+    statsSettings.push_back(SettingInfo::Action(StrId::STR_RESET_READING_STATS, SettingAction::ResetStats));
+  }
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_FAMILY, SettingAction::FontFamily));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_DOWNLOAD, SettingAction::FontDownload));

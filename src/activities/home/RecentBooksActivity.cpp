@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include "../util/ConfirmationActivity.h"
+#include "BookDetailsActivity.h"
 #include "BookFusionBookIdStore.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
@@ -50,7 +51,7 @@ void RecentBooksActivity::rebuildSortedIndices() {
     e.authorKey = b.author;
     e.progressPercent = b.progressPercent;
     e.lastOpenedRank = static_cast<uint16_t>(i);  // RECENT_BOOKS order = most-recent-first
-    e.dateAddedTs = 0;  // Filled lazily in DateAdded sort modes; see below.
+    e.dateAddedTs = 0;                            // Filled lazily in DateAdded sort modes; see below.
     entries.push_back(e);
   }
 
@@ -77,7 +78,8 @@ void RecentBooksActivity::onEnter() {
   }
 
   // Pull last-chosen sort from settings (shared across all list activities).
-  currentSort = (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
+  currentSort =
+      (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
 
   // Load data
   loadRecentBooks();
@@ -116,8 +118,7 @@ void RecentBooksActivity::loop() {
   }
 
   // Long press on a book → context menu
-  if (!showingBookOptions && !longPressBookTriggered && !recentBooks.empty() &&
-      selectorIndex < sortedIndices.size() &&
+  if (!showingBookOptions && !longPressBookTriggered && !recentBooks.empty() && selectorIndex < sortedIndices.size() &&
       mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= 700UL) {
     const size_t actual = sortedIndices[selectorIndex];
     longPressBookTriggered = true;
@@ -133,12 +134,14 @@ void RecentBooksActivity::loop() {
   }
 
   if (showingBookOptions) {
-    buttonNavigator.onNext([this] {
-      bookOptionsIndex = (bookOptionsIndex + 1) % UITheme::BOOK_OPTIONS_COUNT;
+    int optionIds[UITheme::BOOK_OPTIONS_COUNT];
+    const int optionCount = UITheme::getVisibleBookOptions(optionIds, UITheme::BOOK_OPTIONS_COUNT);
+    buttonNavigator.onNext([this, optionCount] {
+      bookOptionsIndex = (bookOptionsIndex + 1) % optionCount;
       requestUpdate();
     });
-    buttonNavigator.onPrevious([this] {
-      bookOptionsIndex = (bookOptionsIndex - 1 + UITheme::BOOK_OPTIONS_COUNT) % UITheme::BOOK_OPTIONS_COUNT;
+    buttonNavigator.onPrevious([this, optionCount] {
+      bookOptionsIndex = (bookOptionsIndex - 1 + optionCount) % optionCount;
       requestUpdate();
     });
 
@@ -152,6 +155,9 @@ void RecentBooksActivity::loop() {
       longPressBookTriggered = false;
       const std::string path = bookOptionsPath;
       const std::string title = bookOptionsTitle;
+      const std::string author = bookOptionsAuthor;
+      const int progress = bookOptionsProgress;
+      const int opt = (bookOptionsIndex >= 0 && bookOptionsIndex < optionCount) ? optionIds[bookOptionsIndex] : -1;
       auto reload = [this] {
         loadRecentBooks();
         if (recentBooks.empty()) {
@@ -161,38 +167,41 @@ void RecentBooksActivity::loop() {
         }
         requestUpdate(true);
       };
-      if (bookOptionsIndex == UITheme::BOOK_OPT_MARK_READ) {
+      if (opt == UITheme::BOOK_OPT_MARK_READ) {
         RECENT_BOOKS.updateProgress(path, 100);
         RECENT_BOOKS.saveToFile();
         reload();
-      } else if (bookOptionsIndex == UITheme::BOOK_OPT_RESET_PROGRESS) {
+      } else if (opt == UITheme::BOOK_OPT_RESET_PROGRESS) {
         RECENT_BOOKS.updateProgress(path, -1);
         RECENT_BOOKS.saveToFile();
         reload();
-      } else if (bookOptionsIndex == UITheme::BOOK_OPT_SHELVE) {
+      } else if (opt == UITheme::BOOK_OPT_SHELVE) {
         RECENT_BOOKS.removeBook(path);
         RECENT_BOOKS.saveToFile();
         reload();
-      } else if (bookOptionsIndex == UITheme::BOOK_OPT_REINDEX) {
+      } else if (opt == UITheme::BOOK_OPT_REINDEX) {
         if (FsHelpers::hasEpubExtension(path)) {
           Storage.removeDir((Epub(path, "/.crosspoint").getCachePath() + "/sections").c_str());
         } else if (FsHelpers::hasXtcExtension(path)) {
           Xtc(path, "/.crosspoint").clearCache();
         }
         reload();
-      } else if (bookOptionsIndex == UITheme::BOOK_OPT_DELETE) {
+      } else if (opt == UITheme::BOOK_OPT_DELETE) {
+        startActivityForResult(std::make_unique<ConfirmationActivity>(
+                                   renderer, mappedInput, tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
+                               [this, path, reload](const ActivityResult& res) mutable {
+                                 if (!res.isCancelled) {
+                                   if (FsHelpers::hasEpubExtension(path)) Epub(path, "/.crosspoint").clearCache();
+                                   Storage.remove(path.c_str());
+                                   RECENT_BOOKS.removeBook(path);
+                                   RECENT_BOOKS.saveToFile();
+                                   reload();
+                                 }
+                               });
+      } else if (opt == UITheme::BOOK_OPT_BOOK_INFO) {
         startActivityForResult(
-            std::make_unique<ConfirmationActivity>(renderer, mappedInput,
-                                                   tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
-            [this, path, reload](const ActivityResult& res) mutable {
-              if (!res.isCancelled) {
-                if (FsHelpers::hasEpubExtension(path)) Epub(path, "/.crosspoint").clearCache();
-                Storage.remove(path.c_str());
-                RECENT_BOOKS.removeBook(path);
-                RECENT_BOOKS.saveToFile();
-                reload();
-              }
-            });
+            std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title, author, progress),
+            [this](const ActivityResult&) { requestUpdate(); });
       }
       return;
     }
@@ -281,8 +290,8 @@ void RecentBooksActivity::render(RenderLock&&) {
 
   // Help text
   const auto labels = showingBookOptions
-      ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
-      : mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+                          ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
+                          : mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   if (showingBookOptions) {

@@ -4,6 +4,8 @@
 #include <Logging.h>
 #include <Serialization.h>
 
+#include <cstring>
+
 void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int x, const int y) const {
   // Validate iterator bounds before rendering
   if (words.size() != wordXpos.size() || words.size() != wordStyles.size()) {
@@ -29,7 +31,21 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       wordY += ascender / 4;
     }
 
-    renderer.drawText(effectiveFontId, wordX, wordY, words[i].c_str(), true, currentStyle);
+    if (!wordBionicBoundary.empty() && i < wordBionicBoundary.size() && wordBionicBoundary[i] > 0) {
+      // Bionic split: draw bold prefix then regular suffix using pre-computed pixel offset.
+      // Max 9 codepoints = at most 36 UTF-8 bytes; stack buffer is safe.
+      const uint8_t boundary = wordBionicBoundary[i];
+      char boldBuf[40];
+      const size_t boldLen = std::min<size_t>({static_cast<size_t>(boundary), words[i].size(), sizeof(boldBuf) - 1});
+      memcpy(boldBuf, words[i].c_str(), boldLen);
+      boldBuf[boldLen] = '\0';
+      const auto boldStyle = static_cast<EpdFontFamily::Style>(currentStyle | EpdFontFamily::BOLD);
+      renderer.drawText(effectiveFontId, wordX, wordY, boldBuf, true, boldStyle);
+      const int suffixX = wordX + static_cast<int>(wordBionicSuffixX[i]);
+      renderer.drawText(effectiveFontId, suffixX, wordY, words[i].c_str() + boldLen, true, currentStyle);
+    } else {
+      renderer.drawText(effectiveFontId, wordX, wordY, words[i].c_str(), true, currentStyle);
+    }
 
     if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
       const std::string& w = words[i];
@@ -75,6 +91,14 @@ bool TextBlock::serialize(FsFile& file) const {
   for (auto x : wordXpos) serialization::writePod(file, x);
   for (auto s : wordStyles) serialization::writePod(file, s);
 
+  // Bionic data: one flag byte, then per-word boundary and suffix-x if present.
+  const uint8_t hasBionic = wordBionicBoundary.empty() ? 0u : 1u;
+  serialization::writePod(file, hasBionic);
+  if (hasBionic) {
+    for (auto b : wordBionicBoundary) serialization::writePod(file, b);
+    for (auto sx : wordBionicSuffixX) serialization::writePod(file, sx);
+  }
+
   // Style (alignment + margins/padding/indent)
   serialization::writePod(file, blockStyle.alignment);
   serialization::writePod(file, blockStyle.textAlignDefined);
@@ -117,6 +141,18 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
   for (auto& x : wordXpos) serialization::readPod(file, x);
   for (auto& s : wordStyles) serialization::readPod(file, s);
 
+  // Bionic data
+  std::vector<uint8_t> wordBionicBoundary;
+  std::vector<uint16_t> wordBionicSuffixX;
+  uint8_t hasBionic = 0;
+  serialization::readPod(file, hasBionic);
+  if (hasBionic) {
+    wordBionicBoundary.resize(wc);
+    wordBionicSuffixX.resize(wc);
+    for (auto& b : wordBionicBoundary) serialization::readPod(file, b);
+    for (auto& sx : wordBionicSuffixX) serialization::readPod(file, sx);
+  }
+
   // Style (alignment + margins/padding/indent)
   serialization::readPod(file, blockStyle.alignment);
   serialization::readPod(file, blockStyle.textAlignDefined);
@@ -132,6 +168,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
   serialization::readPod(file, blockStyle.textIndentDefined);
   serialization::readPod(file, blockStyle.fontOverride);
 
-  return std::unique_ptr<TextBlock>(
-      new TextBlock(std::move(words), std::move(wordXpos), std::move(wordStyles), blockStyle));
+  return std::unique_ptr<TextBlock>(new TextBlock(std::move(words), std::move(wordXpos), std::move(wordStyles),
+                                                  blockStyle, std::move(wordBionicBoundary),
+                                                  std::move(wordBionicSuffixX)));
 }

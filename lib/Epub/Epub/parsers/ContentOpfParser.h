@@ -18,6 +18,10 @@ class ContentOpfParser final : public Print {
     IN_BOOK_TITLE,
     IN_BOOK_AUTHOR,
     IN_BOOK_LANGUAGE,
+    IN_BOOK_DESCRIPTION,
+    IN_BOOK_SUBJECT,
+    IN_BOOK_DATE,
+    IN_BOOK_PUBLISHER,
     IN_MANIFEST,
     IN_SPINE,
     IN_GUIDE,
@@ -31,6 +35,9 @@ class ContentOpfParser final : public Print {
   BookMetadataCache* cache;
   FsFile tempItemStore;
   std::string coverItemId;
+  // Tracks whether the description char-data stream is currently inside an HTML
+  // tag (Calibre stores comments as escaped HTML); used to strip tags across chunks.
+  bool descInTag = false;
 
   // Index for fast idref→href lookup (used only for large EPUBs)
   struct ItemIndexEntry {
@@ -61,6 +68,14 @@ class ContentOpfParser final : public Print {
   std::string title;
   std::string author;
   std::string language;
+  std::string tags;         // dc:subject values, joined with ", "
+  std::string seriesName;   // calibre:series
+  std::string seriesIndex;  // calibre:series_index
+  std::string publisher;    // dc:publisher
+  std::string pubDate;      // dc:date (first occurrence)
+  std::string rating;       // calibre:rating meta (0-10 scale, as written)
+  std::string bookshelf;    // calibre:user_metadata:#bookshelf custom column (#value#)
+  std::string description;  // dc:description, HTML-stripped, capped at Epub::MAX_DESCRIPTION_BYTES
   std::string tocNcxPath;
   std::string tocNavPath;  // EPUB 3 nav document path
   std::string coverItemHref;

@@ -8,6 +8,9 @@
 #include <PngToBmpConverter.h>
 #include <ZipFile.h>
 
+#include <cstdio>
+#include <cstdlib>
+
 #include "Epub/parsers/ContainerParser.h"
 #include "Epub/parsers/ContentOpfParser.h"
 #include "Epub/parsers/TocNavParser.h"
@@ -144,6 +147,33 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const 
   }
 
   bookMetadata.textReferenceHref = opfParser.textReferenceHref;
+  bookMetadata.tags = opfParser.tags;
+  bookMetadata.seriesName = opfParser.seriesName;
+  bookMetadata.seriesIndex = opfParser.seriesIndex;
+  bookMetadata.publisher = opfParser.publisher;
+  bookMetadata.pubDate = opfParser.pubDate;
+  bookMetadata.rating = opfParser.rating;
+  bookMetadata.bookshelf = opfParser.bookshelf;
+
+  // Persist the (large, optional) description to a lazy sidecar so it never lives in
+  // book.bin / coreMetadata and is never loaded on the Library hot path. Only written
+  // on the cache-building pass; read on demand by the Book Details view.
+  if (writeSpineEntries) {
+    std::string desc = opfParser.description;
+    while (!desc.empty() && desc.back() == ' ') desc.pop_back();  // trim trailing collapse-space
+    const auto descPath = getDescriptionPath();
+    if (desc.empty()) {
+      if (Storage.exists(descPath.c_str())) Storage.remove(descPath.c_str());
+    } else {
+      FsFile descFile;
+      if (Storage.openFileForWrite("EBP", descPath, descFile)) {
+        descFile.write(reinterpret_cast<const uint8_t*>(desc.data()), desc.size());
+        descFile.close();
+      } else {
+        LOG_ERR("EBP", "Could not write description sidecar");
+      }
+    }
+  }
 
   if (!opfParser.tocNcxPath.empty()) {
     tocNcxItem = opfParser.tocNcxPath;
@@ -298,7 +328,6 @@ void Epub::discoverCssFilesFromZip() {
     LOG_ERR("EBP", "Failed to enumerate ZIP file paths for CSS discovery");
   }
 }
-
 
 void Epub::parseCssFiles() const {
   // Maximum CSS file size we'll attempt to parse (uncompressed)
@@ -575,6 +604,90 @@ const std::string& Epub::getLanguage() const {
 
   return bookMetadataCache->coreMetadata.language;
 }
+
+const std::string& Epub::getTags() const {
+  static std::string blank;
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return blank;
+  }
+
+  return bookMetadataCache->coreMetadata.tags;
+}
+
+const std::string& Epub::getSeriesName() const {
+  static std::string blank;
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return blank;
+  }
+
+  return bookMetadataCache->coreMetadata.seriesName;
+}
+
+std::string Epub::getSeriesIndex() const {
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return {};
+  }
+
+  std::string index = bookMetadataCache->coreMetadata.seriesIndex;
+  // Calibre stores the index as a float ("1.0"); trim trailing zeros / dot for display.
+  if (index.find('.') != std::string::npos) {
+    while (!index.empty() && index.back() == '0') index.pop_back();
+    if (!index.empty() && index.back() == '.') index.pop_back();
+  }
+  return index;
+}
+
+const std::string& Epub::getPublisher() const {
+  static std::string blank;
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return blank;
+  }
+
+  return bookMetadataCache->coreMetadata.publisher;
+}
+
+std::string Epub::getPublishedDate() const {
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return {};
+  }
+
+  // dc:date is commonly a full ISO timestamp ("2019-01-01T00:00:00+00:00"); show the date.
+  const std::string& date = bookMetadataCache->coreMetadata.pubDate;
+  const auto tPos = date.find('T');
+  return tPos != std::string::npos ? date.substr(0, tPos) : date;
+}
+
+std::string Epub::getRating() const {
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return {};
+  }
+
+  const std::string& rating = bookMetadataCache->coreMetadata.rating;
+  if (rating.empty()) {
+    return {};
+  }
+  // Calibre rating is 0-10 (2 per star); present as out-of-5.
+  const float stars = static_cast<float>(atof(rating.c_str())) / 2.0f;
+  if (stars <= 0.0f) {
+    return {};
+  }
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%g/5", stars);
+  return buf;
+}
+
+const std::string& Epub::getBookshelf() const {
+  static std::string blank;
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return blank;
+  }
+
+  return bookMetadataCache->coreMetadata.bookshelf;
+}
+
+std::string Epub::getDescriptionPath() const { return cachePath + "/desc.bin"; }
+
+bool Epub::hasDescription() const { return Storage.exists(getDescriptionPath().c_str()); }
 
 std::string Epub::getCoverBmpPath(bool cropped) const {
   const auto coverFileName = std::string("cover") + (cropped ? "_crop" : "");

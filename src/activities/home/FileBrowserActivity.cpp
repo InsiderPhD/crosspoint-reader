@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include "../util/ConfirmationActivity.h"
+#include "BookDetailsActivity.h"
 #include "BookFusionBookIdStore.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -289,12 +290,14 @@ void FileBrowserActivity::loop() {
   }
 
   if (showingBookOptions) {
-    buttonNavigator.onNext([this] {
-      bookOptionsIndex = (bookOptionsIndex + 1) % UITheme::BOOK_OPTIONS_COUNT;
+    int optionIds[UITheme::BOOK_OPTIONS_COUNT];
+    const int optionCount = UITheme::getVisibleBookOptions(optionIds, UITheme::BOOK_OPTIONS_COUNT);
+    buttonNavigator.onNext([this, optionCount] {
+      bookOptionsIndex = (bookOptionsIndex + 1) % optionCount;
       requestUpdate();
     });
-    buttonNavigator.onPrevious([this] {
-      bookOptionsIndex = (bookOptionsIndex - 1 + UITheme::BOOK_OPTIONS_COUNT) % UITheme::BOOK_OPTIONS_COUNT;
+    buttonNavigator.onPrevious([this, optionCount] {
+      bookOptionsIndex = (bookOptionsIndex - 1 + optionCount) % optionCount;
       requestUpdate();
     });
 
@@ -308,31 +311,34 @@ void FileBrowserActivity::loop() {
       longPressBookTriggered = false;
       const std::string path = bookOptionsPath;
       const std::string title = bookOptionsTitle;
+      const std::string author = bookOptionsAuthor;
+      const int progress = bookOptionsProgress;
+      const int opt = (bookOptionsIndex >= 0 && bookOptionsIndex < optionCount) ? optionIds[bookOptionsIndex] : -1;
       auto reload = [this] {
         loadFiles();
         if (selectorIndex >= files.size()) selectorIndex = files.empty() ? 0 : files.size() - 1;
         requestUpdate(true);
       };
-      if (bookOptionsIndex == UITheme::BOOK_OPT_MARK_READ) {
+      if (opt == UITheme::BOOK_OPT_MARK_READ) {
         RECENT_BOOKS.updateProgress(path, 100);
         RECENT_BOOKS.saveToFile();
         reload();
-      } else if (bookOptionsIndex == UITheme::BOOK_OPT_RESET_PROGRESS) {
+      } else if (opt == UITheme::BOOK_OPT_RESET_PROGRESS) {
         RECENT_BOOKS.updateProgress(path, -1);
         RECENT_BOOKS.saveToFile();
         reload();
-      } else if (bookOptionsIndex == UITheme::BOOK_OPT_SHELVE) {
+      } else if (opt == UITheme::BOOK_OPT_SHELVE) {
         RECENT_BOOKS.removeBook(path);
         RECENT_BOOKS.saveToFile();
         reload();
-      } else if (bookOptionsIndex == UITheme::BOOK_OPT_REINDEX) {
+      } else if (opt == UITheme::BOOK_OPT_REINDEX) {
         if (FsHelpers::hasEpubExtension(path)) {
           Storage.removeDir((Epub(path, "/.crosspoint").getCachePath() + "/sections").c_str());
         } else if (FsHelpers::hasXtcExtension(path)) {
           Xtc(path, "/.crosspoint").clearCache();
         }
         reload();
-      } else if (bookOptionsIndex == UITheme::BOOK_OPT_DELETE) {
+      } else if (opt == UITheme::BOOK_OPT_DELETE) {
         startActivityForResult(std::make_unique<ConfirmationActivity>(
                                    renderer, mappedInput, tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
                                [this, path, reload](const ActivityResult& res) mutable {
@@ -344,6 +350,10 @@ void FileBrowserActivity::loop() {
                                    reload();
                                  }
                                });
+      } else if (opt == UITheme::BOOK_OPT_BOOK_INFO) {
+        startActivityForResult(
+            std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title, author, progress),
+            [this](const ActivityResult&) { requestUpdate(); });
       }
       return;
     }

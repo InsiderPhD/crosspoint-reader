@@ -9,7 +9,7 @@
 #include "FsHelpers.h"
 
 namespace {
-constexpr uint8_t BOOK_CACHE_VERSION = 9;
+constexpr uint8_t BOOK_CACHE_VERSION = 11;
 constexpr char bookBinFile[] = "/book.bin";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
@@ -122,7 +122,9 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
       sizeof(BOOK_CACHE_VERSION) + /* LUT Offset */ sizeof(uint32_t) + sizeof(spineCount) + sizeof(tocCount);
   const uint32_t metadataSize = metadata.title.size() + metadata.author.size() + metadata.language.size() +
                                 metadata.coverItemHref.size() + metadata.textReferenceHref.size() +
-                                sizeof(uint32_t) * 5;
+                                metadata.tags.size() + metadata.seriesName.size() + metadata.seriesIndex.size() +
+                                metadata.publisher.size() + metadata.pubDate.size() + metadata.rating.size() +
+                                metadata.bookshelf.size() + sizeof(uint32_t) * 12;
   const uint32_t lutSize = sizeof(uint32_t) * spineCount + sizeof(uint32_t) * tocCount;
   const uint32_t lutOffset = headerASize + metadataSize;
 
@@ -137,6 +139,13 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   serialization::writeString(bookFile, metadata.language);
   serialization::writeString(bookFile, metadata.coverItemHref);
   serialization::writeString(bookFile, metadata.textReferenceHref);
+  serialization::writeString(bookFile, metadata.tags);
+  serialization::writeString(bookFile, metadata.seriesName);
+  serialization::writeString(bookFile, metadata.seriesIndex);
+  serialization::writeString(bookFile, metadata.publisher);
+  serialization::writeString(bookFile, metadata.pubDate);
+  serialization::writeString(bookFile, metadata.rating);
+  serialization::writeString(bookFile, metadata.bookshelf);
 
   // Loop through spine entries, writing LUT positions
   spineFile.seek(0);
@@ -394,6 +403,13 @@ bool BookMetadataCache::load() {
   serialization::readString(bookFile, coreMetadata.language);
   serialization::readString(bookFile, coreMetadata.coverItemHref);
   serialization::readString(bookFile, coreMetadata.textReferenceHref);
+  serialization::readString(bookFile, coreMetadata.tags);
+  serialization::readString(bookFile, coreMetadata.seriesName);
+  serialization::readString(bookFile, coreMetadata.seriesIndex);
+  serialization::readString(bookFile, coreMetadata.publisher);
+  serialization::readString(bookFile, coreMetadata.pubDate);
+  serialization::readString(bookFile, coreMetadata.rating);
+  serialization::readString(bookFile, coreMetadata.bookshelf);
 
   loaded = true;
   LOG_DBG("BMC", "Loaded cache data: %d spine, %d TOC entries", spineCount, tocCount);

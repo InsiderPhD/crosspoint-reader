@@ -50,6 +50,7 @@ class LibraryActivity final : public Activity {
     std::string author;
     int progressPercent = -1;  // -1 when the book has no RecentBooksStore entry.
     bool hasCover = false;
+    bool hasBfBadge = false;
     std::string thumbPath;
   };
   std::array<SlotMeta, MAX_PAGE_SIZE> currentPageMeta;
@@ -66,11 +67,10 @@ class LibraryActivity final : public Activity {
   // Indexed in parallel with bookPaths (raw enumeration order).
   std::vector<std::string> authorCache;
   std::vector<uint32_t> dateAddedCache;
-  // Parallel to bookPaths: true if the book has a BookFusion sidecar.
-  // Populated once in enumerateBooks() to avoid an SD stat per cover tile, per redraw.
-  std::vector<bool> bookIsBookFusion;
+  std::vector<bool> bfBadgeCache;
   bool authorCacheReady = false;
   bool dateAddedCacheReady = false;
+  bool bfBadgeCacheReady = false;
   // Set when a sort mode change needs a metadata pass; the next render() shows a
   // "Sorting…" popup before running the (synchronous) rebuild.
   bool pendingSortRebuild = false;
@@ -93,7 +93,7 @@ class LibraryActivity final : public Activity {
   // Empty string if list is empty.
   std::string currentPath() const;
   std::string pathAtLogicalIndex(size_t logicalIdx) const;
-  bool isBookFusionAtLogicalIndex(size_t logicalIdx) const;
+
 
   size_t currentPage() const { return bookPaths.empty() ? 0 : selectorIndex / pageSize(); }
   size_t totalPages() const {
@@ -159,4 +159,11 @@ class LibraryActivity final : public Activity {
   // HomeActivity::dispatchBookAction with library-flavored reload logic:
   // deletions remove from bookPaths and invalidate the page snapshot.
   void dispatchBookAction(BookContextMenu::Action action, const std::string& path, const std::string& title);
+
+  // SD-backed index cache for bookPaths. Avoids the O(N) SD BFS on repeated
+  // library opens by persisting the enumerated path list to
+  // /.crosspoint/library_index.bin. Invalidated automatically when any
+  // scanned directory's FAT mtime changes (file added/deleted/moved).
+  bool tryLoadFromCache();
+  void saveToCache(const std::vector<std::pair<std::string, uint32_t>>& dirMtimes);
 };

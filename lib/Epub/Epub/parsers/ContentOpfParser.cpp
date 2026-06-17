@@ -5,12 +5,67 @@
 #include <Serialization.h>
 #include <XmlParserUtils.h>
 
+#include <string>
+#include <string_view>
+
 #include "../BookMetadataCache.h"
 
 namespace {
 constexpr char MEDIA_TYPE_NCX[] = "application/x-dtbncx+xml";
 constexpr char MEDIA_TYPE_CSS[] = "text/css";
 constexpr char itemCacheFile[] = "/.items.bin";
+
+// Calibre embeds custom-column data as a JSON blob in a <meta> content attribute.
+// Pull out just the "#value#" field without a full JSON parser: handles a quoted
+// string ("#value#": "Shelf") or a list ("#value#": ["A","B"] -> "A, B"). Returns
+// empty for null/absent. Bounded — only the extracted value is copied out, not the blob.
+std::string extractCalibreCustomValue(const char* json) {
+  if (!json) return {};
+  const std::string_view sv{json};
+  const auto key = sv.find("\"#value#\"");
+  if (key == std::string_view::npos) return {};
+
+  size_t i = key + 9;  // past the key token
+  while (i < sv.size() && (sv[i] == ' ' || sv[i] == ':' || sv[i] == '\t')) i++;
+  if (i >= sv.size()) return {};
+
+  const auto readQuoted = [&](size_t pos, std::string& out) -> size_t {
+    // pos points at the opening quote; appends unescaped contents to out, returns
+    // index just past the closing quote (or npos on malformed input).
+    pos++;
+    while (pos < sv.size()) {
+      const char c = sv[pos];
+      if (c == '\\' && pos + 1 < sv.size()) {
+        out.push_back(sv[pos + 1]);
+        pos += 2;
+        continue;
+      }
+      if (c == '"') return pos + 1;
+      out.push_back(c);
+      pos++;
+    }
+    return std::string_view::npos;
+  };
+
+  std::string value;
+  if (sv[i] == '"') {
+    readQuoted(i, value);
+  } else if (sv[i] == '[') {
+    i++;
+    while (i < sv.size() && sv[i] != ']') {
+      if (sv[i] == '"') {
+        std::string item;
+        i = readQuoted(i, item);
+        if (i == std::string_view::npos) break;
+        if (!value.empty()) value.append(", ");
+        value.append(item);
+      } else {
+        i++;
+      }
+    }
+  }
+  return value;
+}
 }  // namespace
 
 bool ContentOpfParser::setup() {
@@ -104,6 +159,34 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
     return;
   }
 
+  if (self->state == IN_METADATA && strcmp(name, "dc:description") == 0) {
+    self->descInTag = false;
+    self->state = IN_BOOK_DESCRIPTION;
+    return;
+  }
+
+  if (self->state == IN_METADATA && strcmp(name, "dc:subject") == 0) {
+    // Multiple dc:subject elements -> join into a single comma-separated tag string.
+    if (!self->tags.empty()) {
+      self->tags.append(", ");
+    }
+    self->state = IN_BOOK_SUBJECT;
+    return;
+  }
+
+  if (self->state == IN_METADATA && strcmp(name, "dc:publisher") == 0) {
+    self->state = IN_BOOK_PUBLISHER;
+    return;
+  }
+
+  if (self->state == IN_METADATA && strcmp(name, "dc:date") == 0) {
+    // Capture only the first dc:date (the publication date); Calibre may emit others.
+    if (self->pubDate.empty()) {
+      self->state = IN_BOOK_DATE;
+    }
+    return;
+  }
+
   if (self->state == IN_PACKAGE && (strcmp(name, "manifest") == 0 || strcmp(name, "opf:manifest") == 0)) {
     self->state = IN_MANIFEST;
     if (!Storage.openFileForWrite("COF", self->cachePath + itemCacheFile, self->tempItemStore)) {
@@ -140,19 +223,33 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
   }
 
   if (self->state == IN_METADATA && (strcmp(name, "meta") == 0 || strcmp(name, "opf:meta") == 0)) {
-    bool isCover = false;
-    std::string coverItemId;
+    const char* metaName = nullptr;
+    const char* metaContent = nullptr;
 
     for (int i = 0; atts[i]; i += 2) {
-      if (strcmp(atts[i], "name") == 0 && strcmp(atts[i + 1], "cover") == 0) {
-        isCover = true;
+      if (strcmp(atts[i], "name") == 0) {
+        metaName = atts[i + 1];
       } else if (strcmp(atts[i], "content") == 0) {
-        coverItemId = atts[i + 1];
+        metaContent = atts[i + 1];
       }
     }
 
-    if (isCover) {
-      self->coverItemId = coverItemId;
+    if (metaName && metaContent) {
+      if (strcmp(metaName, "cover") == 0) {
+        self->coverItemId = metaContent;
+      } else if (strcmp(metaName, "calibre:series") == 0) {
+        // Calibre's custom series metadata. EPUB3-only belongs-to-collection is not
+        // handled here; Calibre always writes the calibre:* pair for back-compat.
+        self->seriesName = metaContent;
+      } else if (strcmp(metaName, "calibre:series_index") == 0) {
+        self->seriesIndex = metaContent;
+      } else if (strcmp(metaName, "calibre:rating") == 0) {
+        self->rating = metaContent;
+      } else if (strcmp(metaName, "calibre:user_metadata:#bookshelf") == 0) {
+        // BookFusion's "bookshelf" Calibre custom column. The content is a JSON blob
+        // describing the column; we pull only the "#value#" out (string or list).
+        self->bookshelf = extractCalibreCustomValue(metaContent);
+      }
     }
     return;
   }
@@ -325,6 +422,47 @@ void XMLCALL ContentOpfParser::characterData(void* userData, const XML_Char* s, 
     self->language.append(s, len);
     return;
   }
+
+  if (self->state == IN_BOOK_SUBJECT) {
+    self->tags.append(s, len);
+    return;
+  }
+
+  if (self->state == IN_BOOK_PUBLISHER) {
+    self->publisher.append(s, len);
+    return;
+  }
+
+  if (self->state == IN_BOOK_DATE) {
+    self->pubDate.append(s, len);
+    return;
+  }
+
+  if (self->state == IN_BOOK_DESCRIPTION) {
+    // Calibre stores comments as escaped HTML; expat hands us the unescaped text
+    // (literal "<p>...</p>"). Strip tags and collapse whitespace as we stream, and
+    // stop once we hit the cap so a pathological description can't grow unbounded.
+    for (int i = 0; i < len; i++) {
+      if (self->description.size() >= Epub::MAX_DESCRIPTION_BYTES) break;
+      const char c = s[i];
+      if (self->descInTag) {
+        if (c == '>') self->descInTag = false;
+        continue;
+      }
+      if (c == '<') {
+        self->descInTag = true;
+        continue;
+      }
+      if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+        if (!self->description.empty() && self->description.back() != ' ') {
+          self->description.push_back(' ');
+        }
+        continue;
+      }
+      self->description.push_back(c);
+    }
+    return;
+  }
 }
 
 void XMLCALL ContentOpfParser::endElement(void* userData, const XML_Char* name) {
@@ -360,6 +498,27 @@ void XMLCALL ContentOpfParser::endElement(void* userData, const XML_Char* name) 
   }
 
   if (self->state == IN_BOOK_LANGUAGE && strcmp(name, "dc:language") == 0) {
+    self->state = IN_METADATA;
+    return;
+  }
+
+  if (self->state == IN_BOOK_DESCRIPTION && strcmp(name, "dc:description") == 0) {
+    self->descInTag = false;
+    self->state = IN_METADATA;
+    return;
+  }
+
+  if (self->state == IN_BOOK_SUBJECT && strcmp(name, "dc:subject") == 0) {
+    self->state = IN_METADATA;
+    return;
+  }
+
+  if (self->state == IN_BOOK_PUBLISHER && strcmp(name, "dc:publisher") == 0) {
+    self->state = IN_METADATA;
+    return;
+  }
+
+  if (self->state == IN_BOOK_DATE && strcmp(name, "dc:date") == 0) {
     self->state = IN_METADATA;
     return;
   }

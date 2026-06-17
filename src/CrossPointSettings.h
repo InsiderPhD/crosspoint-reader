@@ -186,13 +186,7 @@ class CrossPointSettings {
   };
 
   // Minimum session length before it counts toward stats
-  enum MIN_SESSION {
-    MIN_SESSION_1_MIN = 0,
-    MIN_SESSION_3_MIN = 1,
-    MIN_SESSION_5_MIN = 2,
-    MIN_SESSION_COUNT
-  };
-
+  enum MIN_SESSION { MIN_SESSION_1_MIN = 0, MIN_SESSION_3_MIN = 1, MIN_SESSION_5_MIN = 2, MIN_SESSION_COUNT };
 
   enum SEAMLESS_SLEEP_SCREEN {
     SEAMLESS_NEVER = 0,
@@ -313,10 +307,15 @@ class CrossPointSettings {
   uint8_t embeddedStyle = 1;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // Developer mode: surfaces testing-only book actions (Reset Progress, Delete Book
+  // Cache, Regenerate Cover) in the book context menus. Off by default.
+  uint8_t devMode = 0;
   // Image rendering mode in EPUB reader
   uint8_t imageRendering = IMAGES_DISPLAY;
   // Footnote display mode (0 = render at bottom of page, 1 = show in popup menu)
   uint8_t footnoteDisplay = FOOTNOTE_ON_PAGE;
+  // Bionic Reading: bold the first ~43% of each word's letters to guide the eye (0 = off, 1 = on)
+  uint8_t bionicReading = 0;
   // Long press confirm button action (0 = refresh, 1 = sync, 2 = none, 3 = bookmark)
   uint8_t longPressAction = LONG_PRESS_REFRESH;
   // Dark mode (inverts entire UI except images)

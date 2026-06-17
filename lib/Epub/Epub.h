@@ -38,6 +38,11 @@ class Epub {
   void parseCssFiles() const;
 
  public:
+  // Hard cap on the cached book description (Calibre comments are multi-KB HTML).
+  // Bounds parser growth, sidecar size, and the on-screen read buffer so a large
+  // description can never threaten the RAM ceiling. Tune here if needed.
+  static constexpr size_t MAX_DESCRIPTION_BYTES = 4096;
+
   explicit Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
     // create a cache key based on the filepath
     cachePath = cacheDir + "/epub_" + std::to_string(std::hash<std::string>{}(this->filepath));
@@ -52,6 +57,20 @@ class Epub {
   const std::string& getTitle() const;
   const std::string& getAuthor() const;
   const std::string& getLanguage() const;
+  const std::string& getTags() const;
+  const std::string& getSeriesName() const;
+  // Series index cleaned for display (Calibre stores it as a float, e.g. "1.0" -> "1").
+  std::string getSeriesIndex() const;
+  const std::string& getPublisher() const;
+  // Publication date trimmed to YYYY-MM-DD (dc:date is often a full ISO timestamp).
+  std::string getPublishedDate() const;
+  // calibre:rating is a 0-10 scale; returned as "N/5" (e.g. "4/5", "4.5/5"), empty if unset.
+  std::string getRating() const;
+  const std::string& getBookshelf() const;
+  // Path to the lazily-stored description sidecar (read on demand into a bounded
+  // buffer; deliberately NOT returned as a heap std::string).
+  std::string getDescriptionPath() const;
+  bool hasDescription() const;
   std::string getCoverBmpPath(bool cropped = false) const;
   bool generateCoverBmp(bool cropped = false) const;
   std::string getThumbBmpPath() const;

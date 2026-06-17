@@ -7,14 +7,13 @@
 
 #include <memory>
 
-#include "fontIds.h"
-
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraLibraryTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
+#include "fontIds.h"
 
 namespace {
 constexpr int SKIP_PAGE_MS = 700;
@@ -117,8 +116,43 @@ int UITheme::getStatusBarHeight() {
          (showProgressBar ? (((SETTINGS.statusBarProgressBarThickness + 1) * 2) + metrics.progressBarMarginTop) : 0);
 }
 
-void UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author,
-                                   const char* folderPath, int progressPercent, int selectedOptionIndex) {
+namespace {
+const char* bookOptionLabel(int optionId) {
+  switch (optionId) {
+    case UITheme::BOOK_OPT_MARK_READ:
+      return tr(STR_MARK_AS_READ);
+    case UITheme::BOOK_OPT_RESET_PROGRESS:
+      return tr(STR_RESET_PROGRESS);
+    case UITheme::BOOK_OPT_SHELVE:
+      return tr(STR_REMOVE_FROM_RECENTS);
+    case UITheme::BOOK_OPT_DELETE:
+      return tr(STR_DELETE_FROM_DEVICE);
+    case UITheme::BOOK_OPT_REINDEX:
+      return tr(STR_DELETE_CACHE);
+    case UITheme::BOOK_OPT_BOOK_INFO:
+      return tr(STR_BOOK_INFO);
+    default:
+      return "";
+  }
+}
+}  // namespace
+
+int UITheme::getVisibleBookOptions(int* ids, int maxIds) {
+  int n = 0;
+  const auto add = [&](int id) {
+    if (n < maxIds) ids[n++] = id;
+  };
+  add(BOOK_OPT_MARK_READ);
+  add(BOOK_OPT_RESET_PROGRESS);
+  add(BOOK_OPT_SHELVE);
+  add(BOOK_OPT_DELETE);
+  if (SETTINGS.devMode) add(BOOK_OPT_REINDEX);  // "Delete Book Cache" — testing only
+  add(BOOK_OPT_BOOK_INFO);
+  return n;
+}
+
+void UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author, const char* folderPath,
+                                   int progressPercent, int selectedOptionIndex) {
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   constexpr int POPUP_W = 420;
@@ -133,7 +167,9 @@ void UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title, con
   const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
   const int titleBlockH = LINE_V_PAD + static_cast<int>(titleLines.size()) * lineH + LINE_V_PAD;
 
-  const int popupH = titleBlockH + INFO_COUNT * INFO_H + BOOK_OPTIONS_COUNT * OPTION_H + H_PAD;
+  int ids[BOOK_OPTIONS_COUNT];
+  const int optionCount = getVisibleBookOptions(ids, BOOK_OPTIONS_COUNT);
+  const int popupH = titleBlockH + INFO_COUNT * INFO_H + optionCount * OPTION_H + H_PAD;
   const int px = (pageWidth - POPUP_W) / 2;
   const int py = (pageHeight - popupH) / 2;
 
@@ -162,14 +198,12 @@ void UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title, con
   renderer.drawLine(px + BORDER, py + titleBlockH + INFO_COUNT * INFO_H, px + POPUP_W - BORDER - 1,
                     py + titleBlockH + INFO_COUNT * INFO_H);
 
-  const char* options[BOOK_OPTIONS_COUNT] = {tr(STR_MARK_AS_READ), tr(STR_RESET_PROGRESS), tr(STR_REMOVE_FROM_RECENTS),
-                                             tr(STR_DELETE_FROM_DEVICE), tr(STR_DELETE_CACHE)};
-  for (int i = 0; i < BOOK_OPTIONS_COUNT; i++) {
+  for (int i = 0; i < optionCount; i++) {
     const int optY = py + titleBlockH + INFO_COUNT * INFO_H + i * OPTION_H;
     if (i == selectedOptionIndex) {
       renderer.fillRect(px + BORDER, optY, POPUP_W - BORDER * 2, OPTION_H, true);
     }
-    renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - lineH) / 2, options[i],
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - lineH) / 2, bookOptionLabel(ids[i]),
                       i != selectedOptionIndex);
   }
 }
@@ -209,8 +243,8 @@ void UITheme::drawSyncProgressPopup(GfxRenderer& renderer, const char* title, co
 
   // Draw status message
   for (int i = 0; i < static_cast<int>(statusLines.size()); i++) {
-    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + titleBlockH + LINE_V_PAD + i * lineH,
-                     statusLines[i].c_str(), true);
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + titleBlockH + LINE_V_PAD + i * lineH, statusLines[i].c_str(),
+                      true);
   }
 }
 

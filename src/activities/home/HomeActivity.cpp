@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "../util/ConfirmationActivity.h"
+#include "BookDetailsActivity.h"
 #include "BookFusionBookIdStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -277,6 +278,11 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
       RECENT_BOOKS.saveToFile();
       reloadRecents();
       break;
+    case BookContextMenu::Action::BookInfo:
+      startActivityForResult(std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title,
+                                                                   contextMenu.author(), contextMenu.progressPercent()),
+                             [this](const ActivityResult&) { requestUpdate(); });
+      break;
   }
 }
 
@@ -304,6 +310,14 @@ void HomeActivity::loop() {
   if (selectorIndex < static_cast<int>(recentBooks.size())) {
     const auto& book = recentBooks[selectorIndex];
     if (contextMenu.checkLongPress(mappedInput, book.path, book.title, book.author, book.progressPercent)) {
+      // Surface tags in the popup when the cached metadata has them (existing cache only,
+      // no rebuild, so opening the menu never blocks).
+      if (FsHelpers::hasEpubExtension(book.path)) {
+        Epub epub(book.path, "/.crosspoint");
+        if (epub.load(/*buildIfMissing=*/false, /*skipLoadingCss=*/true)) {
+          contextMenu.setInfoTags(epub.getTags());
+        }
+      }
       requestUpdate();
       return;
     }

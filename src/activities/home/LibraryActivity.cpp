@@ -7,23 +7,24 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Serialization.h>
 #include <Xtc.h>
-
-#include "BookFusionBookIdStore.h"
 
 #include <algorithm>
 #include <cstring>
 #include <deque>
 #include <memory>
+#include <utility>
 
 #include "../util/ConfirmationActivity.h"
+#include "BookDetailsActivity.h"
+#include "BookFusionBookIdStore.h"
 #include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
-#include "fontIds.h"
-
 #include "components/icons/bookfusion24.h"
 #include "components/icons/cover.h"
+#include "fontIds.h"
 
 namespace {
 constexpr char MODULE[] = "LIBRARY";
@@ -33,6 +34,26 @@ constexpr int hPaddingInSelection = 8;
 constexpr int cornerRadius = 6;
 constexpr int rowVGap = 16;
 constexpr int pageIndicatorHeight = 30;
+
+// Library index cache — persists bookPaths across activity re-creations.
+constexpr char LIBRARY_INDEX_PATH[] = "/.crosspoint/library_index.bin";
+constexpr uint32_t LIBRARY_INDEX_MAGIC = 0x4C494458u;  // 'L','I','D','X'
+constexpr uint8_t LIBRARY_INDEX_VERSION = 1;
+// Maximum allowed book path length in the cache. Guards against corrupt length
+// fields causing a runaway heap allocation in readSafePath().
+constexpr uint32_t MAX_CACHE_PATH_LEN = 512;
+
+// Reads a serialization::writeString-format string (uint32_t len + raw bytes)
+// but clamps the length before any allocation so a corrupt cache file can't
+// cause an OOM. Returns false if the length is out of range.
+static bool readSafePath(HalFile& f, std::string& s) {
+  uint32_t len = 0;
+  serialization::readPod(f, len);
+  if (len > MAX_CACHE_PATH_LEN) return false;
+  s.resize(len);
+  if (len > 0 && f.read(&s[0], len) != static_cast<int>(len)) return false;
+  return true;
+}
 
 struct GridLayout {
   int sidePadding;
@@ -49,8 +70,7 @@ struct GridLayout {
 // cache (thumb_226.bmp) renders at its native height without scaling. The
 // caller passes the total bottom-reserved area (page indicator strip + button
 // hints bar) so both can be drawn beneath the grid without overlap.
-inline GridLayout computeLayout(int screenW, int screenH, int sidePadding, int gridTopY, int reservedBottom,
-                                int rows) {
+inline GridLayout computeLayout(int screenW, int screenH, int sidePadding, int gridTopY, int reservedBottom, int rows) {
   GridLayout L;
   L.sidePadding = sidePadding;
   L.tileWidth = (screenW - 2 * L.sidePadding) / LibraryActivity::GRID_COLS;
@@ -90,7 +110,8 @@ void LibraryActivity::onEnter() {
   pageRendered = false;
   pageBufferStored = false;
   // Pull last-chosen sort from settings (shared across all list activities).
-  currentSort = (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
+  currentSort =
+      (SETTINGS.sortMode < SORT_MODE_COUNT) ? static_cast<SortMode>(SETTINGS.sortMode) : SortMode::AlphabeticAsc;
   // Defer the SD BFS to the first render so we can paint a "Loading…" popup
   // before it starts. Matches the pendingSortRebuild pattern below.
   initialLoadPending = true;
@@ -108,20 +129,112 @@ void LibraryActivity::onExit() {
   authorCache.shrink_to_fit();
   dateAddedCache.clear();
   dateAddedCache.shrink_to_fit();
-  bookIsBookFusion.clear();
-  bookIsBookFusion.shrink_to_fit();
+  bfBadgeCache.clear();
+  bfBadgeCacheReady = false;
   authorCacheReady = false;
   dateAddedCacheReady = false;
   pendingSortRebuild = false;
 }
 
+bool LibraryActivity::tryLoadFromCache() {
+  HalFile f;
+  if (!Storage.openFileForRead(MODULE, LIBRARY_INDEX_PATH, f)) return false;
+
+  uint32_t magic = 0;
+  uint8_t version = 0;
+  serialization::readPod(f, magic);
+  serialization::readPod(f, version);
+  if (magic != LIBRARY_INDEX_MAGIC || version != LIBRARY_INDEX_VERSION) {
+    f.close();
+    return false;
+  }
+
+  // Validate each stored directory's mtime against the SD card now.
+  // Any change (file added, removed, moved within that dir) updates the FAT
+  // directory timestamp and causes a full re-scan on the next open.
+  uint16_t dirCount = 0;
+  serialization::readPod(f, dirCount);
+  for (uint16_t i = 0; i < dirCount; ++i) {
+    uint32_t storedMtime = 0;
+    std::string dirPath;
+    serialization::readPod(f, storedMtime);
+    if (!readSafePath(f, dirPath)) { f.close(); return false; }
+
+    auto dir = Storage.open(dirPath.c_str());
+    if (!dir || dir.getModifyDateTimePacked() != storedMtime) {
+      f.close();
+      return false;
+    }
+  }
+
+  uint16_t bookCount = 0;
+  serialization::readPod(f, bookCount);
+  bookPaths.clear();
+  bookPaths.reserve(bookCount);
+  for (uint16_t i = 0; i < bookCount; ++i) {
+    std::string path;
+    if (!readSafePath(f, path)) { f.close(); bookPaths.clear(); return false; }
+    bookPaths.push_back(std::move(path));
+  }
+
+  f.close();
+  LOG_DBG(MODULE, "Loaded %u books from library index cache", bookCount);
+  return true;
+}
+
+void LibraryActivity::saveToCache(const std::vector<std::pair<std::string, uint32_t>>& dirMtimes) {
+  Storage.mkdir("/.crosspoint");  // No-op if already exists; failure is caught below.
+
+  HalFile f;
+  if (!Storage.openFileForWrite(MODULE, LIBRARY_INDEX_PATH, f)) {
+    LOG_ERR(MODULE, "Failed to write library index cache");
+    return;
+  }
+
+  serialization::writePod(f, LIBRARY_INDEX_MAGIC);
+  serialization::writePod(f, LIBRARY_INDEX_VERSION);
+
+  const uint16_t dirCount = static_cast<uint16_t>(std::min<size_t>(dirMtimes.size(), 0xFFFFu));
+  serialization::writePod(f, dirCount);
+  for (uint16_t i = 0; i < dirCount; ++i) {
+    serialization::writePod(f, dirMtimes[i].second);  // mtime
+    serialization::writeString(f, dirMtimes[i].first);  // path
+  }
+
+  const uint16_t bookCount = static_cast<uint16_t>(std::min<size_t>(bookPaths.size(), 0xFFFFu));
+  serialization::writePod(f, bookCount);
+  for (uint16_t i = 0; i < bookCount; ++i) {
+    serialization::writeString(f, bookPaths[i]);
+  }
+
+  f.close();
+  LOG_DBG(MODULE, "Saved library index cache: %u dirs, %u books", dirCount, bookCount);
+}
+
 void LibraryActivity::enumerateBooks() {
+  // Fast path: try to load the cached book list. Falls back to BFS if the
+  // cache is missing, corrupt, or any scanned directory's mtime has changed.
+  if (tryLoadFromCache()) {
+    authorCache.assign(bookPaths.size(), std::string{});
+    dateAddedCache.assign(bookPaths.size(), 0u);
+    bfBadgeCache.assign(bookPaths.size(), false);
+    authorCacheReady = false;
+    dateAddedCacheReady = false;
+    bfBadgeCacheReady = false;
+    rebuildSortedIndices();
+    return;
+  }
+
   bookPaths.clear();
   bookPaths.reserve(64);  // Conservative initial guess; std::vector grows as needed.
 
   // BFS via deque to keep stack usage bounded regardless of folder nesting depth.
   std::deque<std::string> dirsToScan;
   dirsToScan.emplace_back("/");
+
+  // Collect (dirPath, mtime) pairs so saveToCache() can validate the cache on
+  // the next open. One entry per directory actually opened during this BFS.
+  std::vector<std::pair<std::string, uint32_t>> dirMtimes;
 
   // Stack buffer for filename reads. Matches FileBrowserActivity::loadFiles (FileBrowserActivity.cpp:86)
   // which uses 500 bytes — long FAT filenames can exceed 255 chars in some cases.
@@ -133,6 +246,8 @@ void LibraryActivity::enumerateBooks() {
 
     auto dir = Storage.open(dirPath.c_str());
     if (!dir || !dir.isDirectory()) continue;
+    // Record mtime before rewindDirectory() since the seek may affect internal state.
+    dirMtimes.emplace_back(dirPath, dir.getModifyDateTimePacked());
     dir.rewindDirectory();
 
     for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
@@ -161,19 +276,13 @@ void LibraryActivity::enumerateBooks() {
   // Reset caches; their contents are bookPaths-indexed and must match the new list.
   authorCache.assign(bookPaths.size(), std::string{});
   dateAddedCache.assign(bookPaths.size(), 0u);
+  bfBadgeCache.assign(bookPaths.size(), false);
   authorCacheReady = false;
   dateAddedCacheReady = false;
-
-  // BookFusion badge cache — sidecar existence read once at enumeration so cover
-  // tiles don't hit the SD card per redraw. Only EPUBs can be BF-linked.
-  bookIsBookFusion.assign(bookPaths.size(), false);
-  for (size_t i = 0; i < bookPaths.size(); i++) {
-    if (FsHelpers::hasEpubExtension(bookPaths[i])) {
-      bookIsBookFusion[i] = BookFusionBookIdStore::hasBookId(bookPaths[i].c_str());
-    }
-  }
+  bfBadgeCacheReady = false;
 
   rebuildSortedIndices();
+  saveToCache(dirMtimes);
 }
 
 namespace {
@@ -221,6 +330,15 @@ void LibraryActivity::rebuildSortedIndices() {
     dateAddedCacheReady = true;
   }
 
+  const bool needsBfBadge =
+      (currentSort == SortMode::BookFusionFirst || currentSort == SortMode::BookFusionLast) && !bfBadgeCacheReady;
+  if (needsBfBadge) {
+    for (size_t i = 0; i < bookPaths.size(); i++) {
+      bfBadgeCache[i] = FsHelpers::hasEpubExtension(bookPaths[i]) && BookFusionBookIdStore::hasBookId(bookPaths[i].c_str());
+    }
+    bfBadgeCacheReady = true;
+  }
+
   // RecentBooksStore is capped at 10 entries (RecentBooksStore.cpp:18) — linear lookup is fine.
   const auto& recents = RECENT_BOOKS.getBooks();
 
@@ -231,6 +349,7 @@ void LibraryActivity::rebuildSortedIndices() {
     e.sortKey = filenameView(bookPaths[i]);
     e.authorKey = authorCacheReady ? std::string_view(authorCache[i]) : std::string_view{};
     e.dateAddedTs = dateAddedCacheReady ? dateAddedCache[i] : 0u;
+    e.hasBfBadge = bfBadgeCacheReady ? bfBadgeCache[i] : false;
     e.progressPercent = -1;
     e.lastOpenedRank = LAST_OPENED_NEVER;
     for (size_t r = 0; r < recents.size(); r++) {
@@ -253,12 +372,6 @@ std::string LibraryActivity::pathAtLogicalIndex(size_t logicalIdx) const {
 
 std::string LibraryActivity::currentPath() const { return pathAtLogicalIndex(selectorIndex); }
 
-bool LibraryActivity::isBookFusionAtLogicalIndex(size_t logicalIdx) const {
-  if (logicalIdx >= sortedIndices.size()) return false;
-  const size_t bookIdx = sortedIndices[logicalIdx];
-  return bookIdx < bookIsBookFusion.size() && bookIsBookFusion[bookIdx];
-}
-
 LibraryActivity::SlotRect LibraryActivity::slotRect(int slotIndexInPage) const {
   const int screenW = renderer.getScreenWidth();
   const int screenH = renderer.getScreenHeight();
@@ -266,9 +379,8 @@ LibraryActivity::SlotRect LibraryActivity::slotRect(int slotIndexInPage) const {
   // Header sits at metrics.topPadding for headerHeight pixels; grid starts below
   // it after one verticalSpacing of breathing room — matches RecentBooksActivity.cpp:199-202.
   const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const GridLayout L =
-      computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
-                    pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
+  const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
+                                     pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
 
   int tileX, tileY;
   tileOrigin(slotIndexInPage, L, tileX, tileY);
@@ -396,6 +508,7 @@ void LibraryActivity::refreshCurrentPageMeta() {
     m.author.clear();
     m.progressPercent = -1;
     m.hasCover = false;
+    m.hasBfBadge = false;
     m.thumbPath.clear();
   }
 
@@ -414,6 +527,7 @@ void LibraryActivity::refreshCurrentPageMeta() {
         meta.title = epub.getTitle();
         meta.author = epub.getAuthor();
       }
+      meta.hasBfBadge = BookFusionBookIdStore::hasBookId(path.c_str());
     }
     if (meta.title.empty()) {
       const auto slash = path.find_last_of('/');
@@ -421,14 +535,10 @@ void LibraryActivity::refreshCurrentPageMeta() {
       meta.title = path.substr(slash + 1, dot - slash - 1);
     }
 
-    // BookFusion-linked books get a leading BF icon at *render* time in
-    // drawOverlay(); the link state isn't stored on meta.title.
-
     // Progress comes from RecentBooksStore's in-memory list; -1 ("not started")
     // if not present. getBooks() is a vector scan — cheap.
     const auto& recents = RECENT_BOOKS.getBooks();
-    auto it = std::find_if(recents.begin(), recents.end(),
-                           [&path](const RecentBook& b) { return b.path == path; });
+    auto it = std::find_if(recents.begin(), recents.end(), [&path](const RecentBook& b) { return b.path == path; });
     meta.progressPercent = (it != recents.end()) ? it->progressPercent : -1;
   }
 }
@@ -490,9 +600,8 @@ void LibraryActivity::renderPageFromScratch() {
   const int screenH = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const GridLayout L =
-      computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
-                    pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
+  const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
+                                     pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
 
   // Make sure currentPageMeta reflects on-disk state. Cheap — only reads
   // book.bin entries that already exist; never parses an EPUB from scratch.
@@ -539,8 +648,7 @@ void LibraryActivity::renderPageFromScratch() {
     // mark, inset from the cover corner. iconY is snapped to a multiple of 8
     // because drawImageTransparent truncates the display-y via integer divide
     // by 8 — non-aligned values shift the icon relative to the white fill.
-    const size_t pageStart = currentPage() * pageSize();
-    if (isBookFusionAtLogicalIndex(pageStart + slot)) {
+    if (currentPageMeta[slot].hasBfBadge) {
       constexpr int BF_ICON_SIZE = 24;
       constexpr int BF_PADDING = 4;  // White padding around the icon.
       constexpr int BF_MARGIN = 4;   // Distance from the cover edge.
@@ -624,9 +732,8 @@ void LibraryActivity::drawOverlay() {
   // Header sits at metrics.topPadding for headerHeight pixels; grid starts below
   // it after one verticalSpacing of breathing room — matches RecentBooksActivity.cpp:199-202.
   const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const GridLayout L =
-      computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
-                    pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
+  const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
+                                     pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
 
   const size_t page = currentPage();
   const size_t pageStart = page * pageSize();
@@ -673,8 +780,7 @@ void LibraryActivity::drawOverlay() {
       textY += titleLineHeight;
     }
     if (!currentPageMeta[i].author.empty()) {
-      const std::string author =
-          renderer.truncatedText(SMALL_FONT_ID, currentPageMeta[i].author.c_str(), maxLineWidth);
+      const std::string author = renderer.truncatedText(SMALL_FONT_ID, currentPageMeta[i].author.c_str(), maxLineWidth);
       renderer.drawText(SMALL_FONT_ID, tileX + hPaddingInSelection, textY, author.c_str(), true);
       textY += titleLineHeight;
     }
@@ -740,7 +846,6 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
       // rebuild and so the BookFusion badge doesn't shift onto the wrong book.
       if (k < authorCache.size()) authorCache.erase(authorCache.begin() + k);
       if (k < dateAddedCache.size()) dateAddedCache.erase(dateAddedCache.begin() + k);
-      if (k < bookIsBookFusion.size()) bookIsBookFusion.erase(bookIsBookFusion.begin() + k);
     }
   };
 
@@ -805,6 +910,11 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
         }
       }
       reloadAfterMutation();
+      break;
+    case BookContextMenu::Action::BookInfo:
+      startActivityForResult(std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title,
+                                                                   contextMenu.author(), contextMenu.progressPercent()),
+                             [this](const ActivityResult&) { requestUpdate(); });
       break;
   }
 }
@@ -872,10 +982,17 @@ void LibraryActivity::loop() {
       const std::string& author = currentPageMeta[slotInPage].author;
       int progress = -1;
       const auto& recents = RECENT_BOOKS.getBooks();
-      auto it = std::find_if(recents.begin(), recents.end(),
-                             [&path](const RecentBook& b) { return b.path == path; });
+      auto it = std::find_if(recents.begin(), recents.end(), [&path](const RecentBook& b) { return b.path == path; });
       if (it != recents.end()) progress = it->progressPercent;
       if (contextMenu.checkLongPress(mappedInput, path, title, author, progress)) {
+        // Tags are short; surface them in the popup when the cached metadata has them.
+        // Use the existing cache only (no rebuild) so opening the menu never blocks.
+        if (FsHelpers::hasEpubExtension(path)) {
+          Epub epub(path, "/.crosspoint");
+          if (epub.load(/*buildIfMissing=*/false, /*skipLoadingCss=*/true)) {
+            contextMenu.setInfoTags(epub.getTags());
+          }
+        }
         pageBufferStored = false;  // Modal will overwrite the snapshot region.
         requestUpdate();
         return;

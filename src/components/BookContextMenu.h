@@ -27,8 +27,9 @@ class BookContextMenu {
     Delete = 3,
     Reindex = 4,
     RegenerateCover = 5,
+    BookInfo = 6,
   };
-  static constexpr int OPTIONS_COUNT = 6;
+  static constexpr int OPTIONS_COUNT = 7;
   static constexpr uint32_t DEFAULT_HOLD_MS = 700;
 
   bool isOpen() const { return showing_; }
@@ -45,6 +46,11 @@ class BookContextMenu {
   // this frame.
   bool checkLongPress(const MappedInputManager& input, std::string path, std::string title, std::string author,
                       int progressPercent, uint32_t holdMs = DEFAULT_HOLD_MS);
+
+  // Optional tags line, shown in the popup when non-empty. Set once by the host right
+  // after checkLongPress() opens the menu (tags aren't always cheaply available, so
+  // they're supplied separately rather than through checkLongPress).
+  void setInfoTags(std::string tags) { tags_ = std::move(tags); }
 
   // Drives the modal while open. Up/Down (via ButtonNavigator) move the
   // selection; Confirm release after the initial-hold release selects;
@@ -70,13 +76,14 @@ class BookContextMenu {
 
  private:
   bool showing_ = false;
-  bool triggered_ = false;          // Long-press fired during current hold cycle.
-  bool awaitingRelease_ = false;    // True after open, until Confirm is released.
-  bool longPressFlagSet_ = false;   // One-shot for short-press suppression.
+  bool triggered_ = false;         // Long-press fired during current hold cycle.
+  bool awaitingRelease_ = false;   // True after open, until Confirm is released.
+  bool longPressFlagSet_ = false;  // One-shot for short-press suppression.
 
   int selectedIndex_ = 0;
   std::string path_;
   std::string title_;
   std::string author_;
+  std::string tags_;
   int progressPercent_ = -1;
 };

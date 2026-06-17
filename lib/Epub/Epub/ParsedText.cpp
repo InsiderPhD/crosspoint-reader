@@ -15,6 +15,15 @@ constexpr int MAX_COST = std::numeric_limits<int>::max();
 
 namespace {
 
+// Returns true if a Unicode codepoint is a letter for bionic-reading purposes.
+// Apostrophe and smart quotes are included (common in contractions).
+// Digits and punctuation are excluded so trailing commas/periods stay unbolded.
+static bool isBionicWordChar(const uint32_t cp) {
+  if ((cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z')) return true;
+  if (cp == '\'' || cp == 0x2018u || cp == 0x2019u) return true;  // apostrophe + smart quotes
+  return cp >= 0x00C0u;  // accented Latin and non-Latin scripts
+}
+
 // Soft hyphen byte pattern used throughout EPUBs (UTF-8 for U+00AD).
 constexpr char SOFT_HYPHEN_UTF8[] = "\xC2\xAD";
 constexpr size_t SOFT_HYPHEN_BYTES = 2;
@@ -80,13 +89,81 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
                          const bool attachToPrevious) {
   if (word.empty()) return;
 
-  words.push_back(std::move(word));
   EpdFontFamily::Style combinedStyle = fontStyle;
   if (underline) {
     combinedStyle = static_cast<EpdFontFamily::Style>(combinedStyle | EpdFontFamily::UNDERLINE);
   }
+
+  // Bionic reading: split letter-sequence words into a bold prefix + regular suffix.
+  // Already-bold words are left untouched — they are already fully emphasized.
+  if (bionicReadingEnabled && (combinedStyle & EpdFontFamily::BOLD) == 0) {
+    addBionicWord(std::move(word), combinedStyle, attachToPrevious);
+    return;
+  }
+
+  words.push_back(std::move(word));
   wordStyles.push_back(combinedStyle);
   wordContinues.push_back(attachToPrevious);
+  wordIsBionicSuffix.push_back(false);
+}
+
+void ParsedText::addBionicWord(std::string word, const EpdFontFamily::Style baseStyle, const bool attachToPrevious) {
+  const auto* const wordEnd = reinterpret_cast<const unsigned char*>(word.c_str()) + word.size();
+  const auto* p = reinterpret_cast<const unsigned char*>(word.c_str());
+  bool firstToken = true;
+
+  while (p < wordEnd) {
+    const auto* segStart = p;
+
+    // Classify this segment from its first codepoint, then consume matching codepoints.
+    const bool segIsWord = isBionicWordChar(utf8NextCodepoint(&p));
+    while (p < wordEnd) {
+      auto* peek = p;
+      if (isBionicWordChar(utf8NextCodepoint(&peek)) != segIsWord) break;
+      p = peek;
+    }
+
+    const size_t segBytes = static_cast<size_t>(p - segStart);
+    if (segBytes == 0) break;
+
+    const bool attach = firstToken ? attachToPrevious : true;
+    firstToken = false;
+
+    if (!segIsWord) {
+      words.emplace_back(reinterpret_cast<const char*>(segStart), segBytes);
+      wordStyles.push_back(baseStyle);
+      wordContinues.push_back(attach);
+      wordIsBionicSuffix.push_back(false);
+      continue;
+    }
+
+    // Count codepoints in this letter segment to compute the bold-prefix length.
+    // Cap at 9 codepoints (36 bytes worst-case UTF-8) — matches TextBlock render buffer.
+    size_t cpCount = 0;
+    const auto* cp = segStart;
+    while (cp < p) { utf8NextCodepoint(&cp); ++cpCount; }
+
+    const size_t boldCps = std::clamp((cpCount * 43u + 99u) / 100u, size_t{1}, size_t{9});
+
+    // Walk forward boldCps codepoints to find the byte-boundary for the prefix.
+    const auto* splitAt = segStart;
+    for (size_t i = 0; i < boldCps; ++i) utf8NextCodepoint(&splitAt);
+    const size_t boldBytes = static_cast<size_t>(splitAt - segStart);
+
+    // Bold prefix.
+    words.emplace_back(reinterpret_cast<const char*>(segStart), boldBytes);
+    wordStyles.push_back(static_cast<EpdFontFamily::Style>(baseStyle | EpdFontFamily::BOLD));
+    wordContinues.push_back(attach);
+    wordIsBionicSuffix.push_back(false);
+
+    // Regular suffix — only if the segment has characters beyond the prefix.
+    if (boldBytes < segBytes) {
+      words.emplace_back(reinterpret_cast<const char*>(segStart) + boldBytes, segBytes - boldBytes);
+      wordStyles.push_back(baseStyle);
+      wordContinues.push_back(true);
+      wordIsBionicSuffix.push_back(true);
+    }
+  }
 }
 
 // Consumes data to minimize memory usage
@@ -463,6 +540,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // line, while "kilometer" moves to the next line.
   // wordContinues[wordIndex] is intentionally left unchanged — the prefix keeps its original attachment.
   wordContinues.insert(wordContinues.begin() + wordIndex + 1, false);
+  wordIsBionicSuffix.insert(wordIsBionicSuffix.begin() + wordIndex + 1, false);
 
   // Update cached widths to reflect the new prefix/remainder pairing.
   wordWidths[wordIndex] = static_cast<uint16_t>(chosenWidth);
@@ -575,6 +653,9 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   std::vector<std::string> lineWords(std::make_move_iterator(words.begin() + lastBreakAt),
                                      std::make_move_iterator(words.begin() + lineBreak));
   std::vector<EpdFontFamily::Style> lineWordStyles(wordStyles.begin() + lastBreakAt, wordStyles.begin() + lineBreak);
+  // wordIsBionicSuffix is always populated in lockstep with words (even when bionic is off).
+  std::vector<bool> lineBionicSuffix(wordIsBionicSuffix.begin() + lastBreakAt,
+                                     wordIsBionicSuffix.begin() + lineBreak);
 
   for (auto& word : lineWords) {
     if (containsSoftHyphen(word)) {
@@ -582,6 +663,41 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     }
   }
 
-  processLine(
-      std::make_shared<TextBlock>(std::move(lineWords), std::move(lineXPos), std::move(lineWordStyles), blockStyle));
+  // Merge each bionic suffix back into its preceding bold-prefix word.
+  // The suffix x-offset was already pre-computed by the layout engine using bold font metrics —
+  // store it so render time can split the combined string without extra font lookups.
+  std::vector<std::string> outWords;
+  std::vector<int16_t> outXPos;
+  std::vector<EpdFontFamily::Style> outStyles;
+  std::vector<uint8_t> outBoundary;
+  std::vector<uint16_t> outSuffixX;
+  outWords.reserve(lineWordCount);
+  outXPos.reserve(lineWordCount);
+  outStyles.reserve(lineWordCount);
+  outBoundary.reserve(lineWordCount);
+  outSuffixX.reserve(lineWordCount);
+
+  for (size_t i = 0; i < lineWordCount; ++i) {
+    if (i < lineBionicSuffix.size() && lineBionicSuffix[i] && !outWords.empty()) {
+      // Merge suffix string into the preceding bold-prefix word.
+      const uint8_t boundary = static_cast<uint8_t>(std::min(outWords.back().size(), size_t{255}));
+      const int16_t rawDelta = lineXPos[i] - outXPos.back();
+      outBoundary.back() = boundary;
+      outSuffixX.back() = rawDelta > 0 ? static_cast<uint16_t>(rawDelta) : 0u;
+      outWords.back() += lineWords[i];
+      // Strip BOLD from the stored style — it is re-applied at render time only up to the boundary.
+      outStyles.back() = static_cast<EpdFontFamily::Style>(outStyles.back() & ~EpdFontFamily::BOLD);
+    } else {
+      outWords.push_back(std::move(lineWords[i]));
+      outXPos.push_back(lineXPos[i]);
+      outStyles.push_back(lineWordStyles[i]);
+      outBoundary.push_back(0);
+      outSuffixX.push_back(0);
+    }
+  }
+
+  const bool hasBionic = std::any_of(outBoundary.begin(), outBoundary.end(), [](const uint8_t b) { return b > 0; });
+  processLine(std::make_shared<TextBlock>(std::move(outWords), std::move(outXPos), std::move(outStyles), blockStyle,
+                                          hasBionic ? std::move(outBoundary) : std::vector<uint8_t>{},
+                                          hasBionic ? std::move(outSuffixX) : std::vector<uint16_t>{}));
 }

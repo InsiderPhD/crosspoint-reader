@@ -2,6 +2,17 @@
 
 ## `book.bin`
 
+> **Current version: 11.** The ImHex pattern below documents the original v3 layout
+> and has not been kept fully in sync. Since then the metadata section gained, in order:
+> `language` (v5); `tags`, `seriesName`, `seriesIndex` (v10); and `publisher`, `pubDate`,
+> `rating`, `bookshelf` (v11) — each a length-prefixed UTF-8 string appended after
+> `textReferenceHref` (12 metadata strings total). `rating` is the raw Calibre 0–10 value;
+> `bookshelf` is the `#value#` of the `calibre:user_metadata:#bookshelf` custom column. The
+> book **description** is NOT in `book.bin`; it is stored separately in a `desc.bin` sidecar
+> in the book's cache directory (HTML-stripped plain UTF-8, capped at
+> `Epub::MAX_DESCRIPTION_BYTES`) and read lazily by the Book Details view so it never loads
+> on the Library hot path.
+
 ### Version 3
 
 ImHex Pattern:

@@ -16,6 +16,7 @@
 #include <string>
 
 #include "BookFusionBookIdStore.h"
+#include "BookFusionMetaStore.h"
 #include "BookFusionTokenStore.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
@@ -494,6 +495,16 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   if (loadSuccess) {
     RECENT_BOOKS.addBook(filename, epub.getTitle(), epub.getAuthor(), epub.getThumbBmpPath());
 
+    // Persist BookFusion's organisational metadata (categories / bookshelves /
+    // lists) — these aren't embedded in the EPUB, so the Book Details view has
+    // no other source for them. Written after load() (which rebuilt the cache
+    // dir) so it survives; an empty meta just clears any stale sidecar.
+    BookFusionMeta bfMeta;
+    bfMeta.categories = book.categories;
+    bfMeta.bookshelves = book.bookshelves;
+    bfMeta.lists = book.lists;
+    BookFusionMetaStore::save(epub.getCachePath(), bfMeta);
+
     // Fall back to extracting a cover from the EPUB itself if the API didn't
     // provide one — keeps the home-screen thumb and DOWNLOAD_COMPLETE popup
     // populated even for books that BookFusion serves without cover metadata.
@@ -672,8 +683,7 @@ void BookFusionBrowserActivity::loop() {
       // stepping feels continuous across the page break.
       if (selectedIndex == 0) {
         constexpr int perPage = BookFusionSearchResult::MAX_BOOKS;
-        const int lastPage =
-            searchResult.totalCount > 0 ? (searchResult.totalCount + perPage - 1) / perPage : 0;
+        const int lastPage = searchResult.totalCount > 0 ? (searchResult.totalCount + perPage - 1) / perPage : 0;
         int target = 0;
         if (currentPage > 1) {
           target = currentPage - 1;
@@ -718,8 +728,7 @@ void BookFusionBrowserActivity::loop() {
       // rather than the last item (which is the tap-Up continuous-step
       // behaviour). If totalCount is unknown we leave hold-Up as a no-op.
       constexpr int perPage = BookFusionSearchResult::MAX_BOOKS;
-      const int lastPage =
-          searchResult.totalCount > 0 ? (searchResult.totalCount + perPage - 1) / perPage : 0;
+      const int lastPage = searchResult.totalCount > 0 ? (searchResult.totalCount + perPage - 1) / perPage : 0;
       if (lastPage > 1) {
         loadPage(lastPage);
       }
@@ -774,8 +783,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
 
     // Page indicator (same "N / M" format as BROWSING). The category list is
     // fully in memory so M is known exactly — no '+' suffix needed.
-    const int pageItems =
-        UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false, categoryPageIndicatorH);
+    const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false, categoryPageIndicatorH);
     const int totalPages = (pageItems > 0) ? (total + pageItems - 1) / pageItems : 1;
     if (totalPages > 1) {
       const int currentVisualPage = (pageItems > 0) ? (selectedCategory / pageItems) + 1 : 1;
