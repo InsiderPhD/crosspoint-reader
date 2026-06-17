@@ -15,9 +15,11 @@ enum class SortMode : uint8_t {
   ProgressLeast,
   DateAddedNewest,
   DateAddedOldest,
+  BookFusionFirst,
+  BookFusionLast,
 };
 
-constexpr uint8_t SORT_MODE_COUNT = 10;
+constexpr uint8_t SORT_MODE_COUNT = 12;
 
 struct SortEntry {
   std::string_view sortKey;
@@ -25,6 +27,7 @@ struct SortEntry {
   int8_t progressPercent = -1;
   uint16_t lastOpenedRank = 0xFFFF;
   uint32_t dateAddedTs = 0;
+  bool hasBfBadge = false;
 };
 
 // Sentinel for "never opened" — items with this rank sort to the end of LastOpened* modes.

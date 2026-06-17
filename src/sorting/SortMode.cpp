@@ -63,6 +63,12 @@ bool compareEntries(SortMode mode, const SortEntry& a, const SortEntry& b) {
       return missingLastLess(a.dateAddedTs == 0, b.dateAddedTs == 0, a.sortKey, b.sortKey, [&] {
         return a.dateAddedTs == b.dateAddedTs ? 0 : (a.dateAddedTs < b.dateAddedTs ? -1 : 1);
       });
+    case SortMode::BookFusionFirst:
+      // BF-linked books first (A-Z within group), then non-BF (A-Z within group).
+      return missingLastLess(!a.hasBfBadge, !b.hasBfBadge, a.sortKey, b.sortKey, [&] { return 0; });
+    case SortMode::BookFusionLast:
+      // Non-BF books first (A-Z within group), then BF-linked books (A-Z within group).
+      return missingLastLess(a.hasBfBadge, b.hasBfBadge, a.sortKey, b.sortKey, [&] { return 0; });
   }
   return false;
 }
@@ -100,6 +106,10 @@ const char* sortModeLabel(SortMode m) {
       return tr(STR_SORT_DATE_ADDED_NEW);
     case SortMode::DateAddedOldest:
       return tr(STR_SORT_DATE_ADDED_OLD);
+    case SortMode::BookFusionFirst:
+      return tr(STR_SORT_BOOKFUSION_FIRST);
+    case SortMode::BookFusionLast:
+      return tr(STR_SORT_BOOKFUSION_LAST);
   }
   return "";
 }
