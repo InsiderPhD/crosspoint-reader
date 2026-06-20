@@ -489,6 +489,9 @@ void LyraTheme::drawPowerButtonHint(GfxRenderer& renderer, const char* label) co
   const int x = screenWidth - buttonWidth;
   constexpr int gap = 140;
   const int y = topHintButtonY - gap - buttonHeight;
+  // Fill the box white first so list/book content underneath doesn't bleed through (the hint
+  // sits over content here, unlike the edge-hugging side hints). Matches drawButtonHints.
+  renderer.fillRoundedRect(x, y, buttonWidth, buttonHeight, cornerRadius, Color::White);
   renderer.drawRoundedRect(x, y, buttonWidth, buttonHeight, 1, cornerRadius, true, false, true, false, true);
   const int textX = x + (buttonWidth - textHeight) / 2;  // center the rotated text in the box width
   renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, y + (buttonHeight + textWidth) / 2, label);
