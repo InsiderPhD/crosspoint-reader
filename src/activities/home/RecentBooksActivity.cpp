@@ -65,6 +65,25 @@ void RecentBooksActivity::rebuildSortedIndices() {
     }
   }
 
+  // Tags aren't kept in the RecentBooksStore record, so load them lazily (only for
+  // the Tag sorts). RECENT_BOOKS is capped at 10 entries, so this stays cheap. The
+  // backing strings live in `tagKeys` for the duration of the sort. Only EPUBs carry
+  // dc:subject tags; everything else stays empty and sinks to the end.
+  std::vector<std::string> tagKeys;
+  if (currentSort == SortMode::TagAsc || currentSort == SortMode::TagDesc) {
+    tagKeys.assign(recentBooks.size(), std::string{});
+    for (size_t i = 0; i < recentBooks.size(); i++) {
+      const std::string& path = recentBooks[i].path;
+      if (FsHelpers::hasEpubExtension(path)) {
+        Epub epub(path, "/.crosspoint");
+        if (Storage.exists((epub.getCachePath() + "/book.bin").c_str()) && epub.load(true, true)) {
+          tagKeys[i] = epub.getTags();
+        }
+      }
+      entries[i].tagKey = tagKeys[i];
+    }
+  }
+
   applySort(sortedIndices, entries, currentSort);
 }
 
@@ -259,7 +278,7 @@ void RecentBooksActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_MENU_RECENT_BOOKS),
-                 sortModeLabel(currentSort));
+                 sortModeLabel(currentSort), showingBookOptions ? nullptr : tr(STR_SORT));
 
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
@@ -293,6 +312,9 @@ void RecentBooksActivity::render(RenderLock&&) {
                           ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
                           : mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Power short-press opens the sort menu; surface that as a sideways hint. Hidden during
+  // the book-options modal, where Power-to-sort is suppressed (see loop()).
+  if (!showingBookOptions) GUI.drawPowerButtonHint(renderer, tr(STR_SORT));
 
   if (showingBookOptions) {
     const auto lastSlash = bookOptionsPath.rfind('/');

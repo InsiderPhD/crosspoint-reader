@@ -47,10 +47,10 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
                                                 SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
   const auto prevButton = swapFront ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
   const auto nextButton = swapFront ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
-  const bool prev = tiltPrev || (usePress ? (input.wasPressed(MappedInputManager::Button::PageBack) ||
-                                             input.wasPressed(prevButton))
-                                          : (input.wasReleased(MappedInputManager::Button::PageBack) ||
-                                             input.wasReleased(prevButton)));
+  const bool prev =
+      tiltPrev ||
+      (usePress ? (input.wasPressed(MappedInputManager::Button::PageBack) || input.wasPressed(prevButton))
+                : (input.wasReleased(MappedInputManager::Button::PageBack) || input.wasReleased(prevButton)));
   const bool powerTurn = SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::PAGE_TURN &&
                          input.wasReleased(MappedInputManager::Button::Power);
   const bool next = tiltNext || (usePress ? (input.wasPressed(MappedInputManager::Button::PageForward) || powerTurn ||

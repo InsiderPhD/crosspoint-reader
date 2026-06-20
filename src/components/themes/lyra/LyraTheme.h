@@ -26,7 +26,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                  .homeCoverTileHeight = 242,
                                  .homeRecentBooksCount = 1,
                                  .buttonHintsHeight = 40,
-                                 .sideButtonHintsWidth = 30,
+                                 .sideButtonHintsWidth = 40,  // match buttonHintsHeight so side/power boxes
+                                                              // are the same thickness as the front hint bar
                                  .progressBarHeight = 16,
                                  .progressBarMarginTop = 1,
                                  .statusBarHorizontalMargin = 5,
@@ -51,7 +52,8 @@ class LyraTheme : public BaseTheme {
   //   void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total) override;
   void drawBatteryLeft(const GfxRenderer& renderer, Rect rect, bool showPercentage = true) const override;
   void drawBatteryRight(const GfxRenderer& renderer, Rect rect, bool showPercentage = true) const override;
-  void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle) const override;
+  void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle = nullptr,
+                  const char* powerButtonHintLabel = nullptr) const override;
   void drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label,
                      const char* rightLabel = nullptr) const override;
   void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,
@@ -64,6 +66,7 @@ class LyraTheme : public BaseTheme {
   void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                        const char* btn4) const override;
   void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const override;
+  void drawPowerButtonHint(GfxRenderer& renderer, const char* label) const override;
   void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                       const std::function<std::string(int index)>& buttonLabel,
                       const std::function<UIIcon(int index)>& rowIcon) const override;

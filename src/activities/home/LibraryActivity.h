@@ -66,9 +66,11 @@ class LibraryActivity final : public Activity {
   // Lazy metadata caches, populated on first selection of the relevant sort mode.
   // Indexed in parallel with bookPaths (raw enumeration order).
   std::vector<std::string> authorCache;
+  std::vector<std::string> tagCache;
   std::vector<uint32_t> dateAddedCache;
   std::vector<bool> bfBadgeCache;
   bool authorCacheReady = false;
+  bool tagCacheReady = false;
   bool dateAddedCacheReady = false;
   bool bfBadgeCacheReady = false;
   // Set when a sort mode change needs a metadata pass; the next render() shows a

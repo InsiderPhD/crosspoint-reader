@@ -127,11 +127,14 @@ void LibraryActivity::onExit() {
   sortedIndices.shrink_to_fit();
   authorCache.clear();
   authorCache.shrink_to_fit();
+  tagCache.clear();
+  tagCache.shrink_to_fit();
   dateAddedCache.clear();
   dateAddedCache.shrink_to_fit();
   bfBadgeCache.clear();
   bfBadgeCacheReady = false;
   authorCacheReady = false;
+  tagCacheReady = false;
   dateAddedCacheReady = false;
   pendingSortRebuild = false;
 }
@@ -158,7 +161,10 @@ bool LibraryActivity::tryLoadFromCache() {
     uint32_t storedMtime = 0;
     std::string dirPath;
     serialization::readPod(f, storedMtime);
-    if (!readSafePath(f, dirPath)) { f.close(); return false; }
+    if (!readSafePath(f, dirPath)) {
+      f.close();
+      return false;
+    }
 
     auto dir = Storage.open(dirPath.c_str());
     if (!dir || dir.getModifyDateTimePacked() != storedMtime) {
@@ -173,7 +179,11 @@ bool LibraryActivity::tryLoadFromCache() {
   bookPaths.reserve(bookCount);
   for (uint16_t i = 0; i < bookCount; ++i) {
     std::string path;
-    if (!readSafePath(f, path)) { f.close(); bookPaths.clear(); return false; }
+    if (!readSafePath(f, path)) {
+      f.close();
+      bookPaths.clear();
+      return false;
+    }
     bookPaths.push_back(std::move(path));
   }
 
@@ -197,7 +207,7 @@ void LibraryActivity::saveToCache(const std::vector<std::pair<std::string, uint3
   const uint16_t dirCount = static_cast<uint16_t>(std::min<size_t>(dirMtimes.size(), 0xFFFFu));
   serialization::writePod(f, dirCount);
   for (uint16_t i = 0; i < dirCount; ++i) {
-    serialization::writePod(f, dirMtimes[i].second);  // mtime
+    serialization::writePod(f, dirMtimes[i].second);    // mtime
     serialization::writeString(f, dirMtimes[i].first);  // path
   }
 
@@ -216,9 +226,11 @@ void LibraryActivity::enumerateBooks() {
   // cache is missing, corrupt, or any scanned directory's mtime has changed.
   if (tryLoadFromCache()) {
     authorCache.assign(bookPaths.size(), std::string{});
+    tagCache.assign(bookPaths.size(), std::string{});
     dateAddedCache.assign(bookPaths.size(), 0u);
     bfBadgeCache.assign(bookPaths.size(), false);
     authorCacheReady = false;
+    tagCacheReady = false;
     dateAddedCacheReady = false;
     bfBadgeCacheReady = false;
     rebuildSortedIndices();
@@ -275,9 +287,11 @@ void LibraryActivity::enumerateBooks() {
 
   // Reset caches; their contents are bookPaths-indexed and must match the new list.
   authorCache.assign(bookPaths.size(), std::string{});
+  tagCache.assign(bookPaths.size(), std::string{});
   dateAddedCache.assign(bookPaths.size(), 0u);
   bfBadgeCache.assign(bookPaths.size(), false);
   authorCacheReady = false;
+  tagCacheReady = false;
   dateAddedCacheReady = false;
   bfBadgeCacheReady = false;
 
@@ -300,6 +314,7 @@ std::string_view filenameView(const std::string& path) {
 void LibraryActivity::rebuildSortedIndices() {
   const bool needsAuthor =
       (currentSort == SortMode::AuthorAsc || currentSort == SortMode::AuthorDesc) && !authorCacheReady;
+  const bool needsTag = (currentSort == SortMode::TagAsc || currentSort == SortMode::TagDesc) && !tagCacheReady;
   const bool needsDateAdded =
       (currentSort == SortMode::DateAddedNewest || currentSort == SortMode::DateAddedOldest) && !dateAddedCacheReady;
 
@@ -319,6 +334,21 @@ void LibraryActivity::rebuildSortedIndices() {
     authorCacheReady = true;
   }
 
+  if (needsTag) {
+    // Only EPUBs carry dc:subject tags; XTC has no tag metadata, so those rows
+    // stay empty and sink to the end of the Tag sorts.
+    for (size_t i = 0; i < bookPaths.size(); i++) {
+      const std::string& path = bookPaths[i];
+      if (FsHelpers::hasEpubExtension(path)) {
+        Epub epub(path, "/.crosspoint");
+        if (Storage.exists((epub.getCachePath() + "/book.bin").c_str()) && epub.load(true, true)) {
+          tagCache[i] = epub.getTags();
+        }
+      }
+    }
+    tagCacheReady = true;
+  }
+
   if (needsDateAdded) {
     for (size_t i = 0; i < bookPaths.size(); i++) {
       HalFile f;
@@ -334,7 +364,8 @@ void LibraryActivity::rebuildSortedIndices() {
       (currentSort == SortMode::BookFusionFirst || currentSort == SortMode::BookFusionLast) && !bfBadgeCacheReady;
   if (needsBfBadge) {
     for (size_t i = 0; i < bookPaths.size(); i++) {
-      bfBadgeCache[i] = FsHelpers::hasEpubExtension(bookPaths[i]) && BookFusionBookIdStore::hasBookId(bookPaths[i].c_str());
+      bfBadgeCache[i] =
+          FsHelpers::hasEpubExtension(bookPaths[i]) && BookFusionBookIdStore::hasBookId(bookPaths[i].c_str());
     }
     bfBadgeCacheReady = true;
   }
@@ -348,6 +379,7 @@ void LibraryActivity::rebuildSortedIndices() {
     SortEntry e;
     e.sortKey = filenameView(bookPaths[i]);
     e.authorKey = authorCacheReady ? std::string_view(authorCache[i]) : std::string_view{};
+    e.tagKey = tagCacheReady ? std::string_view(tagCache[i]) : std::string_view{};
     e.dateAddedTs = dateAddedCacheReady ? dateAddedCache[i] : 0u;
     e.hasBfBadge = bfBadgeCacheReady ? bfBadgeCache[i] : false;
     e.progressPercent = -1;
@@ -461,7 +493,7 @@ void LibraryActivity::render(RenderLock&&) {
     renderer.clearScreen();
     const auto& metrics = UITheme::getInstance().getMetrics();
     GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
-                   tr(STR_LIBRARY), sortModeLabel(currentSort));
+                   tr(STR_LIBRARY), sortModeLabel(currentSort), contextMenu.isOpen() ? nullptr : tr(STR_SORT));
     drawButtonHints();
     contextMenu.render(renderer);
     sortMenu.render(renderer);
@@ -495,6 +527,9 @@ void LibraryActivity::drawButtonHints() {
                           ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
                           : mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Power short-press opens the sort menu; surface that as a sideways hint. Hidden while
+  // the context menu is open, where Power-to-sort is suppressed (see loop()).
+  if (!contextMenu.isOpen()) GUI.drawPowerButtonHint(renderer, tr(STR_SORT));
 }
 
 void LibraryActivity::refreshCurrentPageMeta() {
@@ -666,7 +701,7 @@ void LibraryActivity::renderPageFromScratch() {
   // placeholders until loop() fills them in one at a time.
   renderer.clearScreen();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, screenW, metrics.headerHeight}, tr(STR_LIBRARY),
-                 sortModeLabel(currentSort));
+                 sortModeLabel(currentSort), contextMenu.isOpen() ? nullptr : tr(STR_SORT));
   for (int i = 0; i < booksOnPage; ++i) drawTileCover(i);
 
   // Snapshot covers+header BEFORE drawing the selection/text layer, so
@@ -698,7 +733,7 @@ void LibraryActivity::renderPageFromScratch() {
   // separates "this cover is generating" from "this cover is permanently
   // broken" — once gen is done and the popup disappears, any remaining
   // placeholders are confirmed broken.
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  GUI.drawPopup(renderer, tr(STR_LOADING));
 
   // Push (placeholders + popup) to e-ink so the user sees both immediately.
   if (SETTINGS.darkMode) renderer.invertScreen();
@@ -845,6 +880,7 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
       // Keep ALL parallel caches in lockstep so SortEntry views stay valid on
       // rebuild and so the BookFusion badge doesn't shift onto the wrong book.
       if (k < authorCache.size()) authorCache.erase(authorCache.begin() + k);
+      if (k < tagCache.size()) tagCache.erase(tagCache.begin() + k);
       if (k < dateAddedCache.size()) dateAddedCache.erase(dateAddedCache.begin() + k);
     }
   };

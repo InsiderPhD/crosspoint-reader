@@ -57,14 +57,24 @@ class FileWriteStream final : public Stream {
 }  // namespace
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent) {
-  // Use NetworkClientSecure for HTTPS, regular NetworkClient for HTTP
-  std::unique_ptr<NetworkClient> client;
+  // Use NetworkClientSecure for HTTPS, regular NetworkClient for HTTP.
+  // Own each client as its CONCRETE type. NetworkClient's destructor is
+  // non-virtual, so holding a NetworkClientSecure through a
+  // unique_ptr<NetworkClient> slices it on delete: ~NetworkClientSecure never
+  // runs, its sslclient shared_ptr (whose custom deleter calls stop_ssl_socket)
+  // is never released, and the entire mbedTLS session context (tens of KB)
+  // leaks on every HTTPS transfer. On the no-PSRAM C3 a couple of leaks exhaust
+  // the largest contiguous block and the next TLS handshake fails.
+  std::unique_ptr<NetworkClientSecure> secureClient;
+  std::unique_ptr<NetworkClient> plainClient;
+  NetworkClient* client = nullptr;
   if (UrlUtils::isHttpsUrl(url)) {
-    auto* secureClient = new NetworkClientSecure();
+    secureClient = std::make_unique<NetworkClientSecure>();
     secureClient->setInsecure();
-    client.reset(secureClient);
+    client = secureClient.get();
   } else {
-    client.reset(new NetworkClient());
+    plainClient = std::make_unique<NetworkClient>();
+    client = plainClient.get();
   }
   HTTPClient http;
 
@@ -116,14 +126,24 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent) {
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool allowConfiguredAuth) {
-  // Use NetworkClientSecure for HTTPS, regular NetworkClient for HTTP
-  std::unique_ptr<NetworkClient> client;
+  // Use NetworkClientSecure for HTTPS, regular NetworkClient for HTTP.
+  // Own each client as its CONCRETE type. NetworkClient's destructor is
+  // non-virtual, so holding a NetworkClientSecure through a
+  // unique_ptr<NetworkClient> slices it on delete: ~NetworkClientSecure never
+  // runs, its sslclient shared_ptr (whose custom deleter calls stop_ssl_socket)
+  // is never released, and the entire mbedTLS session context (tens of KB)
+  // leaks on every HTTPS transfer. On the no-PSRAM C3 a couple of leaks exhaust
+  // the largest contiguous block and the next TLS handshake fails.
+  std::unique_ptr<NetworkClientSecure> secureClient;
+  std::unique_ptr<NetworkClient> plainClient;
+  NetworkClient* client = nullptr;
   if (UrlUtils::isHttpsUrl(url)) {
-    auto* secureClient = new NetworkClientSecure();
+    secureClient = std::make_unique<NetworkClientSecure>();
     secureClient->setInsecure();
-    client.reset(secureClient);
+    client = secureClient.get();
   } else {
-    client.reset(new NetworkClient());
+    plainClient = std::make_unique<NetworkClient>();
+    client = plainClient.get();
   }
   HTTPClient http;
 

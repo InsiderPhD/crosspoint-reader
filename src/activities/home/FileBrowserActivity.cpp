@@ -28,8 +28,10 @@ void FileBrowserActivity::loadFiles() {
   folderEntries.clear();
   fileEntryIsBookFusion.clear();
   authorCache.clear();
+  tagCache.clear();
   dateAddedCache.clear();
   authorCacheReady = false;
+  tagCacheReady = false;
   dateAddedCacheReady = false;
 
   auto root = Storage.open(basepath.c_str());
@@ -67,6 +69,7 @@ void FileBrowserActivity::loadFiles() {
   // Folders always keep natural sort and pin to the bottom of the display list.
   FsHelpers::sortFileList(folderEntries);
   authorCache.assign(fileEntries.size(), std::string{});
+  tagCache.assign(fileEntries.size(), std::string{});
   dateAddedCache.assign(fileEntries.size(), 0u);
 
   // BookFusion icon cache — read once at directory load (an expected wait) rather
@@ -96,6 +99,7 @@ std::string_view filenameStemView(const std::string& name) {
 void FileBrowserActivity::rebuildFilesList() {
   const bool needsAuthor =
       (currentSort == SortMode::AuthorAsc || currentSort == SortMode::AuthorDesc) && !authorCacheReady;
+  const bool needsTag = (currentSort == SortMode::TagAsc || currentSort == SortMode::TagDesc) && !tagCacheReady;
   const bool needsDateAdded =
       (currentSort == SortMode::DateAddedNewest || currentSort == SortMode::DateAddedOldest) && !dateAddedCacheReady;
 
@@ -119,6 +123,21 @@ void FileBrowserActivity::rebuildFilesList() {
     authorCacheReady = true;
   }
 
+  if (needsTag) {
+    for (size_t i = 0; i < fileEntries.size(); i++) {
+      const std::string fullPath = baseWithSlash + fileEntries[i];
+      // Only EPUBs carry dc:subject tags; XTC/TXT/MD/BMP stay empty and sink to
+      // the end of the Tag sorts.
+      if (FsHelpers::hasEpubExtension(fileEntries[i])) {
+        Epub epub(fullPath, "/.crosspoint");
+        if (Storage.exists((epub.getCachePath() + "/book.bin").c_str()) && epub.load(true, true)) {
+          tagCache[i] = epub.getTags();
+        }
+      }
+    }
+    tagCacheReady = true;
+  }
+
   if (needsDateAdded) {
     for (size_t i = 0; i < fileEntries.size(); i++) {
       const std::string fullPath = baseWithSlash + fileEntries[i];
@@ -139,6 +158,7 @@ void FileBrowserActivity::rebuildFilesList() {
     SortEntry e;
     e.sortKey = filenameStemView(fileEntries[i]);
     e.authorKey = authorCacheReady ? std::string_view(authorCache[i]) : std::string_view{};
+    e.tagKey = tagCacheReady ? std::string_view(tagCache[i]) : std::string_view{};
     e.dateAddedTs = dateAddedCacheReady ? dateAddedCache[i] : 0u;
     e.progressPercent = -1;
     e.lastOpenedRank = LAST_OPENED_NEVER;
@@ -534,7 +554,8 @@ void FileBrowserActivity::render(RenderLock&&) {
           : ((basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1));
   // Show folder name in header; right side shows the active sort label (Books mode only).
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str(),
-                 (mode == Mode::Books) ? sortModeLabel(currentSort) : nullptr);
+                 (mode == Mode::Books) ? sortModeLabel(currentSort) : nullptr,
+                 showingBookOptions ? nullptr : tr(STR_SORT));
 
   const int pathLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
   const int pathReserved = pathLineHeight + metrics.verticalSpacing;
@@ -596,6 +617,9 @@ void FileBrowserActivity::render(RenderLock&&) {
                           : mappedInput.mapLabels(backLabel, confirmLabel, files.empty() ? "" : tr(STR_DIR_UP),
                                                   files.empty() ? "" : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Power short-press opens the sort menu; surface that as a sideways hint. Hidden during
+  // the book-options modal, where Power-to-sort is suppressed (see loop()).
+  if (!showingBookOptions) GUI.drawPowerButtonHint(renderer, tr(STR_SORT));
 
   if (showingBookOptions) {
     const auto lastSlash = bookOptionsPath.rfind('/');

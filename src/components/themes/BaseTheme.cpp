@@ -236,6 +236,48 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
   }
 }
 
+void BaseTheme::drawPowerButtonHint(GfxRenderer& renderer, const char* label) const {
+  if (label == nullptr || label[0] == '\0') return;
+
+  const int screenWidth = renderer.getScreenWidth();
+  constexpr int buttonMargin = 4;
+  constexpr int buttonWidth = BaseMetrics::values.sideButtonHintsWidth;  // align with Up/Down side hints
+  constexpr int buttonHeight = 80;                                       // fixed size, same as the side boxes
+
+  // Same bordered-box look as drawButtonHints (UI_10 font, white fill + outline), but the box
+  // is oriented vertically and the label rotated 90° CW for the side-mounted Power button.
+  // Placed to track the physical Power button: top-right on the X3, and on the right edge just
+  // above the Up/Down side hints on the X4.
+  const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, label);
+  const int textHeight = renderer.getTextHeight(UI_10_FONT_ID);
+
+  if (gpio.deviceIsX3()) {
+    // X3's Power button is on the top edge: a horizontal box there with a normal (right-side-up)
+    // label. Same physical spot as the inverted version, but drawn normally so the text isn't
+    // flipped (mirrored coordinates land it on the same top-edge corner).
+    const int boxW = textWidth + 14;
+    const int boxH = 40;  // match the 40px thickness of the other hint boxes
+    const int bx = screenWidth - buttonMargin - boxW;
+    const int by = buttonMargin;
+    renderer.fillRect(bx, by, boxW, boxH, false);
+    renderer.drawRect(bx, by, boxW, boxH);
+    renderer.drawText(UI_10_FONT_ID, bx + 7, by + (boxH - textHeight) / 2, label);
+    return;
+  }
+
+  // X4: Power button is on the right, above the Up/Down side hints (drawSideButtonHints
+  // stacks those starting at topButtonY = 345). Vertical box, label rotated 90° CW.
+  const int x = screenWidth - buttonMargin - buttonWidth;
+  constexpr int sideHintsTopY = 345;
+  constexpr int gap = 140;
+  const int y = sideHintsTopY - gap - buttonHeight;
+  renderer.fillRect(x, y, buttonWidth, buttonHeight, false);
+  renderer.drawRect(x, y, buttonWidth, buttonHeight);
+  const int textX = x + (buttonWidth - textHeight) / 2;
+  const int textY = y + (buttonHeight + textWidth) / 2;
+  renderer.drawTextRotated90CW(UI_10_FONT_ID, textX, textY, label);
+}
+
 void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                          const std::function<std::string(int index)>& rowTitle,
                          const std::function<std::string(int index)>& rowSubtitle,
@@ -328,16 +370,26 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   }
 }
 
-void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle) const {
-  // Hide last battery draw
+void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
+                           const char* powerButtonHintLabel) const {
+  // On the X3 the Power-button hint box (e.g. "Sort") is pinned to the top-right corner where the
+  // battery renders, overlapping it. When that hint is present, shift the battery group (icon + %)
+  // left so it clears the box. The shift equals the box width (mirrors drawPowerButtonHint's X3
+  // box: textWidth + 14), which leaves an 8px gap. X4 draws the hint on the side edge — no shift.
+  int powerHintShift = 0;
+  if (powerButtonHintLabel != nullptr && powerButtonHintLabel[0] != '\0' && gpio.deviceIsX3()) {
+    powerHintShift = renderer.getTextWidth(UI_10_FONT_ID, powerButtonHintLabel) + 14;
+  }
+
+  // Hide last battery draw (extend the cleared strip to cover the shifted position)
   constexpr int maxBatteryWidth = 80;
-  renderer.fillRect(rect.x + rect.width - maxBatteryWidth, rect.y + 5, maxBatteryWidth,
-                    BaseMetrics::values.batteryHeight + 10, false);
+  renderer.fillRect(rect.x + rect.width - maxBatteryWidth - powerHintShift, rect.y + 5,
+                    maxBatteryWidth + powerHintShift, BaseMetrics::values.batteryHeight + 10, false);
 
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
   // Position icon at right edge, drawBatteryRight will place text to the left
-  const int batteryX = rect.x + rect.width - 12 - BaseMetrics::values.batteryWidth;
+  const int batteryX = rect.x + rect.width - 12 - BaseMetrics::values.batteryWidth - powerHintShift;
   drawBatteryRight(renderer,
                    Rect{batteryX, rect.y + 5, BaseMetrics::values.batteryWidth, BaseMetrics::values.batteryHeight},
                    showBatteryPercentage);

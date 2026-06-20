@@ -57,6 +57,14 @@ class BookFusionSyncActivity final : public Activity {
   State state = SYNCING;
   std::string statusMessage;
 
+  // Set before painting the wait screen that immediately precedes a blocking
+  // network call, so render() collapses the EPD analog rails (turnOffScreen)
+  // for the duration of that call. Leaving the charge pump powered alongside
+  // WiFi TX spikes during a sync timeout was causing severe ghosting. Consumed
+  // (and cleared) by render(); the post-network paint then wakes from off and
+  // is auto-promoted to a HALF refresh, which also scrubs any residue.
+  bool powerDownAfterRender = false;
+
   // Result-screen content. Filled in by performPush / performPull and rendered
   // when state transitions to RESULT_OK / RESULT_FAILED.
   std::string resultTitle;

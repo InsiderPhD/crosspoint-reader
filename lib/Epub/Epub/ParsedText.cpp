@@ -21,7 +21,7 @@ namespace {
 static bool isBionicWordChar(const uint32_t cp) {
   if ((cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z')) return true;
   if (cp == '\'' || cp == 0x2018u || cp == 0x2019u) return true;  // apostrophe + smart quotes
-  return cp >= 0x00C0u;  // accented Latin and non-Latin scripts
+  return cp >= 0x00C0u;                                           // accented Latin and non-Latin scripts
 }
 
 // Soft hyphen byte pattern used throughout EPUBs (UTF-8 for U+00AD).
@@ -83,6 +83,79 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
   return renderer.getTextAdvanceX(fontId, sanitized.c_str(), style);
 }
 
+// One render fragment of a bionic-split word. Bionic reading stores whole words and expands
+// them into these fragments on demand (at width-measure and line-extract time) so the
+// long-lived per-paragraph vectors stay half the size. Reproduces the previous
+// ParsedText::addBionicWord split exactly: each letter run -> bold prefix + regular suffix,
+// each non-letter run -> a single regular fragment.
+struct BionicFrag {
+  std::string text;
+  EpdFontFamily::Style style;
+  bool isSuffix;  // true = regular tail that merges back into the preceding bold-prefix word at extract
+};
+
+void appendBionicFrags(const std::string& word, const EpdFontFamily::Style baseStyle, std::vector<BionicFrag>& out) {
+  const auto* const wordEnd = reinterpret_cast<const unsigned char*>(word.c_str()) + word.size();
+  const auto* p = reinterpret_cast<const unsigned char*>(word.c_str());
+
+  while (p < wordEnd) {
+    const auto* segStart = p;
+    const bool segIsWord = isBionicWordChar(utf8NextCodepoint(&p));
+    while (p < wordEnd) {
+      const auto* peek = p;
+      if (isBionicWordChar(utf8NextCodepoint(&peek)) != segIsWord) break;
+      p = peek;
+    }
+
+    const size_t segBytes = static_cast<size_t>(p - segStart);
+    if (segBytes == 0) break;
+
+    if (!segIsWord) {
+      out.push_back({std::string(reinterpret_cast<const char*>(segStart), segBytes), baseStyle, false});
+      continue;
+    }
+
+    // Count codepoints to compute the bold-prefix length (43%, min 1, cap 9).
+    size_t cpCount = 0;
+    const auto* cp = segStart;
+    while (cp < p) {
+      utf8NextCodepoint(&cp);
+      ++cpCount;
+    }
+    const size_t boldCps = std::clamp((cpCount * 43u + 99u) / 100u, size_t{1}, size_t{9});
+    const auto* splitAt = segStart;
+    for (size_t i = 0; i < boldCps; ++i) utf8NextCodepoint(&splitAt);
+    const size_t boldBytes = static_cast<size_t>(splitAt - segStart);
+
+    out.push_back({std::string(reinterpret_cast<const char*>(segStart), boldBytes),
+                   static_cast<EpdFontFamily::Style>(baseStyle | EpdFontFamily::BOLD), false});
+    if (boldBytes < segBytes) {
+      out.push_back(
+          {std::string(reinterpret_cast<const char*>(segStart) + boldBytes, segBytes - boldBytes), baseStyle, true});
+    }
+  }
+}
+
+// Composite advance width of a bionic word: sum of its fragments' widths plus the
+// inter-fragment kerning that the old per-fragment layout accumulated as gaps. Matches the
+// pre-refactor line width so the line-break DP makes identical decisions.
+uint16_t measureBionicWordWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
+                                const EpdFontFamily::Style baseStyle) {
+  std::vector<BionicFrag> frags;
+  appendBionicFrags(word, baseStyle, frags);
+  if (frags.empty()) return measureWordWidth(renderer, fontId, word, baseStyle);
+
+  int total = 0;
+  for (size_t i = 0; i < frags.size(); ++i) {
+    total += measureWordWidth(renderer, fontId, frags[i].text, frags[i].style);
+    if (i + 1 < frags.size()) {
+      total +=
+          renderer.getKerning(fontId, lastCodepoint(frags[i].text), firstCodepoint(frags[i + 1].text), frags[i].style);
+    }
+  }
+  return static_cast<uint16_t>(std::max(0, total));
+}
+
 }  // namespace
 
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
@@ -94,76 +167,18 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     combinedStyle = static_cast<EpdFontFamily::Style>(combinedStyle | EpdFontFamily::UNDERLINE);
   }
 
-  // Bionic reading: split letter-sequence words into a bold prefix + regular suffix.
-  // Already-bold words are left untouched — they are already fully emphasized.
-  if (bionicReadingEnabled && (combinedStyle & EpdFontFamily::BOLD) == 0) {
-    addBionicWord(std::move(word), combinedStyle, attachToPrevious);
-    return;
-  }
-
+  // Whole words are always stored as-is. Bionic reading no longer splits the word into a
+  // bold prefix + regular suffix here (which doubled the per-paragraph vectors and could OOM
+  // a large chapter under heap fragmentation). The split is reproduced on demand at layout
+  // time via appendBionicFrags(), keeping these long-lived vectors at one entry per word.
   words.push_back(std::move(word));
   wordStyles.push_back(combinedStyle);
   wordContinues.push_back(attachToPrevious);
-  wordIsBionicSuffix.push_back(false);
 }
 
-void ParsedText::addBionicWord(std::string word, const EpdFontFamily::Style baseStyle, const bool attachToPrevious) {
-  const auto* const wordEnd = reinterpret_cast<const unsigned char*>(word.c_str()) + word.size();
-  const auto* p = reinterpret_cast<const unsigned char*>(word.c_str());
-  bool firstToken = true;
-
-  while (p < wordEnd) {
-    const auto* segStart = p;
-
-    // Classify this segment from its first codepoint, then consume matching codepoints.
-    const bool segIsWord = isBionicWordChar(utf8NextCodepoint(&p));
-    while (p < wordEnd) {
-      auto* peek = p;
-      if (isBionicWordChar(utf8NextCodepoint(&peek)) != segIsWord) break;
-      p = peek;
-    }
-
-    const size_t segBytes = static_cast<size_t>(p - segStart);
-    if (segBytes == 0) break;
-
-    const bool attach = firstToken ? attachToPrevious : true;
-    firstToken = false;
-
-    if (!segIsWord) {
-      words.emplace_back(reinterpret_cast<const char*>(segStart), segBytes);
-      wordStyles.push_back(baseStyle);
-      wordContinues.push_back(attach);
-      wordIsBionicSuffix.push_back(false);
-      continue;
-    }
-
-    // Count codepoints in this letter segment to compute the bold-prefix length.
-    // Cap at 9 codepoints (36 bytes worst-case UTF-8) — matches TextBlock render buffer.
-    size_t cpCount = 0;
-    const auto* cp = segStart;
-    while (cp < p) { utf8NextCodepoint(&cp); ++cpCount; }
-
-    const size_t boldCps = std::clamp((cpCount * 43u + 99u) / 100u, size_t{1}, size_t{9});
-
-    // Walk forward boldCps codepoints to find the byte-boundary for the prefix.
-    const auto* splitAt = segStart;
-    for (size_t i = 0; i < boldCps; ++i) utf8NextCodepoint(&splitAt);
-    const size_t boldBytes = static_cast<size_t>(splitAt - segStart);
-
-    // Bold prefix.
-    words.emplace_back(reinterpret_cast<const char*>(segStart), boldBytes);
-    wordStyles.push_back(static_cast<EpdFontFamily::Style>(baseStyle | EpdFontFamily::BOLD));
-    wordContinues.push_back(attach);
-    wordIsBionicSuffix.push_back(false);
-
-    // Regular suffix — only if the segment has characters beyond the prefix.
-    if (boldBytes < segBytes) {
-      words.emplace_back(reinterpret_cast<const char*>(segStart) + boldBytes, segBytes - boldBytes);
-      wordStyles.push_back(baseStyle);
-      wordContinues.push_back(true);
-      wordIsBionicSuffix.push_back(true);
-    }
-  }
+// Returns true if word i should be rendered with bionic bolding: feature on and not already bold.
+bool ParsedText::isBionicWord(const size_t i) const {
+  return bionicReadingEnabled && (wordStyles[i] & EpdFontFamily::BOLD) == 0;
 }
 
 // Consumes data to minimize memory usage
@@ -243,7 +258,8 @@ std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& rendere
   wordWidths.reserve(words.size());
 
   for (size_t i = 0; i < words.size(); ++i) {
-    wordWidths.push_back(measureWordWidth(renderer, fontId, words[i], wordStyles[i]));
+    wordWidths.push_back(isBionicWord(i) ? measureBionicWordWidth(renderer, fontId, words[i], wordStyles[i])
+                                         : measureWordWidth(renderer, fontId, words[i], wordStyles[i]));
   }
 
   return wordWidths;
@@ -540,7 +556,6 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // line, while "kilometer" moves to the next line.
   // wordContinues[wordIndex] is intentionally left unchanged — the prefix keeps its original attachment.
   wordContinues.insert(wordContinues.begin() + wordIndex + 1, false);
-  wordIsBionicSuffix.insert(wordIsBionicSuffix.begin() + wordIndex + 1, false);
 
   // Update cached widths to reflect the new prefix/remainder pairing.
   wordWidths[wordIndex] = static_cast<uint16_t>(chosenWidth);
@@ -555,7 +570,40 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
                              const GfxRenderer& renderer, const int fontId) {
   const size_t lineBreak = lineBreakIndices[breakIndex];
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
-  const size_t lineWordCount = lineBreak - lastBreakAt;
+
+  // Expand this line's whole words into bionic render fragments (bold prefix + regular suffix
+  // per letter run); non-bionic words expand to a single fragment. Done per line so the
+  // paragraph-wide vectors never hold the doubled fragment set. The local vectors below mirror
+  // the per-fragment representation the layout/merge logic was originally written against, so
+  // the rest of this function is unchanged aside from indexing them.
+  std::vector<std::string> ew;           // fragment text
+  std::vector<EpdFontFamily::Style> es;  // fragment style
+  std::vector<bool> ec;                  // continues (attaches to previous, no space before)
+  std::vector<bool> esuf;                // bionic regular suffix (merges into preceding bold word)
+  std::vector<uint16_t> eww;             // fragment width
+  for (size_t w = lastBreakAt; w < lineBreak; ++w) {
+    if (isBionicWord(w)) {
+      std::vector<BionicFrag> frags;
+      appendBionicFrags(words[w], wordStyles[w], frags);
+      if (!frags.empty()) {
+        for (size_t k = 0; k < frags.size(); ++k) {
+          es.push_back(frags[k].style);
+          ec.push_back(k == 0 ? continuesVec[w] : true);
+          esuf.push_back(frags[k].isSuffix);
+          eww.push_back(measureWordWidth(renderer, fontId, frags[k].text, frags[k].style));
+          ew.push_back(std::move(frags[k].text));
+        }
+        continue;
+      }
+    }
+    // Non-bionic word (or a bionic word that produced no fragments): store it whole.
+    ew.push_back(std::move(words[w]));
+    es.push_back(wordStyles[w]);
+    ec.push_back(continuesVec[w]);
+    esuf.push_back(false);
+    eww.push_back(wordWidths[w]);
+  }
+  const size_t lineWordCount = ew.size();
 
   // Calculate first line indent (only for left/justified text).
   // Positive text-indent (paragraph indent) is suppressed when extraParagraphSpacing is on.
@@ -575,23 +623,21 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   int totalNaturalGaps = 0;
 
   for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
-    lineWordWidthSum += wordWidths[lastBreakAt + wordIdx];
+    lineWordWidthSum += eww[wordIdx];
     // Count gaps: each word after the first creates a gap, unless it's a continuation
-    if (wordIdx > 0 && !continuesVec[lastBreakAt + wordIdx]) {
+    if (wordIdx > 0 && !ec[wordIdx]) {
       actualGapCount++;
-      totalNaturalGaps +=
-          renderer.getSpaceAdvance(fontId, lastCodepoint(words[lastBreakAt + wordIdx - 1]),
-                                   firstCodepoint(words[lastBreakAt + wordIdx]), wordStyles[lastBreakAt + wordIdx - 1]);
-    } else if (wordIdx > 0 && continuesVec[lastBreakAt + wordIdx]) {
+      totalNaturalGaps += renderer.getSpaceAdvance(fontId, lastCodepoint(ew[wordIdx - 1]), firstCodepoint(ew[wordIdx]),
+                                                   es[wordIdx - 1]);
+    } else if (wordIdx > 0 && ec[wordIdx]) {
       // Non-breaking space tokens (" " with continues=true) are visible, stretchable spaces —
       // count them as justifiable gaps so justifyExtra is distributed to them too.
-      if (words[lastBreakAt + wordIdx] == " ") {
+      if (ew[wordIdx] == " ") {
         actualGapCount++;
       }
       // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
       totalNaturalGaps +=
-          renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx - 1]),
-                              firstCodepoint(words[lastBreakAt + wordIdx]), wordStyles[lastBreakAt + wordIdx - 1]);
+          renderer.getKerning(fontId, lastCodepoint(ew[wordIdx - 1]), firstCodepoint(ew[wordIdx]), es[wordIdx - 1]);
     }
   }
 
@@ -622,42 +668,31 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
     lineXPos.push_back(xpos);
 
-    const bool nextIsContinuation = wordIdx + 1 < lineWordCount && continuesVec[lastBreakAt + wordIdx + 1];
+    const bool nextIsContinuation = wordIdx + 1 < lineWordCount && ec[wordIdx + 1];
     if (nextIsContinuation) {
-      int advance = wordWidths[lastBreakAt + wordIdx];
+      int advance = eww[wordIdx];
       // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-      advance +=
-          renderer.getKerning(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
-                              firstCodepoint(words[lastBreakAt + wordIdx + 1]), wordStyles[lastBreakAt + wordIdx]);
+      advance += renderer.getKerning(fontId, lastCodepoint(ew[wordIdx]), firstCodepoint(ew[wordIdx + 1]), es[wordIdx]);
       // Non-breaking space tokens are stretchable — expand them during justification like normal spaces.
-      if (words[lastBreakAt + wordIdx] == " " && continuesVec[lastBreakAt + wordIdx] &&
-          blockStyle.alignment == CssTextAlign::Justify && !isLastLine) {
+      if (ew[wordIdx] == " " && ec[wordIdx] && blockStyle.alignment == CssTextAlign::Justify && !isLastLine) {
         advance += justifyExtra;
       }
       xpos += advance;
     } else {
       int gap = 0;
       if (wordIdx + 1 < lineWordCount) {
-        gap = renderer.getSpaceAdvance(fontId, lastCodepoint(words[lastBreakAt + wordIdx]),
-                                       firstCodepoint(words[lastBreakAt + wordIdx + 1]),
-                                       wordStyles[lastBreakAt + wordIdx]);
+        gap =
+            renderer.getSpaceAdvance(fontId, lastCodepoint(ew[wordIdx]), firstCodepoint(ew[wordIdx + 1]), es[wordIdx]);
       }
       if (blockStyle.alignment == CssTextAlign::Justify && !isLastLine) {
         gap += justifyExtra;
       }
-      xpos += wordWidths[lastBreakAt + wordIdx] + gap;
+      xpos += eww[wordIdx] + gap;
     }
   }
 
-  // Build line data by moving from the original vectors using index range
-  std::vector<std::string> lineWords(std::make_move_iterator(words.begin() + lastBreakAt),
-                                     std::make_move_iterator(words.begin() + lineBreak));
-  std::vector<EpdFontFamily::Style> lineWordStyles(wordStyles.begin() + lastBreakAt, wordStyles.begin() + lineBreak);
-  // wordIsBionicSuffix is always populated in lockstep with words (even when bionic is off).
-  std::vector<bool> lineBionicSuffix(wordIsBionicSuffix.begin() + lastBreakAt,
-                                     wordIsBionicSuffix.begin() + lineBreak);
-
-  for (auto& word : lineWords) {
+  // Strip soft hyphens from the fragment text so rendered glyphs match the measured widths.
+  for (auto& word : ew) {
     if (containsSoftHyphen(word)) {
       stripSoftHyphensInPlace(word);
     }
@@ -678,19 +713,19 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   outSuffixX.reserve(lineWordCount);
 
   for (size_t i = 0; i < lineWordCount; ++i) {
-    if (i < lineBionicSuffix.size() && lineBionicSuffix[i] && !outWords.empty()) {
+    if (i < esuf.size() && esuf[i] && !outWords.empty()) {
       // Merge suffix string into the preceding bold-prefix word.
       const uint8_t boundary = static_cast<uint8_t>(std::min(outWords.back().size(), size_t{255}));
       const int16_t rawDelta = lineXPos[i] - outXPos.back();
       outBoundary.back() = boundary;
       outSuffixX.back() = rawDelta > 0 ? static_cast<uint16_t>(rawDelta) : 0u;
-      outWords.back() += lineWords[i];
+      outWords.back() += ew[i];
       // Strip BOLD from the stored style — it is re-applied at render time only up to the boundary.
       outStyles.back() = static_cast<EpdFontFamily::Style>(outStyles.back() & ~EpdFontFamily::BOLD);
     } else {
-      outWords.push_back(std::move(lineWords[i]));
+      outWords.push_back(std::move(ew[i]));
       outXPos.push_back(lineXPos[i]);
-      outStyles.push_back(lineWordStyles[i]);
+      outStyles.push_back(es[i]);
       outBoundary.push_back(0);
       outSuffixX.push_back(0);
     }

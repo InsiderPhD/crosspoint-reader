@@ -19,15 +19,15 @@
 #include "components/UITheme.h"
 #include "components/icons/award24.h"
 #include "components/icons/book24.h"
-#include "components/icons/checkbox24.h"
 #include "components/icons/check24.h"
+#include "components/icons/checkbox24.h"
 #include "components/icons/confetti24.h"
 #include "components/icons/files24.h"
 #include "components/icons/last30days24.h"
 #include "components/icons/last7days24.h"
 #include "components/icons/readingtime24.h"
-#include "components/icons/recent.h"
 #include "components/icons/receipttotal24.h"
+#include "components/icons/recent.h"
 #include "components/icons/streak24.h"
 #include "fontIds.h"
 #include "util/ReadingStatsAnalytics.h"
@@ -44,10 +44,7 @@ constexpr int PAGE_SESSIONS = 4;
 
 // Tab labels in display order — index matches the PAGE_* enum values above.
 constexpr StrId TAB_NAMES[TOTAL_STATS_PAGES] = {
-    StrId::STR_STATS_TAB_OVERVIEW,
-    StrId::STR_STATS_TAB_BOOKS,
-    StrId::STR_STATS_TAB_WEEKLY,
-    StrId::STR_STATS_TAB_MONTHLY,
+    StrId::STR_STATS_TAB_OVERVIEW, StrId::STR_STATS_TAB_BOOKS, StrId::STR_STATS_TAB_WEEKLY, StrId::STR_MONTH,
     StrId::STR_STATS_TAB_SESSIONS,
 };
 
@@ -406,12 +403,14 @@ void drawReadingChart(GfxRenderer& renderer, const Rect& rect, const std::vector
     }
 
     if (rotateBottomLabels) {
-      const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, bars[index].bottomLabel.c_str(), EpdFontFamily::REGULAR);
+      const int labelWidth =
+          renderer.getTextWidth(SMALL_FONT_ID, bars[index].bottomLabel.c_str(), EpdFontFamily::REGULAR);
       const int rotatedX = barX + (barWidth - renderer.getTextHeight(SMALL_FONT_ID)) / 2;
       const int rotatedY = bottomLabelY + (bottomLabelAreaHeight + labelWidth) / 2;
       renderer.drawTextRotated90CW(SMALL_FONT_ID, rotatedX, rotatedY, bars[index].bottomLabel.c_str());
     } else {
-      const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, bars[index].bottomLabel.c_str(), EpdFontFamily::REGULAR);
+      const int labelWidth =
+          renderer.getTextWidth(SMALL_FONT_ID, bars[index].bottomLabel.c_str(), EpdFontFamily::REGULAR);
       renderer.drawText(SMALL_FONT_ID, barX + (barWidth - labelWidth) / 2, bottomLabelY + 2,
                         bars[index].bottomLabel.c_str());
     }
@@ -515,7 +514,8 @@ MonthSummary buildMonthSummary(const int year, const unsigned month) {
   return summary;
 }
 
-std::array<HeatmapCell, 42> buildHeatmapCells(const int year, const unsigned month, const uint32_t referenceDayOrdinal) {
+std::array<HeatmapCell, 42> buildHeatmapCells(const int year, const unsigned month,
+                                              const uint32_t referenceDayOrdinal) {
   std::array<HeatmapCell, 42> cells{};
   const uint32_t firstDayOrdinal = TimeUtils::getDayOrdinalForDate(year, month, 1);
   const int firstWeekday = static_cast<int>((firstDayOrdinal + 3U) % 7U);  // Monday = 0
@@ -850,23 +850,24 @@ void ReadingStatsActivity::confirmRemoveSelectedBook() {
 
   const ReadingBookStats selectedBook = *books[bookRow];
   const int currentSelection = bookRow;
-  startActivityForResult(
-      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_STATS_ENTRY), getBookTitle(selectedBook)),
-      [this, selectedBook, currentSelection](const ActivityResult& result) {
-        if (!result.isCancelled && READING_STATS.removeBook(selectedBook.path)) {
-          const int bookCount = std::min(static_cast<int>(getUnfinishedBooks().size()), BOOKS_PER_PAGE);
-          if (bookCount == 0) {
-            selectedItemIndex = 0;
-          } else {
-            // Keep cursor on a valid content row (clamped to the new count).
-            const int newRow = std::min(currentSelection, bookCount - 1);
-            selectedItemIndex = newRow + 1;
-          }
-        }
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_STATS_ENTRY),
+                                                                getBookTitle(selectedBook)),
+                         [this, selectedBook, currentSelection](const ActivityResult& result) {
+                           if (!result.isCancelled && READING_STATS.removeBook(selectedBook.path)) {
+                             const int bookCount =
+                                 std::min(static_cast<int>(getUnfinishedBooks().size()), BOOKS_PER_PAGE);
+                             if (bookCount == 0) {
+                               selectedItemIndex = 0;
+                             } else {
+                               // Keep cursor on a valid content row (clamped to the new count).
+                               const int newRow = std::min(currentSelection, bookCount - 1);
+                               selectedItemIndex = newRow + 1;
+                             }
+                           }
 
-        guardBackReturn();
-        requestUpdate(true);
-      });
+                           guardBackReturn();
+                           requestUpdate(true);
+                         });
 }
 
 void ReadingStatsActivity::guardBackReturn() { waitForBackRelease = true; }
@@ -885,7 +886,8 @@ void ReadingStatsActivity::render(RenderLock&&) {
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
   const int contentBottom = pageHeight - metrics.buttonHintsHeight - 4;
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS), nullptr);
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS),
+                 nullptr);
 
   std::vector<TabInfo> tabs;
   tabs.reserve(TOTAL_STATS_PAGES);
@@ -903,23 +905,19 @@ void ReadingStatsActivity::render(RenderLock&&) {
     const std::string dailyGoalValue = ReadingStatsAnalytics::formatDurationHm(todayReadingMs) + " / " +
                                        ReadingStatsAnalytics::formatDurationHm(getDailyReadingGoalMs());
 
-    drawMetricRow(renderer, Rect{sidePadding, contentTop, contentWidth, SUMMARY_ROW_HEIGHT}, Streak24Icon, tr(STR_STREAK),
-                  std::to_string(READING_STATS.getCurrentStreakDays()));
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT}, Confetti24Icon,
-                  tr(STR_MAX_STREAK), std::to_string(READING_STATS.getMaxStreakDays()));
-    drawMetricRow(renderer,
-                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT}, Checkbox24Icon,
-                  tr(STR_DAILY_GOAL), dailyGoalValue);
-    drawMetricRow(renderer,
-                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Readingtime24Icon,
-                  tr(STR_READING_TIME), ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()));
-    drawMetricRow(renderer,
-                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 4, contentWidth, SUMMARY_ROW_HEIGHT}, Check24Icon,
-                  tr(STR_BOOKS_FINISHED), std::to_string(READING_STATS.getBooksFinishedCount()));
-    drawMetricRow(renderer,
-                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 5, contentWidth, SUMMARY_ROW_HEIGHT}, Files24Icon,
-                  tr(STR_BOOKS_STARTED), std::to_string(READING_STATS.getBooksStartedCount()));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop, contentWidth, SUMMARY_ROW_HEIGHT}, Streak24Icon,
+                  tr(STR_STREAK), std::to_string(READING_STATS.getCurrentStreakDays()));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Confetti24Icon, tr(STR_MAX_STREAK), std::to_string(READING_STATS.getMaxStreakDays()));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Checkbox24Icon, tr(STR_DAILY_GOAL), dailyGoalValue);
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Readingtime24Icon, tr(STR_READING_TIME),
+                  ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 4, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Check24Icon, tr(STR_BOOKS_FINISHED), std::to_string(READING_STATS.getBooksFinishedCount()));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 5, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Files24Icon, tr(STR_BOOKS_STARTED), std::to_string(READING_STATS.getBooksStartedCount()));
 
     const int chartHeaderTop = contentTop + SUMMARY_ROW_HEIGHT * 6 + SUMMARY_GAP * 2;
     const int chartTop = chartHeaderTop + CHART_HEADER_HEIGHT + CHART_TOP_GAP;
@@ -937,7 +935,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
     const int bookCount = std::min(totalBooks, BOOKS_PER_PAGE);
 
     const std::string startedBooksLabel =
-        std::string(tr(STR_STARTED_BOOKS)) + " (" + std::to_string(READING_STATS.getBooksStartedCount()) + ")";
+        std::string(tr(STR_BOOKS_STARTED)) + " (" + std::to_string(READING_STATS.getBooksStartedCount()) + ")";
     GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, startedBooksLabel.c_str(), nullptr);
 
     const int listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
@@ -949,13 +947,14 @@ void ReadingStatsActivity::render(RenderLock&&) {
       const int listHeight = std::min(maxListHeight, targetListHeight);
       // -1 highlights no row, which is what we want when the ribbon is focused.
       const int highlightedRow = (selectedItemIndex > 0) ? (selectedItemIndex - 1) : -1;
-      GUI.drawList(renderer, Rect{0, listTop, pageWidth, listHeight}, bookCount, highlightedRow,
-                   [&](const int index) { return getBookTitle(*books[index]); },
-                   [&](const int index) {
-                     return getBookSubtitle(*books[index]) + " | " +
-                            ReadingStatsAnalytics::formatDurationHm(books[index]->totalReadingMs);
-                   }, nullptr,
-                   [&](const int index) { return std::to_string(books[index]->lastProgressPercent) + "%"; }, false);
+      GUI.drawList(
+          renderer, Rect{0, listTop, pageWidth, listHeight}, bookCount, highlightedRow,
+          [&](const int index) { return getBookTitle(*books[index]); },
+          [&](const int index) {
+            return getBookSubtitle(*books[index]) + " | " +
+                   ReadingStatsAnalytics::formatDurationHm(books[index]->totalReadingMs);
+          },
+          nullptr, [&](const int index) { return std::to_string(books[index]->lastProgressPercent) + "%"; }, false);
     }
   } else if (currentPage == PAGE_WEEKLY) {
     const std::vector<ChartBar> weekBars = getRecentDailyReadingBars();
@@ -981,30 +980,27 @@ void ReadingStatsActivity::render(RenderLock&&) {
 
     const uint64_t avgDayMs = last7DaysValueMs / 7ULL;
     drawMetricRow(renderer, Rect{sidePadding, contentTop, contentWidth, SUMMARY_ROW_HEIGHT}, Last7days24Icon,
-            tr(STR_LAST_7D),
-                  ReadingStatsAnalytics::formatDurationHm(last7DaysValueMs));
+                  tr(STR_LAST_7D), ReadingStatsAnalytics::formatDurationHm(last7DaysValueMs));
     drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT},
-            Last30days24Icon, tr(STR_LAST_30D), ReadingStatsAnalytics::formatDurationHm(last30DaysValueMs));
-    drawMetricRow(renderer,
-                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT}, Book24Icon,
-                  tr(STR_DAY_TOTAL), ReadingStatsAnalytics::formatDurationHm(avgDayMs));
-    drawMetricRow(renderer,
-                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT}, Check24Icon,
-                  tr(STR_DAYS_READ), std::to_string(daysRead));
-    drawMetricRow(renderer,
-                  Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 4, contentWidth, SUMMARY_ROW_HEIGHT}, Checkbox24Icon,
-                  tr(STR_DAILY_GOAL), std::to_string(goalDays) + "/7");
+                  Last30days24Icon, tr(STR_LAST_30D), ReadingStatsAnalytics::formatDurationHm(last30DaysValueMs));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Book24Icon, tr(STR_DAY_TOTAL), ReadingStatsAnalytics::formatDurationHm(avgDayMs));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Check24Icon, tr(STR_DAYS_READ), std::to_string(daysRead));
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 4, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Checkbox24Icon, tr(STR_DAILY_GOAL), std::to_string(goalDays) + "/7");
 
-    const std::string bestDayValue = (bestDayMs == 0) ? std::string("-") :
-        (bestDayLabel + " (" + ReadingStatsAnalytics::formatDurationHm(bestDayMs) + ")");
-    drawMetricRow(renderer,
-            Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 5, contentWidth, SUMMARY_ROW_HEIGHT}, Award24Icon,
-                  tr(STR_BEST_DAY), bestDayValue);
+    const std::string bestDayValue =
+        (bestDayMs == 0) ? std::string("-")
+                         : (bestDayLabel + " (" + ReadingStatsAnalytics::formatDurationHm(bestDayMs) + ")");
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 5, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Award24Icon, tr(STR_BEST_DAY), bestDayValue);
 
     const int chartHeaderTop = contentTop + SUMMARY_ROW_HEIGHT * 6 + SUMMARY_GAP * 2;
     const int chartTop = chartHeaderTop + CHART_HEADER_HEIGHT + CHART_TOP_GAP;
     const int chartHeight = std::max(96, contentBottom - chartTop);
-    GUI.drawSubHeader(renderer, Rect{0, chartHeaderTop, pageWidth, CHART_HEADER_HEIGHT}, tr(STR_DAILY_READING), nullptr);
+    GUI.drawSubHeader(renderer, Rect{0, chartHeaderTop, pageWidth, CHART_HEADER_HEIGHT}, tr(STR_DAILY_READING),
+                      nullptr);
     drawReadingChart(renderer, Rect{sidePadding, chartTop, contentWidth, chartHeight}, weekBars, true);
   } else if (currentPage == PAGE_MONTHLY) {
     const uint32_t referenceDayOrdinal = getDisplayReferenceDayOrdinal();
@@ -1015,24 +1011,20 @@ void ReadingStatsActivity::render(RenderLock&&) {
     GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, MONTH_HEADER_HEIGHT}, monthLabel.c_str(), nullptr);
 
     const int summaryTop = contentTop + MONTH_HEADER_HEIGHT + 4;
-    const std::string bestDayValue =
-        monthSummary.bestDayOfMonth > 0
-            ? ReadingStatsAnalytics::formatDurationHm(monthSummary.bestDayReadingMs) + " (" +
-                  std::to_string(monthSummary.bestDayOfMonth) + ")"
-            : ReadingStatsAnalytics::formatDurationHm(monthSummary.bestDayReadingMs);
+    const std::string bestDayValue = monthSummary.bestDayOfMonth > 0
+                                         ? ReadingStatsAnalytics::formatDurationHm(monthSummary.bestDayReadingMs) +
+                                               " (" + std::to_string(monthSummary.bestDayOfMonth) + ")"
+                                         : ReadingStatsAnalytics::formatDurationHm(monthSummary.bestDayReadingMs);
 
     drawMetricRow(renderer, Rect{sidePadding, summaryTop, contentWidth, SUMMARY_ROW_HEIGHT}, Receipttotal24Icon,
-            tr(STR_MONTH_TOTAL),
-                  ReadingStatsAnalytics::formatDurationHm(monthSummary.monthTotalReadingMs));
-    drawMetricRow(renderer, Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT}, Check24Icon,
-                  tr(STR_DAYS_READ), std::to_string(monthSummary.monthDaysRead));
-    drawMetricRow(renderer,
-            Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT}, Award24Icon,
-            tr(STR_BEST_DAY), bestDayValue);
-    drawMetricRow(renderer,
-            Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
-            Last30days24Icon,
-                  tr(STR_YEAR), ReadingStatsAnalytics::formatDurationHm(monthSummary.yearTotalReadingMs));
+                  tr(STR_MONTH_TOTAL), ReadingStatsAnalytics::formatDurationHm(monthSummary.monthTotalReadingMs));
+    drawMetricRow(renderer, Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Check24Icon, tr(STR_DAYS_READ), std::to_string(monthSummary.monthDaysRead));
+    drawMetricRow(renderer, Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Award24Icon, tr(STR_BEST_DAY), bestDayValue);
+    drawMetricRow(renderer, Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Last30days24Icon, tr(STR_YEAR),
+                  ReadingStatsAnalytics::formatDurationHm(monthSummary.yearTotalReadingMs));
 
     const int gridTop = summaryTop + SUMMARY_ROW_HEIGHT * 4 + SECTION_GAP;
     const int legendTop = contentBottom - LEGEND_HEIGHT - 4;
@@ -1059,8 +1051,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
     const int totalUndated = static_cast<int>(undated.size());
     const int sessionCount = std::min(totalUndated, SESSIONS_PER_PAGE);
 
-    const std::string sessionsLabel =
-        std::string(tr(STR_DATE_NOT_SET)) + " (" + std::to_string(totalUndated) + ")";
+    const std::string sessionsLabel = std::string(tr(STR_DATE_NOT_SET)) + " (" + std::to_string(totalUndated) + ")";
     GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, sessionsLabel.c_str(), nullptr);
 
     const int listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;

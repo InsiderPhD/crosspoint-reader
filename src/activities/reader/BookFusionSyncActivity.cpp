@@ -133,6 +133,10 @@ void BookFusionSyncActivity::performPush() {
     char msg[64];
     snprintf(msg, sizeof(msg), "Step 2 of 2: Uploading %.1f%%…", localBfPos.percentage);
     statusMessage = msg;
+    // setProgress() / trackReadingTime() below are blocking network calls —
+    // power the panel down after this paint so the charge pump isn't held
+    // powered through a timeout.
+    powerDownAfterRender = true;
   }
   requestUpdateAndWait();
 
@@ -213,6 +217,9 @@ void BookFusionSyncActivity::performPull() {
   {
     RenderLock lock(*this);
     statusMessage = "Step 1 of 2: Fetching remote progress…";
+    // getProgress() below is a blocking network call — power the panel down
+    // after this paint so the charge pump isn't held powered through a timeout.
+    powerDownAfterRender = true;
   }
   requestUpdateAndWait();
 
@@ -366,5 +373,16 @@ void BookFusionSyncActivity::render(RenderLock&&) {
   }
 
   if (SETTINGS.darkMode) renderer.invertScreen();
-  renderer.displayBuffer();
+
+  // When this paint precedes a blocking network call, power the EPD rails down
+  // afterwards so the charge pump isn't held at high voltage drawing current
+  // alongside WiFi TX spikes during the (potentially many-second) wait — that
+  // combination was causing severe ghosting on sync timeouts. The next paint
+  // wakes from off and the SDK auto-promotes it to a HALF refresh, re-powering
+  // the panel and scrubbing any residue in one go. See EInkDisplay.cpp
+  // displayBuffer() (wake-from-off HALF promotion) and refreshDisplay()
+  // (ANALOG_OFF/CLOCK_OFF on turnOffScreen).
+  const bool powerOff = powerDownAfterRender;
+  powerDownAfterRender = false;
+  renderer.displayBuffer(HalDisplay::FAST_REFRESH, powerOff);
 }

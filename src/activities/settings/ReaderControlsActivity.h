@@ -14,6 +14,10 @@ class ReaderControlsActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
 
+  // Returns the localized action name for a READER_ACTION enum value. Public + static so
+  // the reader can reuse it when drawing the button-hint bar.
+  static const char* actionName(CrossPointSettings::READER_ACTION action);
+
  private:
   static constexpr uint8_t kConfigurableRows = 13;  // 13 user-configurable + 1 fixed
   static constexpr uint8_t kTotalRows = 14;
@@ -26,8 +30,6 @@ class ReaderControlsActivity final : public Activity {
   const char* getRowTitle(uint8_t row) const;
   // Returns the action label for each row.
   const char* getRowActionName(uint8_t row) const;
-  // Returns the action name for a READER_ACTION enum value.
-  static const char* actionName(CrossPointSettings::READER_ACTION action);
   // Advances the action for the given row by one (wraps around).
   void cycleActionForRow(uint8_t row);
   // Returns the current action for a row.

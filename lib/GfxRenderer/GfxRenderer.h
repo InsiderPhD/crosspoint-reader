@@ -117,7 +117,12 @@ class GfxRenderer {
   // Screen ops
   int getScreenWidth() const;
   int getScreenHeight() const;
-  void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
+  // powerOffAfter collapses the EPD analog rails (POWER_OFF) once the refresh
+  // completes, in addition to the user's fadingFix preference. Use it before a
+  // long blocking operation (e.g. a network call that can hang for tens of
+  // seconds) so the charge pump isn't held powered the whole time. The next
+  // paint wakes from off and is auto-promoted to a HALF refresh by the SDK.
+  void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH, bool powerOffAfter = false) const;
   // EXPERIMENTAL: Windowed update - display only a rectangular region
   // void displayWindow(int x, int y, int width, int height) const;
   void invertScreen() const;

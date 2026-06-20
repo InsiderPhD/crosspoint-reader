@@ -13,7 +13,6 @@
 #include "BookFusionBookIdStore.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
-#include "util/HeaderDateUtils.h"
 #include "components/icons/arrow24.h"
 #include "components/icons/book.h"
 #include "components/icons/book24.h"
@@ -36,6 +35,7 @@
 #include "components/icons/transfer.h"
 #include "components/icons/wifi.h"
 #include "fontIds.h"
+#include "util/HeaderDateUtils.h"
 
 // Internal constants
 namespace {
@@ -162,13 +162,23 @@ void LyraTheme::drawBatteryRight(const GfxRenderer& renderer, Rect rect, const b
   drawLyraBatteryIcon(renderer, rect.x, rect.y + 6, LyraMetrics::values.batteryWidth, rect.height, percentage);
 }
 
-void LyraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle) const {
+void LyraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle,
+                           const char* powerButtonHintLabel) const {
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
+
+  // On the X3 the Power-button hint box (e.g. "Sort") is pinned to the top-right corner where the
+  // battery renders, overlapping it. When that hint is present, shift the battery group (icon + %)
+  // left so it clears the box. The shift equals the box width (mirrors drawPowerButtonHint's X3
+  // box: textWidth + 16), which leaves an 8px gap. X4 draws the hint on the side edge — no shift.
+  int powerHintShift = 0;
+  if (powerButtonHintLabel != nullptr && powerButtonHintLabel[0] != '\0' && gpio.deviceIsX3()) {
+    powerHintShift = renderer.getTextWidth(SMALL_FONT_ID, powerButtonHintLabel) + 16;
+  }
 
   const bool showBatteryPercentage =
       SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
   // Position icon at right edge, drawBatteryRight will place text to the left
-  const int batteryX = rect.x + rect.width - 12 - LyraMetrics::values.batteryWidth;
+  const int batteryX = rect.x + rect.width - 12 - LyraMetrics::values.batteryWidth - powerHintShift;
   drawBatteryRight(renderer,
                    Rect{batteryX, rect.y + 5, LyraMetrics::values.batteryWidth, LyraMetrics::values.batteryHeight},
                    showBatteryPercentage);
@@ -407,7 +417,9 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
       renderer.drawRoundedRect(buttonMargin, x3ButtonY, buttonWidth, buttonHeight, 1, cornerRadius, false, true, false,
                                true, true);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, topBtn);
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, buttonMargin, x3ButtonY + (buttonHeight + textWidth) / 2, topBtn);
+      const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+      const int textX = buttonMargin + (buttonWidth - textHeight) / 2;  // center the rotated text in the box width
+      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, x3ButtonY + (buttonHeight + textWidth) / 2, topBtn);
     }
 
     if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
@@ -415,7 +427,9 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
       renderer.drawRoundedRect(rightX, x3ButtonY, buttonWidth, buttonHeight, 1, cornerRadius, true, false, true, false,
                                true);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, bottomBtn);
-      renderer.drawTextRotated90CW(SMALL_FONT_ID, rightX, x3ButtonY + (buttonHeight + textWidth) / 2, bottomBtn);
+      const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+      const int textX = rightX + (buttonWidth - textHeight) / 2;  // center the rotated text in the box width
+      renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, x3ButtonY + (buttonHeight + textWidth) / 2, bottomBtn);
     }
   } else {
     // X4 layout: Both buttons stacked on right side
@@ -436,10 +450,48 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
       if (labels[i] != nullptr && labels[i][0] != '\0') {
         const int y = topHintButtonY + (i * buttonHeight) + 5;
         const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, labels[i]);
-        renderer.drawTextRotated90CW(SMALL_FONT_ID, x, y + (buttonHeight + textWidth) / 2, labels[i]);
+        const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+        const int textX = x + (buttonWidth - textHeight) / 2;  // center the rotated text in the box width
+        renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, y + (buttonHeight + textWidth) / 2, labels[i]);
       }
     }
   }
+}
+
+void LyraTheme::drawPowerButtonHint(GfxRenderer& renderer, const char* label) const {
+  if (label == nullptr || label[0] == '\0') return;
+
+  const int screenWidth = renderer.getScreenWidth();
+  constexpr int buttonWidth = LyraMetrics::values.sideButtonHintsWidth;  // match the Up/Down side boxes
+  constexpr int buttonHeight = 78;                                       // fixed size, same as the side boxes
+
+  // Mirrors drawSideButtonHints' rounded, right-edge style, tracking the physical Power
+  // button: top-right on the X3, and above the Up/Down side hints on the X4. Uses the same
+  // fixed box size as the side hints so it looks consistent.
+  const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, label);
+  const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
+
+  if (gpio.deviceIsX3()) {
+    // X3's Power button is on the top edge: a horizontal box there with a normal (right-side-up)
+    // label. Same physical spot as the inverted version, but drawn normally so the text isn't
+    // flipped (mirrored coordinates land it on the same top-edge corner).
+    const int boxW = textWidth + 16;
+    const int boxH = 40;  // match the 40px thickness of the other hint boxes
+    const int bx = screenWidth - 4 - boxW;
+    const int by = 4;
+    // Top-edge tab: square top corners (flush to the bezel), rounded bottom corners (into the screen).
+    renderer.drawRoundedRect(bx, by, boxW, boxH, 1, cornerRadius, false, false, true, true, true);
+    renderer.drawText(SMALL_FONT_ID, bx + 8, by + (boxH - textHeight) / 2, label);
+    return;
+  }
+
+  // X4: vertical box on the right edge, above the Up/Down side hints, tracking the Power button.
+  const int x = screenWidth - buttonWidth;
+  constexpr int gap = 140;
+  const int y = topHintButtonY - gap - buttonHeight;
+  renderer.drawRoundedRect(x, y, buttonWidth, buttonHeight, 1, cornerRadius, true, false, true, false, true);
+  const int textX = x + (buttonWidth - textHeight) / 2;  // center the rotated text in the box width
+  renderer.drawTextRotated90CW(SMALL_FONT_ID, textX, y + (buttonHeight + textWidth) / 2, label);
 }
 
 void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,

@@ -123,7 +123,7 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
 const char* ReaderControlsActivity::getRowActionName(const uint8_t row) const {
   if (row == kFixedRow) {
     // Power long press is always sleep; show with Fixed indicator.
-    return tr(STR_READER_ACTION_SLEEP);
+    return tr(STR_SLEEP);
   }
   const auto action = getActionForRow(row);
   return actionName(action);
@@ -132,11 +132,11 @@ const char* ReaderControlsActivity::getRowActionName(const uint8_t row) const {
 const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_ACTION action) {
   switch (action) {
     case CrossPointSettings::READER_ACTION_NONE:
-      return tr(STR_READER_ACTION_NONE);
+      return tr(STR_NONE_OPT);
     case CrossPointSettings::READER_ACTION_PAGE_FORWARD:
-      return tr(STR_READER_ACTION_PAGE_FORWARD);
+      return tr(STR_NEXT_PAGE);
     case CrossPointSettings::READER_ACTION_PAGE_BACK:
-      return tr(STR_READER_ACTION_PAGE_BACK);
+      return tr(STR_PREV_PAGE);
     case CrossPointSettings::READER_ACTION_SKIP_CHAPTER_FORWARD:
       return tr(STR_READER_ACTION_SKIP_CHAPTER_FORWARD);
     case CrossPointSettings::READER_ACTION_SKIP_CHAPTER_BACK:
@@ -144,31 +144,37 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
     case CrossPointSettings::READER_ACTION_OPEN_MENU:
       return tr(STR_READER_ACTION_OPEN_MENU);
     case CrossPointSettings::READER_ACTION_GO_HOME:
-      return tr(STR_READER_ACTION_GO_HOME);
+      return tr(STR_HOME);
     case CrossPointSettings::READER_ACTION_FILE_BROWSER:
       return tr(STR_READER_ACTION_FILE_BROWSER);
     case CrossPointSettings::READER_ACTION_SLEEP:
-      return tr(STR_READER_ACTION_SLEEP);
+      return tr(STR_SLEEP);
     case CrossPointSettings::READER_ACTION_SYNC:
       return tr(STR_READER_ACTION_SYNC);
     case CrossPointSettings::READER_ACTION_BOOKMARK:
       return tr(STR_READER_ACTION_BOOKMARK);
     case CrossPointSettings::READER_ACTION_FORCE_REFRESH:
-      return tr(STR_READER_ACTION_FORCE_REFRESH);
+      return tr(STR_REFRESH);
     case CrossPointSettings::READER_ACTION_DARK_MODE:
-      return tr(STR_READER_ACTION_DARK_MODE);
+      return tr(STR_READER_DARK_MODE);
     case CrossPointSettings::READER_ACTION_SCREENSHOT:
       return tr(STR_READER_ACTION_SCREENSHOT);
     case CrossPointSettings::READER_ACTION_MARK_FINISHED:
       return tr(STR_READER_ACTION_MARK_FINISHED);
     case CrossPointSettings::READER_ACTION_FOOTNOTES:
-      return tr(STR_READER_ACTION_FOOTNOTES);
+      return tr(STR_FOOTNOTES);
     case CrossPointSettings::READER_ACTION_AUTO_PAGE_TURN:
       return tr(STR_READER_ACTION_AUTO_PAGE_TURN);
     case CrossPointSettings::READER_ACTION_READING_STATS:
-      return tr(STR_READER_ACTION_READING_STATS);
+      return tr(STR_CAT_STATS);
+    case CrossPointSettings::READER_ACTION_BIONIC_READING:
+      return tr(STR_READER_ACTION_BIONIC_READING);
+    case CrossPointSettings::READER_ACTION_BUTTON_HINTS:
+      return tr(STR_READER_ACTION_BUTTON_HINTS);
+    case CrossPointSettings::READER_ACTION_ROTATE_SCREEN:
+      return tr(STR_READER_ACTION_ROTATE_SCREEN);
     default:
-      return tr(STR_READER_ACTION_NONE);
+      return tr(STR_NONE_OPT);
   }
 }
 

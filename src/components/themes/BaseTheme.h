@@ -119,7 +119,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeCoverTileHeight = 400,
                                  .homeRecentBooksCount = 1,
                                  .buttonHintsHeight = 40,
-                                 .sideButtonHintsWidth = 30,
+                                 .sideButtonHintsWidth = 40,  // match buttonHintsHeight so side/power boxes
+                                                              // are the same thickness as the front hint bar
                                  .progressBarHeight = 16,
                                  .progressBarMarginTop = 1,
                                  .statusBarHorizontalMargin = 5,
@@ -151,14 +152,21 @@ class BaseTheme {
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                const char* btn4) const;
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
+  // Side-mounted Power-button hint: a bordered box styled like the front-button hints but
+  // rotated 90° (sideways), drawn on the left edge. Used by list screens where a Power
+  // short-press opens the sort menu. No-op for empty labels.
+  virtual void drawPowerButtonHint(GfxRenderer& renderer, const char* label) const;
   virtual void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                         const std::function<std::string(int index)>& rowTitle,
                         const std::function<std::string(int index)>& rowSubtitle = nullptr,
                         const std::function<UIIcon(int index)>& rowIcon = nullptr,
                         const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
                         const std::function<bool(int index)>& rowDimmed = nullptr) const;
-  virtual void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title,
-                          const char* subtitle = nullptr) const;
+  // powerButtonHintLabel: when non-null, the caller also draws the side Power-button hint with this
+  // label (e.g. "Sort"). On the X3 that hint box sits in the top-right corner where the battery
+  // renders, so the theme shifts the battery clear of the box (sized to this label). Null = no hint.
+  virtual void drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle = nullptr,
+                          const char* powerButtonHintLabel = nullptr) const;
   virtual void drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label,
                              const char* rightLabel = nullptr) const;
   virtual void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,

@@ -500,7 +500,8 @@ void ReadingStatsDetailActivity::loop() {
     return;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && Storage.exists(bookPath.c_str())) {
+  if (context.allowOpenBook && mappedInput.wasReleased(MappedInputManager::Button::Confirm) &&
+      Storage.exists(bookPath.c_str())) {
     onSelectBook(bookPath);
   }
 }
@@ -628,7 +629,7 @@ void ReadingStatsDetailActivity::render(RenderLock&&) {
     storeBaseScreenBuffer();
   }
 
-  const char* confirmLabel = Storage.exists(bookPath.c_str()) ? tr(STR_OPEN) : "";
+  const char* confirmLabel = (context.allowOpenBook && Storage.exists(bookPath.c_str())) ? tr(STR_OPEN) : "";
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 

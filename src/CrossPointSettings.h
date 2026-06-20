@@ -217,8 +217,28 @@ class CrossPointSettings {
     READER_ACTION_FOOTNOTES = 15,
     READER_ACTION_AUTO_PAGE_TURN = 16,
     READER_ACTION_READING_STATS = 17,
+    READER_ACTION_BIONIC_READING = 18,
+    READER_ACTION_BUTTON_HINTS = 19,
+    READER_ACTION_ROTATE_SCREEN = 20,
     READER_ACTION_COUNT
   };
+
+  // Reader button-hint bar mode. Cycles Off -> Short -> Long -> Front-only Short -> Front-only Long.
+  // The FRONT_* modes show only the front-button bar (no side/power hints).
+  enum BUTTON_HINTS_MODE : uint8_t {
+    BUTTON_HINTS_OFF = 0,
+    BUTTON_HINTS_SHORT = 1,
+    BUTTON_HINTS_LONG = 2,
+    BUTTON_HINTS_FRONT_SHORT = 3,
+    BUTTON_HINTS_FRONT_LONG = 4,
+    BUTTON_HINTS_MODE_COUNT
+  };
+  // True when the mode shows long-press labels.
+  static constexpr bool buttonHintsLong(uint8_t m) { return m == BUTTON_HINTS_LONG || m == BUTTON_HINTS_FRONT_LONG; }
+  // True when the mode shows only the front-button bar (no side/power hints).
+  static constexpr bool buttonHintsFrontOnly(uint8_t m) {
+    return m == BUTTON_HINTS_FRONT_SHORT || m == BUTTON_HINTS_FRONT_LONG;
+  }
 
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
@@ -316,6 +336,9 @@ class CrossPointSettings {
   uint8_t footnoteDisplay = FOOTNOTE_ON_PAGE;
   // Bionic Reading: bold the first ~43% of each word's letters to guide the eye (0 = off, 1 = on)
   uint8_t bionicReading = 0;
+  // Reader button-hint bar mode (BUTTON_HINTS_MODE): Off / Short-press / Long-press labels.
+  // Reserves layout space, so changing it reflows the current chapter. Reader-only.
+  uint8_t showButtonHints = BUTTON_HINTS_OFF;
   // Long press confirm button action (0 = refresh, 1 = sync, 2 = none, 3 = bookmark)
   uint8_t longPressAction = LONG_PRESS_REFRESH;
   // Dark mode (inverts entire UI except images)

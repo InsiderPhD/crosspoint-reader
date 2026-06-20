@@ -69,6 +69,12 @@ bool compareEntries(SortMode mode, const SortEntry& a, const SortEntry& b) {
     case SortMode::BookFusionLast:
       // Non-BF books first (A-Z within group), then BF-linked books (A-Z within group).
       return missingLastLess(a.hasBfBadge, b.hasBfBadge, a.sortKey, b.sortKey, [&] { return 0; });
+    case SortMode::TagAsc:
+      return missingLastLess(a.tagKey.empty(), b.tagKey.empty(), a.sortKey, b.sortKey,
+                             [&] { return ciCompare(a.tagKey, b.tagKey); });
+    case SortMode::TagDesc:
+      return missingLastLess(a.tagKey.empty(), b.tagKey.empty(), a.sortKey, b.sortKey,
+                             [&] { return ciCompare(b.tagKey, a.tagKey); });
   }
   return false;
 }
@@ -110,6 +116,10 @@ const char* sortModeLabel(SortMode m) {
       return tr(STR_SORT_BOOKFUSION_FIRST);
     case SortMode::BookFusionLast:
       return tr(STR_SORT_BOOKFUSION_LAST);
+    case SortMode::TagAsc:
+      return tr(STR_SORT_TAG_ASC);
+    case SortMode::TagDesc:
+      return tr(STR_SORT_TAG_DESC);
   }
   return "";
 }

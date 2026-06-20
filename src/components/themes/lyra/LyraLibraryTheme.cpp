@@ -82,8 +82,7 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
       // 8 because drawImageTransparent truncates the display-y via integer
       // divide by 8 — non-aligned values shift the icon relative to the white
       // fill.
-      if (i < static_cast<int>(recentBooks.size()) &&
-          BookFusionBookIdStore::hasBookId(recentBooks[i].path.c_str())) {
+      if (i < static_cast<int>(recentBooks.size()) && BookFusionBookIdStore::hasBookId(recentBooks[i].path.c_str())) {
         constexpr int BF_ICON_SIZE = 24;
         constexpr int BF_PADDING = 4;
         constexpr int BF_MARGIN = 4;
@@ -110,7 +109,7 @@ void LyraLibraryTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, con
 
       // Measure the label up-front so we can stack icon + label as one unit
       // and center them vertically inside the cover frame.
-      const char* label = tr(STR_VIEW_ALL_COVERS);
+      const char* label = tr(STR_LIBRARY);
       const int labelLineH = renderer.getLineHeight(SMALL_FONT_ID);
       const int labelW = renderer.getTextWidth(SMALL_FONT_ID, label);
       const int stackH = LIBRARY_ICON_SIZE + LIBRARY_LABEL_GAP + labelLineH;

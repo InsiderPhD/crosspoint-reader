@@ -8,6 +8,10 @@
 
 struct ReadingStatsDetailContext {
   bool showSessionSummary = false;
+  // When false, the "Open" (Confirm) action is hidden and disabled. Set this
+  // when launching the detail view from within the reader for the book that's
+  // already open — re-opening it would be a redundant full reader reload.
+  bool allowOpenBook = true;
 };
 
 class ReadingStatsDetailActivity final : public Activity {

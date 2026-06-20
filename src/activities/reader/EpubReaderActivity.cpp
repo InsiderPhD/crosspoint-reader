@@ -13,8 +13,6 @@
 #include <WiFi.h>
 #include <esp_system.h>
 
-#include "util/WifiTimeSync.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -44,11 +42,14 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "WifiCredentialStore.h"
+#include "activities/home/ReadingStatsDetailActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/settings/ReaderControlsActivity.h"  // for ReaderControlsActivity::actionName()
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
+#include "util/WifiTimeSync.h"
 
 // NOTE: This file used to wrap its helpers in an anonymous namespace.
 // BookFusionSyncActivity needs to call makeBookFusionPosition,
@@ -332,6 +333,15 @@ void EpubReaderActivity::onEnter() {
 
   buildBookPageCache();
 
+  // Pre-arm long-press flags for any buttons already held on entry so that a
+  // button held to wake from sleep doesn't fire a spurious long-press action.
+  longPressFeedbackShown = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+  longPressBackFired = mappedInput.isPressed(MappedInputManager::Button::Back);
+  longPressLeftFired = mappedInput.isPressed(MappedInputManager::Button::Left);
+  longPressRightFired = mappedInput.isPressed(MappedInputManager::Button::Right);
+  longPressPageBackFired = mappedInput.isPressed(MappedInputManager::Button::PageBack);
+  longPressPageForwardFired = mappedInput.isPressed(MappedInputManager::Button::PageForward);
+
   // Trigger first update
   requestUpdate();
 }
@@ -377,8 +387,14 @@ void EpubReaderActivity::loop() {
       requestUpdate();
       return;
     }
-    if (!section) { requestUpdate(); return; }
-    if (RenderLock::peek()) { lastPageTurnTime = millis(); return; }
+    if (!section) {
+      requestUpdate();
+      return;
+    }
+    if (RenderLock::peek()) {
+      lastPageTurnTime = millis();
+      return;
+    }
     if ((millis() - lastPageTurnTime) >= pageTurnDuration) {
       pageTurn(true);
       return;
@@ -401,8 +417,8 @@ void EpubReaderActivity::loop() {
   }
 
   // ── Confirm: long press (hold-based, single-fire) ─────────────────────────
-  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
-      mappedInput.getHeldTime() >= skipChapterMs && !longPressFeedbackShown) {
+  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= skipChapterMs &&
+      !longPressFeedbackShown) {
     longPressFeedbackShown = true;
     executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressConfirm));
     return;
@@ -418,8 +434,8 @@ void EpubReaderActivity::loop() {
   }
 
   // ── Back: long press (hold-based, single-fire) ───────────────────────────
-  if (mappedInput.isPressed(MappedInputManager::Button::Back) &&
-      mappedInput.getHeldTime() >= skipChapterMs && !longPressBackFired) {
+  if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= skipChapterMs &&
+      !longPressBackFired) {
     longPressBackFired = true;
     executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressBack));
     return;
@@ -439,22 +455,22 @@ void EpubReaderActivity::loop() {
   }
 
   // Resolve Left/Right actions, swapping when frontButtonFollowOrientation is active.
-  const bool swapFront = SETTINGS.frontButtonFollowOrientation &&
-                         (SETTINGS.orientation == CrossPointSettings::INVERTED ||
-                          SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
-  const auto shortPressLeft = static_cast<CrossPointSettings::READER_ACTION>(
-      swapFront ? SETTINGS.readerShortPressRight : SETTINGS.readerShortPressLeft);
-  const auto longPressLeft = static_cast<CrossPointSettings::READER_ACTION>(
-      swapFront ? SETTINGS.readerLongPressRight : SETTINGS.readerLongPressLeft);
+  const bool swapFront =
+      SETTINGS.frontButtonFollowOrientation && (SETTINGS.orientation == CrossPointSettings::INVERTED ||
+                                                SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
+  const auto shortPressLeft = static_cast<CrossPointSettings::READER_ACTION>(swapFront ? SETTINGS.readerShortPressRight
+                                                                                       : SETTINGS.readerShortPressLeft);
+  const auto longPressLeft = static_cast<CrossPointSettings::READER_ACTION>(swapFront ? SETTINGS.readerLongPressRight
+                                                                                      : SETTINGS.readerLongPressLeft);
   const auto shortPressRight = static_cast<CrossPointSettings::READER_ACTION>(
       swapFront ? SETTINGS.readerShortPressLeft : SETTINGS.readerShortPressRight);
-  const auto longPressRight = static_cast<CrossPointSettings::READER_ACTION>(
-      swapFront ? SETTINGS.readerLongPressLeft : SETTINGS.readerLongPressRight);
+  const auto longPressRight = static_cast<CrossPointSettings::READER_ACTION>(swapFront ? SETTINGS.readerLongPressLeft
+                                                                                       : SETTINGS.readerLongPressRight);
 
   // ── Left: long press / short press ───────────────────────────────────────
   if (longPressLeft != CrossPointSettings::READER_ACTION_NONE) {
-    if (mappedInput.isPressed(MappedInputManager::Button::Left) &&
-        mappedInput.getHeldTime() >= skipChapterMs && !longPressLeftFired) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Left) && mappedInput.getHeldTime() >= skipChapterMs &&
+        !longPressLeftFired) {
       longPressLeftFired = true;
       executeReaderAction(longPressLeft);
       return;
@@ -473,8 +489,8 @@ void EpubReaderActivity::loop() {
 
   // ── Right: long press / short press ──────────────────────────────────────
   if (longPressRight != CrossPointSettings::READER_ACTION_NONE) {
-    if (mappedInput.isPressed(MappedInputManager::Button::Right) &&
-        mappedInput.getHeldTime() >= skipChapterMs && !longPressRightFired) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Right) && mappedInput.getHeldTime() >= skipChapterMs &&
+        !longPressRightFired) {
       longPressRightFired = true;
       executeReaderAction(longPressRight);
       return;
@@ -493,13 +509,11 @@ void EpubReaderActivity::loop() {
 
   // ── Side Up (PageBack): long press / short press ─────────────────────────
   {
-    const auto shortPressSideUp =
-        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideUp);
-    const auto longPressSideUp =
-        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideUp);
+    const auto shortPressSideUp = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideUp);
+    const auto longPressSideUp = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideUp);
     if (longPressSideUp != CrossPointSettings::READER_ACTION_NONE) {
-      if (mappedInput.isPressed(MappedInputManager::Button::PageBack) &&
-          mappedInput.getHeldTime() >= skipChapterMs && !longPressPageBackFired) {
+      if (mappedInput.isPressed(MappedInputManager::Button::PageBack) && mappedInput.getHeldTime() >= skipChapterMs &&
+          !longPressPageBackFired) {
         longPressPageBackFired = true;
         executeReaderAction(longPressSideUp);
         return;
@@ -507,8 +521,7 @@ void EpubReaderActivity::loop() {
       if (!mappedInput.isPressed(MappedInputManager::Button::PageBack)) {
         longPressPageBackFired = false;
       }
-      if (mappedInput.wasReleased(MappedInputManager::Button::PageBack) &&
-          mappedInput.getHeldTime() < skipChapterMs) {
+      if (mappedInput.wasReleased(MappedInputManager::Button::PageBack) && mappedInput.getHeldTime() < skipChapterMs) {
         if (executeReaderAction(shortPressSideUp)) return;
       }
     } else {
@@ -520,10 +533,8 @@ void EpubReaderActivity::loop() {
 
   // ── Side Down (PageForward): long press / short press ────────────────────
   {
-    const auto shortPressSideDown =
-        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideDown);
-    const auto longPressSideDown =
-        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideDown);
+    const auto shortPressSideDown = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideDown);
+    const auto longPressSideDown = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideDown);
     if (longPressSideDown != CrossPointSettings::READER_ACTION_NONE) {
       if (mappedInput.isPressed(MappedInputManager::Button::PageForward) &&
           mappedInput.getHeldTime() >= skipChapterMs && !longPressPageForwardFired) {
@@ -664,9 +675,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     }
     case EpubReaderMenuActivity::MenuAction::BOOKMARKS: {
       const int currentSpinePageCount = section ? section->pageCount : 0;
-      startActivityForResult(
-          std::make_unique<EpubReaderBookmarksActivity>(renderer, mappedInput, epub, epub->getPath(), currentSpineIndex,
-                                                        currentSpinePageCount),
+      startActivityForResult(std::make_unique<EpubReaderBookmarksActivity>(renderer, mappedInput, epub, epub->getPath(),
+                                                                           currentSpineIndex, currentSpinePageCount),
                              [this](const ActivityResult& result) {
                                if (!result.isCancelled) {
                                  const auto& jump = std::get<SyncResult>(result.data);
@@ -755,6 +765,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         pendingScreenshot = true;
       }
       requestUpdate();
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::READER_CONTROLS: {
+      startActivityForResult(std::make_unique<ReaderControlsActivity>(renderer, mappedInput),
+                             [this](const ActivityResult&) {
+                               requestUpdate();  // button mappings may have changed — refresh hint labels
+                             });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::SYNC_PUSH:
@@ -860,6 +877,18 @@ void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
     // Reset section to force re-layout in the new orientation.
     section.reset();
   }
+}
+
+void EpubReaderActivity::reflowCurrentChapter() {
+  RenderLock lock(*this);
+  if (section) {
+    // Preserve the current reading position across the reflow.
+    cachedSpineIndex = currentSpineIndex;
+    cachedChapterTotalPageCount = section->pageCount;
+    nextPageNumber = section->currentPage;
+  }
+  // Reset section to force re-layout with the new settings on the next render.
+  section.reset();
 }
 
 void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption) {
@@ -993,6 +1022,55 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     orientedMarginBottom += std::max(SETTINGS.screenMargin, statusBarHeight);
   }
 
+  // Reserve space for the button-hint widgets so text never runs under them. The widgets
+  // always draw in portrait coords (forced), so the front hint bar sits on the physical
+  // portrait-bottom edge and the side boxes on the portrait-right edge (and portrait-left
+  // on X3). Map those physical edges to the current reading orientation and pad there.
+  // This shrinks the viewport, which is part of the section cache key, so toggling the
+  // hints reflows the chapter automatically.
+  if (SETTINGS.showButtonHints != CrossPointSettings::BUTTON_HINTS_OFF) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const int frontReserve = metrics.buttonHintsHeight;        // front hint bar thickness
+    const int sideReserve = metrics.sideButtonHintsWidth + 6;  // side/power box strip
+    // Front-only modes draw just the front-button bar, so only it needs reserved space.
+    const bool sideHints = !CrossPointSettings::buttonHintsFrontOnly(SETTINGS.showButtonHints);
+    const bool x3 = gpio.deviceIsX3();
+    switch (SETTINGS.orientation) {
+      case CrossPointSettings::PORTRAIT:
+        orientedMarginBottom += frontReserve;
+        if (sideHints) {
+          orientedMarginRight += sideReserve;
+          if (x3) orientedMarginLeft += sideReserve;
+        }
+        break;
+      case CrossPointSettings::INVERTED:
+        orientedMarginTop += frontReserve;
+        if (sideHints) {
+          orientedMarginLeft += sideReserve;
+          if (x3) orientedMarginRight += sideReserve;
+        }
+        break;
+      case CrossPointSettings::LANDSCAPE_CW:
+        orientedMarginLeft += frontReserve;
+        if (sideHints) {
+          orientedMarginBottom += sideReserve;
+          if (x3) orientedMarginTop += sideReserve;
+        }
+        break;
+      case CrossPointSettings::LANDSCAPE_CCW:
+        orientedMarginRight += frontReserve - 10;  // trimmed: front bar sits flush to the right bezel
+        if (sideHints) {
+          orientedMarginTop += sideReserve;
+          if (x3) {
+            orientedMarginBottom += sideReserve - 12;  // trimmed: X3 Up-box reserve
+            // X3's Power-button hint maps to the left edge in landscape CCW.
+            orientedMarginLeft += sideReserve;
+          }
+        }
+        break;
+    }
+  }
+
   const uint16_t viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
   const uint16_t viewportHeight = renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom;
 
@@ -1006,6 +1084,14 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                                   viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
                                   SETTINGS.imageRendering, SETTINGS.footnoteDisplay, SETTINGS.bionicReading)) {
       LOG_DBG("ERS", "Cache not found, building...");
+
+      // A full chapter re-parse (ChapterHtmlSlimParser) is heap-heavy and can OOM mid-session
+      // when free heap is lower than at book-load — e.g. after a rotate, which changes the
+      // viewport and forces this rebuild. Free the cached font glyphs first so the parser has
+      // the maximum contiguous heap; the cache re-warms on the next render.
+      if (auto* fcm = renderer.getFontCacheManager()) {
+        fcm->clearCache();
+      }
 
       const auto popupFn = [this]() { GUI.drawPopup(renderer, tr(STR_INDEXING)); };
 
@@ -1162,11 +1248,11 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   }
 
   LOG_DBG("ERS", "Silently indexing next chapter: %d", nextSpineIndex);
-  if (!nextSection.createSectionFile(
-          SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(), SETTINGS.getReaderLineCompression(),
-          SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
-          SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering, SETTINGS.footnoteDisplay,
-          SETTINGS.bionicReading)) {
+  if (!nextSection.createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(),
+                                     SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
+                                     SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
+                                     SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
+                                     SETTINGS.footnoteDisplay, SETTINGS.bionicReading)) {
     LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
   }
 }
@@ -1308,8 +1394,7 @@ void EpubReaderActivity::recordStatsProgress() {
     chapterTitle = epub->getTocItem(tocIndex).title;
   }
   READING_STATS.updateProgress(
-      static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)), progressPercent >= 90,
-      chapterTitle,
+      static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)), progressPercent >= 90, chapterTitle,
       static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f), 0, 100)));
 }
 
@@ -1410,7 +1495,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.clearScreen(0x00);
         page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
         if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
-          page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+          page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom,
+                                viewportWidth);
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(true, scratch.get(), y, rows);
       }
@@ -1424,7 +1510,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.clearScreen(0x00);
         page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
         if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
-          page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+          page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom,
+                                viewportWidth);
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(false, scratch.get(), y, rows);
       }
@@ -1560,7 +1647,16 @@ void EpubReaderActivity::renderStatusBar() const {
     }
   }
 
-  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, timeLeftSeconds);
+  // Hints render in every orientation, but the reserved layout space only lines up in
+  // portrait (the widgets draw in portrait coords). In landscape/inverted the hints
+  // overlay the edge (read sideways) and no space is reserved.
+  const bool hintsActive = SETTINGS.showButtonHints != CrossPointSettings::BUTTON_HINTS_OFF;
+  const bool hintsReserved = hintsActive && SETTINGS.orientation == CrossPointSettings::PORTRAIT;
+
+  // When space is reserved for the hint bar, lift the status bar above it.
+  const int statusPaddingBottom = hintsReserved ? UITheme::getInstance().getMetrics().buttonHintsHeight : 0;
+  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, statusPaddingBottom, textYOffset,
+                    timeLeftSeconds);
 
   if (footnoteDepth > 0) {
     int ot, or_, ob, ol;
@@ -1570,7 +1666,51 @@ void EpubReaderActivity::renderStatusBar() const {
     const int y = renderer.getScreenHeight() - ob - hintH;
     renderer.fillRect(0, y, renderer.getScreenWidth(), hintH, true);
     renderer.drawCenteredText(UI_10_FONT_ID, y + (hintH - 12) / 2, tr(STR_FOOTNOTE_RETURN), false);
+  } else if (hintsActive) {
+    // Footnote return hint takes the bottom slot while reading a footnote; otherwise
+    // show the button-action hints.
+    renderButtonHints();
   }
+}
+
+void EpubReaderActivity::renderButtonHints() const {
+  using A = CrossPointSettings::READER_ACTION;
+
+  // Long-press modes show each button's long-press action; otherwise its short-press one.
+  // Front-only modes show just the front-button bar (no side/power hints).
+  const bool longMode = CrossPointSettings::buttonHintsLong(SETTINGS.showButtonHints);
+  const bool frontOnly = CrossPointSettings::buttonHintsFrontOnly(SETTINGS.showButtonHints);
+  const auto label = [longMode](uint8_t shortField, uint8_t longField) -> const char* {
+    return ReaderControlsActivity::actionName(static_cast<A>(longMode ? longField : shortField));
+  };
+
+  // The hint widgets are portrait-designed (drawButtonHints force-renders portrait; the side
+  // boxes use portrait-fixed coords). Render the whole thing in portrait so coordinates stay
+  // valid and in-bounds in every reading orientation — in landscape/inverted the hints just
+  // appear sideways along the panel edge.
+  const auto origOrientation = renderer.getOrientation();
+  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+
+  // Front-button actions -> themed bottom hint bar. mapLabels positions each logical
+  // role's label under the physical button it maps to (handles remap + orientation swap).
+  const auto front = mappedInput.mapLabels(label(SETTINGS.readerShortPressBack, SETTINGS.readerLongPressBack),
+                                           label(SETTINGS.readerShortPressConfirm, SETTINGS.readerLongPressConfirm),
+                                           label(SETTINGS.readerShortPressLeft, SETTINGS.readerLongPressLeft),
+                                           label(SETTINGS.readerShortPressRight, SETTINGS.readerLongPressRight));
+  GUI.drawButtonHints(renderer, front.btn1, front.btn2, front.btn3, front.btn4);
+
+  if (!frontOnly) {
+    // Side Up/Down actions -> themed side hint boxes.
+    GUI.drawSideButtonHints(renderer, label(SETTINGS.readerShortPressSideUp, SETTINGS.readerLongPressSideUp),
+                            label(SETTINGS.readerShortPressSideDown, SETTINGS.readerLongPressSideDown));
+
+    // Power button -> side-mounted hint. Short-press is configurable; long-press is fixed to Sleep.
+    const char* powerLabel =
+        longMode ? tr(STR_SLEEP) : ReaderControlsActivity::actionName(static_cast<A>(SETTINGS.readerShortPressPower));
+    GUI.drawPowerButtonHint(renderer, powerLabel);
+  }
+
+  renderer.setOrientation(origOrientation);
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {
@@ -1671,18 +1811,22 @@ void EpubReaderActivity::openReaderMenu() {
     }
   }
 
-  startActivityForResult(
-      std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), currentPage, totalPages,
-                                              bookProgressPercent, SETTINGS.orientation,
-                                              !currentPageFootnotes.empty(), timeLeftChapter, timeLeftBook),
-      [this](const ActivityResult& result) {
-        const auto& menu = std::get<MenuResult>(result.data);
-        applyOrientation(menu.orientation);
-        toggleAutoPageTurn(menu.pageTurnOption);
-        if (!result.isCancelled) {
-          onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
-        }
-      });
+  startActivityForResult(std::make_unique<EpubReaderMenuActivity>(
+                             renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent,
+                             SETTINGS.orientation, !currentPageFootnotes.empty(), timeLeftChapter, timeLeftBook),
+                         [this](const ActivityResult& result) {
+                           const auto& menu = std::get<MenuResult>(result.data);
+                           applyOrientation(menu.orientation);
+                           toggleAutoPageTurn(menu.pageTurnOption);
+                           if (menu.buttonHints != SETTINGS.showButtonHints) {
+                             SETTINGS.showButtonHints = menu.buttonHints;
+                             SETTINGS.saveToFile();
+                             reflowCurrentChapter();  // hint reservation changed — repaginate
+                           }
+                           if (!result.isCancelled) {
+                             onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
+                           }
+                         });
 }
 
 bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION action) {
@@ -1696,7 +1840,10 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
         onGoHome();
         return true;
       }
-      if (!section) { requestUpdate(); return false; }
+      if (!section) {
+        requestUpdate();
+        return false;
+      }
       pageTurn(true);
       return false;
 
@@ -1710,7 +1857,10 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
         requestUpdate();
         return false;
       }
-      if (!section) { requestUpdate(); return false; }
+      if (!section) {
+        requestUpdate();
+        return false;
+      }
       pageTurn(false);
       return false;
 
@@ -1827,8 +1977,36 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
       return false;
 
     case A::READER_ACTION_READING_STATS:
-      activityManager.goToStats();
-      return true;
+      // Open the stats detail view for *this* book directly (not the full stats
+      // overview), pushed on top of the reader via startActivityForResult so
+      // Back returns to the book rather than Home — matching how every other
+      // reader sub-activity (menu, bookmarks, footnotes, sync) is launched.
+      startActivityForResult(
+          std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, epub->getPath(),
+                                                       ReadingStatsDetailContext{.allowOpenBook = false}),
+          [this](const ActivityResult&) { requestUpdate(); });
+      return false;
+
+    case A::READER_ACTION_BIONIC_READING:
+      SETTINGS.bionicReading = !SETTINGS.bionicReading;
+      SETTINGS.saveToFile();
+      reflowCurrentChapter();  // bionic affects layout — repaginate
+      requestUpdate();
+      return false;
+
+    case A::READER_ACTION_BUTTON_HINTS:
+      // Cycle Off -> Short-press -> Long-press -> Off.
+      SETTINGS.showButtonHints = (SETTINGS.showButtonHints + 1) % CrossPointSettings::BUTTON_HINTS_MODE_COUNT;
+      SETTINGS.saveToFile();
+      reflowCurrentChapter();  // hint bar reserves space — repaginate
+      requestUpdate();
+      return false;
+
+    case A::READER_ACTION_ROTATE_SCREEN:
+      // Cycle Portrait -> Landscape CW -> Inverted -> Landscape CCW -> ...
+      applyOrientation((SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT);
+      requestUpdate();
+      return false;
 
     default:
       return false;
@@ -1932,7 +2110,8 @@ void EpubReaderActivity::performKOReaderQuickSync() {
     const bool remoteIsFurtherAhead = remoteProgress.percentage > localKoPos.percentage + 0.01f;
     const bool localIsFurtherAhead = localKoPos.percentage > remoteProgress.percentage + 0.01f;
     const bool localChangedSinceLastSync =
-        hasLastSyncedPosition && !sameKOReaderPosition(lastSyncedPosition, localKoPos, currentSpineIndex, currentPage, totalPages);
+        hasLastSyncedPosition &&
+        !sameKOReaderPosition(lastSyncedPosition, localKoPos, currentSpineIndex, currentPage, totalPages);
 
     if (canCompareSyncState) {
       LOG_DBG("KRS", "Last sync ts=%lld; remote ts=%lld; local changed=%d; localAhead=%d",
@@ -2092,8 +2271,7 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     // Network found but no credentials
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, title,
-                                     "WiFi credentials not found.\nPlease reconnect in Settings.");
+      UITheme::drawSyncProgressPopup(renderer, title, "WiFi credentials not found.\nPlease reconnect in Settings.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -2160,8 +2338,7 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     // Show failure popup
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, title,
-                                     "WiFi connection failed.\nPlease check your settings.");
+      UITheme::drawSyncProgressPopup(renderer, title, "WiFi connection failed.\nPlease check your settings.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -2344,7 +2521,8 @@ void EpubReaderActivity::performBookFusionSync() {
     if (localWentBackIntentionally && !shouldApplyRemote && !alreadyUpToDate) {
       shouldUploadProgress = false;
       skippedUploadForReread = true;
-      LOG_DBG("BFS", "Local went back %.1f%% since last sync; preserving re-read position locally, leaving server unchanged",
+      LOG_DBG("BFS",
+              "Local went back %.1f%% since last sync; preserving re-read position locally, leaving server unchanged",
               lastSyncedPosition.percentage - localBfPos.percentage);
     }
   } else if (downloadResult == BookFusionSyncClient::NOT_FOUND) {

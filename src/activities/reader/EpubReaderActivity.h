@@ -35,7 +35,7 @@ class EpubReaderActivity final : public Activity {
   bool pendingScreenshot = false;
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool automaticPageTurnActive = false;
-  bool autoPageTurnMode = false;        // True when using calibrated reading speed
+  bool autoPageTurnMode = false;  // True when using calibrated reading speed
   bool longPressFeedbackShown = false;
   bool longPressBackFired = false;
   bool longPressLeftFired = false;
@@ -68,6 +68,9 @@ class EpubReaderActivity final : public Activity {
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
   void renderStatusBar() const;
+  // Draws the optional button hints (themed front-button bar + Up/Down side boxes) showing
+  // each button's mapped reader action, when SETTINGS.showButtonHints is enabled.
+  void renderButtonHints() const;
   void silentIndexNextChapterIfNeeded(uint16_t viewportWidth, uint16_t viewportHeight);
   void saveProgress(int spineIndex, int currentPage, int pageCount);
   BookmarkToggleResult addBookmark();
@@ -79,6 +82,10 @@ class EpubReaderActivity final : public Activity {
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   void applyOrientation(uint8_t orientation);
+  // Drops the cached section so the current chapter re-paginates on the next render,
+  // preserving the reading position. Used after a setting change (bionic, button hints)
+  // that alters layout while staying in the reader.
+  void reflowCurrentChapter();
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void pageTurn(bool isForwardTurn);
 

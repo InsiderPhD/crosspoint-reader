@@ -372,7 +372,7 @@ void FontDownloadActivity::render(RenderLock&&) {
           [this](int index) -> std::string {
             if (index == 0) return "";
             const auto& f = families_[familyIndexFromList(index)];
-            if (f.hasUpdate) return tr(STR_UPDATE_AVAILABLE);
+            if (f.hasUpdate) return tr(STR_UPDATE);
             if (f.installed) return tr(STR_INSTALLED);
             return f.description;
           },

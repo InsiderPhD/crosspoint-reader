@@ -23,6 +23,7 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "XtcReaderChapterSelectionActivity.h"
+#include "activities/home/ReadingStatsDetailActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -81,7 +82,10 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
 
     case A::READER_ACTION_PAGE_FORWARD: {
       if (!xtc) return false;
-      if (currentPage >= xtc->getPageCount()) { onGoHome(); return true; }
+      if (currentPage >= xtc->getPageCount()) {
+        onGoHome();
+        return true;
+      }
       ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
       sessionPageTurns++;
       READING_STATS.noteActivity();
@@ -108,7 +112,10 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
 
     case A::READER_ACTION_SKIP_CHAPTER_FORWARD: {
       if (!xtc) return false;
-      if (currentPage >= xtc->getPageCount()) { onGoHome(); return true; }
+      if (currentPage >= xtc->getPageCount()) {
+        onGoHome();
+        return true;
+      }
       ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
       sessionPageTurns++;
       READING_STATS.noteActivity();
@@ -162,8 +169,14 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
       return false;
 
     case A::READER_ACTION_READING_STATS:
-      activityManager.goToStats();
-      return true;
+      // Open the stats detail view for *this* book directly (not the full stats
+      // overview), pushed on top of the reader via startActivityForResult so
+      // Back returns to the book rather than Home.
+      startActivityForResult(
+          std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, xtc->getPath(),
+                                                       ReadingStatsDetailContext{.allowOpenBook = false}),
+          [this](const ActivityResult&) { requestUpdate(); });
+      return false;
 
     case A::READER_ACTION_MARK_FINISHED:
       if (xtc) {
@@ -197,8 +210,8 @@ void XtcReaderActivity::loop() {
   }
 
   // ── Back: long press / short press ───────────────────────────────────────
-  if (mappedInput.isPressed(MappedInputManager::Button::Back) &&
-      mappedInput.getHeldTime() >= skipPageMs && !longPressBackFired) {
+  if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= skipPageMs &&
+      !longPressBackFired) {
     longPressBackFired = true;
     executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressBack));
     return;
@@ -212,22 +225,22 @@ void XtcReaderActivity::loop() {
   }
 
   // Resolve Left/Right with optional orientation swap.
-  const bool swapFront = SETTINGS.frontButtonFollowOrientation &&
-                         (SETTINGS.orientation == CrossPointSettings::INVERTED ||
-                          SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
-  const auto shortPressLeft = static_cast<CrossPointSettings::READER_ACTION>(
-      swapFront ? SETTINGS.readerShortPressRight : SETTINGS.readerShortPressLeft);
-  const auto longPressLeft = static_cast<CrossPointSettings::READER_ACTION>(
-      swapFront ? SETTINGS.readerLongPressRight : SETTINGS.readerLongPressLeft);
+  const bool swapFront =
+      SETTINGS.frontButtonFollowOrientation && (SETTINGS.orientation == CrossPointSettings::INVERTED ||
+                                                SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
+  const auto shortPressLeft = static_cast<CrossPointSettings::READER_ACTION>(swapFront ? SETTINGS.readerShortPressRight
+                                                                                       : SETTINGS.readerShortPressLeft);
+  const auto longPressLeft = static_cast<CrossPointSettings::READER_ACTION>(swapFront ? SETTINGS.readerLongPressRight
+                                                                                      : SETTINGS.readerLongPressLeft);
   const auto shortPressRight = static_cast<CrossPointSettings::READER_ACTION>(
       swapFront ? SETTINGS.readerShortPressLeft : SETTINGS.readerShortPressRight);
-  const auto longPressRight = static_cast<CrossPointSettings::READER_ACTION>(
-      swapFront ? SETTINGS.readerLongPressLeft : SETTINGS.readerLongPressRight);
+  const auto longPressRight = static_cast<CrossPointSettings::READER_ACTION>(swapFront ? SETTINGS.readerLongPressLeft
+                                                                                       : SETTINGS.readerLongPressRight);
 
   // ── Left ─────────────────────────────────────────────────────────────────
   if (longPressLeft != CrossPointSettings::READER_ACTION_NONE) {
-    if (mappedInput.isPressed(MappedInputManager::Button::Left) &&
-        mappedInput.getHeldTime() >= skipPageMs && !longPressLeftFired) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Left) && mappedInput.getHeldTime() >= skipPageMs &&
+        !longPressLeftFired) {
       longPressLeftFired = true;
       executeReaderAction(longPressLeft);
       return;
@@ -244,8 +257,8 @@ void XtcReaderActivity::loop() {
 
   // ── Right ────────────────────────────────────────────────────────────────
   if (longPressRight != CrossPointSettings::READER_ACTION_NONE) {
-    if (mappedInput.isPressed(MappedInputManager::Button::Right) &&
-        mappedInput.getHeldTime() >= skipPageMs && !longPressRightFired) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Right) && mappedInput.getHeldTime() >= skipPageMs &&
+        !longPressRightFired) {
       longPressRightFired = true;
       executeReaderAction(longPressRight);
       return;
@@ -262,20 +275,17 @@ void XtcReaderActivity::loop() {
 
   // ── Side Up (PageBack) ───────────────────────────────────────────────────
   {
-    const auto shortPressSideUp =
-        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideUp);
-    const auto longPressSideUp =
-        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideUp);
+    const auto shortPressSideUp = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideUp);
+    const auto longPressSideUp = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideUp);
     if (longPressSideUp != CrossPointSettings::READER_ACTION_NONE) {
-      if (mappedInput.isPressed(MappedInputManager::Button::PageBack) &&
-          mappedInput.getHeldTime() >= skipPageMs && !longPressPageBackFired) {
+      if (mappedInput.isPressed(MappedInputManager::Button::PageBack) && mappedInput.getHeldTime() >= skipPageMs &&
+          !longPressPageBackFired) {
         longPressPageBackFired = true;
         executeReaderAction(longPressSideUp);
         return;
       }
       if (!mappedInput.isPressed(MappedInputManager::Button::PageBack)) longPressPageBackFired = false;
-      if (mappedInput.wasReleased(MappedInputManager::Button::PageBack) &&
-          mappedInput.getHeldTime() < skipPageMs) {
+      if (mappedInput.wasReleased(MappedInputManager::Button::PageBack) && mappedInput.getHeldTime() < skipPageMs) {
         if (executeReaderAction(shortPressSideUp)) return;
       }
     } else {
@@ -287,20 +297,17 @@ void XtcReaderActivity::loop() {
 
   // ── Side Down (PageForward) ──────────────────────────────────────────────
   {
-    const auto shortPressSideDown =
-        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideDown);
-    const auto longPressSideDown =
-        static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideDown);
+    const auto shortPressSideDown = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideDown);
+    const auto longPressSideDown = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideDown);
     if (longPressSideDown != CrossPointSettings::READER_ACTION_NONE) {
-      if (mappedInput.isPressed(MappedInputManager::Button::PageForward) &&
-          mappedInput.getHeldTime() >= skipPageMs && !longPressPageForwardFired) {
+      if (mappedInput.isPressed(MappedInputManager::Button::PageForward) && mappedInput.getHeldTime() >= skipPageMs &&
+          !longPressPageForwardFired) {
         longPressPageForwardFired = true;
         executeReaderAction(longPressSideDown);
         return;
       }
       if (!mappedInput.isPressed(MappedInputManager::Button::PageForward)) longPressPageForwardFired = false;
-      if (mappedInput.wasReleased(MappedInputManager::Button::PageForward) &&
-          mappedInput.getHeldTime() < skipPageMs) {
+      if (mappedInput.wasReleased(MappedInputManager::Button::PageForward) && mappedInput.getHeldTime() < skipPageMs) {
         if (executeReaderAction(shortPressSideDown)) return;
       }
     } else {

@@ -18,6 +18,8 @@ class EpubReaderMenuActivity final : public Activity {
     AUTO_PAGE_TURN,
     READING_SPEED,
     ROTATE_SCREEN,
+    BUTTON_HINTS,
+    READER_CONTROLS,
     BOOKMARKS,
     ADD_BOOKMARK,
     SCREENSHOT,
@@ -57,17 +59,13 @@ class EpubReaderMenuActivity final : public Activity {
   std::string title = "Reader Menu";
   uint8_t pendingOrientation = 0;
   uint8_t selectedPageTurnOption = 0;
+  uint8_t pendingButtonHints = 0;
   const std::vector<StrId> orientationLabels = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
                                                 StrId::STR_LANDSCAPE_CCW};
-  const std::vector<const char*> pageTurnLabels = {I18N.get(StrId::STR_STATE_OFF),
-                                                   "Auto",
-                                                   "60s",
-                                                   "50s",
-                                                   "40s",
-                                                   "35s",
-                                                   "30s",
-                                                   "25s",
-                                                   "20s"};
+  const std::vector<StrId> buttonHintsLabels = {StrId::STR_NONE_OPT, StrId::STR_SHORT_PRESS, StrId::STR_LONG_PRESS,
+                                                StrId::STR_HINTS_FRONT_SHORT, StrId::STR_HINTS_FRONT_LONG};
+  const std::vector<const char*> pageTurnLabels = {
+      I18N.get(StrId::STR_STATE_OFF), "Auto", "60s", "50s", "40s", "35s", "30s", "25s", "20s"};
   int currentPage = 0;
   int totalPages = 0;
   int bookProgressPercent = 0;

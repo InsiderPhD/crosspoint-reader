@@ -15,7 +15,7 @@
 // ACTION-type entries and entries without a key are device-only.
 inline const std::vector<SettingInfo>& getSettingsList() {
   static const std::vector<StrId> sharedReaderButtonActions = {
-      StrId::STR_SYNC_WITH_BOOKFUSION, StrId::STR_PAGE_TURN, StrId::STR_REFRESH_SCREEN, StrId::STR_SLEEP,
+      StrId::STR_SYNC_WITH_BOOKFUSION, StrId::STR_PAGE_TURN, StrId::STR_FORCE_REFRESH, StrId::STR_SLEEP,
       StrId::STR_CREATE_BOOKMARK,
   };
 
@@ -166,6 +166,10 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                           StrId::STR_CAT_READER),
         SettingInfo::Toggle(StrId::STR_BIONIC_READING, &CrossPointSettings::bionicReading, "bionicReading",
                             StrId::STR_CAT_READER),
+        SettingInfo::Enum(StrId::STR_SHOW_BUTTON_HINTS, &CrossPointSettings::showButtonHints,
+                          {StrId::STR_NONE_OPT, StrId::STR_SHORT_PRESS, StrId::STR_LONG_PRESS,
+                           StrId::STR_HINTS_FRONT_SHORT, StrId::STR_HINTS_FRONT_LONG},
+                          "showButtonHints", StrId::STR_CAT_READER),
         // --- Controls ---
         SettingInfo::Toggle(StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION, &CrossPointSettings::frontButtonFollowOrientation,
                             "frontButtonFollowOrientation", StrId::STR_CAT_SYSTEM),
@@ -189,7 +193,8 @@ inline const std::vector<SettingInfo>& getSettingsList() {
             {StrId::STR_SORT_ALPHA_ASC, StrId::STR_SORT_ALPHA_DESC, StrId::STR_SORT_AUTHOR_ASC,
              StrId::STR_SORT_AUTHOR_DESC, StrId::STR_SORT_LAST_OPENED_NEW, StrId::STR_SORT_LAST_OPENED_OLD,
              StrId::STR_SORT_PROGRESS_MOST, StrId::STR_SORT_PROGRESS_LEAST, StrId::STR_SORT_DATE_ADDED_NEW,
-             StrId::STR_SORT_DATE_ADDED_OLD},
+             StrId::STR_SORT_DATE_ADDED_OLD, StrId::STR_SORT_BOOKFUSION_FIRST, StrId::STR_SORT_BOOKFUSION_LAST,
+             StrId::STR_SORT_TAG_ASC, StrId::STR_SORT_TAG_DESC},
             "sortMode"),
 
         // --- System ---
@@ -201,7 +206,7 @@ inline const std::vector<SettingInfo>& getSettingsList() {
         SettingInfo::Toggle(StrId::STR_DEV_MODE, &CrossPointSettings::devMode, "devMode", StrId::STR_CAT_SYSTEM),
         // --- Stats tab ---
         SettingInfo::Enum(
-            StrId::STR_DAILY_READING_GOAL, &CrossPointSettings::dailyReadingGoal,
+            StrId::STR_DAILY_GOAL, &CrossPointSettings::dailyReadingGoal,
             {StrId::STR_MIN_5, StrId::STR_MIN_10, StrId::STR_MIN_15, StrId::STR_MIN_30, StrId::STR_MIN_60},
             "dailyReadingGoal", StrId::STR_CAT_STATS),
         SettingInfo::Enum(StrId::STR_MIN_SESSION_THRESHOLD, &CrossPointSettings::minSessionMinutes,

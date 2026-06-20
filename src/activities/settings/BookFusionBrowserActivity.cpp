@@ -543,8 +543,17 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
           if (remotePos.updatedAt[0] != '\0') {
             BookFusionBookIdStore::saveLastSyncAt(filename.c_str(), remotePos.updatedAt);
           }
-          LOG_DBG("BFB", "Synced BookFusion position: chapter %d (%.1f%% in book)", remotePos.chapterIndex,
-                  remotePos.percentage);
+          // The library row reads its displayed % straight from RECENT_BOOKS, which
+          // addBook() seeded as "unknown" (-1). Nothing else updates it until the
+          // reader renders a page and calls saveProgress(), so without this the synced
+          // progress is invisible in the library until the book is opened. Use the
+          // chapter-start percentage (page 0, matching what we wrote to progress.bin)
+          // so the value is consistent with what saveProgress() computes on first open.
+          const auto progressPercent =
+              static_cast<int8_t>(epub.calculateProgress(remotePos.chapterIndex, 0.0f) * 100.0f);
+          RECENT_BOOKS.updateProgress(filename, progressPercent);
+          LOG_DBG("BFB", "Synced BookFusion position: chapter %d (%.1f%% in book, %d%% chapter-start)",
+                  remotePos.chapterIndex, remotePos.percentage, progressPercent);
         }
       }
     } else if (syncErr != BookFusionSyncClient::OK && syncErr != BookFusionSyncClient::NOT_FOUND) {

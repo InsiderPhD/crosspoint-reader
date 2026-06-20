@@ -67,7 +67,7 @@ void BmpViewerActivity::onEnter() {
 
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
-  Rect popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  Rect popupRect = GUI.drawPopup(renderer, tr(STR_LOADING));
   GUI.fillPopupProgress(renderer, popupRect, 20);  // Initial 20% progress
   // 1. Open the file
   if (Storage.openFileForRead("BMP", filePath, file)) {
@@ -144,7 +144,7 @@ void BmpViewerActivity::onExit() {
 }
 
 void BmpViewerActivity::doSetSleepCover() {
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  GUI.drawPopup(renderer, tr(STR_LOADING));
 
   bool success = false;
   FsFile inFile, outFile;

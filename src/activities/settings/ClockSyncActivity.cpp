@@ -81,7 +81,7 @@ void ClockSyncActivity::render(RenderLock&&) {
       renderer.drawCenteredText(UI_12_FONT_ID, midY, tr(STR_CLOCK_SYNCING));
       break;
     case SUCCESS: {
-      renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNC_OK), true, EpdFontFamily::BOLD);
+      renderer.drawCenteredText(UI_12_FONT_ID, midY - 20, tr(STR_CLOCK_SYNCED), true, EpdFontFamily::BOLD);
       if (syncedTime[0] != '\0') {
         char line[32];
         snprintf(line, sizeof(line), "%s %s", tr(STR_CURRENT_TIME), syncedTime);

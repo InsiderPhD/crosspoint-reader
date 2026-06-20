@@ -62,8 +62,10 @@ class FileBrowserActivity final : public Activity {
   // Lazy metadata caches, parallel-indexed with fileEntries. Cleared whenever loadFiles
   // runs (directory navigation = new directory's data).
   std::vector<std::string> authorCache;
+  std::vector<std::string> tagCache;
   std::vector<uint32_t> dateAddedCache;
   bool authorCacheReady = false;
+  bool tagCacheReady = false;
   bool dateAddedCacheReady = false;
   bool pendingSortRebuild = false;
 
