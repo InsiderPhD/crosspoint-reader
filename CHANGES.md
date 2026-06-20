@@ -1,6 +1,44 @@
 # CrossPoint Reader — Feature & Fix Summary
 
-Changes made in this session relative to the `master` branch.
+A running technical log of what this fork adds on top of upstream CrossPoint, newest first.
+
+---
+
+## 1.7.0 — June 2026
+
+### Configurable Reader Controls + on-screen button hints
+The reader's buttons are now assignable. **Settings → Reader Controls** binds a **short-press** and **long-press** action to each button, with a live preview and Confirm-to-cycle / Back-to-save flow. Available actions include Chapter Forward/Back, Menu, Files, Sync, Bookmark, Screenshot, Mark Finished, Auto Turn, Bionic, Button Hints, and Rotate. A new **Button Hints** option draws small labels next to each physical button while reading; hint placement modes are **Fixed**, **Front Only Short**, and **Front Only Long**. Bindings attach to logical button roles, so they follow any front-button remap.
+
+**Files changed**: `ReaderControlsActivity.{cpp,h}`, `EpubReaderActivity.{cpp,h}`, `TxtReaderActivity.cpp`, `XtcReaderActivity.cpp`, `ReaderUtils.h`, `CrossPointSettings.h`, `SettingsList.h`, `english.yaml`
+
+### Bionic Reading mode
+New **Bionic Reading** toggle that bolds the leading portion of each word to guide the eye, available as a reader setting and an assignable button action. Re-lays out text, so cached sections regenerate on first open.
+
+**Files changed**: `ParsedText.{cpp,h}`, `Section.cpp`, `GfxRenderer.{cpp,h}`, `EpubReaderActivity.cpp`, `CrossPointSettings.h`
+
+### Book Info panel
+A new **Book Info** screen surfaces full metadata for the open book: series & number, bookshelf, categories, lists, publisher, published date, tags, rating, language, and the full description (with a "No description available" fallback).
+
+**Files changed**: `EpubReaderMenuActivity.{cpp,h}`, `english.yaml` (`STR_BOOK_INFO_*`, `STR_DESCRIPTION`, `STR_NO_DESCRIPTION`)
+
+### More BookFusion metadata & sync
+Sync now records and updates **reading time** alongside position, and pulls richer metadata (series, bookshelf, tags, rating, lists, description) that feeds the Book Info panel. New **BookFusion sort** modes — *BookFusion first / last* and *Tag A–Z / Z–A* — across the library and file lists.
+
+**Files changed**: `BookFusionSyncActivity.{cpp,h}`, `BookFusionBrowserActivity.cpp`, `SortMode.{cpp,h}`, `english.yaml` (`STR_SORT_BOOKFUSION_*`, `STR_SORT_TAG_*`)
+
+### Better X3 support
+Button hints are X3-aware: the Power-button hint tracks the X3's physical top-right Power button, and side-button hint boxes sit against the correct physical edges with proper margin reservations across all reading orientations. Page text is padded so hint boxes never overlap content.
+
+**Files changed**: `BaseTheme.{cpp,h}`, `LyraTheme.{cpp,h}`, `LyraLibraryTheme.cpp`
+
+### Upstream fixes & cleanup
+Rendering/layout fixes in `GfxRenderer`, `ParsedText`, `Section`, and footnote handling, plus a settings/i18n cleanup that removed a batch of dead string keys and shortened navigation labels for the hint UI.
+
+---
+
+## Prior releases (1.6.x and earlier)
+
+The sections below document earlier work on top of the `master` branch.
 
 ---
 
