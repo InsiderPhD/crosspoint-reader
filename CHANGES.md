@@ -4,6 +4,25 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ---
 
+## 1.7.1 — June 2026
+
+### Reliable BookFusion / OPDS downloads on low heap
+Large downloads (notably image-heavy BookFusion EPUBs) were failing with `writeToStream error: -8` (`HTTPC_ERROR_TOO_LESS_RAM`). `HTTPClient::writeToStream` mallocs a contiguous 4 KB read buffer internally, which can't be satisfied when this activity runs at ~16 KB free with a fragmented heap. `HttpDownloader::downloadToFile` now streams the body itself through a single reused 1 KB buffer, decoding identity, chunked, and connection-close framings. A chunked transfer that ends without its terminating zero-length chunk is now rejected as truncated rather than written as a corrupt (partial-JPEG) file. Covers all callers: BookFusion, OPDS/Calibre, OTA, fonts.
+
+**Files changed**: `HttpDownloader.cpp`
+
+### Large-book download warning
+Pressing download on a BookFusion EPUB of 10 MB or more now shows a confirm screen with the title, size, and a warning that image-heavy books may be slow or unstable — Confirm downloads, Back cancels. The size comes from the search API's `download_size`, so the prompt appears before any bandwidth is spent.
+
+**Files changed**: `BookFusionSyncClient.{cpp,h}`, `BookFusionBrowserActivity.{cpp,h}`, `english.yaml` (`STR_BF_LARGE_BOOK_WARNING`)
+
+### Fixes
+- Lyra power-button hint box now fills white first so list/book content no longer bleeds through it.
+
+**Files changed**: `LyraTheme.cpp`
+
+---
+
 ## 1.7.0 — June 2026
 
 ### Configurable Reader Controls + on-screen button hints
