@@ -100,6 +100,7 @@ class BookFusionSearchJsonStream final : public Stream {
     ID,
     TITLE,
     FORMAT,
+    DOWNLOAD_SIZE,
     COVER,
     COVER_URL,
     AUTHORS,
@@ -149,6 +150,8 @@ class BookFusionSearchJsonStream final : public Stream {
         lastKey_ = LastKey::TITLE;
       } else if (keyEquals(key, len, "format")) {
         lastKey_ = LastKey::FORMAT;
+      } else if (keyEquals(key, len, "download_size")) {
+        lastKey_ = LastKey::DOWNLOAD_SIZE;
       } else if (keyEquals(key, len, "cover")) {
         lastKey_ = LastKey::COVER;
       } else if (keyEquals(key, len, "authors")) {
@@ -204,6 +207,11 @@ class BookFusionSearchJsonStream final : public Stream {
   void onNumber(const char* value, size_t /*len*/) {
     if (lastKey_ == LastKey::ID) {
       currentBook_.id = static_cast<uint32_t>(strtoul(value, nullptr, 10));
+    } else if (lastKey_ == LastKey::DOWNLOAD_SIZE) {
+      // Top-level book download_size only — the onKey guard (inBook_ && bookDepth_)
+      // never matches the nested formats[].download_size, so this is the primary
+      // format's size, consistent with the singular `format` field used elsewhere.
+      currentBook_.downloadSize = static_cast<uint32_t>(strtoul(value, nullptr, 10));
     }
     lastKey_ = LastKey::NONE;
   }

@@ -57,6 +57,15 @@ bool bookFusionFormatIsEpub(const BookFusionBook& book) {
   return strcasecmp(book.format, "epub") == 0;
 }
 
+// Image-heavy EPUBs strain the C3's ~380 KB RAM and slow / crash the renderer.
+// Above this size we ask the user to confirm before downloading. File size is a
+// good-enough proxy for "lots of pictures" — text-only EPUBs rarely approach it.
+constexpr uint32_t LARGE_BOOK_WARN_BYTES = 10u * 1024 * 1024;  // 10 MB
+
+bool bookFusionBookIsLarge(const BookFusionBook& book) {
+  return book.downloadSize >= LARGE_BOOK_WARN_BYTES;
+}
+
 std::string bookFusionExpectedFilename(const BookFusionBook& book) {
   std::string baseName = book.title;
   if (book.authors[0] != '\0') {
@@ -640,6 +649,32 @@ void BookFusionBrowserActivity::loop() {
     return;
   }
 
+  if (state == CONFIRM_LARGE_DOWNLOAD) {
+    // Confirm proceeds with the download; Back cancels and returns to the list.
+    // wasPressed (not wasReleased) so the press that opened this screen — already
+    // consumed in BROWSING — can't immediately confirm on its own release.
+    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      const int idx = pendingDownloadIndex;
+      pendingDownloadIndex = -1;
+      if (idx >= 0 && idx < searchResult.count) {
+        startDownload(idx);
+      } else {
+        RenderLock lock(*this);
+        state = BROWSING;
+      }
+      return;
+    }
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+      pendingDownloadIndex = -1;
+      {
+        RenderLock lock(*this);
+        state = BROWSING;
+      }
+      requestUpdate();
+    }
+    return;
+  }
+
   if (state == BROWSING) {
     const int totalItems = searchResult.count;
 
@@ -654,7 +689,20 @@ void BookFusionBrowserActivity::loop() {
 
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       if (selectedIndex < searchResult.count) {
-        startDownload(selectedIndex);
+        // Gate large image-heavy EPUBs behind a confirm screen — the API gives us
+        // download_size up front, so we can ask before spending the transfer. PDFs
+        // and other formats are rejected inside startDownload regardless.
+        const auto& book = searchResult.books[selectedIndex];
+        if (bookFusionFormatIsEpub(book) && bookFusionBookIsLarge(book)) {
+          pendingDownloadIndex = selectedIndex;
+          {
+            RenderLock lock(*this);
+            state = CONFIRM_LARGE_DOWNLOAD;
+          }
+          requestUpdate();
+        } else {
+          startDownload(selectedIndex);
+        }
       }
       return;
     }
@@ -822,6 +870,36 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   if (state == ERROR) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, errorMsg, true, EpdFontFamily::BOLD);
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    renderer.displayBuffer();
+    return;
+  }
+
+  if (state == CONFIRM_LARGE_DOWNLOAD) {
+    const int maxWidth = pageWidth - 40;
+    const bool valid = pendingDownloadIndex >= 0 && pendingDownloadIndex < searchResult.count;
+    const BookFusionBook& book = searchResult.books[valid ? pendingDownloadIndex : 0];
+
+    auto title = renderer.truncatedText(UI_10_FONT_ID, valid ? book.title : "", maxWidth);
+    const auto warnLines = renderer.wrappedText(SMALL_FONT_ID, tr(STR_BF_LARGE_BOOK_WARNING), maxWidth, 4);
+    const int smallH = renderer.getTextHeight(SMALL_FONT_ID) + 6;
+
+    // Centre the title + size + warning stack around the screen midpoint.
+    const int blockH = 30 + 34 + static_cast<int>(warnLines.size()) * smallH;
+    int y = pageHeight / 2 - blockH / 2;
+
+    renderer.drawCenteredText(UI_10_FONT_ID, y, title.c_str(), true, EpdFontFamily::BOLD);
+    y += 30;
+    char sizeText[24];
+    snprintf(sizeText, sizeof(sizeText), "%.1f MB", (valid ? book.downloadSize : 0) / (1024.0f * 1024.0f));
+    renderer.drawCenteredText(UI_10_FONT_ID, y, sizeText, true, EpdFontFamily::BOLD);
+    y += 34;
+    for (const auto& line : warnLines) {
+      renderer.drawCenteredText(SMALL_FONT_ID, y, line.c_str());
+      y += smallH;
+    }
+
+    const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_DOWNLOAD), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer();
     return;

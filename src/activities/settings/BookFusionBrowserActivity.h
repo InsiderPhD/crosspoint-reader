@@ -28,7 +28,16 @@ class BookFusionBrowserActivity final : public Activity {
   bool preventAutoSleep() override { return true; }
 
  private:
-  enum State { CATEGORY_SELECTION, WIFI_SELECTION, LOADING, BROWSING, DOWNLOADING, DOWNLOAD_COMPLETE, ERROR };
+  enum State {
+    CATEGORY_SELECTION,
+    WIFI_SELECTION,
+    LOADING,
+    BROWSING,
+    CONFIRM_LARGE_DOWNLOAD,
+    DOWNLOADING,
+    DOWNLOAD_COMPLETE,
+    ERROR
+  };
 
   State state = CATEGORY_SELECTION;
   ButtonNavigator buttonNavigator;
@@ -68,6 +77,7 @@ class BookFusionBrowserActivity final : public Activity {
   size_t downloadTotal = 0;
   unsigned long lastProgressUpdateMs = 0;  // Throttle progress updates
   char downloadedCoverPath[96] = {};       // Resolved thumb BMP path for DOWNLOAD_COMPLETE popup
+  int pendingDownloadIndex = -1;           // Book awaiting CONFIRM_LARGE_DOWNLOAD acceptance
   // Phase label shown on the Downloading screen — "Connecting…" → "Downloading…"
   // → "Saving…". Updated at each long-running step so the user can see the activity
   // isn't stuck. Empty string falls back to the generic Downloading label.

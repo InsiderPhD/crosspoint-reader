@@ -34,7 +34,8 @@ struct BookFusionBook {
   uint32_t id = 0;
   char title[64] = {};
   char authors[48] = {};
-  char format[8] = {};  // "EPUB", "PDF", etc.
+  char format[8] = {};        // "EPUB", "PDF", etc.
+  uint32_t downloadSize = 0;  // EPUB file size in bytes (API "download_size"); 0 if absent.
   char coverUrl[384] = {};
   // BookFusion organisational metadata that is NOT embedded in the EPUB file
   // (unlike series/tags/publisher), so it's the only API metadata worth
