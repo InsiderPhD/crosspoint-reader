@@ -4,6 +4,14 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ---
 
+## 1.7.2 — June 2026
+
+Maintenance re-release of 1.7.1 to ensure the OTA update is delivered reliably (version bumped so devices reliably detect it as newer). No functional or code changes from 1.7.1.
+
+**Files changed**: `platformio.ini` (version bump)
+
+---
+
 ## 1.7.1 — June 2026
 
 ### Reliable BookFusion / OPDS downloads on low heap
