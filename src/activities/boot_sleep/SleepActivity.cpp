@@ -163,7 +163,10 @@ void SleepActivity::renderDefaultSleepScreen() const {
     renderer.invertScreen();
   }
 
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  // Power off the panel rails as the terminating phase of this refresh.
+  // We are about to enter deep sleep, so the charge pump must not be left
+  // energized (leaving it powered shows as noise on the panel).
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH, /*powerOffAfter=*/true);
 }
 
 void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
@@ -218,7 +221,10 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
     renderer.invertScreen();
   }
 
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  // Power off after this paint only when it is the final one. The greyscale
+  // pass below repaints and powers down on its own (displayGrayBuffer always
+  // collapses the rails after its update).
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH, /*powerOffAfter=*/!hasGreyscale);
 
   if (hasGreyscale) {
     bitmap.rewindToData();
@@ -329,10 +335,10 @@ void SleepActivity::renderCoverSleepScreen() const {
 void SleepActivity::renderLastScreenSleepScreen() const {
   const auto pageHeight = renderer.getScreenHeight();
   renderer.drawImage(MoonIcon, 0, pageHeight - MOONICON_HEIGHT, MOONICON_WIDTH, MOONICON_HEIGHT);
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH, /*powerOffAfter=*/true);
 }
 
 void SleepActivity::renderBlankSleepScreen() const {
   renderer.clearScreen();
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH, /*powerOffAfter=*/true);
 }

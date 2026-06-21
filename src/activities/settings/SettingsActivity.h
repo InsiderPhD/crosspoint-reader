@@ -21,6 +21,7 @@ enum class SettingAction {
   OPDSBrowser,
   Network,
   ClearCache,
+  RecacheLibrary,
   CheckForUpdates,
   SdFirmwareUpdate,
   DownloadFromUrl,

@@ -33,6 +33,13 @@ class LibraryActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
 
+  // Delete the persisted library index so the next library open re-scans the SD
+  // card. Call after adding or removing a book from outside the library (e.g. a
+  // BookFusion/OPDS download): the index's directory-mtime validation can't detect
+  // a file added to the FAT root, so without this the new book stays invisible in
+  // the library until the cache happens to be invalidated for another reason.
+  static void invalidateIndexCache();
+
  private:
   ButtonNavigator buttonNavigator;
   BookContextMenu contextMenu;
@@ -54,6 +61,16 @@ class LibraryActivity final : public Activity {
     std::string thumbPath;
   };
   std::array<SlotMeta, MAX_PAGE_SIZE> currentPageMeta;
+
+  // Two-phase cover loader bookkeeping: which page-local slots we've already run
+  // generateThumbForSlot() on during the current page visit. Unlike SlotMeta's
+  // hasCover (which refreshCurrentPageMeta re-derives from disk every render),
+  // this MUST survive the per-render meta refresh — otherwise a book whose cover
+  // fails to generate (Epub::generateThumbBmp removes the thumb on a failed
+  // JPEG/PNG convert) is re-selected by findMissingThumbSlot every render, wedging
+  // the loader on that one slot forever (endless "Loading…" flashing, no covers).
+  // Cleared in renderPageFromScratch only when the page actually changes.
+  std::array<bool, MAX_PAGE_SIZE> coverGenAttempted{};
 
   // Pagination + selection state. selectorIndex is a *logical* index into the
   // sorted (live) list, not a page-local index — this keeps wrap-around free

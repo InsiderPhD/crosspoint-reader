@@ -17,6 +17,7 @@
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
+#include "activities/home/LibraryActivity.h"
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
@@ -55,6 +56,12 @@ void clearEpubCacheIfNeeded(const String& filePath) {
   if (FsHelpers::hasEpubExtension(filePath)) {
     Epub(filePath.c_str(), "/.crosspoint").clearCache();
     LOG_DBG("WEB", "Cleared epub cache for: %s", filePath.c_str());
+  }
+  // A book added/removed over the network doesn't change the SD root's FAT mtime,
+  // so the library index can't detect it — invalidate it explicitly for any book
+  // file so the library re-scans on its next open.
+  if (FsHelpers::hasEpubExtension(filePath) || FsHelpers::hasXtcExtension(filePath)) {
+    LibraryActivity::invalidateIndexCache();
   }
 }
 
@@ -1117,6 +1124,9 @@ void CrossPointWebServer::handleGetSettings() const {
 
   for (const auto& s : settings) {
     if (!s.key) continue;  // Skip ACTION-only entries
+    // Mirror the device UI (SettingsActivity.cpp): entries with STR_NONE_OPT category are
+    // legacy/hidden/round-trip-only and must not surface as a bogus "None" group on the web.
+    if (s.category == StrId::STR_NONE_OPT) continue;
 
     doc.clear();
     doc["key"] = s.key;

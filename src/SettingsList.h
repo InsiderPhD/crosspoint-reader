@@ -170,6 +170,19 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                           {StrId::STR_NONE_OPT, StrId::STR_SHORT_PRESS, StrId::STR_LONG_PRESS,
                            StrId::STR_HINTS_FRONT_SHORT, StrId::STR_HINTS_FRONT_LONG},
                           "showButtonHints", StrId::STR_CAT_READER),
+        // --- Stats tab ---
+        SettingInfo::Enum(
+            StrId::STR_DAILY_GOAL, &CrossPointSettings::dailyReadingGoal,
+            {StrId::STR_MIN_5, StrId::STR_MIN_10, StrId::STR_MIN_15, StrId::STR_MIN_30, StrId::STR_MIN_60},
+            "dailyReadingGoal", StrId::STR_CAT_STATS),
+        SettingInfo::Enum(StrId::STR_MIN_SESSION_THRESHOLD, &CrossPointSettings::minSessionMinutes,
+                          {StrId::STR_MIN_1, StrId::STR_MIN_3, StrId::STR_MIN_5}, "minSessionMinutes",
+                          StrId::STR_CAT_STATS),
+        // Persisted time-zone preset (index into TimeZoneRegistry). Hidden from the
+        // device tab UI (no category) — selection happens via the Time Zone Action
+        // entry, which launches TimeZoneSelectActivity. Listed here so JsonSettingsIO
+        // round-trips it through settings.json.
+        SettingInfo::Value(StrId::STR_TIME_ZONE, &CrossPointSettings::timeZonePreset, {0, 28, 1}, "timeZonePreset"),
         // --- Controls ---
         SettingInfo::Toggle(StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION, &CrossPointSettings::frontButtonFollowOrientation,
                             "frontButtonFollowOrientation", StrId::STR_CAT_SYSTEM),
@@ -204,19 +217,6 @@ inline const std::vector<SettingInfo>& getSettingsList() {
         SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                             StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_DEV_MODE, &CrossPointSettings::devMode, "devMode", StrId::STR_CAT_SYSTEM),
-        // --- Stats tab ---
-        SettingInfo::Enum(
-            StrId::STR_DAILY_GOAL, &CrossPointSettings::dailyReadingGoal,
-            {StrId::STR_MIN_5, StrId::STR_MIN_10, StrId::STR_MIN_15, StrId::STR_MIN_30, StrId::STR_MIN_60},
-            "dailyReadingGoal", StrId::STR_CAT_STATS),
-        SettingInfo::Enum(StrId::STR_MIN_SESSION_THRESHOLD, &CrossPointSettings::minSessionMinutes,
-                          {StrId::STR_MIN_1, StrId::STR_MIN_3, StrId::STR_MIN_5}, "minSessionMinutes",
-                          StrId::STR_CAT_STATS),
-        // Persisted time-zone preset (index into TimeZoneRegistry). Hidden from the
-        // device tab UI (no category) — selection happens via the Time Zone Action
-        // entry, which launches TimeZoneSelectActivity. Listed here so JsonSettingsIO
-        // round-trips it through settings.json.
-        SettingInfo::Value(StrId::STR_TIME_ZONE, &CrossPointSettings::timeZonePreset, {0, 28, 1}, "timeZonePreset"),
         // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
         SettingInfo::DynamicString(
             StrId::STR_KOREADER_USERNAME, [] { return KOREADER_STORE.getUsername(); },

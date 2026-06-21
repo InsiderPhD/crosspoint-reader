@@ -16,6 +16,32 @@ Pressing download on a BookFusion EPUB of 10 MB or more now shows a confirm scre
 
 **Files changed**: `BookFusionSyncClient.{cpp,h}`, `BookFusionBrowserActivity.{cpp,h}`, `english.yaml` (`STR_BF_LARGE_BOOK_WARNING`)
 
+### BookFusion reading position carries into the library on download
+On download, the synced BookFusion position now stores the book-level percentage straight from the API (`remotePos.percentage`, the authoritative value) into `RecentBooksStore`, instead of recomputing from `chapterIndex` — which defaults to 0 when the API omits `chapter_index` and showed 0% for partway-read books. The library/home progress reads from `RecentBooksStore`, so the synced percentage now appears immediately without opening the book.
+
+**Files changed**: `BookFusionBrowserActivity.cpp`
+
+### BookFusion covers always come from the API image, never the EPUB
+BookFusion-served EPUBs frequently carry broken or missing embedded covers, so cover handling for BookFusion books no longer falls back to EPUB extraction — the only source is the already-normalised API image cached at download (`thumb_<H>.bmp` + full `cover.bmp`). Two follow-on fixes: (1) the download thumbnail is now generated grayscale (`jpeg/pngFileToBmpStreamWithSize`) instead of 1-bit — the 1-bit converter failed on some cover JPEGs, leaving `thumb_<H>.bmp` missing while the grayscale `cover.bmp` succeeded; (2) `LibraryActivity` falls back to the full `cover.bmp` when the tile thumbnail is absent, and never runs `generateThumbBmp` for a BookFusion-linked book (`hasBookId`). Also fixed a render-loop wedge where a slot whose cover couldn't be generated was re-selected every frame (endless "Loading…" flashing, no covers), via a per-page `coverGenAttempted` guard.
+
+**Files changed**: `BookFusionBrowserActivity.cpp`, `LibraryActivity.{cpp,h}`
+
+### Library auto-refreshes after books are added/removed
+The library index (`/.crosspoint/library_index.bin`) validates its cache by directory mtime, but adding a file to the FAT root doesn't bump the root's mtime — so newly downloaded/uploaded books didn't appear (the file browser, which scans live, did show them). `LibraryActivity::invalidateIndexCache()` is now called from every add/remove path: BookFusion download, OPDS download, web upload, and WebDAV PUT/DELETE. A **Recache Library** action (System tab, Developer Mode only) forces a rescan for any remaining edge case. Added a `const String&` overload for `FsHelpers::hasXtcExtension` to match the other extension helpers.
+
+**Files changed**: `LibraryActivity.{cpp,h}`, `BookFusionBrowserActivity.cpp`, `OpdsBookBrowserActivity.cpp`, `CrossPointWebServer.cpp`, `WebDAVHandler.cpp`, `SettingsActivity.{cpp,h}`, `FsHelpers.h`, `english.yaml` (`STR_RECACHE_LIBRARY`, `STR_LIBRARY_RECACHED`)
+
+### Sleep screen: power off the charge pump on the final refresh
+The e-ink charge pump was left energized when entering deep sleep, showing as noise/ghosting on the sleep image. The terminating sleep refresh now passes `powerOffAfter=true` to `displayBuffer`, collapsing the panel rails (the greyscale bitmap path powers down on its own, so it's only set on the final paint).
+
+**Files changed**: `SleepActivity.cpp`
+
+### Settings & stats tidy-ups
+- Reading-stats settings (daily reading goal, minimum session length) regrouped under the Stats category in `SettingsList`, so they sit together on the device and on the web settings page.
+- Reading Stats button hints now show the next tab's name on Confirm (ribbon focus), matching `SettingsActivity`'s convention.
+
+**Files changed**: `SettingsList.h`, `ReadingStatsActivity.cpp`
+
 ### Fixes
 - Lyra power-button hint box now fills white first so list/book content no longer bleeds through it.
 

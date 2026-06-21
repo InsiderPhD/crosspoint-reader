@@ -1,6 +1,7 @@
 #include "ButtonRemapActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalGPIO.h>
 #include <I18n.h>
 
 #include "CrossPointSettings.h"
@@ -133,12 +134,14 @@ void ButtonRemapActivity::render(RenderLock&&) {
   }
 
   // Provide side button actions at the bottom of the screen (split across two lines).
+  // X3 side buttons sit left/right, not up/down — use the matching SideL/SideR wording.
+  const bool isX3 = gpio.deviceIsX3();
   GUI.drawHelpText(renderer,
                    Rect{0, topOffset + 4 * metrics.listRowHeight + 4 * metrics.verticalSpacing, pageWidth, 20},
-                   tr(STR_REMAP_RESET_HINT));
+                   isX3 ? tr(STR_REMAP_RESET_HINT_X3) : tr(STR_REMAP_RESET_HINT));
   GUI.drawHelpText(renderer,
                    Rect{0, topOffset + 4 * metrics.listRowHeight + 5 * metrics.verticalSpacing + 20, pageWidth, 20},
-                   tr(STR_REMAP_CANCEL_HINT));
+                   isX3 ? tr(STR_REMAP_CANCEL_HINT_X3) : tr(STR_REMAP_CANCEL_HINT));
 
   // Live preview of logical labels under front buttons.
   // This mirrors the on-device front button order: Back, Confirm, Left, Right.

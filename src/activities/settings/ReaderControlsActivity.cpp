@@ -1,6 +1,7 @@
 #include "ReaderControlsActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalGPIO.h>
 #include <I18n.h>
 
 #include "CrossPointSettings.h"
@@ -106,10 +107,11 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
       btn = tr(STR_DIR_RIGHT);
       break;
     case 4:
-      btn = tr(STR_DIR_UP);
+      // X3 side buttons sit left/right, not up/down — label them accordingly.
+      btn = gpio.deviceIsX3() ? tr(STR_DIR_SIDE_L) : tr(STR_DIR_UP);
       break;
     case 5:
-      btn = tr(STR_DIR_DOWN);
+      btn = gpio.deviceIsX3() ? tr(STR_DIR_SIDE_R) : tr(STR_DIR_DOWN);
       break;
     default:
       btn = "Power";

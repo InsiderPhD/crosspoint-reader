@@ -10,6 +10,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
+#include "activities/home/LibraryActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
@@ -283,6 +284,9 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
 
   if (result == HttpDownloader::OK) {
     Epub(filename, "/.crosspoint").clearCache();
+    // New file lands in the SD root; force the library to re-scan on next open
+    // (its dir-mtime cache validation can't see root additions on FAT).
+    LibraryActivity::invalidateIndexCache();
     state = BrowserState::BROWSING;
   } else {
     state = BrowserState::ERROR;

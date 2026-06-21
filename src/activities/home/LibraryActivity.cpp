@@ -139,6 +139,13 @@ void LibraryActivity::onExit() {
   pendingSortRebuild = false;
 }
 
+void LibraryActivity::invalidateIndexCache() {
+  if (Storage.exists(LIBRARY_INDEX_PATH)) {
+    Storage.remove(LIBRARY_INDEX_PATH);
+    LOG_DBG(MODULE, "Invalidated library index cache");
+  }
+}
+
 bool LibraryActivity::tryLoadFromCache() {
   HalFile f;
   if (!Storage.openFileForRead(MODULE, LIBRARY_INDEX_PATH, f)) return false;
@@ -555,6 +562,20 @@ void LibraryActivity::refreshCurrentPageMeta() {
       Epub epub(path, "/.crosspoint");
       meta.thumbPath = epub.getThumbBmpPath(COVER_HEIGHT);
       meta.hasCover = Storage.exists(meta.thumbPath.c_str());
+      // BookFusion EPUBs frequently ship with no embedded cover image — the cover
+      // lives only on BookFusion's servers and is fetched at download time, cached
+      // as both thumb_<H>.bmp and the full sleep-screen cover.bmp. If the tile
+      // thumbnail is missing, render that full cover instead of falling back to
+      // (futile) EPUB extraction, which has nothing to extract and only yields a
+      // placeholder. drawTileCover scales/crops any BMP to the tile, so the
+      // full-size cover renders correctly here.
+      if (!meta.hasCover) {
+        const std::string bfCover = epub.getCoverBmpPath(/*cropped=*/false);
+        if (Storage.exists(bfCover.c_str())) {
+          meta.thumbPath = bfCover;
+          meta.hasCover = true;
+        }
+      }
       // load uses cached book.bin when present (fast); otherwise parses the EPUB.
       // We don't *force* parsing here — refresh is meant to be cheap. The
       // generateThumbForSlot() path will trigger a full parse when needed.
@@ -583,7 +604,10 @@ int LibraryActivity::findMissingThumbSlot() const {
   const size_t pageStart = page * pageSize();
   const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookPaths.size() - pageStart));
   for (int i = 0; i < booksOnPage; ++i) {
-    if (!currentPageMeta[i].hasCover) return i;
+    // Skip slots we've already tried this page visit: a cover that fails to
+    // generate leaves hasCover=false on disk, so without this guard the loader
+    // would re-select the same slot every render and never reach the rest.
+    if (!currentPageMeta[i].hasCover && !coverGenAttempted[i]) return i;
   }
   return -1;
 }
@@ -598,6 +622,10 @@ bool LibraryActivity::generateThumbForSlot(int slotIndexInPage) {
   // hasCover=true + missing-file gracefully: it tries to open, fails, falls
   // through to the placeholder. Visually identical to "broken".
   auto& meta = currentPageMeta[slotIndexInPage];
+
+  // Record the attempt up front so findMissingThumbSlot won't re-select this slot
+  // on the forced re-render below, even if generation fails to produce a file.
+  coverGenAttempted[slotIndexInPage] = true;
 
   if (!FsHelpers::hasEpubExtension(path)) {
     meta.hasCover = true;  // .xtc and friends — not generated here; stop polling.
@@ -623,6 +651,17 @@ bool LibraryActivity::generateThumbForSlot(int slotIndexInPage) {
     return false;  // Already there; no slow work happened.
   }
 
+  // BookFusion books: NEVER derive a cover from the EPUB. BookFusion-served EPUBs
+  // frequently carry broken/unreliable cover images; the only trustworthy cover is
+  // the already-normalised image from the API, cached at download as thumb_<H>.bmp
+  // and cover.bmp (both checked in refreshCurrentPageMeta). If neither is present
+  // the API cover failed to cache — show the placeholder rather than extracting a
+  // bad cover from the EPUB.
+  if (BookFusionBookIdStore::hasBookId(path.c_str())) {
+    meta.hasCover = true;  // stop polling; placeholder until the API cover is re-cached
+    return false;
+  }
+
   epub.generateThumbBmp(COVER_HEIGHT);
   // Unconditional true: a missing file after generate means the EPUB has no
   // cover (or the converter rejected it). Either way, don't retry this slot.
@@ -643,6 +682,13 @@ void LibraryActivity::renderPageFromScratch() {
   refreshCurrentPageMeta();
 
   const size_t page = currentPage();
+  // A fresh page (navigation, sort, reload — all of which reset lastRenderedPage
+  // or move it off this page) clears the cover-generation attempt log so every
+  // slot gets one try. A continuation render (the gen tick below invalidated
+  // pageBufferStored but left lastRenderedPage == page) keeps it, so a slot whose
+  // cover can't be generated is skipped instead of retried forever.
+  if (page != lastRenderedPage) coverGenAttempted.fill(false);
+
   const size_t pageStart = page * pageSize();
   const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookPaths.size() - pageStart));
 

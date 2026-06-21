@@ -1,8 +1,10 @@
 #include "Section.h"
 
+#include <Arduino.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Serialization.h>
+#include <esp_heap_caps.h>
 
 #include "Epub/css/CssParser.h"
 #include "Page.h"
@@ -239,6 +241,12 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
       embeddedStyle, contentBase, imageBasePath, imageRendering, popupFn, cssParser, footnoteDisplay == 0,
       bionicReadingEnabled);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
+  // TEMP diagnostic: fragmentation OOM suspected when cold-building a large chapter right after a
+  // BookFusion download (synced progress jumps straight into a deep, big spine item). "largest" is
+  // the real signal — free can read healthy while the largest contiguous block is too small for the
+  // parse, aborting on a throwing new under -fno-exceptions. Remove once confirmed.
+  LOG_DBG("SCT", "pre-parse heap spine=%d html=%d: free=%u largest=%u", spineIndex, fileSize, ESP.getFreeHeap(),
+          heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
   success = visitor.parseAndBuildPages();
 
   Storage.remove(tmpHtmlPath.c_str());

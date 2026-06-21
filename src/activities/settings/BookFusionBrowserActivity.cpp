@@ -10,6 +10,7 @@
 #include <PngToBmpConverter.h>
 #include <WiFi.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -20,6 +21,7 @@
 #include "BookFusionTokenStore.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "activities/home/LibraryActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -149,10 +151,17 @@ bool convertBookFusionCoverImage(const std::string& srcPath, const std::string& 
 
   bool success = false;
   if (thumbnail) {
+    // Grayscale (not 1-bit) thumbnails. The 1-bit converter is less robust and
+    // fails on some cover JPEGs, leaving thumb_<H>.bmp missing even though the
+    // grayscale cover.bmp from the same source succeeds — which is why some
+    // downloaded books showed a cover and others didn't. Epub::generateThumbBmp
+    // uses grayscale for exactly this reason ("avoid reading issues", Epub.cpp);
+    // matching it makes BookFusion thumbnails render reliably in the home cards
+    // and the library grid.
     if (type == CoverImageType::Jpeg) {
-      success = JpegToBmpConverter::jpegFileTo1BitBmpStreamWithSize(src, dest, thumbTargetWidth, thumbTargetHeight);
+      success = JpegToBmpConverter::jpegFileToBmpStreamWithSize(src, dest, thumbTargetWidth, thumbTargetHeight);
     } else {
-      success = PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(src, dest, thumbTargetWidth, thumbTargetHeight);
+      success = PngToBmpConverter::pngFileToBmpStreamWithSize(src, dest, thumbTargetWidth, thumbTargetHeight);
     }
   } else {
     if (type == CoverImageType::Jpeg) {
@@ -514,17 +523,13 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
     bfMeta.lists = book.lists;
     BookFusionMetaStore::save(epub.getCachePath(), bfMeta);
 
-    // Fall back to extracting a cover from the EPUB itself if the API didn't
-    // provide one — keeps the home-screen thumb and DOWNLOAD_COMPLETE popup
-    // populated even for books that BookFusion serves without cover metadata.
+    // No EPUB-cover fallback: BookFusion-served EPUBs frequently carry broken or
+    // unreliable cover images, so the only cover we trust is the already-normalised
+    // image from the API (cached above by cacheBookFusionApiCover). If that failed,
+    // leave the cover unset — the DOWNLOAD_COMPLETE popup falls back to text-only and
+    // the library shows a placeholder, rather than surfacing a bad EPUB-derived cover.
     if (!apiCoverOk) {
-      if (epub.generateThumbBmp(coverHeight)) {
-        const std::string thumbPath = UITheme::getCoverThumbPath(epub.getThumbBmpPath(), coverHeight);
-        strlcpy(downloadedCoverPath, thumbPath.c_str(), sizeof(downloadedCoverPath));
-        LOG_DBG("BFB", "Generated cover thumb from EPUB at %d px: %s", coverHeight, downloadedCoverPath);
-      } else {
-        LOG_DBG("BFB", "Cover thumb generation failed; popup will fall back to text-only");
-      }
+      LOG_DBG("BFB", "BookFusion API cover unavailable; skipping EPUB fallback (text-only)");
     }
 
     // Pull the user's BookFusion reading position so the book opens where they
@@ -555,14 +560,15 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
           // The library row reads its displayed % straight from RECENT_BOOKS, which
           // addBook() seeded as "unknown" (-1). Nothing else updates it until the
           // reader renders a page and calls saveProgress(), so without this the synced
-          // progress is invisible in the library until the book is opened. Use the
-          // chapter-start percentage (page 0, matching what we wrote to progress.bin)
-          // so the value is consistent with what saveProgress() computes on first open.
-          const auto progressPercent =
-              static_cast<int8_t>(epub.calculateProgress(remotePos.chapterIndex, 0.0f) * 100.0f);
+          // progress is invisible in the library until the book is opened. BookFusion
+          // is authoritative for reading position, so display its book-level percentage
+          // directly rather than recomputing from chapterIndex (which is unreliable —
+          // it defaults to 0 whenever the API omits chapter_index, hiding real progress).
+          const auto progressPercent = static_cast<int8_t>(
+              std::clamp(remotePos.percentage, 0.0f, 100.0f) + 0.5f);
           RECENT_BOOKS.updateProgress(filename, progressPercent);
-          LOG_DBG("BFB", "Synced BookFusion position: chapter %d (%.1f%% in book, %d%% chapter-start)",
-                  remotePos.chapterIndex, remotePos.percentage, progressPercent);
+          LOG_DBG("BFB", "Synced BookFusion position: chapter %d, %d%% (BookFusion authoritative)",
+                  remotePos.chapterIndex, progressPercent);
         }
       }
     } else if (syncErr != BookFusionSyncClient::OK && syncErr != BookFusionSyncClient::NOT_FOUND) {
@@ -572,6 +578,11 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
 
   LOG_DBG("BFB", "Download complete, cache cleared and cover regenerated for book_id=%lu",
           static_cast<unsigned long>(book.id));
+
+  // Force the library to re-scan on its next open. The new file lands in the SD
+  // root, whose FAT mtime doesn't change on a child add, so the library index's
+  // mtime-based validation can't detect it on its own.
+  LibraryActivity::invalidateIndexCache();
 
   downloadedFlags[bookIndex] = true;
 

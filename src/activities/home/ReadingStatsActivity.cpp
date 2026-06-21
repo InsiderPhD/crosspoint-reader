@@ -1094,16 +1094,28 @@ void ReadingStatsActivity::render(RenderLock&&) {
   // The bottom-of-screen "N/N" indicator is gone — the tab bar at the top is
   // the canonical position indicator now.
 
+  // Confirm advances the tab whenever the ribbon (selectedItemIndex == 0) is
+  // focused, so its hint is the next tab's name — same convention as
+  // SettingsActivity. On the Books/Sessions content rows Confirm selects the
+  // row instead, so it reads "Select" there.
+  const char* nextTabName = I18N.get(TAB_NAMES[(currentPage + 1) % TOTAL_STATS_PAGES]);
+
   std::string btn2;
-  std::string btn3 = tr(STR_DIR_LEFT);
-  std::string btn4 = tr(STR_DIR_RIGHT);
+  std::string btn3;
+  std::string btn4;
   if (currentPage == PAGE_STARTED_BOOKS || currentPage == PAGE_SESSIONS) {
-    btn2 = tr(STR_SELECT);
+    btn2 = (selectedItemIndex == 0) ? nextTabName : tr(STR_SELECT);
     btn3 = tr(STR_DIR_UP);
     btn4 = tr(STR_DIR_DOWN);
   } else if (currentPage == PAGE_MONTHLY) {
+    // Up/Down step the viewed month; Left/Right do nothing here, so leave them blank.
+    btn2 = nextTabName;
     btn3 = tr(STR_DIR_UP);
     btn4 = tr(STR_DIR_DOWN);
+  } else {
+    // Overview and Weekly have no per-item content or Left/Right navigation —
+    // only the next-tab Confirm hint is meaningful.
+    btn2 = nextTabName;
   }
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), btn2.c_str(), btn3.c_str(), btn4.c_str());
   drawLyraStyleButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

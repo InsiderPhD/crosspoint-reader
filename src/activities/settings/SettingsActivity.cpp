@@ -25,7 +25,9 @@
 #include "SettingsList.h"
 #include "StatusBarSettingsActivity.h"
 #include "TimeZoneSelectActivity.h"
+#include "activities/home/LibraryActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -71,6 +73,11 @@ void SettingsActivity::onEnter() {
   // Clear Reading Cache: testing aid, hidden unless Dev Mode is on.
   if (SETTINGS.devMode) {
     systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
+    // Recache Library: forces a full SD re-scan on the next library open. Safety
+    // net for the rare case the library index misses a file added outside the
+    // normal download/upload paths (its dir-mtime validation can't see SD-root
+    // additions on FAT). Hidden unless Dev Mode is on.
+    systemSettings.push_back(SettingInfo::Action(StrId::STR_RECACHE_LIBRARY, SettingAction::RecacheLibrary));
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
@@ -237,6 +244,17 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::ClearCache:
         startActivityForResult(std::make_unique<ClearCacheActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::RecacheLibrary:
+        // Non-destructive: drop the library index so the next library open does a
+        // full SD re-scan. Confirm first (matches every other action launching an
+        // activity); on confirm, invalidate.
+        startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput,
+                                                                      tr(STR_RECACHE_LIBRARY), tr(STR_LIBRARY_RECACHED)),
+                               [this](const ActivityResult& res) {
+                                 if (!res.isCancelled) LibraryActivity::invalidateIndexCache();
+                                 SETTINGS.saveToFile();
+                               });
         break;
       case SettingAction::CheckForUpdates:
         startActivityForResult(std::make_unique<OtaUpdateActivity>(renderer, mappedInput), resultHandler);

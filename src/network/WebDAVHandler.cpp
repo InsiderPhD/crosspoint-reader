@@ -6,6 +6,8 @@
 #include <Logging.h>
 #include <esp_task_wdt.h>
 
+#include "activities/home/LibraryActivity.h"
+
 namespace {
 const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
 constexpr size_t HIDDEN_ITEMS_COUNT = sizeof(HIDDEN_ITEMS) / sizeof(HIDDEN_ITEMS[0]);
@@ -794,6 +796,12 @@ void WebDAVHandler::clearEpubCacheIfNeeded(const String& path) const {
   if (FsHelpers::hasEpubExtension(path)) {
     Epub(path.c_str(), "/.crosspoint").clearCache();
     LOG_DBG("DAV", "Cleared epub cache for: %s", path.c_str());
+  }
+  // A book added/removed over WebDAV (e.g. Calibre) doesn't change the SD root's
+  // FAT mtime, so the library index can't detect it — invalidate it explicitly for
+  // any book file so the library re-scans on its next open.
+  if (FsHelpers::hasEpubExtension(path) || FsHelpers::hasXtcExtension(path)) {
+    LibraryActivity::invalidateIndexCache();
   }
 }
 
