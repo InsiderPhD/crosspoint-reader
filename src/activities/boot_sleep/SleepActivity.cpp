@@ -163,10 +163,15 @@ void SleepActivity::renderDefaultSleepScreen() const {
     renderer.invertScreen();
   }
 
-  // Power off the panel rails as the terminating phase of this refresh.
-  // We are about to enter deep sleep, so the charge pump must not be left
-  // energized (leaving it powered shows as noise on the panel).
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH, /*powerOffAfter=*/true);
+  // Terminate on a FULL_REFRESH, not a partial one. On battery, deep sleep
+  // opens the battery-protection MOSFET (HalPowerManager::startDeepSleep) and
+  // the panel rail collapses entirely. A partial waveform (HALF/FAST) leaves
+  // the e-ink particles in a metastable state that relies on a powered
+  // controller to hold it; once VCC drops, the particles relax and the old
+  // image ghosts back over a few seconds. A full waveform commits every pixel
+  // to its bistable rail so the image survives power removal. powerOffAfter
+  // still collapses the rails cleanly as the terminating phase of the refresh.
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH, /*powerOffAfter=*/true);
 }
 
 void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
@@ -223,8 +228,13 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
 
   // Power off after this paint only when it is the final one. The greyscale
   // pass below repaints and powers down on its own (displayGrayBuffer always
-  // collapses the rails after its update).
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH, /*powerOffAfter=*/!hasGreyscale);
+  // collapses the rails after its update). When this IS the final paint (BW
+  // cover, no greyscale), use FULL_REFRESH so the image is fully committed and
+  // survives the battery-disconnect power collapse (see renderDefaultSleepScreen
+  // for the full rationale). The intermediate greyscale paint stays on
+  // HALF_REFRESH since displayGrayBuffer supersedes it.
+  renderer.displayBuffer(hasGreyscale ? HalDisplay::HALF_REFRESH : HalDisplay::FULL_REFRESH,
+                         /*powerOffAfter=*/!hasGreyscale);
 
   if (hasGreyscale) {
     bitmap.rewindToData();
@@ -335,10 +345,19 @@ void SleepActivity::renderCoverSleepScreen() const {
 void SleepActivity::renderLastScreenSleepScreen() const {
   const auto pageHeight = renderer.getScreenHeight();
   renderer.drawImage(MoonIcon, 0, pageHeight - MOONICON_HEIGHT, MOONICON_WIDTH, MOONICON_HEIGHT);
+  // Deliberately stays on HALF_REFRESH (partial waveform): the whole point of
+  // seamless sleep is to keep the last page on screen WITHOUT a flash, and a
+  // FULL_REFRESH inverts the panel. The tradeoff is that on battery the
+  // metastable pixels can ghost slightly as the rail collapses (see
+  // renderDefaultSleepScreen). Seamless users opt into flash-free over
+  // ghost-free; do not "fix" this to FULL_REFRESH.
   renderer.displayBuffer(HalDisplay::HALF_REFRESH, /*powerOffAfter=*/true);
 }
 
 void SleepActivity::renderBlankSleepScreen() const {
   renderer.clearScreen();
-  renderer.displayBuffer(HalDisplay::HALF_REFRESH, /*powerOffAfter=*/true);
+  // FULL_REFRESH so the blank field is fully committed and does not let the
+  // prior image ghost back when the battery rail collapses (see
+  // renderDefaultSleepScreen for the full rationale).
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH, /*powerOffAfter=*/true);
 }
