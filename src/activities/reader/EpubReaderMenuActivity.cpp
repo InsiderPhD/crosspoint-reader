@@ -33,6 +33,7 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   }
   items.push_back({MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION});
   items.push_back({MenuAction::BUTTON_HINTS, StrId::STR_SHOW_BUTTON_HINTS});
+  items.push_back({MenuAction::FONT_LAYOUT, StrId::STR_FONT_LAYOUT_PREVIEW});
   items.push_back({MenuAction::READER_CONTROLS, StrId::STR_READER_CONTROLS});
   items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});
   items.push_back({MenuAction::READING_SPEED, StrId::STR_READING_SPEED});

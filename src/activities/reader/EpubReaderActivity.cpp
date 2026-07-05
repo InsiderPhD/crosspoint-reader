@@ -44,6 +44,7 @@
 #include "WifiCredentialStore.h"
 #include "activities/home/ReadingStatsDetailActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/settings/FontLayoutPreviewActivity.h"
 #include "activities/settings/ReaderControlsActivity.h"  // for ReaderControlsActivity::actionName()
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -771,6 +772,18 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResult(std::make_unique<ReaderControlsActivity>(renderer, mappedInput),
                              [this](const ActivityResult&) {
                                requestUpdate();  // button mappings may have changed — refresh hint labels
+                             });
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::FONT_LAYOUT: {
+      startActivityForResult(std::make_unique<FontLayoutPreviewActivity>(renderer, mappedInput),
+                             [this](const ActivityResult&) {
+                               // The preview restores the renderer to its entry orientation on exit;
+                               // re-apply the (possibly changed) reader orientation, then repaginate
+                               // for whatever font/layout settings the user adjusted.
+                               ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+                               reflowCurrentChapter();
+                               requestUpdate();
                              });
       break;
     }

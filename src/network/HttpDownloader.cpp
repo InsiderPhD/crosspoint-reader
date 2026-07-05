@@ -86,7 +86,8 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent) {
 }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
-                                                             ProgressCallback progress, bool allowConfiguredAuth) {
+                                                             ProgressCallback progress, bool allowConfiguredAuth,
+                                                             size_t expectedSize) {
   // Use NetworkClientSecure for HTTPS, regular NetworkClient for HTTP.
   // Own each client as its CONCRETE type. NetworkClient's destructor is
   // non-virtual, so holding a NetworkClientSecure through a
@@ -317,6 +318,24 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     LOG_ERR("HTTP", "Size mismatch: got %zu, expected %zu", downloaded, contentLength);
     Storage.remove(destPath.c_str());
     return HTTP_ERROR;
+  }
+
+  // Cross-check against the size the caller knows independently (e.g. BookFusion's
+  // API download_size). The Content-Length check above only fires when the server
+  // sends that header; BookFusion's pre-signed URLs sometimes stream without one,
+  // so a connection dropped mid-transfer yields a silently truncated EPUB that
+  // every check above accepts. The expected size is an independent record of the
+  // full file, so reject a download that came up well short of it. A tolerance
+  // band (87.5%) absorbs the small, legitimate differences between the advertised
+  // size and the bytes actually served while still catching the gross shortfall
+  // of a truncated transfer.
+  if (expectedSize > 0) {
+    const size_t minAcceptable = expectedSize - expectedSize / 8;
+    if (downloaded < minAcceptable) {
+      LOG_ERR("HTTP", "Incomplete download: got %zu bytes, expected ~%zu", downloaded, expectedSize);
+      Storage.remove(destPath.c_str());
+      return HTTP_ERROR;
+    }
   }
 
   return OK;

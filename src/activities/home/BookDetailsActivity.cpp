@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -30,7 +31,8 @@ int drawInfoRow(GfxRenderer& renderer, int x, int y, int width, const char* labe
   const int lblWidth = renderer.getTextWidth(UI_10_FONT_ID, lbl.c_str(), EpdFontFamily::BOLD);
   renderer.drawText(UI_10_FONT_ID, x, y, lbl.c_str(), true, EpdFontFamily::BOLD);
   const int valueX = x + lblWidth + LABEL_VALUE_GAP;
-  const std::string val = renderer.truncatedText(UI_10_FONT_ID, value.c_str(), std::max(0, width - lblWidth - LABEL_VALUE_GAP));
+  const std::string val =
+      renderer.truncatedText(UI_10_FONT_ID, value.c_str(), std::max(0, width - lblWidth - LABEL_VALUE_GAP));
   renderer.drawText(UI_10_FONT_ID, valueX, y, val.c_str());
   return y + renderer.getLineHeight(UI_10_FONT_ID) + ROW_V_PAD;
 }
@@ -71,6 +73,82 @@ void BookDetailsActivity::freeDescBuffer() {
     descBuffer = nullptr;
   }
   descLength = 0;
+}
+
+int BookDetailsActivity::siblingCount() const {
+  if (!siblingPaths) return 0;
+  return static_cast<int>(siblingOrder.empty() ? siblingPaths->size() : siblingOrder.size());
+}
+
+const std::string* BookDetailsActivity::siblingPathAt(int pos) const {
+  if (!siblingPaths || pos < 0) return nullptr;
+  size_t idx;
+  if (siblingOrder.empty()) {
+    if (static_cast<size_t>(pos) >= siblingPaths->size()) return nullptr;
+    idx = static_cast<size_t>(pos);
+  } else {
+    if (static_cast<size_t>(pos) >= siblingOrder.size()) return nullptr;
+    idx = siblingOrder[pos];
+  }
+  if (idx >= siblingPaths->size()) return nullptr;
+  return &(*siblingPaths)[idx];
+}
+
+// Re-derive the base info the constructor was handed for the current book: title
+// from the filename stem, author/progress from RecentBooksStore (author is left
+// empty when the book isn't in recents — loadMetadata() fills it from the EPUB).
+void BookDetailsActivity::applyBaseInfoFromPath() {
+  const size_t slash = bookPath.find_last_of('/');
+  const std::string filename = (slash == std::string::npos) ? bookPath : bookPath.substr(slash + 1);
+  const size_t dot = filename.rfind('.');
+  title = (dot == std::string::npos) ? filename : filename.substr(0, dot);
+
+  author.clear();
+  progressPercent = -1;
+  const auto& recents = RECENT_BOOKS.getBooks();
+  const auto it =
+      std::find_if(recents.begin(), recents.end(), [this](const RecentBook& rb) { return rb.path == bookPath; });
+  if (it != recents.end()) {
+    author = it->author;
+    progressPercent = it->progressPercent;
+  }
+}
+
+// Clear all per-book state before loading a different book's details.
+void BookDetailsActivity::resetForBook(const std::string& newPath) {
+  freeDescBuffer();
+  scrollOffset = 0;
+  bookPath = newPath;
+  seriesName.clear();
+  seriesNumber.clear();
+  bookshelf.clear();
+  categories.clear();
+  lists.clear();
+  published.clear();
+  publisher.clear();
+  language.clear();
+  tags.clear();
+  rating.clear();
+  coverPath.clear();
+  applyBaseInfoFromPath();
+}
+
+void BookDetailsActivity::navigateToSibling(int newPos) {
+  const int count = siblingCount();
+  if (count <= 1) return;
+  newPos = std::clamp(newPos, 0, count - 1);
+  if (newPos == siblingPos) return;  // already at the first/last book
+  const std::string* p = siblingPathAt(newPos);
+  if (!p) return;
+  siblingPos = newPos;
+  resetForBook(*p);
+
+  // Mirror onEnter(): loadMetadata() can block, so paint "Loading…" first.
+  loading = true;
+  requestUpdateAndWait();
+  loadMetadata();
+  loading = false;
+  requestUpdate();
 }
 
 void BookDetailsActivity::loadMetadata() {
@@ -180,14 +258,29 @@ void BookDetailsActivity::loop() {
 
   // Page-at-a-time scroll through the description (clamped against maxScrollOffset in render()).
   const int pageStep = std::max(1, descVisibleLines - 1);
-  buttonNavigator.onNext([this, pageStep] {
+  const auto scrollDown = [this, pageStep] {
     scrollOffset += pageStep;
     requestUpdate();
-  });
-  buttonNavigator.onPrevious([this, pageStep] {
+  };
+  const auto scrollUp = [this, pageStep] {
     scrollOffset = std::max(0, scrollOffset - pageStep);
     requestUpdate();
-  });
+  };
+
+  if (siblingCount() > 1) {
+    // Front Left/Right step through the sibling books; scrolling stays on the side
+    // Up/Down buttons. Book nav is single-press (no hold-repeat) because each step
+    // triggers a possibly-blocking loadMetadata() (EPUB parse + cover generation).
+    buttonNavigator.onPress({MappedInputManager::Button::Right}, [this] { navigateToSibling(siblingPos + 1); });
+    buttonNavigator.onPress({MappedInputManager::Button::Left}, [this] { navigateToSibling(siblingPos - 1); });
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down}, scrollDown);
+    buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up}, scrollUp);
+  } else {
+    // No sibling list (or a single-book folder): keep the original behaviour where
+    // Up/Left scroll up and Down/Right scroll down.
+    buttonNavigator.onNext(scrollDown);
+    buttonNavigator.onPrevious(scrollUp);
+  }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && Storage.exists(bookPath.c_str())) {
     onSelectBook(bookPath);
@@ -287,7 +380,12 @@ void BookDetailsActivity::render(RenderLock&&) {
   }
 
   const char* confirmLabel = Storage.exists(bookPath.c_str()) ? tr(STR_OPEN) : "";
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  // When sibling navigation is available the front Left/Right buttons change books
+  // (scrolling moves to the side Up/Down buttons); otherwise they still scroll.
+  const bool canNavBooks = siblingCount() > 1;
+  const char* prevLabel = canNavBooks ? tr(STR_BOOK_INFO_PREV_BOOK) : tr(STR_DIR_UP);
+  const char* nextLabel = canNavBooks ? tr(STR_BOOK_INFO_NEXT_BOOK) : tr(STR_DIR_DOWN);
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, prevLabel, nextLabel);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer();

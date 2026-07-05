@@ -22,15 +22,21 @@ enum class SettingAction {
   Network,
   ClearCache,
   RecacheLibrary,
+  RecacheMetadata,
+  RefreshBookFusionMetadata,
   CheckForUpdates,
   SdFirmwareUpdate,
   DownloadFromUrl,
   Language,
   ResetStats,
+  ExportStats,
+  ImportStats,
+  ExportStoryGraph,
   SetDate,
   TimeZone,
   FontFamily,
   FontDownload,
+  FontLayoutPreview,
 };
 
 struct SettingInfo {
@@ -161,10 +167,15 @@ class SettingsActivity final : public Activity {
   std::vector<SettingInfo> readerSettings;
   std::vector<SettingInfo> statsSettings;
   std::vector<SettingInfo> systemSettings;
+  std::vector<SettingInfo> devSettings;
   const std::vector<SettingInfo>* currentSettings = nullptr;
 
-  static constexpr int categoryCount = 4;
-  static const StrId categoryNames[categoryCount];
+  // Category tabs are built dynamically in onEnter() because the Dev tab only
+  // appears when Dev Mode is enabled. categoryNames and categoryLists run in
+  // parallel: categoryLists[i] is the settings vector shown under categoryNames[i].
+  std::vector<StrId> categoryNames;
+  std::vector<const std::vector<SettingInfo>*> categoryLists;
+  int categoryCount = 0;
 
   void enterCategory(int categoryIndex);
   void toggleCurrentSetting();

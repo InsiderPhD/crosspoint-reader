@@ -35,8 +35,12 @@ class HttpDownloader {
    * @param destPath The destination path on SD card
    * @param progress Optional progress callback
    * @param allowConfiguredAuth Whether to attach configured OPDS Basic auth for non-BookFusion URLs
+   * @param expectedSize Optional expected file size in bytes (e.g. BookFusion's API
+   *        download_size). When non-zero, a final file that falls well short of this
+   *        is rejected as a truncated download. 0 = no cross-check.
    * @return DownloadError indicating success or failure type
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
-                                      ProgressCallback progress = nullptr, bool allowConfiguredAuth = true);
+                                      ProgressCallback progress = nullptr, bool allowConfiguredAuth = true,
+                                      size_t expectedSize = 0);
 };

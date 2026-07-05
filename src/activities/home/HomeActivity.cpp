@@ -23,7 +23,7 @@
 #include "fontIds.h"
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 5;  // File Browser, Recents, File transfer, Stats, Settings
+  int count = 4;  // File Browser, File transfer, Stats, Settings
   count += getCoverSlotsUsed();
   if (hasOpdsUrl) {
     count++;
@@ -352,7 +352,6 @@ void HomeActivity::loop() {
     int idx = 0;
     int menuSelectedIndex = selectorIndex - coverSlotsUsed;
     const int fileBrowserIdx = idx++;
-    const int recentsIdx = idx++;
     const int opdsLibraryIdx = hasOpdsUrl ? idx++ : -1;
     const int fileTransferIdx = idx++;
     const int statsIdx = idx++;
@@ -362,8 +361,6 @@ void HomeActivity::loop() {
       onSelectBook(recentBooks[selectorIndex].path);
     } else if (menuSelectedIndex == fileBrowserIdx) {
       onFileBrowserOpen();
-    } else if (menuSelectedIndex == recentsIdx) {
-      onRecentsOpen();
     } else if (menuSelectedIndex == opdsLibraryIdx) {
       onOpdsBrowserOpen();
     } else if (menuSelectedIndex == fileTransferIdx) {
@@ -399,14 +396,14 @@ void HomeActivity::render(RenderLock&&) {
                           std::bind(&HomeActivity::storeCoverBuffer, this));
 
   // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
-                                        tr(STR_READING_STATS), tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Book, Settings};
+  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_FILE_TRANSFER), tr(STR_READING_STATS),
+                                        tr(STR_SETTINGS_TITLE)};
+  std::vector<UIIcon> menuIcons = {Folder, Transfer, Book, Settings};
 
   if (hasOpdsUrl) {
     // Insert OPDS Browser after File Browser
-    menuItems.insert(menuItems.begin() + 2, tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 2, Library);
+    menuItems.insert(menuItems.begin() + 1, tr(STR_OPDS_BROWSER));
+    menuIcons.insert(menuIcons.begin() + 1, Library);
   }
 
   const int menuOffset = getCoverSlotsUsed();
@@ -440,9 +437,23 @@ void HomeActivity::render(RenderLock&&) {
 
 void HomeActivity::onSelectBook(const std::string& path) { activityManager.goToReader(path); }
 
-void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
-
-void HomeActivity::onRecentsOpen() { activityManager.goToRecentBooks(); }
+void HomeActivity::onFileBrowserOpen() {
+  // "Tags"/"Authors" views swap the SD-directory browser for a whole-library grouped view.
+  switch (SETTINGS.folderView) {
+    case CrossPointSettings::FOLDER_VIEW_TAGS:
+      activityManager.goToTagBrowser();
+      break;
+    case CrossPointSettings::FOLDER_VIEW_AUTHORS:
+      activityManager.goToAuthorBrowser();
+      break;
+    case CrossPointSettings::FOLDER_VIEW_SERIES:
+      activityManager.goToSeriesBrowser();
+      break;
+    default:
+      activityManager.goToFileBrowser();
+      break;
+  }
+}
 
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 

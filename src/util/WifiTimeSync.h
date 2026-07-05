@@ -34,4 +34,17 @@ bool attemptIfStale(uint32_t timeoutMs = 8000);
 // block boot because the work runs on a FreeRTOS task.
 void startSilentBootAttempt();
 
+// Cooperatively stop the silent boot NTP task and wait (bounded) until it has
+// released the WiFi radio — which frees the ~40KB the WiFi stack holds. Call
+// this before a heavy, allocation-hungry foreground job (e.g. the library
+// metadata recache) so the two don't contend for heap or the SD/SPI bus and
+// crash on a cold boot. No-op (returns immediately) if the task isn't running,
+// so after the ~10s boot window this costs nothing. Safe to call from any task.
+//
+// maxWaitMs caps the wait: teardown is usually <200ms (the task polls WiFi
+// association every 100ms), but a browse that lands mid-SNTP may wait up to one
+// SNTP timeout (~5s) + teardown before the task notices the stop request — the
+// 8s default leaves headroom so preempt() never gives up with WiFi still up.
+void preempt(uint32_t maxWaitMs = 8000);
+
 }  // namespace WifiTimeSync

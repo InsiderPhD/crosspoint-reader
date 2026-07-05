@@ -5,9 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
-#include <JpegToBmpConverter.h>
 #include <Logging.h>
-#include <PngToBmpConverter.h>
 #include <WiFi.h>
 
 #include <algorithm>
@@ -25,6 +23,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/BookFusionCoverCache.h"
 #include "network/HttpDownloader.h"
 #include "util/StringUtils.h"
 
@@ -64,9 +63,7 @@ bool bookFusionFormatIsEpub(const BookFusionBook& book) {
 // good-enough proxy for "lots of pictures" — text-only EPUBs rarely approach it.
 constexpr uint32_t LARGE_BOOK_WARN_BYTES = 10u * 1024 * 1024;  // 10 MB
 
-bool bookFusionBookIsLarge(const BookFusionBook& book) {
-  return book.downloadSize >= LARGE_BOOK_WARN_BYTES;
-}
+bool bookFusionBookIsLarge(const BookFusionBook& book) { return book.downloadSize >= LARGE_BOOK_WARN_BYTES; }
 
 std::string bookFusionExpectedFilename(const BookFusionBook& book) {
   std::string baseName = book.title;
@@ -85,141 +82,6 @@ std::string bookFusionExpectedFilename(const BookFusionBook& book) {
   return "/" + StringUtils::sanitizeFilename(baseName) + "." + ext;
 }
 
-enum class CoverImageType { Unknown, Jpeg, Png };
-
-std::string normalizeBookFusionCoverUrl(const char* coverUrl) {
-  if (!coverUrl || coverUrl[0] == '\0') return {};
-
-  std::string url = coverUrl;
-  if (url.rfind("//", 0) == 0) {
-    return "https:" + url;
-  }
-  if (url.rfind("/", 0) == 0) {
-    return "https://www.bookfusion.com" + url;
-  }
-  return url;
-}
-
-CoverImageType detectCoverImageType(FsFile& file) {
-  uint8_t header[8] = {};
-  file.seek(0);
-  const int read = file.read(header, sizeof(header));
-  file.seek(0);
-
-  if (read >= 3 && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF) {
-    return CoverImageType::Jpeg;
-  }
-  if (read >= 8 && header[0] == 0x89 && header[1] == 'P' && header[2] == 'N' && header[3] == 'G' && header[4] == 0x0D &&
-      header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A) {
-    return CoverImageType::Png;
-  }
-  return CoverImageType::Unknown;
-}
-
-bool validateCoverBmp(const std::string& path) {
-  FsFile file;
-  if (!Storage.openFileForRead("BFB", path, file)) return false;
-
-  Bitmap bitmap(file);
-  const auto err = bitmap.parseHeaders();
-  file.close();
-
-  if (err != BmpReaderError::Ok) {
-    LOG_ERR("BFB", "BookFusion cover BMP validation failed (err=%d): %s", static_cast<int>(err), path.c_str());
-    return false;
-  }
-  return true;
-}
-
-bool convertBookFusionCoverImage(const std::string& srcPath, const std::string& destPath, bool thumbnail,
-                                 int thumbTargetWidth, int thumbTargetHeight, bool crop) {
-  FsFile src;
-  if (!Storage.openFileForRead("BFB", srcPath, src)) return false;
-
-  const CoverImageType type = detectCoverImageType(src);
-  if (type == CoverImageType::Unknown) {
-    LOG_ERR("BFB", "BookFusion cover has unsupported image signature: %s", srcPath.c_str());
-    src.close();
-    return false;
-  }
-
-  FsFile dest;
-  if (!Storage.openFileForWrite("BFB", destPath, dest)) {
-    src.close();
-    return false;
-  }
-
-  bool success = false;
-  if (thumbnail) {
-    // Grayscale (not 1-bit) thumbnails. The 1-bit converter is less robust and
-    // fails on some cover JPEGs, leaving thumb_<H>.bmp missing even though the
-    // grayscale cover.bmp from the same source succeeds — which is why some
-    // downloaded books showed a cover and others didn't. Epub::generateThumbBmp
-    // uses grayscale for exactly this reason ("avoid reading issues", Epub.cpp);
-    // matching it makes BookFusion thumbnails render reliably in the home cards
-    // and the library grid.
-    if (type == CoverImageType::Jpeg) {
-      success = JpegToBmpConverter::jpegFileToBmpStreamWithSize(src, dest, thumbTargetWidth, thumbTargetHeight);
-    } else {
-      success = PngToBmpConverter::pngFileToBmpStreamWithSize(src, dest, thumbTargetWidth, thumbTargetHeight);
-    }
-  } else {
-    if (type == CoverImageType::Jpeg) {
-      success = JpegToBmpConverter::jpegFileToBmpStream(src, dest, crop);
-    } else {
-      success = PngToBmpConverter::pngFileToBmpStream(src, dest, crop);
-    }
-  }
-
-  src.close();
-  dest.flush();
-  dest.close();
-
-  if (!success || !validateCoverBmp(destPath)) {
-    LOG_ERR("BFB", "Failed to convert BookFusion cover BMP: %s", destPath.c_str());
-    Storage.remove(destPath.c_str());
-    return false;
-  }
-
-  return true;
-}
-
-bool cacheBookFusionApiCover(const BookFusionBook& book, const Epub& epub, int coverHeight, char* downloadedCoverPath,
-                             size_t downloadedCoverPathLen) {
-  const std::string coverUrl = normalizeBookFusionCoverUrl(book.coverUrl);
-  if (coverUrl.empty()) {
-    LOG_DBG("BFB", "BookFusion API did not include a cover URL for book_id=%lu", static_cast<unsigned long>(book.id));
-    return false;
-  }
-
-  const std::string tempCoverPath = epub.getCachePath() + "/.bookfusion-cover";
-  LOG_DBG("BFB", "Downloading BookFusion API cover for book_id=%lu", static_cast<unsigned long>(book.id));
-  const auto downloadResult = HttpDownloader::downloadToFile(coverUrl, tempCoverPath, nullptr, false);
-  if (downloadResult != HttpDownloader::OK) {
-    LOG_ERR("BFB", "Failed to download BookFusion API cover for book_id=%lu", static_cast<unsigned long>(book.id));
-    return false;
-  }
-
-  const int thumbTargetWidth = coverHeight * 0.6f;
-  const int thumbTargetHeight = coverHeight;
-  const std::string thumbPath = epub.getThumbBmpPath(coverHeight);
-  const bool thumbOk =
-      convertBookFusionCoverImage(tempCoverPath, thumbPath, true, thumbTargetWidth, thumbTargetHeight, true);
-
-  // Prime both sleep-screen variants while WiFi is already on. SleepActivity
-  // will later pick the one matching the user's cover mode.
-  const bool fitOk = convertBookFusionCoverImage(tempCoverPath, epub.getCoverBmpPath(false), false, 0, 0, false);
-  const bool cropOk = convertBookFusionCoverImage(tempCoverPath, epub.getCoverBmpPath(true), false, 0, 0, true);
-
-  Storage.remove(tempCoverPath.c_str());
-
-  if (thumbOk) {
-    strlcpy(downloadedCoverPath, thumbPath.c_str(), downloadedCoverPathLen);
-  }
-
-  LOG_DBG("BFB", "BookFusion API cover cache result: thumb=%d fit=%d crop=%d", thumbOk, fitOk, cropOk);
-  return thumbOk;
-}
 }  // namespace
 
 void BookFusionBrowserActivity::onEnter() {
@@ -388,6 +250,7 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   {
     RenderLock lock(*this);
     state = DOWNLOADING;
+    downloadScreenPainted = false;  // Force a full repaint for this book's layout
     downloadProgress = 0;
     downloadTotal = 0;
     lastProgressUpdateMs = 0;  // Reset progress update throttling
@@ -432,55 +295,92 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   epub.setupCacheDir();
   const int coverHeight = UITheme::getInstance().getMetrics().homeCoverHeight;
   const bool apiCoverOk =
-      cacheBookFusionApiCover(book, epub, coverHeight, downloadedCoverPath, sizeof(downloadedCoverPath));
+      BookFusionCoverCache::refresh(book.coverUrl, epub, coverHeight, downloadedCoverPath, sizeof(downloadedCoverPath));
   if (apiCoverOk) {
     LOG_DBG("BFB", "Pre-fetched BookFusion API cover before EPUB download");
+    // The cover arrived after the first (coverless) Downloading frame painted —
+    // force one more full repaint so it's drawn into the persistent framebuffer
+    // before the progress ticks switch to partial repaints.
+    downloadScreenPainted = false;
     requestUpdate(true);  // Queue a second frame so the cover replaces the bare title.
   }
 
-  // Fetch the pre-signed download URL from BookFusion (happens in parallel with
-  // the cover frame the render task is now drawing).
-  const auto urlErr = BookFusionSyncClient::getDownloadUrl(book.id, downloadUrl, sizeof(downloadUrl));
-  if (urlErr != BookFusionSyncClient::OK) {
+  // Retry the fetch a couple of times: BookFusion's pre-signed URLs sometimes
+  // drop mid-transfer and hand back a truncated EPUB (caught by the
+  // expectedSize cross-check in downloadToFile). The pre-signed URL is fetched
+  // fresh each attempt because it can expire between tries.
+  constexpr int kMaxDownloadAttempts = 3;
+  HttpDownloader::DownloadError dlResult = HttpDownloader::HTTP_ERROR;
+  for (int attempt = 1; attempt <= kMaxDownloadAttempts; attempt++) {
+    // Fetch the pre-signed download URL from BookFusion (happens in parallel with
+    // the cover frame the render task is now drawing).
+    const auto urlErr = BookFusionSyncClient::getDownloadUrl(book.id, downloadUrl, sizeof(downloadUrl));
+    if (urlErr != BookFusionSyncClient::OK) {
+      {
+        RenderLock lock(*this);
+        state = ERROR;
+        if (urlErr == BookFusionSyncClient::NOT_FOUND) {
+          strlcpy(errorMsg, tr(STR_BF_BOOK_UNAVAILABLE), sizeof(errorMsg));
+        } else {
+          strlcpy(errorMsg, BookFusionSyncClient::errorString(urlErr), sizeof(errorMsg));
+        }
+      }
+      requestUpdate();
+      return;
+    }
+
     {
       RenderLock lock(*this);
-      state = ERROR;
-      if (urlErr == BookFusionSyncClient::NOT_FOUND) {
-        strlcpy(errorMsg, tr(STR_BF_BOOK_UNAVAILABLE), sizeof(errorMsg));
-      } else {
-        strlcpy(errorMsg, BookFusionSyncClient::errorString(urlErr), sizeof(errorMsg));
-      }
+      downloadProgress = 0;
+      downloadTotal = 0;
+      lastProgressUpdateMs = 0;  // Reset progress throttling for this attempt
     }
-    requestUpdate();
-    return;
+
+    dlResult = HttpDownloader::downloadToFile(
+        downloadUrl, filename,
+        [this](const size_t downloaded, const size_t total) {
+          // Throttle UI updates to every 2 seconds to avoid blocking download with slow e-ink refreshes
+          const unsigned long currentMs = millis();
+          const unsigned long timeSinceLastUpdate = currentMs - lastProgressUpdateMs;
+
+          downloadProgress = downloaded;
+          downloadTotal = total;
+
+          // First byte arrived — flip the status from "Connecting…" to
+          // "Downloading…". Done inside the callback (rather than up-front
+          // before calling HttpDownloader) so the render task has time to paint
+          // the "Connecting… + cover" frame first; otherwise the cover frame
+          // gets coalesced away on the e-ink refresh queue. HttpDownloader now
+          // always fires the callback, including for transfers without
+          // Content-Length, so this branch is reliable.
+          if (lastProgressUpdateMs == 0) {
+            strlcpy(downloadStatus, tr(STR_DOWNLOADING), sizeof(downloadStatus));
+          }
+
+          // Update immediately for first progress report or every 2 seconds
+          if (lastProgressUpdateMs == 0 || timeSinceLastUpdate >= 2000) {
+            lastProgressUpdateMs = currentMs;
+            requestUpdate(true);
+          }
+        },
+        true, static_cast<size_t>(book.downloadSize));
+
+    if (dlResult == HttpDownloader::OK) {
+      break;
+    }
+
+    LOG_ERR("BFB", "Download attempt %d/%d failed for book_id=%lu", attempt, kMaxDownloadAttempts,
+            static_cast<unsigned long>(book.id));
+
+    // More attempts left — surface a brief "retrying" notice on the download
+    // screen and loop. The truncated/partial file is already removed by
+    // downloadToFile on failure, so the next attempt starts clean.
+    if (attempt < kMaxDownloadAttempts) {
+      RenderLock lock(*this);
+      strlcpy(downloadStatus, tr(STR_DOWNLOAD_RETRYING), sizeof(downloadStatus));
+      requestUpdate(true);
+    }
   }
-
-  const auto dlResult =
-      HttpDownloader::downloadToFile(downloadUrl, filename, [this](const size_t downloaded, const size_t total) {
-        // Throttle UI updates to every 2 seconds to avoid blocking download with slow e-ink refreshes
-        const unsigned long currentMs = millis();
-        const unsigned long timeSinceLastUpdate = currentMs - lastProgressUpdateMs;
-
-        downloadProgress = downloaded;
-        downloadTotal = total;
-
-        // First byte arrived — flip the status from "Connecting…" to
-        // "Downloading…". Done inside the callback (rather than up-front
-        // before calling HttpDownloader) so the render task has time to paint
-        // the "Connecting… + cover" frame first; otherwise the cover frame
-        // gets coalesced away on the e-ink refresh queue. HttpDownloader now
-        // always fires the callback, including for transfers without
-        // Content-Length, so this branch is reliable.
-        if (lastProgressUpdateMs == 0) {
-          strlcpy(downloadStatus, tr(STR_DOWNLOADING), sizeof(downloadStatus));
-        }
-
-        // Update immediately for first progress report or every 2 seconds
-        if (lastProgressUpdateMs == 0 || timeSinceLastUpdate >= 2000) {
-          lastProgressUpdateMs = currentMs;
-          requestUpdate(true);
-        }
-      });
 
   if (dlResult != HttpDownloader::OK) {
     {
@@ -525,7 +425,7 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
 
     // No EPUB-cover fallback: BookFusion-served EPUBs frequently carry broken or
     // unreliable cover images, so the only cover we trust is the already-normalised
-    // image from the API (cached above by cacheBookFusionApiCover). If that failed,
+    // image from the API (cached above by BookFusionCoverCache::refresh). If that failed,
     // leave the cover unset — the DOWNLOAD_COMPLETE popup falls back to text-only and
     // the library shows a placeholder, rather than surfacing a bad EPUB-derived cover.
     if (!apiCoverOk) {
@@ -564,8 +464,7 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
           // is authoritative for reading position, so display its book-level percentage
           // directly rather than recomputing from chapterIndex (which is unreliable —
           // it defaults to 0 whenever the API omits chapter_index, hiding real progress).
-          const auto progressPercent = static_cast<int8_t>(
-              std::clamp(remotePos.percentage, 0.0f, 100.0f) + 0.5f);
+          const auto progressPercent = static_cast<int8_t>(std::clamp(remotePos.percentage, 0.0f, 100.0f) + 0.5f);
           RECENT_BOOKS.updateProgress(filename, progressPercent);
           LOG_DBG("BFB", "Synced BookFusion position: chapter %d, %d%% (BookFusion authoritative)",
                   remotePos.chapterIndex, progressPercent);
@@ -804,7 +703,63 @@ void BookFusionBrowserActivity::loop() {
   }
 }
 
+void BookFusionBrowserActivity::drawDownloadDynamic(const int statusY) {
+  const int pageWidth = renderer.getScreenWidth();
+
+  // Clear just the status/progress band to white before (re)drawing it. On the
+  // full path the whole screen was already cleared so this is a harmless no-op;
+  // on the partial path it wipes the previous tick's text/bar so they don't
+  // ghost in the retained framebuffer. drawText's y is the glyph top, so the
+  // band starts at statusY and never reaches up into the cover above it.
+  renderer.fillRect(0, statusY, pageWidth, 130, false);
+
+  // Use the phase label set by startDownload (Connecting / Downloading / Saving
+  // / retrying). Falls back to the generic STR_DOWNLOADING if somehow blank.
+  const char* status = (downloadStatus[0] != '\0') ? downloadStatus : tr(STR_DOWNLOADING);
+  renderer.drawCenteredText(UI_10_FONT_ID, statusY, status, true, EpdFontFamily::BOLD);
+  const int maxWidth = pageWidth - 40;
+  auto title = renderer.truncatedText(UI_10_FONT_ID, downloadTitle, maxWidth);
+  renderer.drawCenteredText(UI_10_FONT_ID, statusY + 30, title.c_str());
+
+  if (downloadTotal > 0) {
+    // Show progress bar with percentage
+    constexpr int barX = 50;
+    constexpr int barHeight = 20;
+    const int barWidth = pageWidth - 100;
+    const int barY = statusY + 60;
+    GUI.drawProgressBar(renderer, Rect{barX, barY, barWidth, barHeight}, downloadProgress, downloadTotal);
+
+    // Show percentage below progress bar
+    const int percent = static_cast<int>((static_cast<uint64_t>(downloadProgress) * 100) / downloadTotal);
+    char percentText[16];
+    snprintf(percentText, sizeof(percentText), "%d%%", percent);
+    renderer.drawCenteredText(UI_10_FONT_ID, barY + 30, percentText);
+  } else if (downloadProgress > 0) {
+    // Show downloaded bytes when total size is unknown (no Content-Length header)
+    char progressText[64];
+    if (downloadProgress >= 1024 * 1024) {
+      snprintf(progressText, sizeof(progressText), "%.1f MB downloaded...", downloadProgress / (1024.0f * 1024.0f));
+    } else if (downloadProgress >= 1024) {
+      snprintf(progressText, sizeof(progressText), "%.1f KB downloaded...", downloadProgress / 1024.0f);
+    } else {
+      snprintf(progressText, sizeof(progressText), "%u bytes downloaded...", downloadProgress);
+    }
+    renderer.drawCenteredText(UI_10_FONT_ID, statusY + 60, progressText);
+  }
+}
+
 void BookFusionBrowserActivity::render(RenderLock&&) {
+  // Fast path: a progress tick on an already-painted Downloading screen. In
+  // single-buffer mode the framebuffer survives between renders, so the header,
+  // cover and title are still present — repaint only the dynamic status/progress
+  // band instead of wiping everything and re-parsing the cover BMP from SD (the
+  // SD read contends with the download's own writes on the HalStorage mutex).
+  if (state == DOWNLOADING && downloadScreenPainted) {
+    drawDownloadDynamic(downloadStatusY);
+    renderer.displayBuffer();
+    return;
+  }
+
   renderer.clearScreen();
 
   const auto pageWidth = renderer.getScreenWidth();
@@ -917,8 +872,10 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   }
 
   if (state == DOWNLOADING) {
-    // Anchor "Downloading..." just below the cover (if we have one). Falls
-    // back to the original centred layout when no cover was pre-fetched.
+    // Full layout. Anchor "Downloading..." just below the cover (if we have one);
+    // fall back to the original centred layout when no cover was pre-fetched.
+    // The cover BMP is parsed from SD exactly once here — subsequent progress
+    // ticks take the fast path at the top of render() and never touch it again.
     int statusY = pageHeight / 2 - 40;
     if (downloadedCoverPath[0] != '\0') {
       FsFile coverFile;
@@ -939,40 +896,9 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
       }
     }
 
-    // Use the phase label set by startDownload (Connecting / Downloading /
-    // Saving). Falls back to the generic STR_DOWNLOADING if the buffer is
-    // somehow blank — should never happen in practice.
-    const char* status = (downloadStatus[0] != '\0') ? downloadStatus : tr(STR_DOWNLOADING);
-    renderer.drawCenteredText(UI_10_FONT_ID, statusY, status, true, EpdFontFamily::BOLD);
-    const int maxWidth = pageWidth - 40;
-    auto title = renderer.truncatedText(UI_10_FONT_ID, downloadTitle, maxWidth);
-    renderer.drawCenteredText(UI_10_FONT_ID, statusY + 30, title.c_str());
-
-    if (downloadTotal > 0) {
-      // Show progress bar with percentage
-      constexpr int barX = 50;
-      constexpr int barHeight = 20;
-      const int barWidth = pageWidth - 100;
-      const int barY = statusY + 60;
-      GUI.drawProgressBar(renderer, Rect{barX, barY, barWidth, barHeight}, downloadProgress, downloadTotal);
-
-      // Show percentage below progress bar
-      const int percent = static_cast<int>((static_cast<uint64_t>(downloadProgress) * 100) / downloadTotal);
-      char percentText[16];
-      snprintf(percentText, sizeof(percentText), "%d%%", percent);
-      renderer.drawCenteredText(UI_10_FONT_ID, barY + 30, percentText);
-    } else if (downloadProgress > 0) {
-      // Show downloaded bytes when total size is unknown (no Content-Length header)
-      char progressText[64];
-      if (downloadProgress >= 1024 * 1024) {
-        snprintf(progressText, sizeof(progressText), "%.1f MB downloaded...", downloadProgress / (1024.0f * 1024.0f));
-      } else if (downloadProgress >= 1024) {
-        snprintf(progressText, sizeof(progressText), "%.1f KB downloaded...", downloadProgress / 1024.0f);
-      } else {
-        snprintf(progressText, sizeof(progressText), "%u bytes downloaded...", downloadProgress);
-      }
-      renderer.drawCenteredText(UI_10_FONT_ID, statusY + 60, progressText);
-    }
+    downloadStatusY = statusY;     // Shared with the fast-path partial repaint
+    downloadScreenPainted = true;  // Cover/header now live in the persistent framebuffer
+    drawDownloadDynamic(statusY);
     renderer.displayBuffer();
     return;
   }

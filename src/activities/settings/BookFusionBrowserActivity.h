@@ -83,6 +83,18 @@ class BookFusionBrowserActivity final : public Activity {
   // isn't stuck. Empty string falls back to the generic Downloading label.
   char downloadStatus[32] = {};
 
+  // The Downloading screen re-renders on every ~2 s progress tick. A full
+  // render() wipes the framebuffer and re-parses the cover BMP from SD — wasteful
+  // SD churn that contends with the download's own writes on the shared
+  // HalStorage mutex, and we have no spare heap to cache the decoded cover
+  // (the transfer already runs at ~16 KB free; see HttpDownloader.cpp). Instead
+  // we exploit single-buffer mode: the framebuffer persists between renders, so
+  // once the cover/title are painted we repaint only the dynamic status/progress
+  // band on each tick and leave the static pixels untouched.
+  bool downloadScreenPainted = false;  // Full Downloading layout already in the framebuffer
+  int downloadStatusY = 0;             // Y of the status line, shared by full + partial repaint
+  void drawDownloadDynamic(int statusY);
+
   char errorMsg[128] = {};
 
   void onWifiSelectionComplete(bool success);

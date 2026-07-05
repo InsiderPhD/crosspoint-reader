@@ -8,11 +8,11 @@
 #include "browser/OpdsBookBrowserActivity.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
+#include "home/GroupBrowserActivity.h"
 #include "home/HomeActivity.h"
 #include "home/LibraryActivity.h"
 #include "home/ReadingHeatmapActivity.h"
 #include "home/ReadingStatsActivity.h"
-#include "home/RecentBooksActivity.h"
 #include "network/CrossPointWebServerActivity.h"
 #include "reader/ReaderActivity.h"
 #include "settings/SettingsActivity.h"
@@ -183,13 +183,21 @@ void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
 }
 
-void ActivityManager::goToRecentBooks() {
-  replaceActivity(std::make_unique<RecentBooksActivity>(renderer, mappedInput));
+void ActivityManager::goToTagBrowser() {
+  replaceActivity(std::make_unique<GroupBrowserActivity>(renderer, mappedInput, GroupBrowserActivity::GroupMode::Tags));
 }
 
-void ActivityManager::goToLibrary() {
-  replaceActivity(std::make_unique<LibraryActivity>(renderer, mappedInput));
+void ActivityManager::goToAuthorBrowser() {
+  replaceActivity(
+      std::make_unique<GroupBrowserActivity>(renderer, mappedInput, GroupBrowserActivity::GroupMode::Authors));
 }
+
+void ActivityManager::goToSeriesBrowser() {
+  replaceActivity(
+      std::make_unique<GroupBrowserActivity>(renderer, mappedInput, GroupBrowserActivity::GroupMode::Series));
+}
+
+void ActivityManager::goToLibrary() { replaceActivity(std::make_unique<LibraryActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToBrowser() {
   replaceActivity(std::make_unique<OpdsBookBrowserActivity>(renderer, mappedInput));
@@ -290,9 +298,7 @@ void ActivityManager::requestUpdateAndWait() {
 
 // RenderLock
 
-RenderLock::RenderLock() {
-  isLocked = (xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY) == pdTRUE);
-}
+RenderLock::RenderLock() { isLocked = (xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY) == pdTRUE); }
 
 RenderLock::RenderLock([[maybe_unused]] Activity&) {
   isLocked = (xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY) == pdTRUE);

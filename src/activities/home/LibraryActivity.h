@@ -113,7 +113,6 @@ class LibraryActivity final : public Activity {
   std::string currentPath() const;
   std::string pathAtLogicalIndex(size_t logicalIdx) const;
 
-
   size_t currentPage() const { return bookPaths.empty() ? 0 : selectorIndex / pageSize(); }
   size_t totalPages() const {
     const int p = pageSize();
@@ -178,11 +177,4 @@ class LibraryActivity final : public Activity {
   // HomeActivity::dispatchBookAction with library-flavored reload logic:
   // deletions remove from bookPaths and invalidate the page snapshot.
   void dispatchBookAction(BookContextMenu::Action action, const std::string& path, const std::string& title);
-
-  // SD-backed index cache for bookPaths. Avoids the O(N) SD BFS on repeated
-  // library opens by persisting the enumerated path list to
-  // /.crosspoint/library_index.bin. Invalidated automatically when any
-  // scanned directory's FAT mtime changes (file added/deleted/moved).
-  bool tryLoadFromCache();
-  void saveToCache(const std::vector<std::pair<std::string, uint32_t>>& dirMtimes);
 };

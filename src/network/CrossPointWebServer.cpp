@@ -23,7 +23,6 @@
 #include "html/HomePageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
-#include <Epub.h>
 
 namespace {
 // Folders/files to hide from the web interface file browser
@@ -50,12 +49,25 @@ String wsLastCompleteName;
 size_t wsLastCompleteSize = 0;
 unsigned long wsLastCompleteAt = 0;
 
-// Helper function to clear epub cache after upload
+// Refresh an EPUB's cache after it changes over the network (upload/replace/delete).
 void clearEpubCacheIfNeeded(const String& filePath) {
-  // Only clear cache for .epub files
   if (FsHelpers::hasEpubExtension(filePath)) {
-    Epub(filePath.c_str(), "/.crosspoint").clearCache();
-    LOG_DBG("WEB", "Cleared epub cache for: %s", filePath.c_str());
+    Epub epub(filePath.c_str(), "/.crosspoint");
+    epub.clearCache();  // Drop any stale cache (matters for a replaced or deleted file).
+    // If the file is still present (upload/replace, not delete), rebuild the metadata
+    // cache now so the Tags/Authors browse views see the new book without waiting for a
+    // manual re-cache. skipLoadingCss=true keeps this to a metadata-only parse.
+    if (Storage.exists(filePath.c_str())) {
+      // A metadata parse can take ~1-2s; bracket it with WDT resets so the fresh
+      // watchdog window covers the whole build (the surrounding upload handler is
+      // watchdog-subscribed and resets around its SD writes too).
+      esp_task_wdt_reset();
+      epub.load(/*buildIfMissing=*/true, /*skipLoadingCss=*/true);
+      esp_task_wdt_reset();
+      LOG_DBG("WEB", "Cached metadata for: %s", filePath.c_str());
+    } else {
+      LOG_DBG("WEB", "Cleared epub cache for: %s", filePath.c_str());
+    }
   }
   // A book added/removed over the network doesn't change the SD root's FAT mtime,
   // so the library index can't detect it — invalidate it explicitly for any book
@@ -1512,7 +1524,6 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
       break;
   }
 }
-
 
 // --- Font management handlers ---
 

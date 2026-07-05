@@ -178,6 +178,31 @@ inline const std::vector<SettingInfo>& getSettingsList() {
         SettingInfo::Enum(StrId::STR_MIN_SESSION_THRESHOLD, &CrossPointSettings::minSessionMinutes,
                           {StrId::STR_MIN_1, StrId::STR_MIN_3, StrId::STR_MIN_5}, "minSessionMinutes",
                           StrId::STR_CAT_STATS),
+        // Sleep-screen stat slots: each picks one reading stat (or None) to show on the sleep screen.
+        SettingInfo::Enum(StrId::STR_SLEEP_STAT_1, &CrossPointSettings::sleepStatSlot1,
+                          {StrId::STR_NONE_OPT, StrId::STR_STAT_TODAY, StrId::STR_STAT_GOAL, StrId::STR_STAT_WEEK,
+                           StrId::STR_STAT_STREAK, StrId::STR_STAT_MONTH, StrId::STR_STAT_TOTAL,
+                           StrId::STR_STAT_FINISHED, StrId::STR_STAT_RETURN, StrId::STR_STAT_BOOK_PROGRESS,
+                           StrId::STR_STAT_DAILY_AVG, StrId::STR_STAT_DAYS_MONTH, StrId::STR_STAT_WEEK_STREAK,
+                           StrId::STR_STAT_GOAL_LEFT, StrId::STR_STAT_BOOK_TIME_LEFT},
+                          "sleepStatSlot1", StrId::STR_CAT_STATS),
+        SettingInfo::Enum(StrId::STR_SLEEP_STAT_2, &CrossPointSettings::sleepStatSlot2,
+                          {StrId::STR_NONE_OPT, StrId::STR_STAT_TODAY, StrId::STR_STAT_GOAL, StrId::STR_STAT_WEEK,
+                           StrId::STR_STAT_STREAK, StrId::STR_STAT_MONTH, StrId::STR_STAT_TOTAL,
+                           StrId::STR_STAT_FINISHED, StrId::STR_STAT_RETURN, StrId::STR_STAT_BOOK_PROGRESS,
+                           StrId::STR_STAT_DAILY_AVG, StrId::STR_STAT_DAYS_MONTH, StrId::STR_STAT_WEEK_STREAK,
+                           StrId::STR_STAT_GOAL_LEFT, StrId::STR_STAT_BOOK_TIME_LEFT},
+                          "sleepStatSlot2", StrId::STR_CAT_STATS),
+        SettingInfo::Enum(StrId::STR_SLEEP_STAT_3, &CrossPointSettings::sleepStatSlot3,
+                          {StrId::STR_NONE_OPT, StrId::STR_STAT_TODAY, StrId::STR_STAT_GOAL, StrId::STR_STAT_WEEK,
+                           StrId::STR_STAT_STREAK, StrId::STR_STAT_MONTH, StrId::STR_STAT_TOTAL,
+                           StrId::STR_STAT_FINISHED, StrId::STR_STAT_RETURN, StrId::STR_STAT_BOOK_PROGRESS,
+                           StrId::STR_STAT_DAILY_AVG, StrId::STR_STAT_DAYS_MONTH, StrId::STR_STAT_WEEK_STREAK,
+                           StrId::STR_STAT_GOAL_LEFT, StrId::STR_STAT_BOOK_TIME_LEFT},
+                          "sleepStatSlot3", StrId::STR_CAT_STATS),
+        // Contact string shown by the "If Found" stat option (e.g. a phone number).
+        SettingInfo::String(StrId::STR_RETURN_CONTACT, SETTINGS.returnContact, sizeof(SETTINGS.returnContact),
+                            "returnContact", StrId::STR_CAT_STATS),
         // Persisted time-zone preset (index into TimeZoneRegistry). Hidden from the
         // device tab UI (no category) — selection happens via the Time Zone Action
         // entry, which launches TimeZoneSelectActivity. Listed here so JsonSettingsIO
@@ -216,6 +241,9 @@ inline const std::vector<SettingInfo>& getSettingsList() {
                           "sleepTimeout", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                             StrId::STR_CAT_SYSTEM),
+        SettingInfo::Enum(StrId::STR_FOLDER_VIEW, &CrossPointSettings::folderView,
+                          {StrId::STR_FOLDERS, StrId::STR_TAGS, StrId::STR_AUTHORS, StrId::STR_SERIES}, "folderView",
+                          StrId::STR_CAT_DISPLAY),
         SettingInfo::Toggle(StrId::STR_DEV_MODE, &CrossPointSettings::devMode, "devMode", StrId::STR_CAT_SYSTEM),
         // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
         SettingInfo::DynamicString(

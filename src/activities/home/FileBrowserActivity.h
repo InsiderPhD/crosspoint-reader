@@ -55,6 +55,9 @@ class FileBrowserActivity final : public Activity {
   std::vector<bool> fileEntryIsBookFusion;
   // Parallel to `files` (the display list); rebuilt by rebuildFilesList().
   std::vector<bool> filesIsBookFusion;
+  // Parallel to `files` (the display list): reading progress percent (-1 = none/unknown),
+  // looked up from RECENT_BOOKS during rebuildFilesList(). Folders are always -1.
+  std::vector<int8_t> filesProgress;
 
   // Sort state
   SortMenu sortMenu;

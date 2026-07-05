@@ -1,5 +1,7 @@
 #pragma once
 
+#include <GfxRenderer.h>
+
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
 
@@ -13,6 +15,17 @@ class ReadingStatsActivity final : public Activity {
   // Resets when switching tabs (1 if previous was on an item, 0 if was on the
   // ribbon, with clamp to the new page's item count).
   int selectedItemIndex = 0;
+  // Tabs whose content can exceed a screenful (Overview: stat rows + Reading
+  // Profile + annual chart; Weekly: large goal boxes + rows + chart) scroll
+  // vertically. Up/Down/Left/Right step the offset; maxScroll is recomputed by
+  // the current page's render and is 0 on non-scrolling tabs.
+  int scrollOffset = 0;
+  int maxScroll = 0;
+  // Stats always render portrait for a consistent layout; if the caller's
+  // orientation differs we force Portrait on enter and restore it on exit.
+  GfxRenderer::Orientation entryOrientation = GfxRenderer::Orientation::Portrait;
+  bool restoreOrientationOnExit = false;
+  bool fullRefreshNext = false;
   int viewedYear = 0;
   unsigned viewedMonth = 1;
   bool waitForConfirmRelease = false;

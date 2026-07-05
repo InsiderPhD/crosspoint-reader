@@ -19,6 +19,7 @@ class EpubReaderMenuActivity final : public Activity {
     READING_SPEED,
     ROTATE_SCREEN,
     BUTTON_HINTS,
+    FONT_LAYOUT,
     READER_CONTROLS,
     BOOKMARKS,
     ADD_BOOKMARK,

@@ -178,15 +178,19 @@ void FileBrowserActivity::rebuildFilesList() {
 
   files.clear();
   filesIsBookFusion.clear();
+  filesProgress.clear();
   files.reserve(fileEntries.size() + folderEntries.size());
   filesIsBookFusion.reserve(fileEntries.size() + folderEntries.size());
+  filesProgress.reserve(fileEntries.size() + folderEntries.size());
   for (uint16_t idx : sortedIndices) {
     files.push_back(fileEntries[idx]);
     filesIsBookFusion.push_back(fileEntryIsBookFusion[idx]);
+    filesProgress.push_back(entries[idx].progressPercent);
   }
   for (const auto& folder : folderEntries) {
     files.push_back(folder);
     filesIsBookFusion.push_back(false);
+    filesProgress.push_back(-1);
   }
 }
 
@@ -371,9 +375,23 @@ void FileBrowserActivity::loop() {
                                  }
                                });
       } else if (opt == UITheme::BOOK_OPT_BOOK_INFO) {
-        startActivityForResult(
-            std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title, author, progress),
-            [this](const ActivityResult&) { requestUpdate(); });
+        // Build the folder-scoped list of navigable books (epub/xtc) in display
+        // order so BookDetails can page Left/Right through them.
+        std::string cleanBase = basepath;
+        if (cleanBase.back() != '/') cleanBase += '/';
+        std::vector<std::string> navPaths;
+        navPaths.reserve(files.size());
+        int navPos = 0;
+        for (const auto& entry : files) {
+          if (entry.empty() || entry.back() == '/') continue;
+          if (!FsHelpers::hasEpubExtension(entry) && !FsHelpers::hasXtcExtension(entry)) continue;
+          std::string full = cleanBase + entry;
+          if (full == path) navPos = static_cast<int>(navPaths.size());
+          navPaths.push_back(std::move(full));
+        }
+        auto details = std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title, author, progress);
+        details->setSiblingsOwned(std::move(navPaths), navPos);
+        startActivityForResult(std::move(details), [this](const ActivityResult&) { requestUpdate(); });
       }
       return;
     }
@@ -576,7 +594,18 @@ void FileBrowserActivity::render(RenderLock&&) {
           if (filesIsBookFusion[index]) return UIIcon::BookFusion;
           return UITheme::getFileIcon(files[index]);
         },
-        nullptr, false);
+        [this](int index) -> std::string {
+          // Reading-progress percent, looked up from RECENT_BOOKS at rebuildFilesList().
+          // -1 (folders, never-opened books) renders as no value.
+          const int8_t progress = filesProgress[index];
+          if (progress >= 0) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d%%", static_cast<int>(progress));
+            return std::string(buf);
+          }
+          return "";
+        },
+        false);
   }
 
   // Full path display

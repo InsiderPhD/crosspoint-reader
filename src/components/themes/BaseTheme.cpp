@@ -444,27 +444,60 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
   constexpr int underlineGap = 4;     // Gap between text and underline
 
   const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
+  const int pad = BaseMetrics::values.contentSidePadding;
+  const int spacing = BaseMetrics::values.tabSpacing;
+  const int startX = rect.x + pad;
+  const int viewRight = rect.x + rect.width - pad;
 
-  int currentX = rect.x + BaseMetrics::values.contentSidePadding;
+  // Pass 1: measure the natural (unscrolled) layout and the selected tab's
+  // bounds so we can horizontally scroll the ribbon when the tabs don't all
+  // fit — this keeps the selected tab's full label readable.
+  int naturalX = startX;
+  int selLeft = startX;
+  int selRight = startX;
+  for (const auto& tab : tabs) {
+    const int w =
+        renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    if (tab.selected) {
+      selLeft = naturalX;
+      selRight = naturalX + w;
+    }
+    naturalX += w + spacing;
+  }
+  const int totalWidth = naturalX - spacing - startX;
+  const int viewWidth = viewRight - startX;
+  // Keep a sliver of the neighbouring tab visible so it's obvious more tabs
+  // exist. Clamping still makes the genuine first/last tab sit flush.
+  constexpr int PEEK = 28;
 
+  int offset = 0;
+  if (totalWidth > viewWidth) {
+    if (selRight - offset > viewRight - PEEK) offset = selRight - (viewRight - PEEK);
+    if (selLeft - offset < startX + PEEK) offset = selLeft - (startX + PEEK);
+    const int maxOffset = totalWidth - viewWidth;
+    if (offset < 0) offset = 0;
+    if (offset > maxOffset) offset = maxOffset;
+  }
+
+  // Pass 2: draw shifted by the scroll offset, skipping tabs fully off-view.
+  int currentX = startX - offset;
   for (const auto& tab : tabs) {
     const int textWidth =
         renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
 
-    // Draw underline for selected tab
-    if (tab.selected) {
-      if (selected) {
-        renderer.fillRect(currentX - 3, rect.y, textWidth + 6, lineHeight + underlineGap);
-      } else {
-        renderer.fillRect(currentX, rect.y + lineHeight + underlineGap, textWidth, underlineHeight);
+    if (currentX + textWidth >= startX && currentX <= viewRight) {
+      if (tab.selected) {
+        if (selected) {
+          renderer.fillRect(currentX - 3, rect.y, textWidth + 6, lineHeight + underlineGap);
+        } else {
+          renderer.fillRect(currentX, rect.y + lineHeight + underlineGap, textWidth, underlineHeight);
+        }
       }
+      renderer.drawText(UI_12_FONT_ID, currentX, rect.y, tab.label, !(tab.selected && selected),
+                        tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
     }
 
-    // Draw tab label
-    renderer.drawText(UI_12_FONT_ID, currentX, rect.y, tab.label, !(tab.selected && selected),
-                      tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
-
-    currentX += textWidth + BaseMetrics::values.tabSpacing;
+    currentX += textWidth + spacing;
   }
 }
 

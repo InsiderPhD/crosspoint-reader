@@ -164,6 +164,15 @@ class CrossPointSettings {
   // Dark mode (inverts entire UI except images)
   enum DARK_MODE { DARK_MODE_OFF = 0, DARK_MODE_ON = 1, DARK_MODE_COUNT };
 
+  // "Browse Files" view mode
+  enum FOLDER_VIEW {
+    FOLDER_VIEW_FOLDERS = 0,
+    FOLDER_VIEW_TAGS = 1,
+    FOLDER_VIEW_AUTHORS = 2,
+    FOLDER_VIEW_SERIES = 3,
+    FOLDER_VIEW_COUNT
+  };
+
   // Long press confirm button action
   enum LONG_PRESS_ACTION {
     LONG_PRESS_REFRESH = 0,
@@ -193,6 +202,34 @@ class CrossPointSettings {
     SEAMLESS_AFTER_TIMEOUT = 1,
     SEAMLESS_ALWAYS = 2,
     SEAMLESS_SLEEP_SCREEN_COUNT
+  };
+
+  // Reading stat selectable on the sleep screen (one per picker slot).
+  enum SLEEP_STAT {
+    SLEEP_STAT_NONE = 0,
+    SLEEP_STAT_TODAY = 1,
+    SLEEP_STAT_GOAL = 2,
+    SLEEP_STAT_WEEK = 3,
+    SLEEP_STAT_STREAK = 4,
+    SLEEP_STAT_MONTH = 5,
+    SLEEP_STAT_TOTAL = 6,
+    SLEEP_STAT_FINISHED = 7,
+    // "If found, please return to" line with the user-entered contact (returnContact).
+    // Skipped when returnContact is empty.
+    SLEEP_STAT_RETURN = 8,
+    // Percent through the currently-open book. Skipped when no book is open.
+    SLEEP_STAT_BOOK_PROGRESS = 9,
+    // Average time read per day over the last 7 days.
+    SLEEP_STAT_DAILY_AVG = 10,
+    // Number of days read in the current calendar month.
+    SLEEP_STAT_DAYS_MONTH = 11,
+    // Last 7 days as a row of cells; a cell is filled when that day met the goal.
+    SLEEP_STAT_WEEK_STREAK = 12,
+    // Time remaining to reach today's daily goal ("Daily goal met" once reached).
+    SLEEP_STAT_GOAL_LEFT = 13,
+    // Estimated reading time left in the currently-open book.
+    SLEEP_STAT_BOOK_TIME_LEFT = 14,
+    SLEEP_STAT_COUNT
   };
 
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
@@ -248,6 +285,12 @@ class CrossPointSettings {
   uint8_t sleepScreenCoverFilter = NO_FILTER;
   // Sleep screen orientation
   uint8_t sleepScreenOrientation = PORTRAIT;
+  // Reading stats shown on the sleep screen (one SLEEP_STAT per slot; NONE = hidden).
+  uint8_t sleepStatSlot1 = SLEEP_STAT_NONE;
+  uint8_t sleepStatSlot2 = SLEEP_STAT_NONE;
+  uint8_t sleepStatSlot3 = SLEEP_STAT_NONE;
+  // Contact (e.g. phone number) shown by the SLEEP_STAT_RETURN "if found" line. Empty = unset.
+  char returnContact[32] = "";
   // Status bar settings (statusBar retained for migration only)
   uint8_t statusBar = FULL;
   uint8_t statusBarChapterPageCount = 1;
@@ -327,6 +370,9 @@ class CrossPointSettings {
   uint8_t embeddedStyle = 1;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // "Browse Files" view: FOLDERS = the SD directory tree (default), TAGS = whole-library
+  // tag folders (each book tag presented as a folder).
+  uint8_t folderView = FOLDER_VIEW_FOLDERS;
   // Developer mode: surfaces testing-only book actions (Reset Progress, Delete Book
   // Cache, Regenerate Cover) in the book context menus. Off by default.
   uint8_t devMode = 0;

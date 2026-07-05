@@ -794,8 +794,22 @@ bool WebDAVHandler::getOverwrite(WebServer& s) const {
 
 void WebDAVHandler::clearEpubCacheIfNeeded(const String& path) const {
   if (FsHelpers::hasEpubExtension(path)) {
-    Epub(path.c_str(), "/.crosspoint").clearCache();
-    LOG_DBG("DAV", "Cleared epub cache for: %s", path.c_str());
+    Epub epub(path.c_str(), "/.crosspoint");
+    epub.clearCache();  // Drop any stale cache (matters for a replaced or deleted file).
+    // If the file is still present (upload/replace, not delete), rebuild the metadata
+    // cache now so the Tags/Authors browse views see the new book without a manual re-cache.
+    if (Storage.exists(path.c_str())) {
+      // A metadata parse can take ~1-2s; bracket it with WDT resets so the fresh
+      // watchdog window covers the whole build. NB: Calibre WebDAV batch-sends serialize
+      // one parse per file in the handler — acceptable, but the cache-on-browse pass is
+      // the correctness backstop if a very large book ever overruns here.
+      esp_task_wdt_reset();
+      epub.load(/*buildIfMissing=*/true, /*skipLoadingCss=*/true);
+      esp_task_wdt_reset();
+      LOG_DBG("DAV", "Cached metadata for: %s", path.c_str());
+    } else {
+      LOG_DBG("DAV", "Cleared epub cache for: %s", path.c_str());
+    }
   }
   // A book added/removed over WebDAV (e.g. Calibre) doesn't change the SD root's
   // FAT mtime, so the library index can't detect it — invalidate it explicitly for

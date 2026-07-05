@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "AppMetricCard.h"
 #include "CrossPointState.h"
 #include "ReadingDayDetailActivity.h"
 #include "ReadingStatsDetailActivity.h"
@@ -35,21 +36,27 @@
 
 namespace {
 constexpr unsigned long BOOK_LONG_PRESS_MS = 1000;
-constexpr int TOTAL_STATS_PAGES = 5;
+constexpr int TOTAL_STATS_PAGES = 6;
 constexpr int PAGE_OVERVIEW = 0;
 constexpr int PAGE_STARTED_BOOKS = 1;
 constexpr int PAGE_WEEKLY = 2;
 constexpr int PAGE_MONTHLY = 3;
 constexpr int PAGE_SESSIONS = 4;
+constexpr int PAGE_YEAR = 5;
 
 // Tab labels in display order — index matches the PAGE_* enum values above.
+// The Reading Profile is shown on the Overview tab (not a dedicated tab). The
+// tab bar auto-scrolls to keep the selected tab's full label readable.
 constexpr StrId TAB_NAMES[TOTAL_STATS_PAGES] = {
     StrId::STR_STATS_TAB_OVERVIEW, StrId::STR_STATS_TAB_BOOKS, StrId::STR_STATS_TAB_WEEKLY, StrId::STR_MONTH,
-    StrId::STR_STATS_TAB_SESSIONS,
+    StrId::STR_STATS_TAB_SESSIONS, StrId::STR_STATS_TAB_YEAR,
 };
 
 // Sessions tab is capped at one screenful like the Books tab.
 constexpr int SESSIONS_PER_PAGE = 4;
+
+// Pixels a scrollable tab moves per Up/Down/Left/Right press (~2 stat rows).
+constexpr int STATS_SCROLL_STEP = 68;
 
 // Collects sessionLog indices for entries that don't yet have a date
 // assigned. The Sessions tab is intentionally a "needs your input" inbox —
@@ -160,6 +167,85 @@ void drawMetricRow(GfxRenderer& renderer, const Rect& rect, const uint8_t* icon,
   renderer.drawText(UI_10_FONT_ID, rect.x + rect.width - valueWidth, rect.y + textY, value.c_str(), true,
                     EpdFontFamily::BOLD);
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1);
+}
+
+// Sakamoto's algorithm: 0 = Sunday .. 6 = Saturday.
+int statsDayOfWeek(int year, unsigned month, unsigned day) {
+  static constexpr int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+  if (month < 3) year -= 1;
+  return (year + year / 4 - year / 100 + year / 400 + t[month - 1] + static_cast<int>(day)) % 7;
+}
+
+// Defined further down in the heatmap section; used by the week cells so they
+// share the Monthly view's goal-scaled heat levels.
+int getHeatLevel(uint64_t readingMs);
+
+// One large weekday cell shaded by the same goal-scaled heat level as the
+// Monthly heatmap, with the weekday letter centered and a marker on today.
+void drawWeekHeatCell(GfxRenderer& renderer, const Rect& rect, const uint64_t readingMs, const char* letter,
+                      const bool isToday) {
+  const int level = getHeatLevel(readingMs);
+  const Rect fill{rect.x + 1, rect.y + 1, std::max(0, rect.width - 2), std::max(0, rect.height - 2)};
+  bool textBlack = true;
+  switch (level) {
+    case 1:
+    case 2:
+      renderer.fillRectDither(fill.x, fill.y, fill.width, fill.height, Color::LightGray);
+      break;
+    case 3:
+    case 4:
+      renderer.fillRectDither(fill.x, fill.y, fill.width, fill.height, Color::DarkGray);
+      textBlack = (level < 4);
+      break;
+    case 5:
+      renderer.fillRect(fill.x, fill.y, fill.width, fill.height);
+      textBlack = false;
+      break;
+    default:
+      break;
+  }
+  renderer.drawRect(rect.x, rect.y, rect.width, rect.height);
+
+  const int letterW = renderer.getTextWidth(UI_12_FONT_ID, letter, EpdFontFamily::BOLD);
+  const int letterH = renderer.getLineHeight(UI_12_FONT_ID);
+  renderer.drawText(UI_12_FONT_ID, rect.x + (rect.width - letterW) / 2, rect.y + (rect.height - letterH) / 2, letter,
+                    textBlack, EpdFontFamily::BOLD);
+  if (isToday) {
+    renderer.drawRect(rect.x + 2, rect.y + 2, rect.width - 4, rect.height - 4, level >= 4 ? false : true);
+  }
+}
+
+// Mon-Sun goal cells for the current week. Sized like the Monthly heatmap cells
+// (square, full width) and shaded by the same goal-scaled heat level. Draws a
+// row starting at (x, y); returns the cell (row) height, or 0 if the clock
+// isn't set so the week can't be anchored.
+int drawGoalWeekRow(GfxRenderer& renderer, int x, int y, int availWidth) {
+  const uint32_t todayOrd = TimeUtils::getLocalDayOrdinal(READING_STATS.getDisplayTimestamp());
+  int ty = 0;
+  unsigned tm = 0;
+  unsigned td = 0;
+  if (!TimeUtils::getDateFromDayOrdinal(todayOrd, ty, tm, td)) {
+    return 0;  // clock not set -> can't anchor the week
+  }
+  const int dow = statsDayOfWeek(ty, tm, td);  // 0 = Sunday
+  const uint32_t mondayOrd = todayOrd - static_cast<uint32_t>((dow + 6) % 7);
+  static constexpr char WEEK_LETTERS[7] = {'M', 'T', 'W', 'T', 'F', 'S', 'S'};
+  constexpr int CELL_GAP = 6;  // matches Monthly's HEATMAP_GRID_GAP
+  const int cell = (availWidth - CELL_GAP * 6) / 7;
+  for (int d = 0; d < 7; ++d) {
+    const uint32_t ord = mondayOrd + static_cast<uint32_t>(d);
+    uint64_t ms = 0;
+    for (const auto& rd : READING_STATS.getReadingDays()) {
+      if (rd.dayOrdinal == ord) {
+        ms = rd.readingMs;
+        break;
+      }
+    }
+    const int cx = x + d * (cell + CELL_GAP);
+    const char letter[2] = {WEEK_LETTERS[d], '\0'};
+    drawWeekHeatCell(renderer, Rect{cx, y, cell, cell}, ms, letter, ord == todayOrd);
+  }
+  return cell;
 }
 
 void drawLyraStyleButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
@@ -636,6 +722,15 @@ void ReadingStatsActivity::onEnter() {
   Activity::onEnter();
   captureFirstStatsAccessDate();
 
+  // Force portrait so the stats layout is consistent regardless of the caller's
+  // orientation (e.g. a landscape reader). Restored on exit.
+  entryOrientation = renderer.getOrientation();
+  if (entryOrientation != GfxRenderer::Orientation::Portrait) {
+    renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+    restoreOrientationOnExit = true;
+    fullRefreshNext = true;  // orientation flips must full-refresh to avoid ghosting
+  }
+
   currentPage = PAGE_OVERVIEW;
   selectedItemIndex = 0;
   resolveReferenceMonth(viewedYear, viewedMonth);
@@ -645,7 +740,13 @@ void ReadingStatsActivity::onEnter() {
   requestUpdate();
 }
 
-void ReadingStatsActivity::onExit() { Activity::onExit(); }
+void ReadingStatsActivity::onExit() {
+  if (restoreOrientationOnExit) {
+    renderer.setOrientation(entryOrientation);
+    restoreOrientationOnExit = false;
+  }
+  Activity::onExit();
+}
 
 void ReadingStatsActivity::changePage(const int delta) {
   currentPage += delta;
@@ -758,6 +859,27 @@ void ReadingStatsActivity::loop() {
     }
   }
 
+  // Overview and Weekly scroll vertically when their content overflows. Short
+  // Up/Down OR Left/Right step the scroll offset; long-press still cycles tabs
+  // via the navigator below. maxScroll is set during render.
+  const bool scrollablePage = (currentPage == PAGE_OVERVIEW || currentPage == PAGE_WEEKLY);
+  if (scrollablePage && selectedItemIndex == 0 && maxScroll > 0) {
+    const bool scrollDown = mappedInput.wasReleased(MappedInputManager::Button::Down) ||
+                            mappedInput.wasReleased(MappedInputManager::Button::Right);
+    const bool scrollUp = mappedInput.wasReleased(MappedInputManager::Button::Up) ||
+                          mappedInput.wasReleased(MappedInputManager::Button::Left);
+    if (scrollDown) {
+      scrollOffset = std::min(scrollOffset + STATS_SCROLL_STEP, maxScroll);
+      requestUpdate();
+      return;
+    }
+    if (scrollUp) {
+      scrollOffset = std::max(scrollOffset - STATS_SCROLL_STEP, 0);
+      requestUpdate();
+      return;
+    }
+  }
+
   const int pageItemCount = currentPageItemCount();
   const int navTotal = pageItemCount + 1;  // +1 for the ribbon
 
@@ -782,6 +904,8 @@ void ReadingStatsActivity::loop() {
   });
 
   if (hasChangedPage) {
+    // Reset scroll so each tab always opens at the top.
+    scrollOffset = 0;
     // Same rule as SettingsActivity: keep the ribbon focus on the ribbon, or
     // hop to the first content row of the new tab if the user was already in
     // the list (clamped to the new page's actual count).
@@ -897,34 +1021,133 @@ void ReadingStatsActivity::render(RenderLock&&) {
   GUI.drawTabBar(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight}, tabs,
                  selectedItemIndex == 0);
 
+  // Reset each render; scrollable tabs (Overview/Weekly) set it from their
+  // measured content height so loop() knows whether Up/Down/Left/Right scroll.
+  maxScroll = 0;
+
+  // Shared finish step for scrollable tabs: mask content that ran past the
+  // viewport, repaint the pinned header/tab bar, and draw a right-edge
+  // scrollbar. Call after drawing the page's scroll-offset content.
+  auto drawScrollChrome = [&]() {
+    renderer.fillRect(0, contentBottom, pageWidth, pageHeight - contentBottom, false);
+    if (scrollOffset > 0) {
+      renderer.fillRect(0, 0, pageWidth, contentTop, false);
+      GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS),
+                     nullptr);
+      GUI.drawTabBar(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
+                     tabs, selectedItemIndex == 0);
+    }
+    if (maxScroll > 0) {
+      const int trackX = pageWidth - 5;
+      const int trackTop = contentTop;
+      const int trackH = contentBottom - contentTop;
+      const int totalContent = trackH + maxScroll;
+      const int thumbH = std::max(20, trackH * trackH / totalContent);
+      const int thumbY = trackTop + (trackH - thumbH) * scrollOffset / maxScroll;
+      renderer.drawLine(trackX + 1, trackTop, trackX + 1, trackTop + trackH);
+      renderer.fillRect(trackX, thumbY, 3, thumbH, true);
+    }
+  };
+
   if (currentPage == PAGE_OVERVIEW) {
     const uint64_t todayReadingMs = READING_STATS.getTodayReadingMs();
-    int annualReadingYear = 0;
-    const auto annualReadingBars = getAnnualReadingBars(annualReadingYear);
-    const std::string annualReadingTitle = formatAnnualReadingTitle(annualReadingYear);
     const std::string dailyGoalValue = ReadingStatsAnalytics::formatDurationHm(todayReadingMs) + " / " +
                                        ReadingStatsAnalytics::formatDurationHm(getDailyReadingGoalMs());
+    const auto profile = ReadingStatsAnalytics::buildReadingProfileSummary();
 
-    drawMetricRow(renderer, Rect{sidePadding, contentTop, contentWidth, SUMMARY_ROW_HEIGHT}, Streak24Icon,
-                  tr(STR_STREAK), std::to_string(READING_STATS.getCurrentStreakDays()));
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Confetti24Icon, tr(STR_MAX_STREAK), std::to_string(READING_STATS.getMaxStreakDays()));
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Checkbox24Icon, tr(STR_DAILY_GOAL), dailyGoalValue);
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Readingtime24Icon, tr(STR_READING_TIME),
-                  ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()));
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 4, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Check24Icon, tr(STR_BOOKS_FINISHED), std::to_string(READING_STATS.getBooksFinishedCount()));
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 5, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Files24Icon, tr(STR_BOOKS_STARTED), std::to_string(READING_STATS.getBooksStartedCount()));
+    // The Overview content (stat rows + Reading Profile) can exceed a screenful,
+    // so it scrolls. Everything is laid out in virtual coordinates from 0 and
+    // drawn at (contentTop + virtualY - scroll); content that lands above/below
+    // the viewport is masked after drawing. (The annual chart moved to Sessions.)
+    const int viewportHeight = contentBottom - contentTop;
+    const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    constexpr int PROFILE_NAME_HEIGHT = 22;
+    constexpr int PROFILE_DIM_GAP = 8;
 
-    const int chartHeaderTop = contentTop + SUMMARY_ROW_HEIGHT * 6 + SUMMARY_GAP * 2;
-    const int chartTop = chartHeaderTop + CHART_HEADER_HEIGHT + CHART_TOP_GAP;
-    const int chartHeight = std::max(96, contentBottom - chartTop);
-    GUI.drawSubHeader(renderer, Rect{0, chartHeaderTop, pageWidth, CHART_HEADER_HEIGHT}, annualReadingTitle.c_str(),
-                      nullptr);
-    drawReadingChart(renderer, Rect{sidePadding, chartTop, contentWidth, chartHeight}, annualReadingBars, false);
+    // Pre-wrap the four dimension descriptions so we can measure total height.
+    const StrId dimNameIds[4] = {StrId::STR_HABIT, StrId::STR_STABILITY, StrId::STR_ENGAGEMENT, StrId::STR_DEPTH};
+    const StrId dimDescIds[4] = {StrId::STR_HABIT_DESC, StrId::STR_STABILITY_DESC, StrId::STR_ENGAGEMENT_DESC,
+                                 StrId::STR_DEPTH_DESC};
+    const int dimScores[4] = {profile.habit.score, profile.stability.score, profile.engagement.score,
+                              profile.depth.score};
+    std::array<std::vector<std::string>, 4> dimDescLines;
+    std::array<std::vector<std::string>, 4> dimBreakLines;
+    if (profile.hasData) {
+      // Labelled per-dimension breakdown (the raw numbers behind each score).
+      const std::string breaks[4] = {
+          std::string(I18N.get(StrId::STR_DAYS_READ)) + " " + profile.habit.primaryValue + "   " +
+              I18N.get(StrId::STR_GOALS_MET) + " " + profile.habit.secondaryValue,
+          std::string(I18N.get(StrId::STR_READ_STREAK)) + " " + profile.stability.primaryValue + "   " +
+              I18N.get(StrId::STR_BEST_DAY_SHARE) + " " + profile.stability.secondaryValue,
+          std::string(I18N.get(StrId::STR_SESSIONS)) + " " + profile.engagement.primaryValue + "   " +
+              I18N.get(StrId::STR_PER_READ_DAY) + " " + profile.engagement.secondaryValue,
+          std::string(I18N.get(StrId::STR_SESSIONS_UNDER_10M)) + " " + profile.depth.primaryValue + "   " +
+              I18N.get(StrId::STR_SESSIONS_10M_TO_29M) + " " + profile.depth.secondaryValue + "   " +
+              I18N.get(StrId::STR_SESSIONS_30M_PLUS) + " " + profile.depth.tertiaryValue,
+      };
+      for (int i = 0; i < 4; ++i) {
+        dimBreakLines[i] = renderer.wrappedText(UI_10_FONT_ID, breaks[i].c_str(), contentWidth, 2);
+        dimDescLines[i] = renderer.wrappedText(UI_10_FONT_ID, I18N.get(dimDescIds[i]), contentWidth, 3);
+      }
+    }
+
+    // ---- Measure pass: total virtual content height ----
+    int totalHeight = SUMMARY_ROW_HEIGHT * 6;
+    if (profile.hasData) {
+      totalHeight += SUMMARY_GAP + CHART_HEADER_HEIGHT + 4;  // Profile sub-header
+      for (int i = 0; i < 4; ++i) {
+        totalHeight += PROFILE_NAME_HEIGHT +
+                       static_cast<int>(dimBreakLines[i].size() + dimDescLines[i].size()) * lineHeight +
+                       PROFILE_DIM_GAP;
+      }
+    }
+    totalHeight += SUMMARY_GAP;  // small bottom margin
+
+    maxScroll = std::max(0, totalHeight - viewportHeight);
+    scrollOffset = std::clamp(scrollOffset, 0, maxScroll);
+
+    // ---- Draw pass ----
+    const int dy = contentTop - scrollOffset;
+    int y = dy;
+
+    const uint8_t* rowIcons[6] = {Streak24Icon,      Confetti24Icon, Checkbox24Icon,
+                                  Readingtime24Icon, Check24Icon,    Files24Icon};
+    const char* rowLabels[6] = {tr(STR_STREAK),       tr(STR_MAX_STREAK),     tr(STR_DAILY_GOAL),
+                                tr(STR_READING_TIME), tr(STR_BOOKS_FINISHED), tr(STR_BOOKS_STARTED)};
+    const std::string rowValues[6] = {std::to_string(READING_STATS.getCurrentStreakDays()),
+                                      std::to_string(READING_STATS.getMaxStreakDays()),
+                                      dailyGoalValue,
+                                      ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()),
+                                      std::to_string(READING_STATS.getBooksFinishedCount()),
+                                      std::to_string(READING_STATS.getBooksStartedCount())};
+    for (int i = 0; i < 6; ++i) {
+      drawMetricRow(renderer, Rect{sidePadding, y, contentWidth, SUMMARY_ROW_HEIGHT}, rowIcons[i], rowLabels[i],
+                    rowValues[i]);
+      y += SUMMARY_ROW_HEIGHT;
+    }
+
+    if (profile.hasData) {
+      y += SUMMARY_GAP;
+      GUI.drawSubHeader(renderer, Rect{0, y, pageWidth, CHART_HEADER_HEIGHT}, tr(STR_STATS_TAB_PROFILE),
+                        std::to_string(profile.totalScore).c_str());
+      y += CHART_HEADER_HEIGHT + 4;
+      for (int i = 0; i < 4; ++i) {
+        const std::string nameLine = std::string(I18N.get(dimNameIds[i])) + "   " + std::to_string(dimScores[i]);
+        renderer.drawText(UI_10_FONT_ID, sidePadding, y, nameLine.c_str(), true, EpdFontFamily::BOLD);
+        y += PROFILE_NAME_HEIGHT;
+        for (const auto& breakLine : dimBreakLines[i]) {
+          renderer.drawText(UI_10_FONT_ID, sidePadding, y, breakLine.c_str(), true, EpdFontFamily::BOLD);
+          y += lineHeight;
+        }
+        for (const auto& descLine : dimDescLines[i]) {
+          renderer.drawText(UI_10_FONT_ID, sidePadding, y, descLine.c_str());
+          y += lineHeight;
+        }
+        y += PROFILE_DIM_GAP;
+      }
+    }
+
+    drawScrollChrome();
   } else if (currentPage == PAGE_STARTED_BOOKS) {
     const auto books = getUnfinishedBooks();
     const int totalBooks = static_cast<int>(books.size());
@@ -959,7 +1182,6 @@ void ReadingStatsActivity::render(RenderLock&&) {
   } else if (currentPage == PAGE_WEEKLY) {
     const std::vector<ChartBar> weekBars = getRecentDailyReadingBars();
     const uint64_t last7DaysValueMs = READING_STATS.getRecentReadingMs(7);
-    const uint64_t last30DaysValueMs = READING_STATS.getRecentReadingMs(30);
 
     uint32_t daysRead = 0;
     uint32_t goalDays = 0;
@@ -978,30 +1200,49 @@ void ReadingStatsActivity::render(RenderLock&&) {
       }
     }
 
+    // The Weekly content (large goal boxes + rows + chart) overflows a screen,
+    // so it scrolls the same way Overview does: virtual coordinates from 0,
+    // drawn at (contentTop + virtualY - scroll).
     const uint64_t avgDayMs = last7DaysValueMs / 7ULL;
-    drawMetricRow(renderer, Rect{sidePadding, contentTop, contentWidth, SUMMARY_ROW_HEIGHT}, Last7days24Icon,
-                  tr(STR_LAST_7D), ReadingStatsAnalytics::formatDurationHm(last7DaysValueMs));
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Last30days24Icon, tr(STR_LAST_30D), ReadingStatsAnalytics::formatDurationHm(last30DaysValueMs));
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Book24Icon, tr(STR_DAY_TOTAL), ReadingStatsAnalytics::formatDurationHm(avgDayMs));
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Check24Icon, tr(STR_DAYS_READ), std::to_string(daysRead));
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 4, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Checkbox24Icon, tr(STR_DAILY_GOAL), std::to_string(goalDays) + "/7");
-
     const std::string bestDayValue =
         (bestDayMs == 0) ? std::string("-")
                          : (bestDayLabel + " (" + ReadingStatsAnalytics::formatDurationHm(bestDayMs) + ")");
-    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT * 5, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Award24Icon, tr(STR_BEST_DAY), bestDayValue);
+    const bool weekAnchored = TimeUtils::isClockValid(READING_STATS.getDisplayTimestamp());
+    const int weekCell = (contentWidth - 36) / 7;  // square, Monthly-sized
+    constexpr int WEEK_CHART_HEIGHT = 300;
+    const int weekBlockHeight = weekAnchored ? weekCell + SUMMARY_GAP * 2 : 0;
 
-    const int chartHeaderTop = contentTop + SUMMARY_ROW_HEIGHT * 6 + SUMMARY_GAP * 2;
-    const int chartTop = chartHeaderTop + CHART_HEADER_HEIGHT + CHART_TOP_GAP;
-    const int chartHeight = std::max(96, contentBottom - chartTop);
-    GUI.drawSubHeader(renderer, Rect{0, chartHeaderTop, pageWidth, CHART_HEADER_HEIGHT}, tr(STR_DAILY_READING),
-                      nullptr);
-    drawReadingChart(renderer, Rect{sidePadding, chartTop, contentWidth, chartHeight}, weekBars, true);
+    const int viewportHeight = contentBottom - contentTop;
+    const int totalHeight = weekBlockHeight + SUMMARY_ROW_HEIGHT * 5 + SUMMARY_GAP * 2 + CHART_HEADER_HEIGHT +
+                            CHART_TOP_GAP + WEEK_CHART_HEIGHT;
+    maxScroll = std::max(0, totalHeight - viewportHeight);
+    scrollOffset = std::clamp(scrollOffset, 0, maxScroll);
+
+    int y = contentTop - scrollOffset;
+    if (weekAnchored) {
+      drawGoalWeekRow(renderer, sidePadding, y, contentWidth);
+      y += weekCell + SUMMARY_GAP * 2;
+    }
+
+    // Average daily reading over the last 7 days (labelled clearly so it isn't
+    // mistaken for "today"). Last-30-days lives on the Monthly tab now.
+    drawMetricRow(renderer, Rect{sidePadding, y, contentWidth, SUMMARY_ROW_HEIGHT}, Last7days24Icon, tr(STR_LAST_7D),
+                  ReadingStatsAnalytics::formatDurationHm(last7DaysValueMs));
+    drawMetricRow(renderer, Rect{sidePadding, y + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT}, Book24Icon,
+                  tr(STR_DAILY_AVERAGE), ReadingStatsAnalytics::formatDurationHm(avgDayMs));
+    drawMetricRow(renderer, Rect{sidePadding, y + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Check24Icon, tr(STR_DAYS_READ), std::to_string(daysRead));
+    drawMetricRow(renderer, Rect{sidePadding, y + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Checkbox24Icon, tr(STR_DAILY_GOAL), std::to_string(goalDays) + "/7");
+    drawMetricRow(renderer, Rect{sidePadding, y + SUMMARY_ROW_HEIGHT * 4, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Award24Icon, tr(STR_BEST_DAY), bestDayValue);
+    y += SUMMARY_ROW_HEIGHT * 5 + SUMMARY_GAP * 2;
+
+    GUI.drawSubHeader(renderer, Rect{0, y, pageWidth, CHART_HEADER_HEIGHT}, tr(STR_DAILY_READING), nullptr);
+    y += CHART_HEADER_HEIGHT + CHART_TOP_GAP;
+    drawReadingChart(renderer, Rect{sidePadding, y, contentWidth, WEEK_CHART_HEIGHT}, weekBars, true);
+
+    drawScrollChrome();
   } else if (currentPage == PAGE_MONTHLY) {
     const uint32_t referenceDayOrdinal = getDisplayReferenceDayOrdinal();
     const auto monthSummary = buildMonthSummary(viewedYear, viewedMonth);
@@ -1022,11 +1263,8 @@ void ReadingStatsActivity::render(RenderLock&&) {
                   Check24Icon, tr(STR_DAYS_READ), std::to_string(monthSummary.monthDaysRead));
     drawMetricRow(renderer, Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT * 2, contentWidth, SUMMARY_ROW_HEIGHT},
                   Award24Icon, tr(STR_BEST_DAY), bestDayValue);
-    drawMetricRow(renderer, Rect{sidePadding, summaryTop + SUMMARY_ROW_HEIGHT * 3, contentWidth, SUMMARY_ROW_HEIGHT},
-                  Last30days24Icon, tr(STR_YEAR),
-                  ReadingStatsAnalytics::formatDurationHm(monthSummary.yearTotalReadingMs));
 
-    const int gridTop = summaryTop + SUMMARY_ROW_HEIGHT * 4 + SECTION_GAP;
+    const int gridTop = summaryTop + SUMMARY_ROW_HEIGHT * 3 + SECTION_GAP;
     const int legendTop = contentBottom - LEGEND_HEIGHT - 4;
     const int gridHeight = std::max(100, legendTop - gridTop - SECTION_GAP);
     const int cellWidth = (contentWidth - HEATMAP_GRID_GAP * 6) / 7;
@@ -1042,19 +1280,40 @@ void ReadingStatsActivity::render(RenderLock&&) {
 
     drawLegend(renderer, Rect{sidePadding, legendTop, contentWidth, LEGEND_HEIGHT});
   } else if (currentPage == PAGE_SESSIONS) {
-    // The Sessions tab is an "undated inbox" — only sessions that endSession
-    // couldn't date (because the clock was invalid at the time) show up here,
-    // most-recent first. Picking a date in the editor moves the session out
-    // of this list and into the per-book reading-days bucket for that day.
+    // Session-length distribution over the recorded session log (bounded to the
+    // most recent MAX_SESSION_LOG_ENTRIES sessions). Purely informational — the
+    // cards are not selectable, so navigation is unchanged.
+    const auto buckets = ReadingStatsAnalytics::countSessionDurationBuckets();
+    GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, tr(STR_SESSION_LENGTHS), nullptr);
+    const int bucketCardsTop = contentTop + LIST_HEADER_HEIGHT + 4;
+    constexpr int BUCKET_CARD_GAP = 8;
+    constexpr int BUCKET_CARD_HEIGHT = 60;
+    const int bucketCardWidth = (contentWidth - BUCKET_CARD_GAP * 2) / 3;
+    const StrId bucketLabels[3] = {StrId::STR_SESSIONS_UNDER_10M, StrId::STR_SESSIONS_10M_TO_29M,
+                                   StrId::STR_SESSIONS_30M_PLUS};
+    const uint32_t bucketValues[3] = {buckets.under10, buckets.mid, buckets.over30};
+    for (int i = 0; i < 3; ++i) {
+      const int cardX = sidePadding + i * (bucketCardWidth + BUCKET_CARD_GAP);
+      AppMetricCard::Options bucketOpts;
+      bucketOpts.labelY = 38;
+      AppMetricCard::draw(renderer, Rect{cardX, bucketCardsTop, bucketCardWidth, BUCKET_CARD_HEIGHT},
+                          I18N.get(bucketLabels[i]), std::to_string(bucketValues[i]), bucketOpts);
+    }
+
+    // The rest of the Sessions tab is an "undated inbox" — only sessions that
+    // endSession couldn't date (because the clock was invalid at the time) show
+    // up here, most-recent first. Picking a date in the editor moves the session
+    // out of this list and into the per-book reading-days bucket for that day.
     const auto& fullSessions = READING_STATS.getSessionLog();
     const auto undated = collectUndatedSessionIndices();
     const int totalUndated = static_cast<int>(undated.size());
     const int sessionCount = std::min(totalUndated, SESSIONS_PER_PAGE);
 
+    const int inboxTop = bucketCardsTop + BUCKET_CARD_HEIGHT + SECTION_GAP;
     const std::string sessionsLabel = std::string(tr(STR_DATE_NOT_SET)) + " (" + std::to_string(totalUndated) + ")";
-    GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, sessionsLabel.c_str(), nullptr);
+    GUI.drawSubHeader(renderer, Rect{0, inboxTop, pageWidth, LIST_HEADER_HEIGHT}, sessionsLabel.c_str(), nullptr);
 
-    const int listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
+    const int listTop = inboxTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
     if (sessionCount == 0) {
       renderer.drawText(UI_10_FONT_ID, sidePadding, listTop + 20, tr(STR_NO_READING_STATS));
     } else {
@@ -1089,6 +1348,36 @@ void ReadingStatsActivity::render(RenderLock&&) {
           },
           false);
     }
+  } else if (currentPage == PAGE_YEAR) {
+    // Dedicated annual overview: year total + best month, then the year's
+    // monthly reading as a bar chart. (Yearly stats live here, not on Monthly.)
+    int annualYear = 0;
+    const auto annualBars = getAnnualReadingBars(annualYear);
+    uint64_t yearTotalMs = 0;
+    uint64_t bestMonthMs = 0;
+    std::string bestMonthLabel = "-";
+    for (const auto& bar : annualBars) {
+      yearTotalMs += bar.readingMs;
+      if (bar.readingMs > bestMonthMs) {
+        bestMonthMs = bar.readingMs;
+        bestMonthLabel = bar.bottomLabel;
+      }
+    }
+
+    drawMetricRow(renderer, Rect{sidePadding, contentTop, contentWidth, SUMMARY_ROW_HEIGHT}, Receipttotal24Icon,
+                  tr(STR_YEAR_TOTAL), ReadingStatsAnalytics::formatDurationHm(yearTotalMs));
+    const std::string bestMonthValue =
+        (bestMonthMs == 0) ? std::string("-")
+                           : (bestMonthLabel + " (" + ReadingStatsAnalytics::formatDurationHm(bestMonthMs) + ")");
+    drawMetricRow(renderer, Rect{sidePadding, contentTop + SUMMARY_ROW_HEIGHT, contentWidth, SUMMARY_ROW_HEIGHT},
+                  Award24Icon, tr(STR_BEST_MONTH), bestMonthValue);
+
+    const int chartHeaderTop = contentTop + SUMMARY_ROW_HEIGHT * 2 + SUMMARY_GAP * 2;
+    const int chartTop = chartHeaderTop + CHART_HEADER_HEIGHT + CHART_TOP_GAP;
+    const int chartHeight = std::max(120, contentBottom - chartTop);
+    GUI.drawSubHeader(renderer, Rect{0, chartHeaderTop, pageWidth, CHART_HEADER_HEIGHT},
+                      formatAnnualReadingTitle(annualYear).c_str(), nullptr);
+    drawReadingChart(renderer, Rect{sidePadding, chartTop, contentWidth, chartHeight}, annualBars, false);
   }
 
   // The bottom-of-screen "N/N" indicator is gone — the tab bar at the top is
@@ -1112,18 +1401,27 @@ void ReadingStatsActivity::render(RenderLock&&) {
     btn2 = nextTabName;
     btn3 = tr(STR_DIR_UP);
     btn4 = tr(STR_DIR_DOWN);
+  } else if (maxScroll > 0) {
+    // Overview/Weekly scroll when their content overflows; Up/Down (or
+    // Left/Right) move the view.
+    btn2 = nextTabName;
+    btn3 = tr(STR_DIR_UP);
+    btn4 = tr(STR_DIR_DOWN);
   } else {
-    // Overview and Weekly have no per-item content or Left/Right navigation —
-    // only the next-tab Confirm hint is meaningful.
+    // Non-scrolling tabs: only the next-tab Confirm hint is meaningful.
     btn2 = nextTabName;
   }
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), btn2.c_str(), btn3.c_str(), btn4.c_str());
   drawLyraStyleButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // First paint after a forced portrait flip needs a full refresh to clear the
+  // previous orientation's image.
+  const HalDisplay::RefreshMode refreshMode = fullRefreshNext ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH;
+  fullRefreshNext = false;
 
   // Match SettingsActivity — partial (FAST) refresh on every tab transition.
   // The earlier HALF_REFRESH on non-Books pages was a leftover from when each
   // tab change effectively redrew the whole screen via the bottom N/N
   // pagination; with the top tab bar in place the diff between pages is
   // small enough that FAST keeps the e-ink updates snappy without ghosting.
-  renderer.displayBuffer();
+  renderer.displayBuffer(refreshMode);
 }

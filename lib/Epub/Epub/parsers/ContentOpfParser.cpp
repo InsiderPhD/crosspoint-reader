@@ -412,7 +412,11 @@ void XMLCALL ContentOpfParser::characterData(void* userData, const XML_Char* s, 
 
   if (self->state == IN_BOOK_AUTHOR) {
     if (!self->author.empty()) {
-      self->author.append(", ");  // Add separator for multiple authors
+      // Join multiple <dc:creator> elements with " & " (not ", "): a name is written
+      // "Last, First", so a comma is ambiguous with the intra-name separator. Using '&'
+      // lets the Authors folder view split co-authors correctly (GroupBrowserActivity
+      // splits author keys on '&'). This is also the Calibre display convention.
+      self->author.append(" & ");
     }
     self->author.append(s, len);
     return;

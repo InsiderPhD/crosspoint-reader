@@ -228,31 +228,64 @@ void LyraTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char
 
 void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,
                            bool selected) const {
-  int currentX = rect.x + LyraMetrics::values.contentSidePadding;
+  const int pad = LyraMetrics::values.contentSidePadding;
+  const int spacing = LyraMetrics::values.tabSpacing;
+  const int startX = rect.x + pad;
+  const int viewRight = rect.x + rect.width - pad;
 
   if (selected) {
     renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
   }
 
+  // Pass 1: measure the natural layout and the selected tab's bounds so the
+  // ribbon can scroll horizontally when the tabs overflow, keeping the selected
+  // tab's full label readable. Each cell is text + 2*hPaddingInSelection.
+  int naturalX = startX;
+  int selLeft = startX;
+  int selRight = startX;
+  for (const auto& tab : tabs) {
+    const int cellW = renderer.getTextWidth(UI_10_FONT_ID, tab.label, EpdFontFamily::REGULAR) + 2 * hPaddingInSelection;
+    if (tab.selected) {
+      selLeft = naturalX;
+      selRight = naturalX + cellW;
+    }
+    naturalX += cellW + spacing;
+  }
+  const int totalWidth = naturalX - spacing - startX;
+  const int viewWidth = viewRight - startX;
+  // Keep a sliver of the neighbouring tab visible so it's obvious more tabs
+  // exist. Clamping still makes the genuine first/last tab sit flush.
+  constexpr int PEEK = 28;
+
+  int offset = 0;
+  if (totalWidth > viewWidth) {
+    if (selRight - offset > viewRight - PEEK) offset = selRight - (viewRight - PEEK);
+    if (selLeft - offset < startX + PEEK) offset = selLeft - (startX + PEEK);
+    const int maxOffset = totalWidth - viewWidth;
+    if (offset < 0) offset = 0;
+    if (offset > maxOffset) offset = maxOffset;
+  }
+
+  // Pass 2: draw shifted by the scroll offset, skipping tabs fully off-view.
+  int currentX = startX - offset;
   for (const auto& tab : tabs) {
     const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, tab.label, EpdFontFamily::REGULAR);
+    const int cellW = textWidth + 2 * hPaddingInSelection;
 
-    if (tab.selected) {
-      if (selected) {
-        renderer.fillRoundedRect(currentX, rect.y + 1, textWidth + 2 * hPaddingInSelection, rect.height - 4,
-                                 cornerRadius, Color::Black);
-      } else {
-        renderer.fillRectDither(currentX, rect.y, textWidth + 2 * hPaddingInSelection, rect.height - 3,
-                                Color::LightGray);
-        renderer.drawLine(currentX, rect.y + rect.height - 3, currentX + textWidth + 2 * hPaddingInSelection,
-                          rect.y + rect.height - 3, 2, true);
+    if (currentX + cellW >= startX && currentX <= viewRight) {
+      if (tab.selected) {
+        if (selected) {
+          renderer.fillRoundedRect(currentX, rect.y + 1, cellW, rect.height - 4, cornerRadius, Color::Black);
+        } else {
+          renderer.fillRectDither(currentX, rect.y, cellW, rect.height - 3, Color::LightGray);
+          renderer.drawLine(currentX, rect.y + rect.height - 3, currentX + cellW, rect.y + rect.height - 3, 2, true);
+        }
       }
+      renderer.drawText(UI_10_FONT_ID, currentX + hPaddingInSelection, rect.y + 6, tab.label,
+                        !(tab.selected && selected), EpdFontFamily::REGULAR);
     }
 
-    renderer.drawText(UI_10_FONT_ID, currentX + hPaddingInSelection, rect.y + 6, tab.label, !(tab.selected && selected),
-                      EpdFontFamily::REGULAR);
-
-    currentX += textWidth + LyraMetrics::values.tabSpacing + 2 * hPaddingInSelection;
+    currentX += cellW + spacing;
   }
 
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);

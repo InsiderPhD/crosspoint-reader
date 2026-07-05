@@ -9,7 +9,10 @@
 #include "FsHelpers.h"
 
 namespace {
-constexpr uint8_t BOOK_CACHE_VERSION = 11;
+// v12: multiple <dc:creator> authors are now joined with " & " (was ", ") so the Authors
+// folder view can split co-authors without breaking "Last, First" names. Bumping forces a
+// rebuild of stale book.bin so the fix applies without a manual recache.
+constexpr uint8_t BOOK_CACHE_VERSION = 12;
 constexpr char bookBinFile[] = "/book.bin";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";

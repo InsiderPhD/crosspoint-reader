@@ -36,7 +36,6 @@ class HomeActivity final : public Activity {
   void dispatchBookAction(BookContextMenu::Action action, const std::string& path, const std::string& title);
   void onSelectBook(const std::string& path);
   void onFileBrowserOpen();
-  void onRecentsOpen();
   void onSettingsOpen();
   void onFileTransferOpen();
   void onOpdsBrowserOpen();

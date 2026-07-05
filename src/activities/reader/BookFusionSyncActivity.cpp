@@ -52,7 +52,14 @@ void BookFusionSyncActivity::onExit() {
 
 void BookFusionSyncActivity::loop() {
   if (state == RESULT_OK || state == RESULT_FAILED) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    // Handle on release, not press: performSync() blocks the main loop inside
+    // onEnter(), so the Confirm press that advanced us into the sync (e.g.
+    // "Connect" on the WiFi screen) is still held — or already consumed as a
+    // press edge — by the time this result screen appears. wasPressed() would
+    // wait for a fresh press-down that never comes, so the first Apply/OK does
+    // nothing. wasReleased() fires on the release the user naturally does on
+    // this screen. Mirrors KOReaderSyncActivity's result-screen handling.
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       if (state == RESULT_OK && direction == Direction::PULL) {
         // Apply: hand the resolved position back to the reader; the result
         // handler jumps to the chapter and applies the intra-fraction.
@@ -64,7 +71,7 @@ void BookFusionSyncActivity::loop() {
         setResult(std::move(result));
       }
       finish();
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       // Back always cancels — for PULL this means "don't apply the remote
       // position even though we successfully fetched it".
       ActivityResult result;

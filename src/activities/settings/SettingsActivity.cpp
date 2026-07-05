@@ -12,6 +12,7 @@
 #include "CrossPointSettings.h"
 #include "DownloadUpdateFromUrlActivity.h"
 #include "FontDownloadActivity.h"
+#include "FontLayoutPreviewActivity.h"
 #include "FontSelectionActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "LanguageSelectActivity.h"
@@ -19,10 +20,13 @@
 #include "MappedInputManager.h"
 #include "OtaUpdateActivity.h"
 #include "ReaderControlsActivity.h"
+#include "RecacheMetadataActivity.h"
+#include "RefreshBookFusionMetadataActivity.h"
 #include "ResetStatsActivity.h"
 #include "SdCardFontGlobals.h"
 #include "SdFirmwareUpdateActivity.h"
 #include "SettingsList.h"
+#include "StatsDataActivity.h"
 #include "StatusBarSettingsActivity.h"
 #include "TimeZoneSelectActivity.h"
 #include "activities/home/LibraryActivity.h"
@@ -30,9 +34,6 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-
-const StrId SettingsActivity::categoryNames[categoryCount] = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER,
-                                                              StrId::STR_CAT_STATS, StrId::STR_CAT_SYSTEM};
 
 void SettingsActivity::onEnter() {
   Activity::onEnter();
@@ -42,6 +43,7 @@ void SettingsActivity::onEnter() {
   readerSettings.clear();
   statsSettings.clear();
   systemSettings.clear();
+  devSettings.clear();
 
   for (const auto& setting : getSettingsList()) {
     if (setting.category == StrId::STR_NONE_OPT) continue;
@@ -49,6 +51,21 @@ void SettingsActivity::onEnter() {
     // Action (appended below) is the single picker entry. Web UI still sees the
     // Enum because CrossPointWebServer iterates getSettingsList() directly.
     if (setting.type == SettingType::ENUM && setting.key && std::strcmp(setting.key, "fontFamily") == 0) continue;
+    // Device-only override: these reader settings are now edited through the
+    // Font & Layout preview (with live sample text), so hide the redundant flat
+    // rows from the device Settings list. They remain in the web UI, which
+    // iterates getSettingsList() directly.
+    if (setting.key &&
+        (std::strcmp(setting.key, "fontSize") == 0 || std::strcmp(setting.key, "lineSpacing") == 0 ||
+         std::strcmp(setting.key, "paragraphAlignment") == 0 || std::strcmp(setting.key, "screenMargin") == 0 ||
+         std::strcmp(setting.key, "extraParagraphSpacing") == 0 || std::strcmp(setting.key, "bionicReading") == 0 ||
+         std::strcmp(setting.key, "textAntiAliasing") == 0 || std::strcmp(setting.key, "orientation") == 0)) {
+      continue;
+    }
+    // Device-only override: the "if found" contact is a free-text field with no
+    // on-device keyboard entry path, so it is edited from the web UI only. The
+    // web UI iterates getSettingsList() directly, so it still sees this entry.
+    if (setting.key && std::strcmp(setting.key, "returnContact") == 0) continue;
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       displaySettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_READER) {
@@ -70,43 +87,67 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BF_SYNC, SettingAction::BookFusionSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_BROWSER, SettingAction::OPDSBrowser));
-  // Clear Reading Cache: testing aid, hidden unless Dev Mode is on.
-  if (SETTINGS.devMode) {
-    systemSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
-    // Recache Library: forces a full SD re-scan on the next library open. Safety
-    // net for the rare case the library index misses a file added outside the
-    // normal download/upload paths (its dir-mtime validation can't see SD-root
-    // additions on FAT). Hidden unless Dev Mode is on.
-    systemSettings.push_back(SettingInfo::Action(StrId::STR_RECACHE_LIBRARY, SettingAction::RecacheLibrary));
-  }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
-  // Download Update from URL: raw-writes firmware (bypasses image verify) — bricking
-  // risk for casual users, so gate it behind Dev Mode.
-  if (SETTINGS.devMode) {
-    systemSettings.push_back(SettingInfo::Action(StrId::STR_DOWNLOAD_FROM_URL, SettingAction::DownloadFromUrl));
-  }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
-  // Stats tab device-only actions (date/timezone pickers + reset). The daily
-  // goal + min-session-length Enum entries are already populated above from
+  // Stats tab device-only actions (date/timezone pickers). The daily goal +
+  // min-session-length Enum entries are already populated above from
   // SettingsList — these actions go below them.
   statsSettings.push_back(SettingInfo::Action(StrId::STR_SET_DATE, SettingAction::SetDate));
   statsSettings.push_back(SettingInfo::Action(StrId::STR_TIME_ZONE, SettingAction::TimeZone));
-  // Reset Reading Stats: testing aid, hidden unless Dev Mode is on.
-  if (SETTINGS.devMode) {
-    statsSettings.push_back(SettingInfo::Action(StrId::STR_RESET_READING_STATS, SettingAction::ResetStats));
-  }
+  // Data management: lossless JSON export/import (round-trip backup) plus a
+  // one-way StoryGraph-compatible CSV of the book catalog.
+  statsSettings.push_back(SettingInfo::Action(StrId::STR_EXPORT_READING_STATS, SettingAction::ExportStats));
+  statsSettings.push_back(SettingInfo::Action(StrId::STR_IMPORT_READING_STATS, SettingAction::ImportStats));
+  statsSettings.push_back(SettingInfo::Action(StrId::STR_EXPORT_STORYGRAPH, SettingAction::ExportStoryGraph));
+
+  // --- Dev tools ---
+  // These are all testing aids / risky operations, collected under a dedicated
+  // Dev tab that is only shown when Dev Mode is enabled (see category assembly
+  // below). Dev Mode itself is toggled from the System tab.
+  // Clear Reading Cache: testing aid.
+  devSettings.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
+  // Recache Library: forces a full SD re-scan on the next library open. Safety
+  // net for the rare case the library index misses a file added outside the
+  // normal download/upload paths (its dir-mtime validation can't see SD-root
+  // additions on FAT).
+  devSettings.push_back(SettingInfo::Action(StrId::STR_RECACHE_LIBRARY, SettingAction::RecacheLibrary));
+  // Recache Metadata: builds book.bin for any book that lacks it, so tags (and
+  // other metadata) exist for books that have never been opened. Needed to make
+  // Tag-folder mode complete. Slow (full parse per uncached book).
+  devSettings.push_back(SettingInfo::Action(StrId::STR_RECACHE_METADATA, SettingAction::RecacheMetadata));
+  // Refresh BookFusion Data: re-downloads API-sourced metadata (covers,
+  // categories/shelves/lists, reading position) for every locally-downloaded
+  // BookFusion book. Needs WiFi.
+  devSettings.push_back(SettingInfo::Action(StrId::STR_REFRESH_BF_METADATA, SettingAction::RefreshBookFusionMetadata));
+  // Download Update from URL: raw-writes firmware (bypasses image verify) — bricking
+  // risk for casual users.
+  devSettings.push_back(SettingInfo::Action(StrId::STR_DOWNLOAD_FROM_URL, SettingAction::DownloadFromUrl));
+  // Reset Reading Stats: testing aid.
+  devSettings.push_back(SettingInfo::Action(StrId::STR_RESET_READING_STATS, SettingAction::ResetStats));
+
+  readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_LAYOUT_PREVIEW, SettingAction::FontLayoutPreview));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
-  readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_FAMILY, SettingAction::FontFamily));
-  readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_DOWNLOAD, SettingAction::FontDownload));
+  // Font family (built-in + SD) and Font Download are now edited inside the
+  // Font & Layout preview, so they are not listed separately here.
+
+  // Assemble the visible category tabs. categoryNames and categoryLists stay in
+  // lockstep. The Dev tab is only appended when Dev Mode is enabled.
+  categoryNames = {StrId::STR_CAT_DISPLAY, StrId::STR_CAT_READER, StrId::STR_CAT_STATS, StrId::STR_CAT_SYSTEM};
+  categoryLists = {&displaySettings, &readerSettings, &statsSettings, &systemSettings};
+  if (SETTINGS.devMode) {
+    categoryNames.push_back(StrId::STR_CAT_DEV);
+    categoryLists.push_back(&devSettings);
+  }
+  categoryCount = static_cast<int>(categoryNames.size());
 
   // Reset selection to first category
   selectedCategoryIndex = 0;
   selectedSettingIndex = 0;
 
   // Initialize with first category (Display)
-  currentSettings = &displaySettings;
-  settingsCount = static_cast<int>(displaySettings.size());
+  currentSettings = categoryLists[0];
+  settingsCount = static_cast<int>(currentSettings->size());
 
   // Trigger first update
   requestUpdate();
@@ -170,20 +211,7 @@ void SettingsActivity::loop() {
 
   if (hasChangedCategory) {
     selectedSettingIndex = (selectedSettingIndex == 0) ? 0 : 1;
-    switch (selectedCategoryIndex) {
-      case 0:
-        currentSettings = &displaySettings;
-        break;
-      case 1:
-        currentSettings = &readerSettings;
-        break;
-      case 2:
-        currentSettings = &statsSettings;
-        break;
-      case 3:
-        currentSettings = &systemSettings;
-        break;
-    }
+    currentSettings = categoryLists[selectedCategoryIndex];
     settingsCount = static_cast<int>(currentSettings->size());
   }
 }
@@ -249,12 +277,19 @@ void SettingsActivity::toggleCurrentSetting() {
         // Non-destructive: drop the library index so the next library open does a
         // full SD re-scan. Confirm first (matches every other action launching an
         // activity); on confirm, invalidate.
-        startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput,
-                                                                      tr(STR_RECACHE_LIBRARY), tr(STR_LIBRARY_RECACHED)),
+        startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_RECACHE_LIBRARY),
+                                                                      tr(STR_LIBRARY_RECACHED)),
                                [this](const ActivityResult& res) {
                                  if (!res.isCancelled) LibraryActivity::invalidateIndexCache();
                                  SETTINGS.saveToFile();
                                });
+        break;
+      case SettingAction::RecacheMetadata:
+        startActivityForResult(std::make_unique<RecacheMetadataActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::RefreshBookFusionMetadata:
+        startActivityForResult(std::make_unique<RefreshBookFusionMetadataActivity>(renderer, mappedInput),
+                               resultHandler);
         break;
       case SettingAction::CheckForUpdates:
         startActivityForResult(std::make_unique<OtaUpdateActivity>(renderer, mappedInput), resultHandler);
@@ -271,6 +306,18 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::ResetStats:
         startActivityForResult(std::make_unique<ResetStatsActivity>(renderer, mappedInput), resultHandler);
         break;
+      case SettingAction::ExportStats:
+        startActivityForResult(std::make_unique<StatsDataActivity>(renderer, mappedInput, StatsDataMode::ExportJson),
+                               resultHandler);
+        break;
+      case SettingAction::ImportStats:
+        startActivityForResult(std::make_unique<StatsDataActivity>(renderer, mappedInput, StatsDataMode::ImportJson),
+                               resultHandler);
+        break;
+      case SettingAction::ExportStoryGraph:
+        startActivityForResult(
+            std::make_unique<StatsDataActivity>(renderer, mappedInput, StatsDataMode::ExportStoryGraph), resultHandler);
+        break;
       case SettingAction::SetDate:
         startActivityForResult(std::make_unique<ManualDateActivity>(renderer, mappedInput), resultHandler);
         break;
@@ -286,6 +333,12 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::FontDownload:
         startActivityForResult(std::make_unique<FontDownloadActivity>(renderer, mappedInput),
+                               [this](const ActivityResult&) { ensureSdFontLoaded(); });
+        break;
+      case SettingAction::FontLayoutPreview:
+        // The preview persists its own settings and restores the renderer to
+        // Portrait on exit; just reload the (possibly changed) active font.
+        startActivityForResult(std::make_unique<FontLayoutPreviewActivity>(renderer, mappedInput),
                                [this](const ActivityResult&) { ensureSdFontLoaded(); });
         break;
       case SettingAction::None:
