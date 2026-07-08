@@ -87,6 +87,18 @@ class ReadingStatsStore {
     uint64_t accumulatedMs = 0;
     uint8_t startProgressPercent = 0;
     bool startCompleted = false;
+    // False until the session's first updateProgress(). beginSession captures
+    // startProgressPercent from book.lastProgressPercent, which is stale when
+    // the stats entry is fresh (e.g. right after a stats wipe) — the reader
+    // then restores the real position and reports it, and that jump must
+    // rebase the start, not count as progress read this session.
+    bool startProgressRebased = false;
+    // How much of accumulatedMs is currently written into a per-day bucket, and
+    // under which day. Lets flushActiveSessionToBuckets() checkpoint the session
+    // durably mid-read (so an ungraceful shutdown doesn't lose it) while moving
+    // it to a single day if the resolved date changes.
+    uint32_t bucketedDay = 0;
+    uint64_t bucketedMs = 0;
   };
 
   std::vector<ReadingBookStats> books;
@@ -119,12 +131,15 @@ class ReadingStatsStore {
                               const std::string& coverBmpPath, const std::string& preferredBookId = "");
   void touchBook(size_t index);
   ReadingDayStats& getOrCreateReadingDay(uint32_t epochSeconds);
-  ReadingDayStats& getOrCreateBookReadingDay(ReadingBookStats& book, uint32_t epochSeconds);
   uint32_t getLatestKnownTimestamp() const;
   uint32_t getReferenceTimestamp(uint32_t preferredTimestamp, uint32_t bookTimestamp = 0) const;
   uint32_t getReferenceDayOrdinal() const;
   void updateBookReadTimestamp(ReadingBookStats& book, uint32_t preferredTimestamp);
-  void recordReadingTime(ReadingBookStats& book, uint32_t epochSeconds, uint64_t readingMs);
+  // Checkpoint the active session's accumulated time into the per-day buckets,
+  // attributing the whole session to a single day (moving it if the resolved
+  // day changed). No-op while the clock is invalid. Called periodically for
+  // crash-safety and once more at endSession().
+  void flushActiveSessionToBuckets();
   // bookId may be empty (legacy paths) and dayOrdinal may be 0 (no date yet).
   // The MAX_SESSION_LOG_ENTRIES cap is still applied.
   void appendSessionLogEntry(uint32_t dayOrdinal, uint32_t sessionMs, const std::string& bookId);
@@ -192,6 +207,15 @@ class ReadingStatsStore {
   uint64_t getRecentReadingMs(uint32_t days) const;
   uint32_t getCurrentStreakDays() const;
   uint32_t getMaxStreakDays() const;
+  // Lifetime session count (sum of book.sessions) and derived average length.
+  // Average uses total reading time / session count, so it's a lifetime figure.
+  uint32_t getTotalSessionCount() const;
+  uint64_t getAverageSessionMs() const;
+  // Longest single session, over the retained session log (last
+  // MAX_SESSION_LOG_ENTRIES sessions), and count of sessions on the reference
+  // ("today") day. 0 when the clock has never been valid.
+  uint64_t getLongestSessionMs() const;
+  uint32_t getSessionsToday() const;
   uint32_t getDisplayTimestamp(bool* usedFallback = nullptr) const;
   bool hasReadingDays() const { return !readingDays.empty(); }
 

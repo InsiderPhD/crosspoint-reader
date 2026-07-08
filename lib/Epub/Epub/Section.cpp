@@ -374,8 +374,10 @@ uint16_t Section::readCachedPageCount(const std::string& path) {
     f.close();
     return 0;
   }
-  // pageCount sits before the three trailing uint32_t offsets (LUT, anchor map, paragraph LUT).
-  f.seek(HEADER_SIZE - sizeof(uint32_t) * 3 - sizeof(uint16_t));
+  // pageCount sits before the four trailing uint32_t offsets (LUT, anchor map,
+  // paragraph LUT, list-item LUT) — must match the patch layout in
+  // createSectionFile (seek at HEADER_SIZE - sizeof(uint32_t) * 4 - sizeof(pageCount)).
+  f.seek(HEADER_SIZE - sizeof(uint32_t) * 4 - sizeof(uint16_t));
   uint16_t pc = 0;
   f.read(&pc, sizeof(pc));
   f.close();

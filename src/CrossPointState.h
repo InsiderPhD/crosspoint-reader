@@ -15,6 +15,13 @@ class CrossPointState {
   uint8_t recentSleepFill = 0;                          // valid entries (0..SLEEP_RECENT_COUNT)
   uint8_t readerActivityLoadCount = 0;
   bool lastSleepFromReader = false;
+  // Reader's last computed "time left in book" (pages-left × reading pace),
+  // stashed at reader exit so the sleep screen can show it without re-deriving
+  // a pace from whole-percent progress (which hides after short sessions).
+  // Runtime-only — deliberately not persisted; the sleep screen paints in the
+  // same boot. bookPath tags which book it was computed for.
+  std::string readerTimeLeftBookPath;
+  uint32_t readerTimeLeftSeconds = 0;
   uint32_t lastKnownValidTimestamp = 0;
   bool showBootScreen = true;
 

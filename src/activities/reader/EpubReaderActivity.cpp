@@ -279,6 +279,34 @@ void EpubReaderActivity::buildBookPageCache() {
           totalKnownPages);
 }
 
+uint32_t EpubReaderActivity::computeBookTimeLeftSeconds() const {
+  if (!epub || !section || section->pageCount <= 0 || SETTINGS.readingSpeedSecondsPerPage == 0) {
+    return 0;
+  }
+  const int pageNow = section->currentPage;
+  const int chapterPages = section->pageCount;
+  int pagesLeft = 0;
+  if (!spinePageCountCache.empty() && cachedTotalBookPages > 0) {
+    // Per-spine page cache available: exact pages before this chapter + within it.
+    int pagesBeforeChapter = 0;
+    for (int i = 0; i < currentSpineIndex && i < static_cast<int>(spinePageCountCache.size()); i++) {
+      pagesBeforeChapter += spinePageCountCache[i];
+    }
+    pagesLeft = cachedTotalBookPages - pagesBeforeChapter - pageNow;
+  } else {
+    // Fallback: scale this chapter's page density by the remaining byte fraction.
+    const float chapterProgress = static_cast<float>(pageNow) / static_cast<float>(chapterPages);
+    const float bookProgress = epub->calculateProgress(currentSpineIndex, chapterProgress);  // 0-1
+    const float sectionStart = epub->calculateProgress(currentSpineIndex, 0.0f);
+    const float sectionEnd = epub->calculateProgress(currentSpineIndex, 1.0f);
+    const float sectionFraction = sectionEnd - sectionStart;
+    pagesLeft = (sectionFraction > 0.001f)
+                    ? static_cast<int>((1.0f - bookProgress) / sectionFraction * static_cast<float>(chapterPages))
+                    : chapterPages - pageNow;
+  }
+  return (pagesLeft > 0) ? static_cast<uint32_t>(pagesLeft) * SETTINGS.readingSpeedSecondsPerPage : 0;
+}
+
 void EpubReaderActivity::onEnter() {
   Activity::onEnter();
 
@@ -358,6 +386,11 @@ void EpubReaderActivity::onExit() {
   if (SETTINGS.readingSpeedSecondsPerPage > 0) {
     SETTINGS.saveToFile();
   }
+
+  // Stash the pages-based book time-left for the sleep screen while the
+  // section is still alive (runtime-only; not persisted).
+  APP_STATE.readerTimeLeftBookPath = epub ? epub->getPath() : "";
+  APP_STATE.readerTimeLeftSeconds = computeBookTimeLeftSeconds();
 
   recordStatsProgress();
   READING_STATS.endSession();
@@ -1140,11 +1173,22 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
     // Update cache with the actual page count for this chapter now that it's loaded/rendered
     if (section->pageCount > 0 && currentSpineIndex < static_cast<int>(spinePageCountCache.size())) {
-      const uint16_t oldEstimate = spinePageCountCache[currentSpineIndex];
-      const uint16_t actualCount = section->pageCount;
-      if (oldEstimate != actualCount) {
-        cachedTotalBookPages += static_cast<int>(actualCount) - static_cast<int>(oldEstimate);
-        spinePageCountCache[currentSpineIndex] = actualCount;
+      if (cachedTotalBookPages == 0) {
+        // onEnter's buildBookPageCache() bailed out (no cached sections yet —
+        // e.g. right after a .crosspoint wipe). This section's file exists now
+        // (created above), so build the full per-spine estimate from it.
+        // Patching only this spine into a zero total would instead switch the
+        // time-left code off its byte-fraction fallback while every unvisited
+        // chapter still counts 0 pages, collapsing the book estimate to
+        // chapter scale ("30m left" in a book that needs hours).
+        buildBookPageCache();
+      } else {
+        const uint16_t oldEstimate = spinePageCountCache[currentSpineIndex];
+        const uint16_t actualCount = section->pageCount;
+        if (oldEstimate != actualCount) {
+          cachedTotalBookPages += static_cast<int>(actualCount) - static_cast<int>(oldEstimate);
+          spinePageCountCache[currentSpineIndex] = actualCount;
+        }
       }
     }
 
@@ -1796,31 +1840,11 @@ void EpubReaderActivity::openReaderMenu() {
   const int bookProgressPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
 
   uint32_t timeLeftChapter = 0;
-  uint32_t timeLeftBook = 0;
+  const uint32_t timeLeftBook = computeBookTimeLeftSeconds();
   if (SETTINGS.readingSpeedSecondsPerPage > 0 && section) {
     const int pagesLeftChapter = totalPages - currentPage;
     if (pagesLeftChapter > 0) {
       timeLeftChapter = static_cast<uint32_t>(pagesLeftChapter) * SETTINGS.readingSpeedSecondsPerPage;
-    }
-    if (!spinePageCountCache.empty() && cachedTotalBookPages > 0) {
-      int pagesBeforeChapter = 0;
-      for (int i = 0; i < currentSpineIndex && i < static_cast<int>(spinePageCountCache.size()); i++) {
-        pagesBeforeChapter += spinePageCountCache[i];
-      }
-      const int pagesLeftBook = cachedTotalBookPages - pagesBeforeChapter - currentPage;
-      if (pagesLeftBook > 0) {
-        timeLeftBook = static_cast<uint32_t>(pagesLeftBook) * SETTINGS.readingSpeedSecondsPerPage;
-      }
-    } else {
-      const float sectionStart = epub->calculateProgress(currentSpineIndex, 0.0f);
-      const float sectionEnd = epub->calculateProgress(currentSpineIndex, 1.0f);
-      const float sectionFraction = sectionEnd - sectionStart;
-      const int pagesLeftBook = (sectionFraction > 0.001f)
-                                    ? static_cast<int>((1.0f - bookProgress / 100.0f) / sectionFraction * totalPages)
-                                    : pagesLeftChapter;
-      if (pagesLeftBook > 0) {
-        timeLeftBook = static_cast<uint32_t>(pagesLeftBook) * SETTINGS.readingSpeedSecondsPerPage;
-      }
     }
   }
 

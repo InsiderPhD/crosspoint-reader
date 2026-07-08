@@ -457,16 +457,27 @@ uint8_t SleepActivity::buildStatLines(StatLine lines[MAX_STAT_LINES]) const {
         if (APP_STATE.openEpubPath.empty()) {
           continue;  // no book open
         }
-        const ReadingBookStats* book = READING_STATS.findMatchingBookForPath(APP_STATE.openEpubPath);
-        // Estimate remaining time from time already spent vs. progress on THIS
-        // book (no page-count re-parse needed). Needs a few percent of progress to
-        // be meaningful; skipped when finished or not yet tracked.
-        if (book == nullptr || book->completed || book->totalReadingMs == 0 || book->lastProgressPercent < 5 ||
-            book->lastProgressPercent >= 100) {
-          continue;
+        // Prefer the reader's own pages-left × pace figure, stashed at reader
+        // exit — the same estimate the status bar / reader menu show, and it
+        // doesn't hide after short sessions the way percent-based pace does.
+        if (APP_STATE.readerTimeLeftSeconds > 0 && APP_STATE.readerTimeLeftBookPath == APP_STATE.openEpubPath) {
+          const uint64_t timeLeftMs = static_cast<uint64_t>(APP_STATE.readerTimeLeftSeconds) * 1000ULL;
+          snprintf(buf, N, "%s %s", ReadingStatsAnalytics::formatDurationHm(timeLeftMs).c_str(),
+                   tr(STR_STAT_BOOK_TIME_LEFT_MSG));
+          break;
         }
-        const uint64_t timeLeftMs =
-            book->totalReadingMs * (100 - book->lastProgressPercent) / book->lastProgressPercent;
+        // Fallback (no stash this boot): pace of the just-finished session —
+        // "read (end-start)% of the book in sessionMs, so (100-end)% remaining
+        // takes remaining/pace". Recent-reading only, so it survives a stats
+        // reset, unlike extrapolating lifetime time vs. progress.
+        const ReadingSessionSnapshot& snap = READING_STATS.getLastSessionSnapshot();
+        if (!snap.valid || snap.path != APP_STATE.openEpubPath || snap.sessionMs == 0 ||
+            snap.endProgressPercent <= snap.startProgressPercent || snap.endProgressPercent >= 100) {
+          continue;  // no recent forward progress to estimate a pace from
+        }
+        const uint32_t gainedPct = snap.endProgressPercent - snap.startProgressPercent;
+        const uint32_t remainingPct = 100 - snap.endProgressPercent;
+        const uint64_t timeLeftMs = static_cast<uint64_t>(snap.sessionMs) * remainingPct / gainedPct;
         snprintf(buf, N, "%s %s", ReadingStatsAnalytics::formatDurationHm(timeLeftMs).c_str(),
                  tr(STR_STAT_BOOK_TIME_LEFT_MSG));
         break;

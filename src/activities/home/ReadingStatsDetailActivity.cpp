@@ -273,6 +273,25 @@ std::string buildEstimatedTimeLeftText(const ReadingBookStats& book) {
     return tr(STR_DONE);
   }
 
+  // Prefer the most-recent session's pace when it's for this book: "read
+  // (end-start)% of the book in sessionMs, so (100-end)% remaining takes
+  // remaining/pace". This uses only recent reading, so it survives a stats reset
+  // and ignores offline/unassigned history — matching the sleep-screen estimate.
+  // Falls back to the lifetime extrapolation for books not read this session.
+  const ReadingSessionSnapshot& snap = READING_STATS.getLastSessionSnapshot();
+  if (snap.valid && !book.bookId.empty() && snap.bookId == book.bookId && snap.sessionMs > 0 &&
+      snap.endProgressPercent > snap.startProgressPercent && snap.endProgressPercent < 100) {
+    const uint32_t gainedPct = snap.endProgressPercent - snap.startProgressPercent;
+    const uint32_t remainingPct = 100 - snap.endProgressPercent;
+    const uint64_t remainingMs = roundUpEstimateMs(static_cast<uint64_t>(snap.sessionMs) * remainingPct / gainedPct);
+    std::string estimateText = "~" + ReadingStatsAnalytics::formatDurationHm(remainingMs);
+    const std::string sessionText = buildSessionEstimateText(remainingMs, book);
+    if (!sessionText.empty()) {
+      estimateText += " / " + sessionText;
+    }
+    return estimateText;
+  }
+
   if (book.totalReadingMs < MIN_ESTIMATE_READING_MS ||
       book.lastProgressPercent < MIN_ESTIMATE_PROGRESS_PERCENT) {
     return tr(STR_ESTIMATE_AFTER_MORE_READING);

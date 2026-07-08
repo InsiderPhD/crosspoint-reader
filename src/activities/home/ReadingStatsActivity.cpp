@@ -1092,7 +1092,8 @@ void ReadingStatsActivity::render(RenderLock&&) {
     }
 
     // ---- Measure pass: total virtual content height ----
-    int totalHeight = SUMMARY_ROW_HEIGHT * 6;
+    constexpr int SUMMARY_ROW_COUNT = 9;
+    int totalHeight = SUMMARY_ROW_HEIGHT * SUMMARY_ROW_COUNT;
     if (profile.hasData) {
       totalHeight += SUMMARY_GAP + CHART_HEADER_HEIGHT + 4;  // Profile sub-header
       for (int i = 0; i < 4; ++i) {
@@ -1110,17 +1111,41 @@ void ReadingStatsActivity::render(RenderLock&&) {
     const int dy = contentTop - scrollOffset;
     int y = dy;
 
-    const uint8_t* rowIcons[6] = {Streak24Icon,      Confetti24Icon, Checkbox24Icon,
-                                  Readingtime24Icon, Check24Icon,    Files24Icon};
-    const char* rowLabels[6] = {tr(STR_STREAK),       tr(STR_MAX_STREAK),     tr(STR_DAILY_GOAL),
-                                tr(STR_READING_TIME), tr(STR_BOOKS_FINISHED), tr(STR_BOOKS_STARTED)};
-    const std::string rowValues[6] = {std::to_string(READING_STATS.getCurrentStreakDays()),
-                                      std::to_string(READING_STATS.getMaxStreakDays()),
-                                      dailyGoalValue,
-                                      ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()),
-                                      std::to_string(READING_STATS.getBooksFinishedCount()),
-                                      std::to_string(READING_STATS.getBooksStartedCount())};
-    for (int i = 0; i < 6; ++i) {
+    // "Sessions today" row also shows the lifetime average sessions per reading
+    // day, e.g. "3  (2.1/day)". Guard against zero reading days.
+    char sessionsValue[48];
+    {
+      const uint32_t sessionsToday = READING_STATS.getSessionsToday();
+      const size_t daysRead = READING_STATS.getReadingDays().size();
+      if (daysRead > 0) {
+        const uint32_t perDayX10 =
+            static_cast<uint32_t>((static_cast<uint64_t>(READING_STATS.getTotalSessionCount()) * 10 + daysRead / 2) /
+                                  daysRead);
+        snprintf(sessionsValue, sizeof(sessionsValue), "%u  (%u.%u/day)", sessionsToday, perDayX10 / 10,
+                 perDayX10 % 10);
+      } else {
+        snprintf(sessionsValue, sizeof(sessionsValue), "%u", sessionsToday);
+      }
+    }
+
+    const uint8_t* rowIcons[SUMMARY_ROW_COUNT] = {
+        Streak24Icon,      Confetti24Icon, Checkbox24Icon,    Readingtime24Icon, Check24Icon,
+        Files24Icon,       Readingtime24Icon, Award24Icon,    Receipttotal24Icon};
+    const char* rowLabels[SUMMARY_ROW_COUNT] = {
+        tr(STR_STREAK),       tr(STR_MAX_STREAK),     tr(STR_DAILY_GOAL),  tr(STR_READING_TIME),
+        tr(STR_BOOKS_FINISHED), tr(STR_BOOKS_STARTED), tr(STR_AVG_SESSION), tr(STR_LONGEST_SESSION),
+        tr(STR_SESSIONS_TODAY)};
+    const std::string rowValues[SUMMARY_ROW_COUNT] = {
+        std::to_string(READING_STATS.getCurrentStreakDays()),
+        std::to_string(READING_STATS.getMaxStreakDays()),
+        dailyGoalValue,
+        ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()),
+        std::to_string(READING_STATS.getBooksFinishedCount()),
+        std::to_string(READING_STATS.getBooksStartedCount()),
+        ReadingStatsAnalytics::formatDurationHm(READING_STATS.getAverageSessionMs()),
+        ReadingStatsAnalytics::formatDurationHm(READING_STATS.getLongestSessionMs()),
+        std::string(sessionsValue)};
+    for (int i = 0; i < SUMMARY_ROW_COUNT; ++i) {
       drawMetricRow(renderer, Rect{sidePadding, y, contentWidth, SUMMARY_ROW_HEIGHT}, rowIcons[i], rowLabels[i],
                     rowValues[i]);
       y += SUMMARY_ROW_HEIGHT;

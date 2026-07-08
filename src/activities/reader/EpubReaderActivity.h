@@ -64,6 +64,11 @@ class EpubReaderActivity final : public Activity {
   int cachedTotalBookPages = 0;
 
   void buildBookPageCache();
+  // Book time-left in seconds: pages left in the book × persisted reading pace.
+  // Uses the per-spine page cache when built, else the byte-fraction fallback.
+  // Returns 0 when it can't estimate (no section/pace). Shared by the reader
+  // menu and the onExit stash the sleep screen displays.
+  uint32_t computeBookTimeLeftSeconds() const;
 
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
