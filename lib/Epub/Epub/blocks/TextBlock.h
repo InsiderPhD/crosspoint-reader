@@ -25,10 +25,8 @@ class TextBlock final : public Block {
 
  public:
   explicit TextBlock(std::vector<std::string> words, std::vector<int16_t> word_xpos,
-                     std::vector<EpdFontFamily::Style> word_styles,
-                     const BlockStyle& blockStyle = BlockStyle(),
-                     std::vector<uint8_t> bionic_boundary = {},
-                     std::vector<uint16_t> bionic_suffix_x = {})
+                     std::vector<EpdFontFamily::Style> word_styles, const BlockStyle& blockStyle = BlockStyle(),
+                     std::vector<uint8_t> bionic_boundary = {}, std::vector<uint16_t> bionic_suffix_x = {})
       : words(std::move(words)),
         wordXpos(std::move(word_xpos)),
         wordStyles(std::move(word_styles)),
@@ -39,6 +37,14 @@ class TextBlock final : public Block {
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
   const BlockStyle& getBlockStyle() const { return blockStyle; }
   const std::vector<std::string>& getWords() const { return words; }
+  // Per-word horizontal offsets and styles, exposed for clipping/selection which needs
+  // per-word hit geometry off an already-laid-out line. Both vectors are in lockstep with words.
+  const std::vector<int16_t>& getWordXpos() const { return wordXpos; }
+  const std::vector<EpdFontFamily::Style>& getWordStyles() const { return wordStyles; }
+  // True when layout inserted a visual hyphen at a line break for this word (not present in the
+  // EPUB text). master does not yet track this per-word, so always false; clipping text export
+  // simply keeps any trailing hyphen. Kept for API parity with the clipping text builder.
+  bool wordEndsWithInsertedHyphen(size_t /*index*/) const { return false; }
   bool isEmpty() override { return words.empty(); }
   size_t wordCount() const { return words.size(); }
   // given a renderer works out where to break the words into lines

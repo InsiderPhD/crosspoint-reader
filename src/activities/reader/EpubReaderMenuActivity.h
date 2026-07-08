@@ -23,6 +23,8 @@ class EpubReaderMenuActivity final : public Activity {
     READER_CONTROLS,
     BOOKMARKS,
     ADD_BOOKMARK,
+    SAVE_CLIPPING,
+    VIEW_CLIPPINGS,
     SCREENSHOT,
     DISPLAY_QR,
     MARK_AS_COMPLETED,

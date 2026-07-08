@@ -103,6 +103,15 @@ class EpubReaderActivity final : public Activity {
   // caller should return immediately).
   bool executeReaderAction(CrossPointSettings::READER_ACTION action);
 
+  // Clipping/highlight capture. startClipSelection builds the current page's word geometry and
+  // opens the selection overlay; on confirm it persists the clipping and exports it. handleClippingJump
+  // navigates to a saved clipping picked from the list. computeOrientedMargins returns the reading
+  // viewport margins (shared with render() so the selection overlay uses the same text origin).
+  void startClipSelection();
+  void handleClippingJump(const ClippingJumpResult& jump);
+  void computeOrientedMargins(int& orientedMarginTop, int& orientedMarginRight, int& orientedMarginBottom,
+                              int& orientedMarginLeft) const;
+
   // Helper: open the reader menu (the full complex sub-activity launch).
   void openReaderMenu();
 

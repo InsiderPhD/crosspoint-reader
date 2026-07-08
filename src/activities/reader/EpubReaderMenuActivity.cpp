@@ -40,6 +40,8 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   items.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
   items.push_back({MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS});
   items.push_back({MenuAction::ADD_BOOKMARK, StrId::STR_CREATE_BOOKMARK});
+  items.push_back({MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING});
+  items.push_back({MenuAction::VIEW_CLIPPINGS, StrId::STR_VIEW_CLIPPINGS});
   // Screenshot is a developer/testing action — only surface it in Dev Mode.
   if (SETTINGS.devMode) {
     items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});

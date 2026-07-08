@@ -175,6 +175,8 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
       return tr(STR_READER_ACTION_BUTTON_HINTS);
     case CrossPointSettings::READER_ACTION_ROTATE_SCREEN:
       return tr(STR_READER_ACTION_ROTATE_SCREEN);
+    case CrossPointSettings::READER_ACTION_CREATE_CLIPPING:
+      return tr(STR_READER_ACTION_CREATE_CLIPPING);
     default:
       return tr(STR_NONE_OPT);
   }
