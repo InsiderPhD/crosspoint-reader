@@ -18,8 +18,10 @@ class CrossPointState {
   // Reader's last computed "time left in book" (pages-left × reading pace),
   // stashed at reader exit so the sleep screen can show it without re-deriving
   // a pace from whole-percent progress (which hides after short sessions).
-  // Runtime-only — deliberately not persisted; the sleep screen paints in the
-  // same boot. bookPath tags which book it was computed for.
+  // Persisted in state.json: the sleep screen can repaint in a boot where the
+  // reader never ran (wake to home -> timeout, silent/crash reboot), and the
+  // estimate only changes inside the reader so a persisted value stays in step
+  // with progress. bookPath tags which book it was computed for.
   std::string readerTimeLeftBookPath;
   uint32_t readerTimeLeftSeconds = 0;
   uint32_t lastKnownValidTimestamp = 0;

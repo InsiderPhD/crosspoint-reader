@@ -183,6 +183,7 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
 
     if (topBtn != nullptr && topBtn[0] != '\0') {
       const int leftX = buttonMargin;
+      renderer.fillRect(leftX, x3ButtonY, buttonWidth, buttonHeight, false);
       renderer.drawRect(leftX, x3ButtonY, buttonWidth, buttonHeight);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, topBtn);
       const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
@@ -193,6 +194,7 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
 
     if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
       const int rightX = screenWidth - buttonMargin - buttonWidth;
+      renderer.fillRect(rightX, x3ButtonY, buttonWidth, buttonHeight, false);
       renderer.drawRect(rightX, x3ButtonY, buttonWidth, buttonHeight);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, bottomBtn);
       const int textHeight = renderer.getTextHeight(SMALL_FONT_ID);
@@ -206,10 +208,17 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
     const char* labels[] = {topBtn, bottomBtn};
     const int x = screenWidth - buttonMargin - buttonWidth;
 
+    // Fill each box white first so reader/page content underneath doesn't bleed through the hint
+    // (these boxes sit over text at the right edge). Matches drawButtonHints' opaque background.
     if (topBtn != nullptr && topBtn[0] != '\0') {
+      renderer.fillRect(x, topButtonY, buttonWidth, buttonHeight, false);
       renderer.drawLine(x, topButtonY, x + buttonWidth - 1, topButtonY);
       renderer.drawLine(x, topButtonY, x, topButtonY + buttonHeight - 1);
       renderer.drawLine(x + buttonWidth - 1, topButtonY, x + buttonWidth - 1, topButtonY + buttonHeight - 1);
+    }
+
+    if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
+      renderer.fillRect(x, topButtonY + buttonHeight, buttonWidth, buttonHeight, false);
     }
 
     if ((topBtn != nullptr && topBtn[0] != '\0') || (bottomBtn != nullptr && bottomBtn[0] != '\0')) {

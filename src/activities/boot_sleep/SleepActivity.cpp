@@ -466,7 +466,8 @@ uint8_t SleepActivity::buildStatLines(StatLine lines[MAX_STAT_LINES]) const {
                    tr(STR_STAT_BOOK_TIME_LEFT_MSG));
           break;
         }
-        // Fallback (no stash this boot): pace of the just-finished session —
+        // Fallback (no stash: pre-update state.json, non-EPUB book, or reader
+        // exited at 0 pages left): pace of the just-finished session —
         // "read (end-start)% of the book in sessionMs, so (100-end)% remaining
         // takes remaining/pace". Recent-reading only, so it survives a stats
         // reset, unlike extrapolating lifetime time vs. progress.

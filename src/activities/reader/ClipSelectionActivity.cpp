@@ -125,8 +125,8 @@ void ClipSelectionActivity::render(RenderLock&&) {
   const auto confirmLabel = startMarkIdx == -1 ? tr(STR_SELECT) : tr(STR_DONE);
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  // Up/Down side buttons move by line; label both boxes (position conveys direction).
-  GUI.drawSideButtonHints(renderer, tr(STR_LINE), tr(STR_LINE));
+  // Up/Down side buttons move the cursor by line; label each box with its direction.
+  GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
 
   renderer.displayBuffer();
 }

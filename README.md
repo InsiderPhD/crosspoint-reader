@@ -34,7 +34,7 @@ Everything below has been added or significantly reworked on top of the upstream
 - File explorer with nested folders
 - Multi-language UI — English, Spanish, French, German, Italian, Portuguese, Russian, Ukrainian, Polish, Swedish, Norwegian, [and more](./USER_GUIDE.md#supported-languages)
 
-See [the user guide](./USER_GUIDE.md) for operating instructions, including the [KOReader Sync quick setup](./USER_GUIDE.md#365-koreader-sync-quick-setup).
+See [the user guide](./USER_GUIDE.md) for operating instructions, including the [KOReader Sync quick setup](./USER_GUIDE.md#koreader-sync-quick-setup).
 
 For project scope, see [SCOPE.md](SCOPE.md).
 

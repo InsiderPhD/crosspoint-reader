@@ -75,6 +75,10 @@ bool compareEntries(SortMode mode, const SortEntry& a, const SortEntry& b) {
     case SortMode::TagDesc:
       return missingLastLess(a.tagKey.empty(), b.tagKey.empty(), a.sortKey, b.sortKey,
                              [&] { return ciCompare(b.tagKey, a.tagKey); });
+    case SortMode::SeriesIndexAsc:
+      // Ascending by numeric series index; un-indexed books (< 0) go last, tie-break on name.
+      return missingLastLess(a.seriesIndex < 0.0f, b.seriesIndex < 0.0f, a.sortKey, b.sortKey,
+                             [&] { return a.seriesIndex == b.seriesIndex ? 0 : (a.seriesIndex < b.seriesIndex ? -1 : 1); });
   }
   return false;
 }
@@ -120,6 +124,8 @@ const char* sortModeLabel(SortMode m) {
       return tr(STR_SORT_TAG_ASC);
     case SortMode::TagDesc:
       return tr(STR_SORT_TAG_DESC);
+    case SortMode::SeriesIndexAsc:
+      return tr(STR_SORT_SERIES_ORDER);
   }
   return "";
 }

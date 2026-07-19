@@ -447,6 +447,7 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
     constexpr int x3ButtonY = 155;
 
     if (topBtn != nullptr && topBtn[0] != '\0') {
+      renderer.fillRoundedRect(buttonMargin, x3ButtonY, buttonWidth, buttonHeight, cornerRadius, Color::White);
       renderer.drawRoundedRect(buttonMargin, x3ButtonY, buttonWidth, buttonHeight, 1, cornerRadius, false, true, false,
                                true, true);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, topBtn);
@@ -457,6 +458,7 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
 
     if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
       const int rightX = screenWidth - buttonWidth;
+      renderer.fillRoundedRect(rightX, x3ButtonY, buttonWidth, buttonHeight, cornerRadius, Color::White);
       renderer.drawRoundedRect(rightX, x3ButtonY, buttonWidth, buttonHeight, 1, cornerRadius, true, false, true, false,
                                true);
       const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, bottomBtn);
@@ -470,11 +472,14 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
     const int x = screenWidth - buttonWidth;
 
     if (topBtn != nullptr && topBtn[0] != '\0') {
+      renderer.fillRoundedRect(x, topHintButtonY, buttonWidth, buttonHeight, cornerRadius, Color::White);
       renderer.drawRoundedRect(x, topHintButtonY, buttonWidth, buttonHeight, 1, cornerRadius, true, false, true, false,
                                true);
     }
 
     if (bottomBtn != nullptr && bottomBtn[0] != '\0') {
+      renderer.fillRoundedRect(x, topHintButtonY + buttonHeight + 5, buttonWidth, buttonHeight, cornerRadius,
+                               Color::White);
       renderer.drawRoundedRect(x, topHintButtonY + buttonHeight + 5, buttonWidth, buttonHeight, 1, cornerRadius, true,
                                false, true, false, true);
     }
