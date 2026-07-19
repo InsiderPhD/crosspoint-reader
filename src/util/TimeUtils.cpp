@@ -2,11 +2,11 @@
 
 #include <Arduino.h>
 #include <esp_sntp.h>
+#include <sys/time.h>
 
 #include <algorithm>
 #include <climits>
 #include <ctime>
-#include <sys/time.h>
 
 #include "CrossPointSettings.h"
 #include "TimeZoneRegistry.h"
@@ -171,9 +171,8 @@ uint32_t TimeUtils::getLocalDayOrdinal(const uint32_t epochSeconds) {
     return epochSeconds / 86400UL;
   }
 
-  return static_cast<uint32_t>(
-      daysFromCivil(localTime.tm_year + 1900, static_cast<unsigned>(localTime.tm_mon + 1),
-                    static_cast<unsigned>(localTime.tm_mday)));
+  return static_cast<uint32_t>(daysFromCivil(localTime.tm_year + 1900, static_cast<unsigned>(localTime.tm_mon + 1),
+                                             static_cast<unsigned>(localTime.tm_mday)));
 }
 
 uint32_t TimeUtils::getDayOrdinalForDate(const int year, const unsigned month, const unsigned day) {
@@ -225,7 +224,43 @@ std::string TimeUtils::formatDateTime(const uint32_t epochSeconds, const bool ap
          (localTime.tm_min < 10 ? "0" : "") + std::to_string(localTime.tm_min);
 }
 
-std::string TimeUtils::formatDateParts(const int year, const unsigned month, const unsigned day, const bool appendBang) {
+std::string TimeUtils::formatTime(const uint32_t epochSeconds) {
+  if (!isClockValid(epochSeconds)) {
+    return "";
+  }
+
+  configureTimezone();
+  time_t currentTime = static_cast<time_t>(epochSeconds);
+  tm localTime = {};
+  if (localtime_r(&currentTime, &localTime) == nullptr) {
+    return "";
+  }
+
+  char buffer[8];
+  snprintf(buffer, sizeof(buffer), "%02d:%02d", localTime.tm_hour, localTime.tm_min);
+  return buffer;
+}
+
+// Unpadded day/month (e.g. "10/7") — matches the dd/mm order used elsewhere.
+std::string TimeUtils::formatShortDate(const uint32_t epochSeconds) {
+  if (!isClockValid(epochSeconds)) {
+    return "";
+  }
+
+  configureTimezone();
+  time_t currentTime = static_cast<time_t>(epochSeconds);
+  tm localTime = {};
+  if (localtime_r(&currentTime, &localTime) == nullptr) {
+    return "";
+  }
+
+  char buffer[8];
+  snprintf(buffer, sizeof(buffer), "%d/%d", localTime.tm_mday, localTime.tm_mon + 1);
+  return buffer;
+}
+
+std::string TimeUtils::formatDateParts(const int year, const unsigned month, const unsigned day,
+                                       const bool appendBang) {
   return formatDateBuffer(year, month, day, appendBang);
 }
 
