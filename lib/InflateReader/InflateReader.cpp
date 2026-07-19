@@ -1,11 +1,21 @@
 #include "InflateReader.h"
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #include <cstring>
 #include <type_traits>
 
 namespace {
 constexpr size_t INFLATE_DICT_SIZE = 32768;
-}
+// NOTE: a static BSS pool for this dictionary was tried and reverted. It made
+// section builds immune to heap fragmentation, but the permanent 32KB pushed
+// "reader + BLE stack" past the total heap budget (observed: 4KB free after
+// enabling Bluetooth with a book open → OOM abort). If builds under
+// fragmentation need a guaranteed dictionary again, borrow an idle 48KB
+// framebuffer-sized region for the duration of the build instead of pinning
+// RAM permanently.
+}  // namespace
 
 // Guarantee the cast pattern in the header comment is valid.
 static_assert(std::is_standard_layout<InflateReader>::value,

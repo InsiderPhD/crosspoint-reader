@@ -1,7 +1,9 @@
 #include "BookFusionSyncActivity.h"
 
+#include <BluetoothHIDManager.h>
 #include <BookFusionBookIdStore.h>
 #include <BookFusionTokenStore.h>
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -40,11 +42,24 @@ void BookFusionSyncActivity::onEnter() {
     statusMessage = (direction == Direction::PUSH) ? "Preparing to push…" : "Preparing to pull…";
   }
   requestUpdate();
+  // BLE and WiFi share the radio; hand it to WiFi cleanly for the sync. The
+  // user re-enables Bluetooth afterwards (reader menu / bound button).
+  auto& btMgr = BluetoothHIDManager::getInstance();
+  if (btMgr.isEnabled()) {
+    LOG_INF("BT", "Disabling Bluetooth for WiFi sync");
+    btMgr.disable();
+  }
+  // The TLS handshake alone wants ~45-50KB of heap (mbedTLS buffers). Drop the
+  // cached font glyphs as well; they re-warm on the next page render.
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    fcm->clearCache();
+  }
   performSync();
 }
 
 void BookFusionSyncActivity::onExit() {
   Activity::onExit();
+  BookFusionSyncClient::closeConnection();
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   delay(100);
@@ -316,8 +331,8 @@ void BookFusionSyncActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
 
-  const char* title = (direction == Direction::PUSH) ? "BookFusion: Push Local Progress"
-                                                     : "BookFusion: Pull Remote Progress";
+  const char* title =
+      (direction == Direction::PUSH) ? "BookFusion: Push Local Progress" : "BookFusion: Pull Remote Progress";
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, title);
 
   const int lineH = renderer.getLineHeight(UI_10_FONT_ID);

@@ -132,6 +132,11 @@ class BookFusionSyncClient {
                            const char* sort = nullptr, uint32_t bookshelfId = 0);
   static Error getDownloadUrl(uint32_t bookId, char* outUrl, size_t maxLen);
 
+  // Close the shared keep-alive connection. Call when a sync/browse session is
+  // done (before WiFi teardown) so the TLS context's heap is returned; the next
+  // request transparently reconnects.
+  static void closeConnection();
+
   // --- Bookshelves ---
   // Returns the user's custom shelves. POSTs `{}` to /api/user/bookshelves/search.
   // The plugin source treats this as un-paginated; we accept that.

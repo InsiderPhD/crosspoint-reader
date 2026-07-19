@@ -14,11 +14,149 @@
 #include "StreamingJsonParser.h"
 
 namespace {
-// Add auth and accept headers to an authenticated request.
-void addAuthHeaders(HTTPClient& http) {
-  const std::string bearer = "Bearer " + BF_TOKEN_STORE.getToken();
-  http.addHeader("Authorization", bearer.c_str());
-  http.addHeader("Accept", BookFusionSyncClient::API_ACCEPT);
+// Small TLS buffers so the handshake fits the ESP32-C3's heap even when it is
+// fragmented (the Arduino WiFiClientSecure default of 16KB in + 16KB out needs
+// two large contiguous blocks and was observed failing after the BLE stack had
+// run). Same approach as lib/KOReaderSync/KOReaderSyncClient.cpp.
+constexpr int HTTP_BUF_SIZE = 2048;
+
+// Growable response-body collector for JSON endpoints.
+struct ResponseBuffer {
+  char* data = nullptr;
+  int len = 0;
+  int capacity = 0;
+
+  ~ResponseBuffer() { free(data); }
+
+  bool ensure(int size) {
+    if (size <= capacity) return true;
+    char* newData = (char*)realloc(data, size);
+    if (!newData) return false;
+    data = newData;
+    capacity = size;
+    return true;
+  }
+};
+
+// One shared connection for the whole session: BookFusion flows issue several
+// requests to the same host back-to-back (get/set progress, paged search), and
+// each fresh TLS handshake is both slow and the most memory-hungry moment in
+// the flow (2x16KB record buffers). setReuse keeps the socket alive between
+// requests until closeConnection().
+//
+// Transport is Arduino HTTPClient/WiFiClientSecure with setInsecure() — the
+// project's historical trust model (encrypted, server not authenticated). An
+// esp_http_client port with certificate verification was tried and reverted:
+// the framework's CA bundle fails on BookFusion's Sectigo chain, its esp-tls
+// forbids skipping verification, and pinned roots still require a correct
+// device clock (the leaf cert's validity window starts Apr 2026).
+WiFiClientSecure* g_secure = nullptr;
+HTTPClient* g_http = nullptr;
+
+bool acquireClient() {
+  if (g_http) return true;
+  g_secure = new WiFiClientSecure();
+  if (!g_secure) return false;
+  g_secure->setInsecure();
+  g_http = new HTTPClient();
+  if (!g_http) {
+    delete g_secure;
+    g_secure = nullptr;
+    return false;
+  }
+  g_http->setReuse(true);
+  g_http->setConnectTimeout(10000);  // ms: TCP connect
+  g_http->setTimeout(15000);         // ms: response read
+  return true;
+}
+
+void dropConnection() {
+  if (g_http) {
+    g_http->end();
+    delete g_http;
+    g_http = nullptr;
+  }
+  if (g_secure) {
+    g_secure->stop();
+    delete g_secure;
+    g_secure = nullptr;
+  }
+}
+
+// Perform one request on the shared connection.
+// Returns the HTTP status code, or a negative value on transport/sink failure.
+int performRequest(const char* url, const char* method, const char* contentType, const String* body,
+                   ResponseBuffer* respBuf, Stream* respStream, int* totalCountOut, bool authenticated) {
+  if (!acquireClient()) {
+    LOG_ERR("BFS", "HTTP client init failed");
+    return -1;
+  }
+
+  LOG_DBG("BFS", "HTTPS %s %s (heap: %u, max alloc: %u)", method, url, (unsigned)ESP.getFreeHeap(),
+          (unsigned)ESP.getMaxAllocHeap());
+
+  if (!g_http->begin(*g_secure, url)) {
+    LOG_ERR("BFS", "HTTP begin failed");
+    dropConnection();
+    return -1;
+  }
+  g_http->addHeader("Accept", BookFusionSyncClient::API_ACCEPT);
+  if (authenticated) {
+    const std::string bearer = "Bearer " + BF_TOKEN_STORE.getToken();
+    g_http->addHeader("Authorization", bearer.c_str());
+  }
+  if (contentType) {
+    g_http->addHeader("Content-Type", contentType);
+  }
+  if (totalCountOut) {
+    static const char* kCollectedHeaders[] = {"Total-Count"};
+    g_http->collectHeaders(kCollectedHeaders, 1);
+  }
+
+  const int httpCode =
+      body ? g_http->sendRequest(method, reinterpret_cast<uint8_t*>(const_cast<char*>(body->c_str())), body->length())
+           : g_http->sendRequest(method);
+
+  if (httpCode < 0) {
+    LOG_ERR("BFS", "HTTP request failed: %d (heap: %u)", httpCode, (unsigned)ESP.getFreeHeap());
+    dropConnection();
+    return -1;
+  }
+
+  if (totalCountOut) {
+    const String totalHeader = g_http->header("Total-Count");
+    *totalCountOut = totalHeader.length() > 0 ? totalHeader.toInt() : 0;
+  }
+
+  bool sinkError = false;
+  if (respStream) {
+    if (httpCode == 200) {
+      if (g_http->writeToStream(respStream) < 0) {
+        sinkError = true;
+      }
+    } else {
+      g_http->getString();  // drain the error body so the connection stays reusable
+    }
+  } else if (respBuf) {
+    const String responseBody = g_http->getString();
+    if (respBuf->ensure(responseBody.length() + 1)) {
+      memcpy(respBuf->data, responseBody.c_str(), responseBody.length() + 1);
+      respBuf->len = responseBody.length();
+    } else {
+      LOG_ERR("BFS", "Response buffer allocation failed (%u bytes)", (unsigned)responseBody.length());
+      sinkError = true;
+    }
+  } else {
+    g_http->getString();  // drain
+  }
+
+  // With setReuse, end() keeps the socket open when the server allows it.
+  g_http->end();
+
+  if (sinkError) {
+    return -2;
+  }
+  return httpCode;
 }
 
 bool keyEquals(const char* key, size_t len, const char* expected) {
@@ -496,21 +634,13 @@ BookFusionSyncClient::Error BookFusionSyncClient::requestDeviceCode(BookFusionDe
   snprintf(url, sizeof(url), "%s/api/user/auth/device", BASE_URL);
   LOG_DBG("BFS", "Requesting device code: %s", url);
 
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
-  HTTPClient http;
-  http.begin(secureClient, url);
-  http.addHeader("Accept", API_ACCEPT);
-  http.addHeader("Content-Type", "application/json");
-
   JsonDocument body;
   body["client_id"] = CLIENT_ID;
   String bodyStr;
   serializeJson(body, bodyStr);
 
-  const int httpCode = http.POST(bodyStr);
-  String responseBody = http.getString();
-  http.end();
+  ResponseBuffer resp;
+  const int httpCode = performRequest(url, "POST", "application/json", &bodyStr, &resp, nullptr, nullptr, false);
 
   LOG_DBG("BFS", "requestDeviceCode response: %d", httpCode);
 
@@ -522,7 +652,7 @@ BookFusionSyncClient::Error BookFusionSyncClient::requestDeviceCode(BookFusionDe
   }
 
   JsonDocument doc;
-  if (deserializeJson(doc, responseBody) != DeserializationError::Ok) {
+  if (!resp.data || deserializeJson(doc, resp.data) != DeserializationError::Ok) {
     LOG_ERR("BFS", "requestDeviceCode JSON parse error");
     return JSON_ERROR;
   }
@@ -543,13 +673,6 @@ BookFusionSyncClient::Error BookFusionSyncClient::pollForToken(const char* devic
   char url[128];
   snprintf(url, sizeof(url), "%s/api/user/auth/token", BASE_URL);
 
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
-  HTTPClient http;
-  http.begin(secureClient, url);
-  http.addHeader("Accept", API_ACCEPT);
-  http.addHeader("Content-Type", "application/json");
-
   JsonDocument body;
   body["grant_type"] = DEVICE_CODE_GRANT_TYPE;
   body["client_id"] = CLIENT_ID;
@@ -557,9 +680,8 @@ BookFusionSyncClient::Error BookFusionSyncClient::pollForToken(const char* devic
   String bodyStr;
   serializeJson(body, bodyStr);
 
-  const int httpCode = http.POST(bodyStr);
-  String responseBody = http.getString();
-  http.end();
+  ResponseBuffer resp;
+  const int httpCode = performRequest(url, "POST", "application/json", &bodyStr, &resp, nullptr, nullptr, false);
 
   LOG_DBG("BFS", "pollForToken response: %d", httpCode);
 
@@ -568,7 +690,7 @@ BookFusionSyncClient::Error BookFusionSyncClient::pollForToken(const char* devic
   }
 
   JsonDocument doc;
-  if (deserializeJson(doc, responseBody) != DeserializationError::Ok) {
+  if (!resp.data || deserializeJson(doc, resp.data) != DeserializationError::Ok) {
     LOG_ERR("BFS", "pollForToken JSON parse error");
     return JSON_ERROR;
   }
@@ -610,20 +732,12 @@ BookFusionSyncClient::Error BookFusionSyncClient::getProgress(uint32_t bookId, B
   snprintf(url, sizeof(url), "%s/api/user/books/%lu/reading_position", BASE_URL, (unsigned long)bookId);
   LOG_DBG("BFS", "getProgress: %s", url);
 
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
-  HTTPClient http;
-  http.begin(secureClient, url);
-  addAuthHeaders(http);
-
-  const int httpCode = http.GET();
+  ResponseBuffer resp;
+  const int httpCode = performRequest(url, "GET", nullptr, nullptr, &resp, nullptr, nullptr, true);
 
   if (httpCode == 200) {
-    String responseBody = http.getString();
-    http.end();
-
     JsonDocument doc;
-    if (deserializeJson(doc, responseBody) != DeserializationError::Ok) {
+    if (!resp.data || deserializeJson(doc, resp.data) != DeserializationError::Ok) {
       LOG_ERR("BFS", "getProgress JSON parse error");
       return JSON_ERROR;
     }
@@ -635,7 +749,6 @@ BookFusionSyncClient::Error BookFusionSyncClient::getProgress(uint32_t bookId, B
     return OK;
   }
 
-  http.end();
   LOG_DBG("BFS", "getProgress response: %d", httpCode);
 
   if (httpCode == 404) return NOT_FOUND;
@@ -654,13 +767,6 @@ BookFusionSyncClient::Error BookFusionSyncClient::setProgress(uint32_t bookId, c
   snprintf(url, sizeof(url), "%s/api/user/books/%lu/reading_position", BASE_URL, (unsigned long)bookId);
   LOG_DBG("BFS", "setProgress: %s (%.2f%%)", url, pos.percentage);
 
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
-  HTTPClient http;
-  http.begin(secureClient, url);
-  addAuthHeaders(http);
-  http.addHeader("Content-Type", "application/json");
-
   JsonDocument body;
   body["percentage"] = pos.percentage;
   body["chapter_index"] = pos.chapterIndex;
@@ -668,19 +774,15 @@ BookFusionSyncClient::Error BookFusionSyncClient::setProgress(uint32_t bookId, c
   String bodyStr;
   serializeJson(body, bodyStr);
 
-  const int httpCode = http.POST(bodyStr);
-  String responseBody;
-  if (httpCode == 200 || httpCode == 201) {
-    responseBody = http.getString();
-  }
-  http.end();
+  ResponseBuffer resp;
+  const int httpCode = performRequest(url, "POST", "application/json", &bodyStr, &resp, nullptr, nullptr, true);
 
   LOG_DBG("BFS", "setProgress response: %d", httpCode);
 
   if (httpCode == 200 || httpCode == 201) {
-    if (out != nullptr && responseBody.length() > 0) {
+    if (out != nullptr && resp.data != nullptr) {
       JsonDocument doc;
-      if (deserializeJson(doc, responseBody) == DeserializationError::Ok) {
+      if (deserializeJson(doc, resp.data) == DeserializationError::Ok) {
         readBookFusionPosition(doc, *out);
       } else {
         LOG_DBG("BFS", "setProgress response JSON parse skipped");
@@ -701,21 +803,6 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
 
   char url[128];
   snprintf(url, sizeof(url), "%s/api/user/books/search", BASE_URL);
-
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
-  HTTPClient http;
-  http.begin(secureClient, url);
-  addAuthHeaders(http);
-  http.addHeader("Content-Type", "application/json");
-
-  // BookFusion emits a `Total-Count` response header with the total number of
-  // books across all pages (confirmed empirically via header dump). HTTPClient
-  // requires us to register the key up-front; it's then readable via
-  // http.header("Total-Count") after the request. collectHeaders takes
-  // `const char**`, so the array can't be `const`-of-`const`.
-  static const char* kCollectedHeaders[] = {"Total-Count"};
-  http.collectHeaders(kCollectedHeaders, sizeof(kCollectedHeaders) / sizeof(kCollectedHeaders[0]));
 
   // Keep one visible page in memory. The response body itself is streamed
   // through BookFusionSearchJsonStream, so we never allocate the raw JSON.
@@ -740,36 +827,29 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
   String bodyStr;
   serializeJson(reqBody, bodyStr);
 
-  const int httpCode = http.POST(bodyStr);
+  // The response body streams through BookFusionSearchJsonStream during the
+  // request; BookFusion's `Total-Count` header (total books across all pages)
+  // is captured by the shared event handler.
+  BookFusionSearchJsonStream responseStream(out, page);
+  int totalCount = 0;
+  const int httpCode =
+      performRequest(url, "POST", "application/json", &bodyStr, nullptr, &responseStream, &totalCount, true);
   LOG_DBG("BFS", "searchBooks page=%d response: %d", page, httpCode);
 
-  // Pick up the total before any early returns so the count is still written
-  // into `out` on partial-success paths (currently the early returns bail out
-  // before populating `out` anyway, but reading the header here is cheap and
-  // future-proofs the assignment).
-  const String totalCountHeader = http.header("Total-Count");
-  out.totalCount = totalCountHeader.length() > 0 ? totalCountHeader.toInt() : 0;
+  out.totalCount = totalCount;
 
-  if (httpCode < 0) {
-    http.end();
-    return NETWORK_ERROR;
-  }
   if (httpCode == 401) {
-    http.end();
     return AUTH_FAILED;
   }
-  if (httpCode != 200) {
-    http.end();
-    return SERVER_ERROR;
-  }
-
-  BookFusionSearchJsonStream responseStream(out, page);
-  const int writeResult = http.writeToStream(&responseStream);
-  http.end();
-
-  if (writeResult < 0) {
-    LOG_ERR("BFS", "searchBooks body stream error: %d", writeResult);
+  if (httpCode == -2) {
+    LOG_ERR("BFS", "searchBooks body stream error");
     return NETWORK_ERROR;
+  }
+  if (httpCode < 0) {
+    return NETWORK_ERROR;
+  }
+  if (httpCode != 200) {
+    return SERVER_ERROR;
   }
   if (responseStream.empty()) {
     LOG_ERR("BFS", "searchBooks response body empty");
@@ -801,16 +881,9 @@ BookFusionSyncClient::Error BookFusionSyncClient::getDownloadUrl(uint32_t bookId
   char url[128];
   snprintf(url, sizeof(url), "%s/api/user/books/%lu/download", BASE_URL, static_cast<unsigned long>(bookId));
 
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
-  HTTPClient http;
-  http.begin(secureClient, url);
-  addAuthHeaders(http);
-  http.addHeader("Content-Type", "application/json");
-
-  const int httpCode = http.POST("{}");
-  String responseBody = http.getString();
-  http.end();
+  const String emptyBody = "{}";
+  ResponseBuffer resp;
+  const int httpCode = performRequest(url, "POST", "application/json", &emptyBody, &resp, nullptr, nullptr, true);
 
   LOG_DBG("BFS", "getDownloadUrl book=%lu response: %d", static_cast<unsigned long>(bookId), httpCode);
 
@@ -820,7 +893,7 @@ BookFusionSyncClient::Error BookFusionSyncClient::getDownloadUrl(uint32_t bookId
   if (httpCode != 200) return SERVER_ERROR;
 
   JsonDocument doc;
-  if (deserializeJson(doc, responseBody) != DeserializationError::Ok) {
+  if (!resp.data || deserializeJson(doc, resp.data) != DeserializationError::Ok) {
     LOG_ERR("BFS", "getDownloadUrl JSON parse error");
     return JSON_ERROR;
   }
@@ -858,51 +931,35 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBookshelves(BookFusionBo
     char url[128];
     snprintf(url, sizeof(url), "%s/api/user/bookshelves/search", BASE_URL);
 
-    WiFiClientSecure secureClient;
-    secureClient.setInsecure();
-    HTTPClient http;
-    http.begin(secureClient, url);
-    addAuthHeaders(http);
-    http.addHeader("Content-Type", "application/json");
-
-    static const char* kCollectedHeaders[] = {"Total-Count"};
-    http.collectHeaders(kCollectedHeaders, sizeof(kCollectedHeaders) / sizeof(kCollectedHeaders[0]));
-
     JsonDocument reqBody;
     reqBody["page"] = page;
     reqBody["per_page"] = SHELVES_PER_PAGE;
     String bodyStr;
     serializeJson(reqBody, bodyStr);
 
-    const int httpCode = http.POST(bodyStr);
+    const int countBeforePage = out.count;
+    BookFusionBookshelfJsonStream responseStream(out);
+    int pageTotalCount = 0;
+    const int httpCode =
+        performRequest(url, "POST", "application/json", &bodyStr, nullptr, &responseStream, &pageTotalCount, true);
     LOG_DBG("BFS", "searchBookshelves page=%d response: %d", page, httpCode);
 
-    if (httpCode < 0) {
-      http.end();
-      return NETWORK_ERROR;
-    }
     if (httpCode == 401) {
-      http.end();
       return AUTH_FAILED;
     }
+    if (httpCode == -2) {
+      LOG_ERR("BFS", "searchBookshelves body stream error");
+      return NETWORK_ERROR;
+    }
+    if (httpCode < 0) {
+      return NETWORK_ERROR;
+    }
     if (httpCode != 200) {
-      http.end();
       return SERVER_ERROR;
     }
 
     if (page == 1) {
-      const String totalHeader = http.header("Total-Count");
-      totalCount = totalHeader.length() > 0 ? totalHeader.toInt() : 0;
-    }
-
-    const int countBeforePage = out.count;
-    BookFusionBookshelfJsonStream responseStream(out);
-    const int writeResult = http.writeToStream(&responseStream);
-    http.end();
-
-    if (writeResult < 0) {
-      LOG_ERR("BFS", "searchBookshelves body stream error: %d", writeResult);
-      return NETWORK_ERROR;
+      totalCount = pageTotalCount;
     }
     if (responseStream.empty()) {
       LOG_ERR("BFS", "searchBookshelves response body empty");
@@ -931,21 +988,14 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBookshelves(BookFusionBo
 }
 
 BookFusionSyncClient::Error BookFusionSyncClient::trackReadingTime(const uint32_t bookId,
-                                                                      const uint32_t durationSeconds,
-                                                                      const char* loggedAtUtcIso) {
+                                                                   const uint32_t durationSeconds,
+                                                                   const char* loggedAtUtcIso) {
   if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
 
   char url[128];
   snprintf(url, sizeof(url), "%s/api/user/reading/track", BASE_URL);
   LOG_DBG("BFS", "trackReadingTime: book=%lu duration=%lus logged_at=%s", (unsigned long)bookId,
           (unsigned long)durationSeconds, loggedAtUtcIso);
-
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
-  HTTPClient http;
-  http.begin(secureClient, url);
-  addAuthHeaders(http);
-  http.addHeader("Content-Type", "application/json");
 
   JsonDocument body;
   JsonArray records = body["records"].to<JsonArray>();
@@ -959,8 +1009,7 @@ BookFusionSyncClient::Error BookFusionSyncClient::trackReadingTime(const uint32_
   String bodyStr;
   serializeJson(body, bodyStr);
 
-  const int httpCode = http.POST(bodyStr);
-  http.end();
+  const int httpCode = performRequest(url, "POST", "application/json", &bodyStr, nullptr, nullptr, nullptr, true);
 
   LOG_DBG("BFS", "trackReadingTime response: %d", httpCode);
 
@@ -969,6 +1018,8 @@ BookFusionSyncClient::Error BookFusionSyncClient::trackReadingTime(const uint32_
   if (httpCode < 0) return NETWORK_ERROR;
   return SERVER_ERROR;
 }
+
+void BookFusionSyncClient::closeConnection() { dropConnection(); }
 
 const char* BookFusionSyncClient::errorString(Error error) {
   switch (error) {
