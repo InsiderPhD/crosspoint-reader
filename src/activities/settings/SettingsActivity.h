@@ -20,6 +20,7 @@ enum class SettingAction {
   BookFusionSync,
   OPDSBrowser,
   Network,
+  Bluetooth,
   ClearCache,
   RecacheLibrary,
   RecacheMetadata,

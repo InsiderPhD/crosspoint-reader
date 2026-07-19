@@ -258,6 +258,7 @@ class CrossPointSettings {
     READER_ACTION_BUTTON_HINTS = 19,
     READER_ACTION_ROTATE_SCREEN = 20,
     READER_ACTION_CREATE_CLIPPING = 21,
+    READER_ACTION_TOGGLE_BLUETOOTH = 22,
     READER_ACTION_COUNT
   };
 
@@ -322,6 +323,11 @@ class CrossPointSettings {
   // Last-chosen sort order in list activities (Library / Recents / FileBrowser).
   // Stored as a SortMode value; defaults to AlphabeticAsc on first run.
   uint8_t sortMode = 0;
+  // Last-chosen sort order in the grouped (Tags/Authors/Series) browse view. Kept separate
+  // from `sortMode` because the grouped view offers a different mode set and Series defaults
+  // to series order. Sentinel 0xFF = "unset" → GroupBrowserActivity picks the per-mode
+  // default (Series order for Series, else Name A-Z). Any real SortMode overrides it.
+  uint8_t groupSortMode = 0xFF;
   // EPUB reading orientation settings
   // 0 = portrait (default), 1 = landscape clockwise, 2 = inverted, 3 = landscape counter-clockwise
   uint8_t orientation = PORTRAIT;
@@ -371,6 +377,10 @@ class CrossPointSettings {
   uint8_t embeddedStyle = 1;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // BLE bonded remote identity, so the firmware can auto-reconnect after reboot
+  char bleBondedDeviceAddr[18] = "";
+  char bleBondedDeviceName[32] = "";
+  uint8_t bleBondedDeviceAddrType = 0;
   // "Browse Files" view: FOLDERS = the SD directory tree (default), TAGS = whole-library
   // tag folders (each book tag presented as a folder).
   uint8_t folderView = FOLDER_VIEW_FOLDERS;
@@ -386,6 +396,12 @@ class CrossPointSettings {
   // Reader button-hint bar mode (BUTTON_HINTS_MODE): Off / Short-press / Long-press labels.
   // Reserves layout space, so changing it reflows the current chapter. Reader-only.
   uint8_t showButtonHints = BUTTON_HINTS_OFF;
+  // Reader-menu entry visibility (1 = shown). For users who bind these functions
+  // to reader controls and don't want the duplicate menu rows.
+  uint8_t readerMenuClippings = 1;  // Save Clipping / View Clippings
+  uint8_t readerMenuBookmarks = 1;  // Add Bookmark / Bookmarks
+  uint8_t readerMenuSync = 1;       // Sync Push / Sync Pull
+  uint8_t readerMenuBluetooth = 1;  // Bluetooth Remote toggle
   // Long press confirm button action (0 = refresh, 1 = sync, 2 = none, 3 = bookmark)
   uint8_t longPressAction = LONG_PRESS_REFRESH;
   // Dark mode (inverts entire UI except images)

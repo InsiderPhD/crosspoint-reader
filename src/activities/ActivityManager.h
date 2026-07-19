@@ -108,6 +108,7 @@ class ActivityManager {
 
   bool preventAutoSleep() const;
   bool isReaderActivity() const;
+  bool keepsBluetoothActive() const;
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
 

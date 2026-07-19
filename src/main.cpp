@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <BluetoothHIDManager.h>
+#include <BoardConfig.h>
 #include <Epub.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -13,6 +15,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <SPI.h>
+#include <WiFi.h>
 #include <builtinFonts/all.h>
 
 #include <cstring>
@@ -42,6 +45,9 @@ FontDecompressor fontDecompressor;
 SdCardFontSystem sdFontSystem;
 FontCacheManager fontCacheManager(renderer.getFontMap(), renderer.getSdCardFonts());
 static unsigned long allowSleepAt = 0;
+// Read by the BLE input-mapping callback (NimBLE task context) to decide whether
+// generic remote keys mean page-turn (reader) or menu navigation (elsewhere).
+static volatile bool gBluetoothReaderContext = false;
 
 void ensureSdFontLoaded() { sdFontSystem.ensureLoaded(renderer); }
 
@@ -255,6 +261,14 @@ void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
 
+  // BLE cannot survive deep sleep; shut the stack down cleanly so the remote
+  // disconnects instead of timing out, and NimBLE releases its heap.
+  auto& btMgr = BluetoothHIDManager::getInstance();
+  if (btMgr.isEnabled()) {
+    LOG_INF("SLP", "Disabling Bluetooth before deep sleep");
+    btMgr.disable();
+  }
+
   const bool isSeamless = SETTINGS.seamlessSleepScreen == CrossPointSettings::SEAMLESS_SLEEP_SCREEN::SEAMLESS_ALWAYS ||
                           (fromTimeout && SETTINGS.seamlessSleepScreen ==
                                               CrossPointSettings::SEAMLESS_SLEEP_SCREEN::SEAMLESS_AFTER_TIMEOUT);
@@ -333,6 +347,17 @@ void setup() {
   silentRebootTarget = 0;
 
   gpio.begin();
+
+  // Lock in the runtime board profile right after hardware detection, before any
+  // SDK driver reads BoardConfig::ACTIVE. The status-bar clock uses freeink::Rtc,
+  // which reads the RTC address/bus from ACTIVE; without this, ACTIVE stays at the
+  // X4 default until display init (setDisplayX3) and halClock.begin() would see "no
+  // RTC". X4 is the default profile and is not selected here, so the X4 path is
+  // unchanged. selectDevice() is idempotent, so the later setDisplayX3() is harmless.
+  if (gpio.deviceIsX3()) {
+    BoardConfig::selectDevice(BoardConfig::Board::XteinkX3);
+  }
+
   powerManager.begin();
   halTiltSensor.begin();
   halClock.begin();
@@ -367,6 +392,15 @@ void setup() {
   KOREADER_STORE.loadFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
+
+  // Bluetooth HID page-turner remotes: BLE keycodes are translated into virtual
+  // presses of the physical buttons, so activities see them as normal input.
+  // The stack itself is only initialised when the user enables Bluetooth.
+  auto& btMgr = BluetoothHIDManager::getInstance();
+  btMgr.setButtonInjector([](uint8_t buttonIndex, bool pressed) { gpio.setVirtualButtonState(buttonIndex, pressed); });
+  btMgr.setButtonActivityNotifier([](uint8_t buttonIndex) { gpio.updateVirtualButtonActivity(buttonIndex); });
+  btMgr.setReaderContextCallback([]() { return gBluetoothReaderContext; });
+  btMgr.setBondedDevice(SETTINGS.bleBondedDeviceAddr, SETTINGS.bleBondedDeviceName);
 
   const auto wakeupReason = gpio.getWakeupReason();
   switch (wakeupReason) {
@@ -481,6 +515,31 @@ void loop() {
   gpio.update();
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
 
+  // Bluetooth HID maintenance: inactivity timeout and bonded-remote reconnect.
+  // Cheap no-ops while Bluetooth is disabled.
+  gBluetoothReaderContext = activityManager.isReaderActivity();
+  auto& btMgr = BluetoothHIDManager::getInstance();
+  const bool physicalInputDetected = gpio.wasAnyPressed() || gpio.wasAnyReleased();
+  // Bluetooth only runs where it's used: the reader and the Bluetooth settings
+  // screen. Everywhere else the stack is shut down so its heap (and the
+  // fragmentation it causes) goes back to the rest of the firmware.
+  const bool bleAllowedHere = activityManager.keepsBluetoothActive();
+  // Note: there is deliberately NO automatic re-enable. Whenever the stack goes
+  // down (leaving the reader, a section-build memory pause, a WiFi sync, deep
+  // sleep), it stays down until the user flips the reader-menu or Bluetooth
+  // settings toggle — turning a chunk of heap on is always an explicit choice.
+  // Leaving the reader/BT settings: power the stack down immediately so its
+  // ~56KB is back in the heap before whatever comes next (home browsing, and
+  // especially a book open with its spine/section cache builds). The session
+  // flag survives, so the first button press back in the reader re-enables it.
+  if (btMgr.isEnabled() && !bleAllowedHere) {
+    LOG_INF("MAIN", "Disabling Bluetooth outside reader/settings");
+    btMgr.disable();
+  }
+  btMgr.updateActivity();
+  btMgr.checkAutoReconnect(physicalInputDetected);
+  const bool bleRecentActivity = btMgr.isEnabled() && btMgr.hasRecentActivity();
+
   renderer.setFadingFix(SETTINGS.fadingFix);
 
   if (Serial && millis() - lastMemPrint >= 10000) {
@@ -510,7 +569,7 @@ void loop() {
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
-  if (userInputDetected || halTiltSensor.hadActivity() || activityManager.preventAutoSleep()) {
+  if (userInputDetected || halTiltSensor.hadActivity() || activityManager.preventAutoSleep() || bleRecentActivity) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }

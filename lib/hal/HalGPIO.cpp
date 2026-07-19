@@ -8,6 +8,10 @@
 // Global HalGPIO instance
 HalGPIO gpio;
 
+namespace {
+constexpr unsigned long VIRTUAL_BUTTON_REPRESS_DEBOUNCE_MS = 250;
+}
+
 namespace X3GPIO {
 
 struct X3ProbeResult {
@@ -203,6 +207,13 @@ void HalGPIO::begin() {
 }
 
 void HalGPIO::update() {
+  previousVirtualButtonState = virtualButtonState;
+  // Expose sub-frame presses (set and already released since the last latch)
+  // for one full frame so activities see the press edge; the release edge
+  // follows on the next update once the pending bit is consumed.
+  virtualButtonState = desiredVirtualButtonState | pendingVirtualPresses;
+  pendingVirtualPresses = 0;
+
   inputMgr.update();
   const bool connected = isUsbConnected();
   usbStateChanged = (connected != lastUsbConnected);
@@ -212,27 +223,120 @@ void HalGPIO::update() {
 bool HalGPIO::wasUsbStateChanged() const { return usbStateChanged; }
 
 bool HalGPIO::isPressed(uint8_t buttonIndex) const {
-  return inputMgr.isPressed(buttonIndex);
+  return inputMgr.isPressed(buttonIndex) || (virtualButtonState & (1 << buttonIndex));
 }
 
 bool HalGPIO::wasPressed(uint8_t buttonIndex) const {
-  return inputMgr.wasPressed(buttonIndex);
+  const uint8_t virtualPressed = virtualButtonState & ~previousVirtualButtonState;
+  return inputMgr.wasPressed(buttonIndex) || (virtualPressed & (1 << buttonIndex));
 }
 
 bool HalGPIO::wasAnyPressed() const {
-  return inputMgr.wasAnyPressed();
+  const uint8_t virtualPressed = virtualButtonState & ~previousVirtualButtonState;
+  return inputMgr.wasAnyPressed() || (virtualPressed > 0);
 }
 
 bool HalGPIO::wasReleased(uint8_t buttonIndex) const {
-  return inputMgr.wasReleased(buttonIndex);
+  const uint8_t virtualRelease = previousVirtualButtonState & ~virtualButtonState;
+  return inputMgr.wasReleased(buttonIndex) || (virtualRelease & (1 << buttonIndex));
 }
 
 bool HalGPIO::wasAnyReleased() const {
-  return inputMgr.wasAnyReleased();
+  const uint8_t virtualRelease = previousVirtualButtonState & ~virtualButtonState;
+  return inputMgr.wasAnyReleased() || (virtualRelease > 0);
 }
 
 unsigned long HalGPIO::getHeldTime() const {
-  return inputMgr.getHeldTime();
+  unsigned long heldTime = inputMgr.getHeldTime();
+
+  for (uint8_t buttonIndex = 0; buttonIndex <= BTN_POWER; ++buttonIndex) {
+    const unsigned long virtualHeldTime = getHeldTime(buttonIndex);
+    if (virtualHeldTime > heldTime) {
+      heldTime = virtualHeldTime;
+    }
+  }
+
+  return heldTime;
+}
+
+unsigned long HalGPIO::getHeldTime(uint8_t buttonIndex) const {
+  const uint8_t mask = (1 << buttonIndex);
+  if (virtualButtonState & mask) {
+    // While a virtual press is active, prefer the notify-driven activity timestamp:
+    // BLE remotes report "still held" via repeated HID frames, not a level signal.
+    if (virtualLastActivityTime[buttonIndex] >= virtualPressStart[buttonIndex]) {
+      return virtualLastActivityTime[buttonIndex] - virtualPressStart[buttonIndex];
+    }
+    return millis() - virtualPressStart[buttonIndex];
+  }
+
+  if ((previousVirtualButtonState & ~virtualButtonState) & mask) {
+    return virtualPressFinish[buttonIndex] - virtualPressStart[buttonIndex];
+  }
+
+  if (inputMgr.isPressed(buttonIndex) || inputMgr.wasPressed(buttonIndex) || inputMgr.wasReleased(buttonIndex)) {
+    return inputMgr.getHeldTime();
+  }
+
+  return 0;
+}
+
+void HalGPIO::setVirtualButtonState(uint8_t buttonIndex, bool pressed) {
+  if (buttonIndex > BTN_POWER) {
+    return;
+  }
+
+  const uint8_t mask = (1 << buttonIndex);
+  const bool wasHeld = (desiredVirtualButtonState & mask) != 0;
+  if (pressed == wasHeld) {
+    return;
+  }
+
+  const unsigned long now = millis();
+
+  if (pressed) {
+    // BLE HID remotes can emit short release/press jitter for one physical click.
+    // Suppress immediate re-presses so the reader doesn't render multiple fast
+    // refreshes for what should be a single page turn.
+    if (virtualPressFinish[buttonIndex] != 0 &&
+        (now - virtualPressFinish[buttonIndex]) < VIRTUAL_BUTTON_REPRESS_DEBOUNCE_MS) {
+      return;
+    }
+
+    desiredVirtualButtonState |= mask;
+    pendingVirtualPresses |= mask;
+    virtualPressStart[buttonIndex] = now;
+    virtualLastActivityTime[buttonIndex] = now;
+  } else {
+    desiredVirtualButtonState &= ~mask;
+    virtualPressFinish[buttonIndex] = (virtualLastActivityTime[buttonIndex] >= virtualPressStart[buttonIndex])
+                                          ? virtualLastActivityTime[buttonIndex]
+                                          : now;
+    virtualLastActivityTime[buttonIndex] = 0;
+  }
+}
+
+void HalGPIO::injectButtonPress(uint8_t buttonIndex) {
+  setVirtualButtonState(buttonIndex, true);
+  setVirtualButtonState(buttonIndex, false);
+}
+
+void HalGPIO::updateVirtualButtonActivity(uint8_t buttonIndex) {
+  if (buttonIndex <= BTN_POWER) {
+    virtualLastActivityTime[buttonIndex] = millis();
+  }
+}
+
+void HalGPIO::clearVirtualButtons() {
+  virtualButtonState = 0;
+  desiredVirtualButtonState = 0;
+  previousVirtualButtonState = 0;
+  pendingVirtualPresses = 0;
+  for (uint8_t buttonIndex = 0; buttonIndex <= BTN_POWER; ++buttonIndex) {
+    virtualPressStart[buttonIndex] = 0;
+    virtualPressFinish[buttonIndex] = 0;
+    virtualLastActivityTime[buttonIndex] = 0;
+  }
 }
 
 void HalGPIO::startDeepSleep() {

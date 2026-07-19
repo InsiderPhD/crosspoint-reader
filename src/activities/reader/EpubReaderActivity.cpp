@@ -387,15 +387,17 @@ void EpubReaderActivity::onExit() {
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
   APP_STATE.readerActivityLoadCount = 0;
+  // Stash the pages-based book time-left for the sleep screen while the
+  // section is still alive. Must be set BEFORE saveToFile() so it persists:
+  // the sleep screen can repaint in a later boot where the reader never ran
+  // (wake to home -> timeout, silent reboot, crash reboot) and would otherwise
+  // lose this stat while the other (stats-store-backed) cards keep showing.
+  APP_STATE.readerTimeLeftBookPath = epub ? epub->getPath() : "";
+  APP_STATE.readerTimeLeftSeconds = computeBookTimeLeftSeconds();
   APP_STATE.saveToFile();
   if (SETTINGS.readingSpeedSecondsPerPage > 0) {
     SETTINGS.saveToFile();
   }
-
-  // Stash the pages-based book time-left for the sleep screen while the
-  // section is still alive (runtime-only; not persisted).
-  APP_STATE.readerTimeLeftBookPath = epub ? epub->getPath() : "";
-  APP_STATE.readerTimeLeftSeconds = computeBookTimeLeftSeconds();
 
   recordStatsProgress();
   READING_STATS.endSession();
@@ -447,7 +449,8 @@ void EpubReaderActivity::loop() {
   }
 
   // ── Power: long press always sleeps; short press = configured action ──────
-  if (mappedInput.isPressed(MappedInputManager::Button::Power) && mappedInput.getHeldTime() >= skipChapterMs) {
+  if (mappedInput.isPressed(MappedInputManager::Button::Power) &&
+      mappedInput.getHeldTime(MappedInputManager::Button::Power) >= skipChapterMs) {
     enterDeepSleepFromReaderAction();
     return;
   }
@@ -457,8 +460,8 @@ void EpubReaderActivity::loop() {
   }
 
   // ── Confirm: long press (hold-based, single-fire) ─────────────────────────
-  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= skipChapterMs &&
-      !longPressFeedbackShown) {
+  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
+      mappedInput.getHeldTime(MappedInputManager::Button::Confirm) >= skipChapterMs && !longPressFeedbackShown) {
     longPressFeedbackShown = true;
     executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressConfirm));
     return;
@@ -474,8 +477,8 @@ void EpubReaderActivity::loop() {
   }
 
   // ── Back: long press (hold-based, single-fire) ───────────────────────────
-  if (mappedInput.isPressed(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= skipChapterMs &&
-      !longPressBackFired) {
+  if (mappedInput.isPressed(MappedInputManager::Button::Back) &&
+      mappedInput.getHeldTime(MappedInputManager::Button::Back) >= skipChapterMs && !longPressBackFired) {
     longPressBackFired = true;
     executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressBack));
     return;
@@ -509,8 +512,8 @@ void EpubReaderActivity::loop() {
 
   // ── Left: long press / short press ───────────────────────────────────────
   if (longPressLeft != CrossPointSettings::READER_ACTION_NONE) {
-    if (mappedInput.isPressed(MappedInputManager::Button::Left) && mappedInput.getHeldTime() >= skipChapterMs &&
-        !longPressLeftFired) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Left) &&
+        mappedInput.getHeldTime(MappedInputManager::Button::Left) >= skipChapterMs && !longPressLeftFired) {
       longPressLeftFired = true;
       executeReaderAction(longPressLeft);
       return;
@@ -518,7 +521,8 @@ void EpubReaderActivity::loop() {
     if (!mappedInput.isPressed(MappedInputManager::Button::Left)) {
       longPressLeftFired = false;
     }
-    if (mappedInput.wasReleased(MappedInputManager::Button::Left) && mappedInput.getHeldTime() < skipChapterMs) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Left) &&
+        mappedInput.getHeldTime(MappedInputManager::Button::Left) < skipChapterMs) {
       if (executeReaderAction(shortPressLeft)) return;
     }
   } else {
@@ -529,8 +533,8 @@ void EpubReaderActivity::loop() {
 
   // ── Right: long press / short press ──────────────────────────────────────
   if (longPressRight != CrossPointSettings::READER_ACTION_NONE) {
-    if (mappedInput.isPressed(MappedInputManager::Button::Right) && mappedInput.getHeldTime() >= skipChapterMs &&
-        !longPressRightFired) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Right) &&
+        mappedInput.getHeldTime(MappedInputManager::Button::Right) >= skipChapterMs && !longPressRightFired) {
       longPressRightFired = true;
       executeReaderAction(longPressRight);
       return;
@@ -538,7 +542,8 @@ void EpubReaderActivity::loop() {
     if (!mappedInput.isPressed(MappedInputManager::Button::Right)) {
       longPressRightFired = false;
     }
-    if (mappedInput.wasReleased(MappedInputManager::Button::Right) && mappedInput.getHeldTime() < skipChapterMs) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Right) &&
+        mappedInput.getHeldTime(MappedInputManager::Button::Right) < skipChapterMs) {
       if (executeReaderAction(shortPressRight)) return;
     }
   } else {
@@ -552,8 +557,8 @@ void EpubReaderActivity::loop() {
     const auto shortPressSideUp = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressSideUp);
     const auto longPressSideUp = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideUp);
     if (longPressSideUp != CrossPointSettings::READER_ACTION_NONE) {
-      if (mappedInput.isPressed(MappedInputManager::Button::PageBack) && mappedInput.getHeldTime() >= skipChapterMs &&
-          !longPressPageBackFired) {
+      if (mappedInput.isPressed(MappedInputManager::Button::PageBack) &&
+          mappedInput.getHeldTime(MappedInputManager::Button::PageBack) >= skipChapterMs && !longPressPageBackFired) {
         longPressPageBackFired = true;
         executeReaderAction(longPressSideUp);
         return;
@@ -561,7 +566,8 @@ void EpubReaderActivity::loop() {
       if (!mappedInput.isPressed(MappedInputManager::Button::PageBack)) {
         longPressPageBackFired = false;
       }
-      if (mappedInput.wasReleased(MappedInputManager::Button::PageBack) && mappedInput.getHeldTime() < skipChapterMs) {
+      if (mappedInput.wasReleased(MappedInputManager::Button::PageBack) &&
+          mappedInput.getHeldTime(MappedInputManager::Button::PageBack) < skipChapterMs) {
         if (executeReaderAction(shortPressSideUp)) return;
       }
     } else {
@@ -577,7 +583,8 @@ void EpubReaderActivity::loop() {
     const auto longPressSideDown = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressSideDown);
     if (longPressSideDown != CrossPointSettings::READER_ACTION_NONE) {
       if (mappedInput.isPressed(MappedInputManager::Button::PageForward) &&
-          mappedInput.getHeldTime() >= skipChapterMs && !longPressPageForwardFired) {
+          mappedInput.getHeldTime(MappedInputManager::Button::PageForward) >= skipChapterMs &&
+          !longPressPageForwardFired) {
         longPressPageForwardFired = true;
         executeReaderAction(longPressSideDown);
         return;
@@ -586,7 +593,7 @@ void EpubReaderActivity::loop() {
         longPressPageForwardFired = false;
       }
       if (mappedInput.wasReleased(MappedInputManager::Button::PageForward) &&
-          mappedInput.getHeldTime() < skipChapterMs) {
+          mappedInput.getHeldTime(MappedInputManager::Button::PageForward) < skipChapterMs) {
         if (executeReaderAction(shortPressSideDown)) return;
       }
     } else {
@@ -669,8 +676,53 @@ void EpubReaderActivity::jumpToPercent(int percent) {
   }
 }
 
+void EpubReaderActivity::toggleBluetoothFromReader() {
+  auto& btMgr = BluetoothHIDManager::getInstance();
+  const bool turningOn = !btMgr.isEnabled();
+  {
+    RenderLock lock(*this);
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    GUI.drawPopup(renderer, turningOn ? tr(STR_BT_TURNING_ON) : tr(STR_BT_TURNING_OFF));
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+  }
+  if (turningOn) {
+    // The BLE stack wants ~56KB and the page must still be renderable
+    // afterwards. Free the chapter layout (reloads from cache) and the
+    // glyph cache (re-warms) before starting it — enabling with a book
+    // loaded otherwise leaves single-digit KB and the next render OOMs.
+    {
+      RenderLock lock(*this);
+      if (section) {
+        nextPageNumber = section->currentPage;
+        cachedChapterTotalPageCount = section->pageCount;
+        section.reset();
+      }
+    }
+    if (auto* fcm = renderer.getFontCacheManager()) {
+      fcm->clearCache();
+    }
+    if (!btMgr.enable()) {
+      RenderLock lock(*this);
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      GUI.drawPopup(renderer, tr(STR_BT_ENABLE_FAILED));
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+      vTaskDelay(1500 / portTICK_PERIOD_MS);
+    }
+  } else {
+    btMgr.disable();
+  }
+  pagesUntilFullRefresh = 1;
+  requestUpdate();
+}
+
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
   switch (action) {
+    case EpubReaderMenuActivity::MenuAction::TOGGLE_BLUETOOTH: {
+      toggleBluetoothFromReader();
+      break;
+    }
     case EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER: {
       const int spineIdx = currentSpineIndex;
       const std::string path = epub->getPath();
@@ -781,18 +833,6 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       // If no text or page loading failed, just close menu
       requestUpdate();
       break;
-    }
-    case EpubReaderMenuActivity::MenuAction::MARK_AS_COMPLETED: {
-      if (epub) {
-        RECENT_BOOKS.updateProgress(epub->getPath(), 100);
-        RECENT_BOOKS.saveToFile();
-      }
-      if (!bookFinishedRecorded) {
-        bookFinishedRecorded = true;
-        READING_STATS.updateProgress(100, true);
-      }
-      onGoHome();
-      return;
     }
     case EpubReaderMenuActivity::MenuAction::GO_HOME: {
       onGoHome();
@@ -1318,6 +1358,14 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                                   viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
                                   SETTINGS.imageRendering, SETTINGS.footnoteDisplay, SETTINGS.bionicReading)) {
       LOG_DBG("ERS", "Cache not found, building...");
+
+      // The chapter re-parse needs a ~32KB contiguous block for the ZIP inflate
+      // state; with the BLE stack up the largest free block can drop below 20KB
+      // and the build fails outright. Shut BLE down for the build — the user is
+      // watching the Indexing popup anyway. The stack intentionally stays down
+      // afterwards; it returns on the next physical button press or via the
+      // reader-menu Bluetooth toggle.
+      BleMemoryPause blePause;
 
       // A full chapter re-parse (ChapterHtmlSlimParser) is heap-heavy and can OOM mid-session
       // when free heap is lower than at book-load — e.g. after a rotate, which changes the
@@ -2060,6 +2108,10 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
     case A::READER_ACTION_NONE:
       return false;
 
+    case A::READER_ACTION_TOGGLE_BLUETOOTH:
+      toggleBluetoothFromReader();
+      return true;
+
     case A::READER_ACTION_PAGE_FORWARD:
       if (currentSpineIndex > 0 && currentSpineIndex >= epub->getSpineItemsCount()) {
         onGoHome();
@@ -2305,6 +2357,17 @@ void EpubReaderActivity::performKOReaderQuickSync() {
   }
   const KOReaderPosition localKoPos = ProgressMapper::toKOReader(epub, localPos);
 
+  // Local position (with paragraph precision) is captured; free the chapter
+  // layout before the TLS session starts — see performBookFusionSync.
+  {
+    RenderLock lock(*this);
+    if (section) {
+      nextPageNumber = section->currentPage;
+      cachedChapterTotalPageCount = section->pageCount;
+      section.reset();
+    }
+  }
+
   int64_t lastSyncTimestamp = 0;
   const bool hasLastSyncTimestamp = KOReaderSyncStateStore::loadLastSyncTimestamp(epubPath.c_str(), lastSyncTimestamp);
   KOReaderStoredPosition lastSyncedPosition;
@@ -2459,6 +2522,7 @@ void EpubReaderActivity::performKOReaderQuickSync() {
 
   vTaskDelay(1200 / portTICK_PERIOD_MS);
 
+  BookFusionSyncClient::closeConnection();
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   delay(100);
@@ -2510,6 +2574,21 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
 
   // Attempt connection
   LOG_DBG("BFS", "Attempting to connect to WiFi: %s", lastSsid.c_str());
+
+  // BLE and WiFi share the radio; hand it to WiFi cleanly for the sync. The
+  // user re-enables Bluetooth afterwards (reader menu / bound button); an
+  // automatic restore was tried and froze the device — BT controller init
+  // right after a WiFi session is unreliable on this chip.
+  auto& btMgrSync = BluetoothHIDManager::getInstance();
+  if (btMgrSync.isEnabled()) {
+    LOG_INF("BT", "Disabling Bluetooth for WiFi sync");
+    btMgrSync.disable();
+  }
+  // The TLS handshake alone wants ~45-50KB of heap (mbedTLS buffers). Drop the
+  // cached font glyphs as well; they re-warm on the next page render.
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    fcm->clearCache();
+  }
 
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
@@ -2622,6 +2701,23 @@ void EpubReaderActivity::performBookFusionSync() {
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
     return;
   }
+  // Local position is captured; free the chapter layout AND the book metadata
+  // before the TLS session starts. The handshake is the allocation spike: two
+  // 16KB record buffers (fixed in the precompiled mbedtls) plus X509/RSA work —
+  // measured on-device to need everything we can free (MinFree hit 184 bytes
+  // with only the section released). The section reloads from its cache file,
+  // and the epub is reloaded right after the first request (the connection is
+  // reused afterwards, so later requests have no handshake spike).
+  {
+    RenderLock lock(*this);
+    if (section) {
+      nextPageNumber = section->currentPage;
+      cachedChapterTotalPageCount = section->pageCount;
+      section.reset();
+    }
+    epub.reset();
+  }
+
   char lastSyncAt[40] = {};
   const bool hasLastSyncAt = BookFusionBookIdStore::loadLastSyncAt(epubPath.c_str(), lastSyncAt, sizeof(lastSyncAt));
   BookFusionStoredPosition lastSyncedPosition;
@@ -2638,6 +2734,18 @@ void EpubReaderActivity::performBookFusionSync() {
   // First, try to fetch remote progress from BookFusion
   BookFusionPosition remoteBfPos;
   auto downloadResult = BookFusionSyncClient::getProgress(bookId, remoteBfPos);
+
+  // Reload the book metadata released above — the handshake is behind us and
+  // the rest of this flow (position resolution, rendering) needs it.
+  {
+    RenderLock lock(*this);
+    epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+    if (!epub->load(true, SETTINGS.embeddedStyle == 0)) {
+      LOG_ERR("BFS", "Failed to reload epub after sync request");
+      onGoHome();
+      return;
+    }
+  }
 
   bool shouldUploadProgress = true;
   bool appliedRemoteProgress = false;
@@ -2829,6 +2937,7 @@ void EpubReaderActivity::performBookFusionSync() {
   // storeBwBuffer() (six 8 KB chunks) can fail to find a contiguous block,
   // leaving the screen in a half-grayscale state — that's the post-sync
   // ghosting we saw in the field.
+  BookFusionSyncClient::closeConnection();
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   delay(100);

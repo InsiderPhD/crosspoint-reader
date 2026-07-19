@@ -85,6 +85,7 @@ class EpubReaderActivity final : public Activity {
   void recordStatsProgress();
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
+  void toggleBluetoothFromReader();
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   void applyOrientation(uint8_t orientation);
   // Drops the cached section so the current chapter re-paginates on the next render,
