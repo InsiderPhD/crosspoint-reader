@@ -420,6 +420,8 @@ KatiePoint can pair with cheap BLE page-turner remotes and clickers (Bluetooth H
 
 > **Fair warning:** this feature is experimental. Cheap remotes all speak slightly different dialects, and Bluetooth is a serious RAM hog on this hardware — so KatiePoint is deliberately strict about when it runs.
 
+<img src="docs/images/user-guide/bluetooth-page-turner.gif" alt="Animated demo: turning Bluetooth on from the reader, the remote reconnecting, and pages turning from the handheld clicker" width="300">
+
 ### Every button turns the page forward
 
 KatiePoint does **not** map remote buttons to separate forward/back actions. *Any*
