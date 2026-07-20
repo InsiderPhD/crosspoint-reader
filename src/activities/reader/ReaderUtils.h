@@ -6,6 +6,7 @@
 #include <HalDisplay.h>
 #include <HalTiltSensor.h>
 #include <Logging.h>
+#include <esp_heap_caps.h>
 
 #include "MappedInputManager.h"
 
@@ -13,6 +14,19 @@ namespace ReaderUtils {
 
 constexpr unsigned long GO_HOME_MS = 1000;
 constexpr int FOOTNOTE_HINT_HEIGHT = 20;
+
+// A section build's peak demand is one 32KB CONTIGUOUS malloc for the inflate
+// ring buffer (InflateReader::init), plus working room for the parser and file
+// buffers. Free bytes are never the constraint here — the largest contiguous
+// block is. Measured on hardware: 96KB free with a 27KB largest block fails.
+constexpr size_t SECTION_BUILD_INFLATE_BYTES = 32768;
+constexpr size_t SECTION_BUILD_HEADROOM_BYTES = 8192;
+constexpr size_t SECTION_BUILD_REQUIRED_BLOCK = SECTION_BUILD_INFLATE_BYTES + SECTION_BUILD_HEADROOM_BYTES;
+
+inline size_t largestFreeBlock() { return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT); }
+
+/** True when a section build would fit right now without freeing anything. */
+inline bool sectionBuildFitsNow() { return largestFreeBlock() >= SECTION_BUILD_REQUIRED_BLOCK; }
 
 inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
   switch (orientation) {
@@ -39,12 +53,32 @@ struct PageTurnResult {
   bool fromTilt;
 };
 
+/**
+ * The footnote display mode a section build/load should actually use.
+ *
+ * Single point of truth on purpose. footnoteDisplay is a section-cache key
+ * (Section.cpp compares it on load and stamps the *requested* value into the
+ * header), so the build, the load and the render-time checks must all derive it
+ * the same way. Disagreement means either a layout that expects footnotes the
+ * build omitted, or a chapter cached as "footnotes on" that contains none and
+ * never invalidates.
+ *
+ * This briefly excluded on-page footnotes whenever a BLE remote was paired, back
+ * when the footnote table was a single ~35KB contiguous allocation (32 entries
+ * each carrying an inline char[1024]) — bigger than the inflate dictionary, and
+ * the allocation that aborted builds. That table is now a packed pool with a
+ * 12KB largest block, comfortably under the 32KB inflate buffer that dominates a
+ * build, so the exclusion no longer earned its cost and was removed.
+ */
+inline uint8_t effectiveFootnoteDisplay() { return SETTINGS.footnoteDisplay; }
+
+/** True when footnotes should be laid out on the page for this build/render. */
+inline bool footnotesOnPage() { return effectiveFootnoteDisplay() == CrossPointSettings::FOOTNOTE_ON_PAGE; }
+
 inline bool allowLongPressChapterSkip() {
-  // BLE page-turn remotes can report delayed or synthetic release frames, which
-  // makes release-driven page turns look ghostier than local buttons. Treat
-  // recent BLE input as page-turn-only and keep chapter-skip semantics for the
-  // local hardware buttons.
-  return SETTINGS.longPressChapterSkip && !BluetoothHIDManager::getInstance().hadRecentFree2Input();
+  // BLE remote presses are injected as pulses, so their hold duration is always
+  // meaningless. Keep chapter-skip semantics for the local hardware buttons only.
+  return SETTINGS.longPressChapterSkip && !BluetoothHIDManager::getInstance().hadRecentRemoteInput();
 }
 
 inline PageTurnResult detectPageTurn(const MappedInputManager& input) {

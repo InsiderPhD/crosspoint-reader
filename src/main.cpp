@@ -35,6 +35,7 @@
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
 #include "util/ButtonNavigator.h"
+#include "util/HeapReport.h"
 #include "util/ScreenshotUtil.h"
 #include "util/WifiTimeSync.h"
 
@@ -393,13 +394,17 @@ void setup() {
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
-  // Bluetooth HID page-turner remotes: BLE keycodes are translated into virtual
-  // presses of the physical buttons, so activities see them as normal input.
-  // The stack itself is only initialised when the user enables Bluetooth.
+  // Bluetooth HID page-turner remotes: any button on the remote is injected as a
+  // virtual press of the physical page-forward button, so activities see it as
+  // normal input. The stack itself is only initialised when the user enables
+  // Bluetooth.
   auto& btMgr = BluetoothHIDManager::getInstance();
   btMgr.setButtonInjector([](uint8_t buttonIndex, bool pressed) { gpio.setVirtualButtonState(buttonIndex, pressed); });
-  btMgr.setButtonActivityNotifier([](uint8_t buttonIndex) { gpio.updateVirtualButtonActivity(buttonIndex); });
   btMgr.setReaderContextCallback([]() { return gBluetoothReaderContext; });
+  // Page-forward lives on a side button that the user can swap, so resolve it
+  // through the same mapping the reader uses rather than hardcoding BTN_DOWN.
+  btMgr.setPageTurnButtonProvider(
+      []() { return mappedInputManager.getPhysicalButtonIndex(MappedInputManager::Button::PageForward); });
   btMgr.setBondedDevice(SETTINGS.bleBondedDeviceAddr, SETTINGS.bleBondedDeviceName);
 
   const auto wakeupReason = gpio.getWakeupReason();
@@ -523,7 +528,12 @@ void loop() {
   // Bluetooth only runs where it's used: the reader and the Bluetooth settings
   // screen. Everywhere else the stack is shut down so its heap (and the
   // fragmentation it causes) goes back to the rest of the firmware.
-  const bool bleAllowedHere = activityManager.keepsBluetoothActive();
+  // Autosync additionally locks Bluetooth out everywhere: the BLE stack wants
+  // ~56KB (with a >=30KB contiguous block) that a background sync's WiFi+TLS
+  // needs, the two share one radio, and bringing the BT controller up right
+  // after esp_wifi_stop() hard-freezes the device — which is exactly what a
+  // mid-reading autosync teardown would set up.
+  const bool bleAllowedHere = activityManager.keepsBluetoothActive() && SETTINGS.bluetoothAllowed();
   // Note: there is deliberately NO automatic re-enable. Whenever the stack goes
   // down (leaving the reader, a section-build memory pause, a WiFi sync, deep
   // sleep), it stays down until the user flips the reader-menu or Bluetooth
@@ -533,7 +543,8 @@ void loop() {
   // especially a book open with its spine/section cache builds). The session
   // flag survives, so the first button press back in the reader re-enables it.
   if (btMgr.isEnabled() && !bleAllowedHere) {
-    LOG_INF("MAIN", "Disabling Bluetooth outside reader/settings");
+    LOG_INF("MAIN", "Disabling Bluetooth (%s)",
+            SETTINGS.bluetoothAllowed() ? "outside reader/settings" : "autosync enabled");
     btMgr.disable();
   }
   btMgr.updateActivity();
@@ -598,6 +609,40 @@ void loop() {
     screenshotComboActive = false;
   }
 
+  // RAM investigator: POWER + Confirm, alongside the POWER + DOWN screenshot
+  // chord. Handled here rather than in an activity so a heap reading can be
+  // taken on any screen, including mid-render states no menu can reach.
+  //
+  // Deliberately NOT POWER + UP: that is the recovery-firmware chord checked
+  // during setup() (see above), and putting a second meaning on it invites a
+  // mis-press near the SD firmware update path. Confirm is resolved through
+  // MappedInputManager so the chord follows the user's front-button remapping.
+  static bool heapReportButtonsReleased = true;
+  static bool heapReportComboActive = false;
+  const bool heapReportChordHeld =
+      gpio.isPressed(HalGPIO::BTN_POWER) && mappedInputManager.isPressed(MappedInputManager::Button::Confirm);
+  if (heapReportChordHeld) {
+    heapReportComboActive = true;
+    if (heapReportButtonsReleased) {
+      heapReportButtonsReleased = false;
+      {
+        RenderLock lock;
+        HeapReport::dump(renderer);
+      }
+    }
+    return;
+  }
+  if (heapReportComboActive) {
+    if (gpio.isPressed(HalGPIO::BTN_POWER)) return;
+    if (gpio.wasReleased(HalGPIO::BTN_POWER)) {
+      heapReportButtonsReleased = true;
+      heapReportComboActive = false;
+      return;
+    }
+    heapReportButtonsReleased = true;
+    heapReportComboActive = false;
+  }
+
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
   if (millis() - lastActivityTime >= sleepTimeoutMs) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
@@ -608,8 +653,9 @@ void loop() {
 
   if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) &&
       gpio.getHeldTime() > SETTINGS.getPowerButtonDuration()) {
-    // If the screenshot combination is potentially being pressed, don't sleep
-    if (gpio.isPressed(HalGPIO::BTN_DOWN)) {
+    // If a POWER chord is potentially being pressed (screenshot / RAM
+    // investigator), don't sleep.
+    if (gpio.isPressed(HalGPIO::BTN_DOWN) || mappedInputManager.isPressed(MappedInputManager::Button::Confirm)) {
       return;
     }
     enterDeepSleep();

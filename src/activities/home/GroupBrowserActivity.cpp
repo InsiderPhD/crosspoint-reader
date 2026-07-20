@@ -22,6 +22,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/ProgressAutoSync.h"
 #include "util/WifiTimeSync.h"
 
 namespace {
@@ -38,10 +39,8 @@ constexpr SortOption GROUP_SORT_OPTIONS[] = {
     {SortMode::DateAddedNewest, SortMode::DateAddedOldest},
 };
 constexpr SortOption GROUP_SORT_OPTIONS_SERIES[] = {
-    {SortMode::SeriesIndexAsc, SortMode::SeriesIndexAsc},
-    {SortMode::AlphabeticAsc, SortMode::AlphabeticDesc},
-    {SortMode::LastOpenedNewest, SortMode::LastOpenedOldest},
-    {SortMode::ProgressMost, SortMode::ProgressLeast},
+    {SortMode::SeriesIndexAsc, SortMode::SeriesIndexAsc},     {SortMode::AlphabeticAsc, SortMode::AlphabeticDesc},
+    {SortMode::LastOpenedNewest, SortMode::LastOpenedOldest}, {SortMode::ProgressMost, SortMode::ProgressLeast},
     {SortMode::DateAddedNewest, SortMode::DateAddedOldest},
 };
 
@@ -201,6 +200,7 @@ void GroupBrowserActivity::loadLibraryKeys() {
   // stack heap is freed before this recache's heavy per-book allocations —
   // avoids a cold-boot OOM/contention crash. No-op after the ~10s boot window.
   WifiTimeSync::preempt();
+  ProgressAutoSync::preempt();
   LibraryScan::enumerateBooks(bookPaths);
   bookKeys.assign(bookPaths.size(), std::string{});
   // Only series mode needs a per-book numeric sort key; leave it empty otherwise.
@@ -686,7 +686,8 @@ void GroupBrowserActivity::render(RenderLock&&) {
         },
         nullptr,
         [this](int index) {
-          return isFolderRow(index) ? UIIcon::Folder : UITheme::getFileIcon(bookPaths[rootBookIdx[index - groups.size()]]);
+          return isFolderRow(index) ? UIIcon::Folder
+                                    : UITheme::getFileIcon(bookPaths[rootBookIdx[index - groups.size()]]);
         },
         [this](int index) -> std::string {
           if (isFolderRow(index)) {

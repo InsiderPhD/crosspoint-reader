@@ -17,6 +17,7 @@
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/ProgressAutoSync.h"
 
 // Implemented in EpubReaderActivity.cpp. We share the same helpers so the
 // position math stays in lockstep with the popup-style sync path.
@@ -36,6 +37,8 @@ std::string BookFusionSyncActivity::chapterNameForSpine(int spineIndex) const {
 
 void BookFusionSyncActivity::onEnter() {
   Activity::onEnter();
+  // A background autosync may hold the radio; this screen takes it over.
+  ProgressAutoSync::preempt();
   {
     RenderLock lock(*this);
     state = SYNCING;

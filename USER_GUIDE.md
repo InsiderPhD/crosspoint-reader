@@ -420,29 +420,76 @@ KatiePoint can pair with cheap BLE page-turner remotes and clickers (Bluetooth H
 
 > **Fair warning:** this feature is experimental. Cheap remotes all speak slightly different dialects, and Bluetooth is a serious RAM hog on this hardware — so KatiePoint is deliberately strict about when it runs.
 
+### Every button turns the page forward
+
+KatiePoint does **not** map remote buttons to separate forward/back actions. *Any*
+button on the remote turns one page forward.
+
+This is deliberate. Cheap clickers disagree about almost everything — some send a
+different code per button, some send the *same* code for every button, and
+one-button models alternate between two codes on each press. Trying to tell those
+apart was unreliable in practice, so KatiePoint doesn't try. There is no button
+mapping step, and nothing to configure.
+
+The trade-off: **you cannot page backwards with the remote.** Use the device's own
+buttons for that. Remotes that only send data while a button is held (rather than
+on press) are not supported.
+
 ### Pairing a remote
 
-1. Go to **Settings → System → Bluetooth Page Turner**.
-2. Set **Bluetooth** to On, then choose **No remote - connect one** to scan.
-3. Pick your remote from the list (unnamed devices that aren't input devices are hidden automatically). Once connected, it's remembered for reconnection.
+1. **Put the remote into pairing mode first.** This is the step most people miss —
+   the remote must be actively advertising or it will not appear in the scan. How
+   you do it varies by model; commonly it is holding a button for a few seconds
+   until an LED flashes. Check your remote's instructions.
+2. Go to **Settings → System → Bluetooth Page Turner**.
+3. Set **Bluetooth** to On, then choose **No remote - connect one** to scan.
+4. Pick your remote from the list (unnamed devices that aren't input devices are
+   hidden automatically). Once connected, it's remembered for reconnection.
 
-### Mapping the buttons
+When it connects, KatiePoint spends about a second watching the remote sit idle so
+it can learn what "no button pressed" looks like for that model. Don't hold a
+button during those first couple of seconds after connecting.
 
-If pages don't turn — or turn the wrong way — run **Map Remote**:
+### Give yourself a way to turn it back on
 
-- Select **Forward key**, press Confirm, then press the remote button you want for *next page*. Repeat with **Back key** for *previous page*.
-- The tester line at the bottom flashes **FORWARD pressed** / **BACK pressed** so you can verify before choosing **Save & Finish**.
-- **One-button remote**: some clickers have a single button that alternates between two codes on every press. Turn on the **One-button remote** row, capture the button twice (once per row — it sends a different code each press), and both codes will page forward.
+**Do this while you're setting up, not later.** Bluetooth turns itself off often
+(see below), and if you have no quick way to switch it on, using a remote becomes
+tedious. Either:
+
+- Keep the **Bluetooth Remote** row visible in the reader menu (**Settings → Reader
+  → Bluetooth in Menu**), or
+- Bind **Bluetooth Remote** to a button via **Settings → Reader Controls** — this
+  is the faster option, and pressing the bound button again turns it off and frees
+  the memory.
 
 ### Day-to-day use
 
-- Turn the remote connection on and off from the **reader menu** (**Bluetooth Remote** row — it shows the paired remote's name when on), or bind **Bluetooth Remote** to any button via **Reader Controls**. Pressing the bound button again turns it off and frees the memory.
-- If the remote stops responding, **press one of its buttons** — the device listens for it waking up and reconnects within a couple of seconds.
-- The reader-menu row can be hidden via **Settings → Reader → Bluetooth in Menu** if you don't use a remote.
+- If the remote stops responding, **press one of its buttons** — the device listens
+  for it waking up and reconnects within a couple of seconds.
+- Long-press gestures (such as chapter skip) work from the device's own buttons
+  only. A remote press is always a single page turn.
 
 ### Why does Bluetooth keep turning itself off?
 
-By design. Bluetooth needs a large slice of the device's very limited RAM, so KatiePoint shuts it down whenever that memory is needed elsewhere: during **syncing**, while **indexing chapters**, when you **leave the reader** (home screen, library, settings), and in **sleep**. It never turns itself back on — flip the reader-menu row (or press your bound button) when you want the remote again.
+By design. Bluetooth needs a large slice of the device's very limited RAM, so
+KatiePoint shuts it down whenever that memory is needed elsewhere: during
+**syncing**, while **indexing chapters**, when you **leave the reader** (home
+screen, library, settings), and in **sleep**.
+
+**It never turns itself back on — including after a sync.** This catches people
+out: you sync, carry on reading, and the remote is silently dead. Flip the
+reader-menu row or press your bound button to bring it back.
+
+That is not laziness on the device's part. Bringing Bluetooth up immediately after
+a WiFi session is unreliable on this chip — it has been observed to freeze the
+device outright — so re-enabling is always left as a deliberate choice you make
+once the radio has settled.
+
+Occasionally the toggle will refuse with a memory message. Bluetooth needs one
+large *unbroken* run of free memory, and after heavy activity the free memory can
+be plentiful but fragmented into pieces too small to use. Turning a page or two,
+or leaving and re-entering the book, usually frees a large enough run; a restart
+always will.
 
 ---
 
@@ -506,7 +553,7 @@ See **[Reading Stats](#9-reading-stats)** — Daily Reading Goal, Minimum Sessio
 - **Long-press Action** — the reader long-press action (Sync / Page Turn / Force Refresh / Sleep / Create Bookmark).
 - **Tilt Page Turn** *(X3 only, when the IMU is present)* — Off / Normal / Inverted.
 - **WiFi Networks** *(action)* — manage saved networks.
-- **Bluetooth Page Turner** *(action)* — pair and map a BLE remote (see **[Bluetooth Page Turner](#11-bluetooth-page-turner)**).
+- **Bluetooth Page Turner** *(action)* — pair a BLE remote (see **[Bluetooth Page Turner](#11-bluetooth-page-turner)**).
 - **KOReader Sync** *(action)* — see **[KOReader Sync](#koreader-sync-quick-setup)**.
 - **BookFusion Sync** *(action)* — link/manage your BookFusion account.
 - **OPDS Browser** *(action)* — server URL, username, password.

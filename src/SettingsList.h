@@ -199,6 +199,12 @@ inline void appendReaderBehaviourSettings(std::vector<SettingInfo>& v) {
                                    "readerMenuBluetooth", StrId::STR_CAT_READER),
                SettingInfo::Toggle(StrId::STR_MENU_SYNC, &CrossPointSettings::readerMenuSync, "readerMenuSync",
                                    StrId::STR_CAT_READER),
+               // Silent background progress push. Turning this on disables the
+               // Bluetooth remote (shared radio + heap); see bluetoothAllowed().
+               SettingInfo::Enum(StrId::STR_AUTOSYNC, &CrossPointSettings::autosyncMode,
+                                 {StrId::STR_NONE_OPT, StrId::STR_AUTOSYNC_CHAPTER, StrId::STR_AUTOSYNC_1PCT,
+                                  StrId::STR_AUTOSYNC_5PCT, StrId::STR_AUTOSYNC_10PCT, StrId::STR_AUTOSYNC_ON_EXIT},
+                                 "autosyncMode", StrId::STR_CAT_READER),
            });
 }
 
@@ -407,7 +413,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 inline const std::vector<SettingInfo>& getSettingsList() {
   static const std::vector<SettingInfo> list = [] {
     std::vector<SettingInfo> v;
-    v.reserve(64);
+    v.reserve(65);
     SettingsListDetail::appendDisplaySettings(v);
     SettingsListDetail::appendReaderTypographySettings(v);
     SettingsListDetail::appendReaderBehaviourSettings(v);

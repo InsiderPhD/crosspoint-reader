@@ -1,5 +1,6 @@
 #include "ActivityManager.h"
 
+#include <BluetoothHIDManager.h>
 #include <HalPowerManager.h>
 
 #include "SdCardFontGlobals.h"
@@ -132,6 +133,11 @@ void ActivityManager::loop() {
       currentActivity = std::move(pendingActivity);
 
       lock.unlock();  // onEnter may acquire its own lock
+      // Before the incoming screen allocates anything, not after. The main loop
+      // also enforces this policy, but only on its *next* iteration — by which
+      // time onEnter() has already had to find its buffers with the BLE stack
+      // still holding ~56KB.
+      releaseBluetoothIfUnused();
       currentActivity->onEnter();
 
       // onEnter may request another pending action, we will handle it in the next loop iteration
@@ -248,6 +254,18 @@ bool ActivityManager::isReaderActivity() const { return currentActivity && curre
 
 bool ActivityManager::keepsBluetoothActive() const {
   return currentActivity && currentActivity->keepsBluetoothActive();
+}
+
+void ActivityManager::releaseBluetoothIfUnused() {
+  if (!currentActivity || currentActivity->keepsBluetoothActive()) {
+    return;
+  }
+  auto& btMgr = BluetoothHIDManager::getInstance();
+  if (!btMgr.isEnabled()) {
+    return;
+  }
+  LOG_INF("ACT", "Releasing Bluetooth before entering %s", currentActivity->name.c_str());
+  btMgr.disable();
 }
 
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }

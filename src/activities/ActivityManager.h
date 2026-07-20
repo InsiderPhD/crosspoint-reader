@@ -109,6 +109,10 @@ class ActivityManager {
   bool preventAutoSleep() const;
   bool isReaderActivity() const;
   bool keepsBluetoothActive() const;
+  // Shut the BLE stack down if the current activity does not need it. Called at
+  // the transition point so the incoming screen allocates against the recovered
+  // heap rather than competing with a stack that is about to be freed anyway.
+  void releaseBluetoothIfUnused();
   bool skipLoopDelay() const;
   ScreenshotInfo getScreenshotInfo() const;
 

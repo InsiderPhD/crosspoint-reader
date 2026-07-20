@@ -3,11 +3,8 @@
 #include <Arduino.h>
 
 #include <functional>
-#include <map>
 #include <string>
 #include <vector>
-
-#include "DeviceProfiles.h"
 
 // Forward declarations
 class NimBLEClient;
@@ -21,6 +18,11 @@ struct BluetoothDevice {
   bool isHID = false;
 };
 
+// Number of leading HID report bytes the press detector considers. Every clicker
+// we have seen encodes its button state well inside this window, and the fixed
+// size keeps ConnectedDevice free of heap allocations.
+inline constexpr size_t HID_FRAME_BYTES = 8;
+
 struct ConnectedDevice {
   std::string address;
   std::string name;
@@ -28,32 +30,27 @@ struct ConnectedDevice {
   std::vector<NimBLERemoteCharacteristic*> reportChars;
   unsigned long connectedTime = 0;  // Timestamp when BLE link was established
   bool subscribed = false;
-  unsigned long lastActivityTime = 0;   // Timestamp of last HID report received
-  uint8_t lastHIDKeycode = 0x00;        // Track last keycode to detect press/release transitions
-  unsigned long lastInjectionTime = 0;  // Cooldown for button injection to prevent flooding
-  uint8_t lastInjectedKeycode = 0x00;   // Track last injected key for smarter cooldown
-  uint8_t activeInjectedButton = 0xFF;  // Currently held virtual button, if any
-  bool wasConnected = false;            // Track if this device was previously connected for auto-reconnect
-  bool hasSeenRelease = false;          // Ignore startup noise until a release frame is seen
-  bool lastButtonState = false;         // Track button pressed state (from byte[0])
-  const DeviceProfiles::DeviceProfile* profile = nullptr;  // Device-specific HID profile
-  bool simpleFallbackEnabled = false;
-  uint8_t simpleForwardKeycode = 0x00;
-  uint8_t simpleBackKeycode = 0x00;
-  bool descriptorHasConsumerPage = false;
-  bool descriptorHasKeyboardPage = false;
-  uint8_t descriptorSuggestedIndex = 0xFF;
-  unsigned long lastNormalizedEventMs = 0;
-  uint8_t lastNormalizedKeycode = 0x00;
-  bool lastNormalizedPressed = false;
-  uint8_t lastNormalizedDirection = 0xFF;  // 0x00=back, 0x01=forward, 0xFF=unknown
-  uint16_t lastGameBrickCounter = 0xFFFF;  // For counter-freeze detection (button vs joystick)
-  uint8_t lastGameBrickActiveKey = 0x00;   // Latched first key per freeze-window (prevents overshoot misfires)
-  uint8_t gameBrickCenterPressFrames = 0;  // Centered horizontal active-frame streak (LEFT fallback)
-  bool pendingGameBrickRelease = false;    // Delay short A/B release tails so one long hold stays merged
-  unsigned long pendingGameBrickReleaseMs = 0;
-  uint8_t pendingGameBrickKeycode = 0x00;
-  uint8_t pendingGameBrickButton = 0xFF;
+  unsigned long lastActivityTime = 0;  // Timestamp of last HID report received
+  bool wasConnected = false;           // Track if this device was previously connected for auto-reconnect
+
+  // --- Direction-agnostic press detector state ---
+  // Any button on any remote turns one page forward, so we never decode keycodes.
+  // Instead we learn what this remote's idle report looks like, mask off the bytes
+  // that free-run (rolling counters, joystick axes), and treat every idle -> active
+  // transition of the remaining bytes as one press.
+  uint8_t idleFrame[HID_FRAME_BYTES] = {0};  // Reference "nothing pressed" report
+  uint8_t prevFrame[HID_FRAME_BYTES] = {0};  // Previous report, for churn detection
+  uint8_t volatileMask = 0;                  // Bit i set => byte i free-runs, ignore it
+  uint8_t byteChangeCount[HID_FRAME_BYTES] = {0};
+  unsigned long baselineStartMs = 0;  // Start of the post-connect learning window
+  uint16_t baselineFrames = 0;        // Frames seen during the learning window
+  bool baselineReady = false;
+  bool active = false;              // Current frame differs from idle on unmasked bytes
+  unsigned long activeSinceMs = 0;  // When the current active run began
+  uint8_t churnMask = 0;            // Bytes that changed during the current active run
+  uint8_t activeChangeCount = 0;    // How many frames changed during the current active run
+  unsigned long lastPressMs = 0;    // Last injected page turn (repeat suppression)
+  unsigned long lastRemoteInputMs = 0;
 };
 
 class BluetoothHIDManager {
@@ -80,20 +77,15 @@ class BluetoothHIDManager {
 
   // Input handling
   void processInputEvents();
-  void setInputCallback(std::function<void(uint16_t keycode)> callback);
-  // Learn callback receives every RAW HID report while set (not just decoded
-  // keycodes) so the setup wizard can diff whole frames. Runs in NimBLE task context.
-  void setLearnInputCallback(std::function<void(const uint8_t* data, size_t length)> callback);
   void setButtonInjector(std::function<void(uint8_t buttonIndex, bool pressed)> injector);
   void setReaderContextCallback(std::function<bool()> callback);
-  void setButtonActivityNotifier(std::function<void(uint8_t buttonIndex)> notifier);
+  // Resolves the physical button index a remote press should be injected as.
+  // Supplied by the app because the reader's page-forward side button depends on
+  // SETTINGS.sideButtonLayout, which lives above this layer. A plain function
+  // pointer, not std::function: this is called from the NimBLE task on every press.
+  void setPageTurnButtonProvider(uint8_t (*provider)()) { _pageTurnButtonProvider = provider; }
   void setDebugCaptureEnabled(bool enabled) { _debugCaptureEnabled = enabled; }
   bool isDebugCaptureEnabled() const { return _debugCaptureEnabled; }
-  // While suppressed, HID reports are still parsed (learn/debug callbacks fire) but no
-  // virtual button presses are injected. Used by the setup wizard so the remote can't
-  // drive the device UI while its keys are being learned.
-  void setInjectionSuppressed(bool suppressed);
-  bool isInjectionSuppressed() const { return _injectionSuppressed; }
   void setBondedDevice(const std::string& address, const std::string& name = "");
   void updateActivity();  // Call periodically to check inactivity timeout
   // Reconnect the bonded device when disconnected. Two triggers: a physical
@@ -115,7 +107,10 @@ class BluetoothHIDManager {
   // Check if BLE has had activity recently (within last 4 minutes)
   // Used by power manager to prevent sleep during BLE use
   bool hasRecentActivity() const;
-  bool hadRecentFree2Input(unsigned long windowMs = 1500) const;
+  // True if a remote sent input within the window. Remote presses are injected as
+  // short pulses, so hold-duration is meaningless for them — callers use this to
+  // suppress long-press gestures (e.g. chapter skip) right after remote input.
+  bool hadRecentRemoteInput(unsigned long windowMs = 1500) const;
 
   // State persistence
   void saveState();
@@ -136,9 +131,10 @@ class BluetoothHIDManager {
   void cleanup();
   void startBackgroundScan();
   void stopBackgroundScan();
-  uint16_t parseHIDReport(uint8_t* data, size_t length);
   ConnectedDevice* findConnectedDevice(const std::string& address);
-  uint8_t mapKeycodeToButton(uint8_t keycode, ConnectedDevice* device);
+  // Feeds one HID report to the device's press detector. Returns true when the
+  // frame represents a fresh button press that should turn a page.
+  static bool detectPress(ConnectedDevice* device, const uint8_t* data, size_t length, unsigned long nowMs);
 
   bool _enabled = false;
   bool _scanning = false;
@@ -146,13 +142,10 @@ class BluetoothHIDManager {
   volatile bool _pendingBondedConnect = false;  // set from NimBLE scan callback, consumed in loop task
   std::vector<BluetoothDevice> _discoveredDevices;
   std::vector<ConnectedDevice> _connectedDevices;
-  std::function<void(uint16_t)> _inputCallback;
-  std::function<void(const uint8_t*, size_t)> _learnInputCallback;
   std::function<void(uint8_t, bool)> _buttonInjector;
   std::function<bool()> _readerContextCallback;
-  std::function<void(uint8_t)> _buttonActivityNotifier;
+  uint8_t (*_pageTurnButtonProvider)() = nullptr;
   bool _debugCaptureEnabled = false;
-  bool _injectionSuppressed = false;
   bool _memoryPaused = false;
   volatile bool _maintenanceSuspended = false;  // render task asks loop-task maintenance to stand down
   volatile bool _maintenanceBusy = false;       // loop-task maintenance currently executing

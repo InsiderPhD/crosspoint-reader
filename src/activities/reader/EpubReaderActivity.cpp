@@ -11,12 +11,14 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
 
 #include "BookFusionBookIdStore.h"
 #include "BookFusionSyncActivity.h"
@@ -54,6 +56,7 @@
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
+#include "util/TimeUtils.h"
 #include "util/WifiTimeSync.h"
 
 // NOTE: This file used to wrap its helpers in an anonymous namespace.
@@ -364,6 +367,8 @@ void EpubReaderActivity::onEnter() {
 
   readingSessionStartMs = millis();
   sessionPageTurns = 0;
+  // New book: forget the previous book's autosync baseline and provider.
+  ProgressAutoSync::resetSessionBaseline();
 
   buildBookPageCache();
 
@@ -403,6 +408,25 @@ void EpubReaderActivity::onExit() {
   READING_STATS.endSession();
   CLIPPINGS.unload();
 
+  if (SETTINGS.autosyncMode != CrossPointSettings::AUTOSYNC_OFF) {
+    // Join any in-flight background push before we tear down — deep sleep
+    // follows this on the sleep path and would kill it mid-TLS.
+    ProgressAutoSync::preempt();
+  }
+  if (SETTINGS.autosyncMode == CrossPointSettings::AUTOSYNC_ON_EXIT && epub && TimeUtils::wasTimeSyncedThisBoot()) {
+    // Blocking on purpose: a detached task cannot survive the deep sleep that
+    // follows. Heap is plentiful here — nothing renders during onExit().
+    const auto trigger = ProgressAutoSync::providerFor(epub->getPath());
+    if (trigger.provider != ProgressAutoSync::Provider::None) {
+      if (const auto payload = buildAutosyncPayload(trigger)) {
+        if (ProgressAutoSync::hasUnsyncedProgress(*payload)) {
+          LOG_INF("PAS", "Autosync on exit: pushing progress");
+          ProgressAutoSync::pushBlocking(*payload);
+        }
+      }
+    }
+  }
+
   section.reset();
   epub.reset();
 }
@@ -414,6 +438,14 @@ void EpubReaderActivity::loop() {
   }
 
   READING_STATS.tickActiveSession();
+
+  // A background autosync just finished. If pages were rendered while it held
+  // the WiFi/TLS heap, the grayscale path may have degraded — clear any residue
+  // with one full refresh. No popup was drawn, so when the sync landed between
+  // turns (the common case) this costs nothing.
+  if (ProgressAutoSync::consumeCompletion() && sessionPageTurns != pageTurnsAtAutosyncStart) {
+    pagesUntilFullRefresh = 1;
+  }
 
   // Record book completion on the main task (not render task) to avoid racing stats store.
   if (!bookFinishedRecorded && currentSpineIndex >= epub->getSpineItemsCount()) {
@@ -678,6 +710,19 @@ void EpubReaderActivity::jumpToPercent(int percent) {
 
 void EpubReaderActivity::toggleBluetoothFromReader() {
   auto& btMgr = BluetoothHIDManager::getInstance();
+  // Reachable via a bound button even though the menu row is hidden — explain
+  // rather than silently doing nothing.
+  if (!SETTINGS.bluetoothAllowed()) {
+    RenderLock lock(*this);
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    GUI.drawPopup(renderer, tr(STR_BT_OFF_AUTOSYNC));
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+    delay(1500);
+    pagesUntilFullRefresh = 1;
+    requestUpdate();
+    return;
+  }
   const bool turningOn = !btMgr.isEnabled();
   {
     RenderLock lock(*this);
@@ -1078,6 +1123,8 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     recordStatsProgress();
   }
 
+  maybeAutosync();
+
   lastPageTurnTime = millis();
   requestUpdate();
 }
@@ -1356,23 +1403,30 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     if (!section->loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
                                   SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                   viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                  SETTINGS.imageRendering, SETTINGS.footnoteDisplay, SETTINGS.bionicReading)) {
+                                  SETTINGS.imageRendering, ReaderUtils::effectiveFootnoteDisplay(),
+                                  SETTINGS.bionicReading)) {
       LOG_DBG("ERS", "Cache not found, building...");
-
-      // The chapter re-parse needs a ~32KB contiguous block for the ZIP inflate
-      // state; with the BLE stack up the largest free block can drop below 20KB
-      // and the build fails outright. Shut BLE down for the build — the user is
-      // watching the Indexing popup anyway. The stack intentionally stays down
-      // afterwards; it returns on the next physical button press or via the
-      // reader-menu Bluetooth toggle.
-      BleMemoryPause blePause;
 
       // A full chapter re-parse (ChapterHtmlSlimParser) is heap-heavy and can OOM mid-session
       // when free heap is lower than at book-load — e.g. after a rotate, which changes the
       // viewport and forces this rebuild. Free the cached font glyphs first so the parser has
-      // the maximum contiguous heap; the cache re-warms on the next render.
+      // the maximum contiguous heap; the cache re-warms on the next render. This is free —
+      // no user-visible cost — so it happens before we consider sacrificing anything.
       if (auto* fcm = renderer.getFontCacheManager()) {
         fcm->clearCache();
+      }
+
+      // Only tear the BLE stack down if the build does not already fit. Killing
+      // the user's page-turner mid-chapter is a real cost, so it is paid only
+      // when measurement says it is necessary — not on every cache miss. The
+      // stack intentionally stays down afterwards; it returns on the next
+      // physical button press or via the reader-menu Bluetooth toggle.
+      std::optional<BleMemoryPause> blePause;
+      if (!ReaderUtils::sectionBuildFitsNow()) {
+        LOG_INF("ERS", "Build needs %u contiguous, largest is %u — pausing BLE",
+                static_cast<unsigned>(ReaderUtils::SECTION_BUILD_REQUIRED_BLOCK),
+                static_cast<unsigned>(ReaderUtils::largestFreeBlock()));
+        blePause.emplace();
       }
 
       const auto popupFn = [this]() { GUI.drawPopup(renderer, tr(STR_INDEXING)); };
@@ -1381,7 +1435,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                                       SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
                                       SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
                                       SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
-                                      SETTINGS.footnoteDisplay, SETTINGS.bionicReading, popupFn)) {
+                                      ReaderUtils::effectiveFootnoteDisplay(), SETTINGS.bionicReading, popupFn)) {
         LOG_ERR("ERS", "Failed to persist page data to SD");
         section.reset();
         return;
@@ -1536,16 +1590,41 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   if (nextSection.loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
                                   SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                   viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
-                                  SETTINGS.imageRendering, SETTINGS.footnoteDisplay, SETTINGS.bionicReading)) {
+                                  SETTINGS.imageRendering, ReaderUtils::effectiveFootnoteDisplay(),
+                                  SETTINGS.bionicReading)) {
     return;
   }
 
-  LOG_DBG("ERS", "Silently indexing next chapter: %d", nextSpineIndex);
+  // Cheap and invisible: the glyph cache re-warms on the next render.
+  if (!ReaderUtils::sectionBuildFitsNow()) {
+    if (auto* fcm = renderer.getFontCacheManager()) {
+      fcm->clearCache();
+    }
+  }
+
+  // Deliberately does NOT pause BLE, unlike the on-demand path. This prefetch
+  // runs with the current chapter's layout still resident, which is what pins
+  // the heap into pieces; measured on-device, tearing the BLE stack down here
+  // returned 48KB of free heap and moved the largest block by 0 bytes. Killing
+  // the user's remote for a build that then fails anyway is the worst outcome,
+  // so when there is no room we skip. The chapter still gets built at the real
+  // turn, where `section` has been released first and the heap is far less
+  // fragmented — that path keeps its BleMemoryPause because it must succeed.
+  if (!ReaderUtils::sectionBuildFitsNow()) {
+    LOG_DBG("ERS", "Skipping prefetch of chapter %d: largest block %u < %u needed (deferred to chapter turn)",
+            nextSpineIndex, static_cast<unsigned>(ReaderUtils::largestFreeBlock()),
+            static_cast<unsigned>(ReaderUtils::SECTION_BUILD_REQUIRED_BLOCK));
+    return;
+  }
+
+  LOG_DBG("ERS", "Silently indexing next chapter: %d (largest block %u)", nextSpineIndex,
+          static_cast<unsigned>(ReaderUtils::largestFreeBlock()));
+
   if (!nextSection.createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(),
                                      SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
                                      SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
                                      SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
-                                     SETTINGS.footnoteDisplay, SETTINGS.bionicReading)) {
+                                     ReaderUtils::effectiveFootnoteDisplay(), SETTINGS.bionicReading)) {
     LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
   }
 }
@@ -1691,6 +1770,88 @@ void EpubReaderActivity::recordStatsProgress() {
       static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f), 0, 100)));
 }
 
+std::unique_ptr<ProgressAutoSync::Payload> EpubReaderActivity::buildAutosyncPayload(
+    const ProgressAutoSync::Trigger& trigger) {
+  if (!epub || trigger.provider == ProgressAutoSync::Provider::None) {
+    return nullptr;
+  }
+
+  const int currentPage = section ? section->currentPage : nextPageNumber;
+  const int totalPages = section ? section->pageCount : cachedChapterTotalPageCount;
+
+  auto payload = makeUniqueNoThrow<ProgressAutoSync::Payload>();
+  if (!payload) {
+    LOG_ERR("PAS", "Autosync payload allocation failed");
+    return nullptr;
+  }
+
+  payload->provider = trigger.provider;
+  payload->epubPath = epub->getPath();
+  payload->spineIndex = currentSpineIndex;
+  payload->pageNumber = currentPage;
+  payload->totalPages = totalPages;
+
+  if (trigger.provider == ProgressAutoSync::Provider::BookFusion) {
+    if (!makeBookFusionPosition(epub, currentSpineIndex, currentPage, totalPages, payload->bfPos)) {
+      return nullptr;
+    }
+    payload->bookId = trigger.bookId;
+    payload->bookPercent = payload->bfPos.percentage;
+    // READING_STATS is main-task-only, so the reading-time total has to be read
+    // here and carried; the sync task can never touch the store itself.
+    if (const ReadingBookStats* bookStats = READING_STATS.findBook(payload->epubPath)) {
+      payload->totalReadingMs = bookStats->totalReadingMs;
+    }
+    return payload;
+  }
+
+  // KOReader. The XPath must be generated here: ChapterXPathResolver reads the
+  // chapter out of the EPUB, and Epub/zip access is not safe against the render
+  // task re-parsing a chapter concurrently.
+  std::optional<uint16_t> paragraphIndex;
+  if (section && currentPage >= 0 && currentPage < section->pageCount) {
+    const uint16_t paragraphPage =
+        currentPage > 0 ? static_cast<uint16_t>(currentPage - 1) : static_cast<uint16_t>(currentPage);
+    if (const auto pIdx = section->getParagraphIndexForPage(paragraphPage)) {
+      paragraphIndex = *pIdx;
+    }
+  }
+  CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPages};
+  if (paragraphIndex.has_value()) {
+    localPos.paragraphIndex = *paragraphIndex;
+    localPos.hasParagraphIndex = true;
+  }
+  const KOReaderPosition koPos = ProgressMapper::toKOReader(epub, localPos);
+  payload->koXpath = koPos.xpath;
+  payload->koPercentage = koPos.percentage;
+  payload->bookPercent = koPos.percentage * 100.0f;
+  // The filename hash is trivial; the binary one reads the EPUB off SD, so the
+  // sync task computes (and caches) that instead of stalling the page turn.
+  if (KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME) {
+    payload->koDocumentHash = KOReaderDocumentId::calculateFromFilename(payload->epubPath);
+  }
+  return payload;
+}
+
+void EpubReaderActivity::maybeAutosync() {
+  // Cheapest possible bail-out: this runs on every page turn.
+  if (SETTINGS.autosyncMode == CrossPointSettings::AUTOSYNC_OFF || !epub || !section || section->pageCount <= 0) {
+    return;
+  }
+
+  const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
+  const float bookPercent = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+
+  const auto trigger = ProgressAutoSync::shouldSync(epub->getPath(), currentSpineIndex, bookPercent);
+  if (trigger.provider == ProgressAutoSync::Provider::None) {
+    return;
+  }
+  if (auto payload = buildAutosyncPayload(trigger)) {
+    pageTurnsAtAutosyncStart = sessionPageTurns;
+    ProgressAutoSync::start(std::move(payload));
+  }
+}
+
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
@@ -1705,7 +1866,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const uint32_t heapBefore = esp_get_free_heap_size();
   auto scope = fcm->createPrewarmScope();
   page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);  // scan pass
-  if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+  if (ReaderUtils::footnotesOnPage())
     page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
   scope.endScanAndPrewarm();
   const uint32_t heapAfter = esp_get_free_heap_size();
@@ -1719,7 +1880,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   bool imagePageWithAA = page->hasImages() && SETTINGS.textAntiAliasing;
 
   page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-  if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+  if (ReaderUtils::footnotesOnPage())
     page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
   renderStatusBar();
   fcm->logStats("bw_render");
@@ -1740,7 +1901,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       // Re-render page content to restore images into the blanked area
       // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
       page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-      if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+      if (ReaderUtils::footnotesOnPage())
         page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
       renderStatusBar();
       if (SETTINGS.darkMode) renderer.invertScreen();
@@ -1787,7 +1948,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(0x00);
         page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-        if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+        if (ReaderUtils::footnotesOnPage())
           page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom,
                                 viewportWidth);
         renderer.endStripTarget();
@@ -1802,7 +1963,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(0x00);
         page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-        if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+        if (ReaderUtils::footnotesOnPage())
           page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom,
                                 viewportWidth);
         renderer.endStripTarget();
@@ -1839,7 +2000,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
       page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-      if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+      if (ReaderUtils::footnotesOnPage())
         page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
@@ -1848,7 +2009,7 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
       page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-      if (SETTINGS.footnoteDisplay == CrossPointSettings::FOOTNOTE_ON_PAGE)
+      if (ReaderUtils::footnotesOnPage())
         page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
       renderer.copyGrayscaleMsbBuffers();
       const auto tGrayMsb = millis();
@@ -2532,6 +2693,9 @@ void EpubReaderActivity::performKOReaderQuickSync() {
 }
 
 void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuccess, const char* syncTitle) {
+  // A background autosync may own the radio right now; this path tears WiFi
+  // down and reconnects, which would kill it mid-TLS.
+  ProgressAutoSync::preempt();
   const char* title = (syncTitle && syncTitle[0] != '\0') ? syncTitle : "BookFusion Sync";
   // Show connecting popup
   {

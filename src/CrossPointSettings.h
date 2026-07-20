@@ -234,6 +234,21 @@ class CrossPointSettings {
 
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
 
+  // Silent background progress push while reading (BookFusion or KOReader).
+  // Percent modes fire once the book progress has advanced that many
+  // percentage points since the last successful push; ON_EXIT pushes once when
+  // leaving the book instead. Only active when the boot NTP check succeeded —
+  // that's the firmware's proof that WiFi works this session.
+  enum AUTOSYNC : uint8_t {
+    AUTOSYNC_OFF = 0,
+    AUTOSYNC_EVERY_CHAPTER = 1,
+    AUTOSYNC_EVERY_1_PERCENT = 2,
+    AUTOSYNC_EVERY_5_PERCENT = 3,
+    AUTOSYNC_EVERY_10_PERCENT = 4,
+    AUTOSYNC_ON_EXIT = 5,
+    AUTOSYNC_COUNT
+  };
+
   // Reader button action — assignable to any button/press-type in the reader context.
   enum READER_ACTION : uint8_t {
     READER_ACTION_NONE = 0,
@@ -402,6 +417,8 @@ class CrossPointSettings {
   uint8_t readerMenuBookmarks = 1;  // Add Bookmark / Bookmarks
   uint8_t readerMenuSync = 1;       // Sync Push / Sync Pull
   uint8_t readerMenuBluetooth = 1;  // Bluetooth Remote toggle
+  // Silent background progress sync while reading (AUTOSYNC enum).
+  uint8_t autosyncMode = AUTOSYNC_OFF;
   // Long press confirm button action (0 = refresh, 1 = sync, 2 = none, 3 = bookmark)
   uint8_t longPressAction = LONG_PRESS_REFRESH;
   // Dark mode (inverts entire UI except images)
@@ -453,6 +470,27 @@ class CrossPointSettings {
     const uint8_t idx = (minSessionMinutes < MIN_SESSION_COUNT) ? minSessionMinutes : MIN_SESSION_3_MIN;
     return MINUTES[idx] * 60UL * 1000UL;
   }
+  // Percentage-point step for the percent autosync modes; 0 for Off, Every
+  // Chapter and On Exit (those don't use a percentage threshold).
+  uint8_t getAutosyncPercentStep() const {
+    switch (autosyncMode) {
+      case AUTOSYNC_EVERY_1_PERCENT:
+        return 1;
+      case AUTOSYNC_EVERY_5_PERCENT:
+        return 5;
+      case AUTOSYNC_EVERY_10_PERCENT:
+        return 10;
+      default:
+        return 0;
+    }
+  }
+  // Bluetooth and autosync cannot coexist: the BLE stack holds ~56KB (and wants
+  // a >=30KB contiguous block), it shares the single radio with WiFi, and
+  // bringing the BT controller up right after esp_wifi_stop() hard-freezes the
+  // device — which is exactly the sequence a mid-reading autosync creates.
+  // Autosync wins; the remote comes back when the user sets Autosync to Off.
+  bool bluetoothAllowed() const { return autosyncMode == AUTOSYNC_OFF; }
+
   int getReaderFontId() const;
   int getCodeFontId() const;
 

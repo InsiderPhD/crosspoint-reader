@@ -3,17 +3,81 @@
 #include <expat.h>
 
 #include <climits>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
 #include "../FootnoteEntry.h"
 
-// Anchor id → body text pair collected during pre-scan
+// Offset sentinel for a FootnoteBodyEntry with no body text in the pool.
+constexpr uint16_t FOOTNOTE_POOL_NO_TEXT = 0xFFFF;
+
+// Packed backing store for footnote body text, shared by every FootnoteBodyEntry.
+//
+// This used to be a `char text[1024]` inline in each entry: 32 x ~1090 bytes was
+// ~35KB in ONE contiguous block, the largest single allocation a section build
+// made, and a hard build abort whenever the heap could not produce that block.
+// Footnote bodies are typically 50-200 bytes, so reserving the 1024-byte worst
+// case 32 times over wasted the great majority of it. Packing the bodies
+// back-to-back in one modest buffer and storing a 2-byte offset per entry cuts
+// the largest block to POOL_BYTES and the total to ~14KB.
+//
+// The pool is a FIXED size deliberately. A pool that shrank under heap pressure
+// would make "which footnotes fit" depend on the heap state at build time, and
+// Section.cpp stamps the *requested* footnoteDisplay into the cache header — so
+// a memory-dependent result would be cached and never invalidated. Fixed size
+// means exhaustion depends only on the chapter's own content.
+class FootnoteBodyPool {
+ public:
+  // 32 entries averaging ~380 bytes. Bodies past this fall back to off-page
+  // display for the rest of the chapter (logged by the caller).
+  static constexpr uint16_t POOL_BYTES = 12 * 1024;
+
+  // nothrow: a throwing new under -fno-exceptions goes straight to abort().
+  bool allocate() {
+    buffer.reset(new (std::nothrow) char[POOL_BYTES]);
+    used = 0;
+    return buffer != nullptr;
+  }
+  bool valid() const { return buffer != nullptr; }
+  void reset() {
+    buffer.reset();
+    used = 0;
+  }
+  uint16_t bytesUsed() const { return used; }
+
+  // Copies `len` bytes of `text` plus a terminator into the pool.
+  // Returns the offset, or FOOTNOTE_POOL_NO_TEXT when the pool is full.
+  uint16_t add(const char* text, uint16_t len) {
+    if (!buffer || len == 0) return FOOTNOTE_POOL_NO_TEXT;
+    if (static_cast<uint32_t>(used) + len + 1 > POOL_BYTES) return FOOTNOTE_POOL_NO_TEXT;
+    const uint16_t offset = used;
+    memcpy(buffer.get() + offset, text, len);
+    buffer[offset + len] = '\0';
+    used = static_cast<uint16_t>(used + len + 1);
+    return offset;
+  }
+
+  // Returns nullptr for FOOTNOTE_POOL_NO_TEXT or any out-of-range offset.
+  const char* get(uint16_t offset) const {
+    if (!buffer || offset >= used) return nullptr;
+    return buffer.get() + offset;
+  }
+
+ private:
+  std::unique_ptr<char[]> buffer;
+  uint16_t used = 0;
+};
+
+// Anchor id → body text reference collected during pre-scan.
+// `textOffset` indexes into the parser's FootnoteBodyPool, not this struct.
 struct FootnoteBodyEntry {
   char id[64];
-  char text[1024];
+  uint16_t textOffset = FOOTNOTE_POOL_NO_TEXT;
   mutable int16_t cachedLineCount = -1;  // -1 = not yet computed
 };
 #include "../ParsedText.h"
@@ -118,16 +182,17 @@ class ChapterHtmlSlimParser {
   static constexpr int MAX_CROSS_FILES = 4;
   static constexpr int MAX_CROSS_FILE_NAME_LEN = 80;
   std::unique_ptr<FootnoteBodyEntry[]> footnoteBodyEntries;
+  FootnoteBodyPool footnoteBodyPool;  // backing store for every entry's body text
   int footnoteBodyEntryCount = 0;
   const char* lookupFootnoteText(const char* href) const;
   int lookupFootnoteLineCount(const char* href, int width) const;
   static constexpr int MAX_TARGET_FRAGMENTS = 32;
   static int preScanAnchors(const std::string& filepath, FootnoteBodyEntry* entries, int maxEntries,
-                             char (*crossFiles)[MAX_CROSS_FILE_NAME_LEN] = nullptr,
-                             int* crossFileCount = nullptr, int maxCrossFiles = 0,
-                             char (*collectFragments)[64] = nullptr,
-                             int* collectFragmentCount = nullptr, int maxCollectFragments = 0,
-                             char (*filterFragments)[64] = nullptr, int filterFragmentCount = 0);
+                            FootnoteBodyPool* pool, char (*crossFiles)[MAX_CROSS_FILE_NAME_LEN] = nullptr,
+                            int* crossFileCount = nullptr, int maxCrossFiles = 0,
+                            char (*collectFragments)[64] = nullptr, int* collectFragmentCount = nullptr,
+                            int maxCollectFragments = 0, char (*filterFragments)[64] = nullptr,
+                            int filterFragmentCount = 0);
 
   void updateEffectiveInlineStyle();
   void startNewTextBlock(const BlockStyle& blockStyle);

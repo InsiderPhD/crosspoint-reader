@@ -59,7 +59,7 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   // Bluetooth remote toggle: only shown once a remote has been paired
   // (pairing itself lives in Settings > Bluetooth Page Turner), and hideable
   // like the bookmarks/clippings/sync rows (Settings > Reader).
-  if (SETTINGS.readerMenuBluetooth && SETTINGS.bleBondedDeviceAddr[0] != '\0') {
+  if (SETTINGS.readerMenuBluetooth && SETTINGS.bleBondedDeviceAddr[0] != '\0' && SETTINGS.bluetoothAllowed()) {
     items.push_back({MenuAction::TOGGLE_BLUETOOTH, StrId::STR_BT_REMOTE_TOGGLE});
   }
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
@@ -210,6 +210,13 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   const std::string clockText = TimeUtils::formatTime(nowTs);
   if (!clockText.empty()) {
     statusLine += clockText + " " + TimeUtils::formatShortDate(nowTs) + " | ";
+  }
+  // Autosync needs the boot NTP check to have succeeded (that's how the
+  // firmware knows WiFi works this session). When it didn't, autosync is
+  // silently inactive — say so rather than leaving the user to wonder.
+  if (SETTINGS.autosyncMode != CrossPointSettings::AUTOSYNC_OFF && !TimeUtils::wasTimeSyncedThisBoot()) {
+    statusLine += tr(STR_AUTOSYNC_OFF_NOTICE);
+    statusLine += " | ";
   }
   statusLine += ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTodayReadingMs()) + " / " +
                 ReadingStatsAnalytics::formatDurationHm(SETTINGS.getDailyGoalMs());

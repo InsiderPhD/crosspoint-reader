@@ -27,6 +27,8 @@ namespace {
 struct PreScanState {
   FootnoteBodyEntry* entries;
   int maxEntries;
+  FootnoteBodyPool* pool = nullptr;  // backing store for captured body text
+  bool poolExhausted = false;        // set once a body could not be stored
   int count = 0;
   int depth = 0;
   bool capturing = false;
@@ -62,7 +64,10 @@ struct PreScanState {
             const char* frag = hash + 1;
             bool found = false;
             for (int j = 0; j < *self->collectFragmentCount; j++) {
-              if (strcmp(self->collectFragments[j], frag) == 0) { found = true; break; }
+              if (strcmp(self->collectFragments[j], frag) == 0) {
+                found = true;
+                break;
+              }
             }
             if (!found && *self->collectFragmentCount < self->maxCollectFragments) {
               strncpy(self->collectFragments[*self->collectFragmentCount], frag, 63);
@@ -76,8 +81,7 @@ struct PreScanState {
             if (fnameLen > 0 && fnameLen < 80 && *self->crossFileCount < self->maxCrossFiles) {
               bool found = false;
               for (int j = 0; j < *self->crossFileCount; j++) {
-                if (strncmp(self->crossFiles[j], href, fnameLen) == 0 &&
-                    self->crossFiles[j][fnameLen] == '\0') {
+                if (strncmp(self->crossFiles[j], href, fnameLen) == 0 && self->crossFiles[j][fnameLen] == '\0') {
                   found = true;
                   break;
                 }
@@ -104,7 +108,10 @@ struct PreScanState {
         if (self->targetFragments) {
           bool isTarget = false;
           for (int j = 0; j < self->targetFragmentCount; j++) {
-            if (strcmp(self->targetFragments[j], id) == 0) { isTarget = true; break; }
+            if (strcmp(self->targetFragments[j], id) == 0) {
+              isTarget = true;
+              break;
+            }
           }
           if (!isTarget) break;  // not a target — skip without resetting capture
         }
@@ -207,12 +214,20 @@ struct PreScanState {
         self->currentText[newLen] = '\0';
         self->currentTextLen = newLen;
       }
-      if (self->currentTextLen > 0 && self->count < self->maxEntries) {
-        strncpy(self->entries[self->count].id, self->currentId, sizeof(self->entries[0].id) - 1);
-        self->entries[self->count].id[sizeof(self->entries[0].id) - 1] = '\0';
-        strncpy(self->entries[self->count].text, self->currentText, sizeof(self->entries[0].text) - 1);
-        self->entries[self->count].text[sizeof(self->entries[0].text) - 1] = '\0';
-        self->count++;
+      if (self->currentTextLen > 0 && self->count < self->maxEntries && self->pool) {
+        // Commit the body to the shared pool first: an entry with no text is
+        // worse than no entry at all, because lookupFootnoteText would return
+        // nullptr and the reference would silently render blank. If the pool is
+        // full, drop the entry so the footnote falls back to off-page display.
+        const uint16_t offset = self->pool->add(self->currentText, static_cast<uint16_t>(self->currentTextLen));
+        if (offset == FOOTNOTE_POOL_NO_TEXT) {
+          self->poolExhausted = true;
+        } else {
+          strncpy(self->entries[self->count].id, self->currentId, sizeof(self->entries[0].id) - 1);
+          self->entries[self->count].id[sizeof(self->entries[0].id) - 1] = '\0';
+          self->entries[self->count].textOffset = offset;
+          self->count++;
+        }
       }
       self->capturing = false;
       self->captureDepth = -1;
@@ -222,7 +237,6 @@ struct PreScanState {
 };
 
 }  // namespace
-
 
 // Minimum file size (in bytes) to show indexing popup - smaller chapters don't benefit from it
 constexpr size_t MIN_SIZE_FOR_POPUP = 10 * 1024;  // 10KB
@@ -393,7 +407,13 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
     pendingAnchorId.clear();
   }
-  currentTextBlock.reset(new ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyle, bionicReadingEnabled));
+  // nothrow: one of these per paragraph, and a throwing new aborts under
+  // -fno-exceptions. A null block is tolerated by the emit paths below.
+  currentTextBlock.reset(new (std::nothrow)
+                             ParsedText(extraParagraphSpacing, hyphenationEnabled, blockStyle, bionicReadingEnabled));
+  if (!currentTextBlock) {
+    LOG_ERR("EHP", "Out of memory allocating text block");
+  }
   wordsExtractedInBlock = 0;
 }
 
@@ -817,14 +837,14 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                   self->completePageFn(std::move(self->currentPage), self->xpathParagraphIndex,
                                        self->xpathListItemIndex);
                   self->completedPageCount++;
-                  self->currentPage.reset(new Page());
+                  self->currentPage.reset(new (std::nothrow) Page());
                   if (!self->currentPage) {
                     LOG_ERR("EHP", "Failed to create new page");
                     return;
                   }
                   self->currentPageNextY = 0;
                 } else if (!self->currentPage) {
-                  self->currentPage.reset(new Page());
+                  self->currentPage.reset(new (std::nothrow) Page());
                   if (!self->currentPage) {
                     LOG_ERR("EHP", "Failed to create initial page");
                     return;
@@ -1483,8 +1503,39 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   blockStyleStack.reserve(8);
   blockStyleStack.push_back(rootBlockStyle);
 
-  footnoteBodyEntries = std::make_unique<FootnoteBodyEntry[]>(MAX_FOOTNOTE_BODY_ENTRIES);
+  // The footnote pre-scan store is now two allocations: a small index array
+  // (32 x ~68 bytes = ~2.2KB) and the shared body-text pool (12KB). It was one
+  // ~35KB contiguous block when each entry carried an inline `char text[1024]`
+  // — the biggest single allocation a section build made. Three rules:
+  //   1. Only allocate when on-page footnotes are actually enabled. Every reader
+  //      of this array is either inside `if (footnoteDisplayOnPage)` or
+  //      null-guarded, so leaving it null is safe — and it hands the heap back
+  //      to every build for users with the feature off.
+  //   2. Allocate nothrow. This was a throwing `new`, and under -fno-exceptions a
+  //      failure here goes straight to std::terminate -> abort(), crashing the
+  //      device mid-build.
+  //   3. Failure still aborts the build. Section.cpp stamps the *requested*
+  //      footnoteDisplay into the cache header, so a silent downgrade would be
+  //      cached as "footnotes on" and never invalidate. Whether on-page
+  //      footnotes are possible must be decided before the build starts, not
+  //      discovered halfway through it.
   footnoteBodyEntryCount = 0;
+  if (footnoteDisplayOnPage) {
+    footnoteBodyEntries.reset(new (std::nothrow) FootnoteBodyEntry[MAX_FOOTNOTE_BODY_ENTRIES]);
+    if (!footnoteBodyEntries) {
+      LOG_ERR("EHP", "No room for footnote index (%u bytes, largest block %u); aborting build",
+              static_cast<unsigned>(sizeof(FootnoteBodyEntry) * MAX_FOOTNOTE_BODY_ENTRIES),
+              static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+      return false;
+    }
+    if (!footnoteBodyPool.allocate()) {
+      LOG_ERR("EHP", "No room for footnote body pool (%u bytes, largest block %u); aborting build",
+              static_cast<unsigned>(FootnoteBodyPool::POOL_BYTES),
+              static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
+      footnoteBodyEntries.reset();
+      return false;
+    }
+  }
 
   // Trigger indexing popup early so it's visible during pre-scan phases too.
   // Open the file briefly to check size, then close — main parse re-opens below.
@@ -1500,17 +1551,32 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
     }
   }
 
+  // Heap-allocate fragment buffer to stay within stack budget (32 × 64 = 2KB).
+  // Allocated before the phase block so a failure can cleanly downgrade to
+  // off-page footnotes: nothrow, because a throwing new aborts the device.
+  struct FragBuf {
+    char ids[MAX_TARGET_FRAGMENTS][64];
+  };
+  std::unique_ptr<FragBuf> fragBuf;
+  if (footnoteDisplayOnPage) {
+    fragBuf.reset(new (std::nothrow) FragBuf());
+    if (!fragBuf) {
+      // Same reasoning as the footnote table above: no silent downgrade, or the
+      // cache header ends up describing a chapter that was never built.
+      LOG_ERR("EHP", "No room for the fragment scan buffer; aborting build");
+      footnoteBodyEntries.reset();
+      footnoteBodyPool.reset();
+      return false;
+    }
+  }
+
   if (footnoteDisplayOnPage) {
     // Phase 1: collect all href fragment IDs and cross-file filenames — no id→text capture.
-    // Heap-allocate fragment buffer to stay within stack budget (32 × 64 = 2KB).
-    struct FragBuf { char ids[MAX_TARGET_FRAGMENTS][64]; };
-    auto fragBuf = std::make_unique<FragBuf>();
     int fragCount = 0;
     char crossFiles[MAX_CROSS_FILES][MAX_CROSS_FILE_NAME_LEN] = {};
     int crossFileCount = 0;
-    preScanAnchors(filepath, footnoteBodyEntries.get(), 0,
-                   crossFiles, &crossFileCount, MAX_CROSS_FILES,
-                   fragBuf->ids, &fragCount, MAX_TARGET_FRAGMENTS);
+    preScanAnchors(filepath, footnoteBodyEntries.get(), 0, &footnoteBodyPool, crossFiles, &crossFileCount,
+                   MAX_CROSS_FILES, fragBuf->ids, &fragCount, MAX_TARGET_FRAGMENTS);
 
     // Phase 2: scan cross-files, filtering to only the target fragment IDs.
     if (crossFileCount > 0 && epub) {
@@ -1523,9 +1589,8 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
         cfFile.close();
         if (ok) {
           const int extra = preScanAnchors(cfTmpPath, footnoteBodyEntries.get() + footnoteBodyEntryCount,
-                                           MAX_FOOTNOTE_BODY_ENTRIES - footnoteBodyEntryCount,
-                                           nullptr, nullptr, 0, nullptr, nullptr, 0,
-                                           fragBuf->ids, fragCount);
+                                           MAX_FOOTNOTE_BODY_ENTRIES - footnoteBodyEntryCount, &footnoteBodyPool,
+                                           nullptr, nullptr, 0, nullptr, nullptr, 0, fragBuf->ids, fragCount);
           footnoteBodyEntryCount += extra;
         }
         Storage.remove(cfTmpPath.c_str());
@@ -1536,9 +1601,8 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
     // Must be a separate pass because Phase 1 needs to collect all fragment IDs first.
     if (fragCount > 0 && footnoteBodyEntryCount < MAX_FOOTNOTE_BODY_ENTRIES) {
       const int extra = preScanAnchors(filepath, footnoteBodyEntries.get() + footnoteBodyEntryCount,
-                                       MAX_FOOTNOTE_BODY_ENTRIES - footnoteBodyEntryCount,
-                                       nullptr, nullptr, 0, nullptr, nullptr, 0,
-                                       fragBuf->ids, fragCount);
+                                       MAX_FOOTNOTE_BODY_ENTRIES - footnoteBodyEntryCount, &footnoteBodyPool, nullptr,
+                                       nullptr, 0, nullptr, nullptr, 0, fragBuf->ids, fragCount);
       footnoteBodyEntryCount += extra;
     }
 
@@ -1549,10 +1613,14 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
     // on-demand overflow ring (one SD read + LOG_DBG per glyph — the footnote-text flood).
     // ensureSdCardFontReady() is a no-op for flash-resident fonts.
     for (int i = 0; i < footnoteBodyEntryCount; i++) {
-      if (footnoteBodyEntries[i].text[0] != '\0') {
-        renderer.ensureSdCardFontReady(fontId, footnoteBodyEntries[i].text);
+      const char* body = footnoteBodyPool.get(footnoteBodyEntries[i].textOffset);
+      if (body) {
+        renderer.ensureSdCardFontReady(fontId, body);
       }
     }
+
+    LOG_DBG("EHP", "Footnote pre-scan: %d bodies, %u/%u pool bytes", footnoteBodyEntryCount,
+            static_cast<unsigned>(footnoteBodyPool.bytesUsed()), static_cast<unsigned>(FootnoteBodyPool::POOL_BYTES));
   }
 
   auto paragraphAlignmentBlockStyle = BlockStyle();
@@ -1636,21 +1704,24 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
     currentTextBlock.reset();
   }
 
-  // Free pre-scan data — no longer needed once all pages are serialized
+  // Free pre-scan data — no longer needed once all pages are serialized.
+  // Every page has already copied the body text it needs into its own
+  // FootnoteEntry, so releasing the pool here cannot dangle.
   footnoteBodyEntries.reset();
+  footnoteBodyPool.reset();
 
   return true;
 }
 
-int ChapterHtmlSlimParser::preScanAnchors(const std::string& filepath, FootnoteBodyEntry* entries,
-                                          int maxEntries, char (*crossFiles)[MAX_CROSS_FILE_NAME_LEN],
-                                          int* crossFileCount, int maxCrossFiles,
-                                          char (*collectFragments)[64], int* collectFragmentCount,
-                                          int maxCollectFragments, char (*filterFragments)[64],
-                                          int filterFragmentCount) {
+int ChapterHtmlSlimParser::preScanAnchors(const std::string& filepath, FootnoteBodyEntry* entries, int maxEntries,
+                                          FootnoteBodyPool* pool, char (*crossFiles)[MAX_CROSS_FILE_NAME_LEN],
+                                          int* crossFileCount, int maxCrossFiles, char (*collectFragments)[64],
+                                          int* collectFragmentCount, int maxCollectFragments,
+                                          char (*filterFragments)[64], int filterFragmentCount) {
   PreScanState state;
   state.entries = entries;
   state.maxEntries = maxEntries;
+  state.pool = pool;
   state.crossFiles = crossFiles;
   state.crossFileCount = crossFileCount;
   state.maxCrossFiles = maxCrossFiles;
@@ -1688,6 +1759,12 @@ int ChapterHtmlSlimParser::preScanAnchors(const std::string& filepath, FootnoteB
   XML_ParserFree(parser);
   file.close();
 
+  if (state.poolExhausted) {
+    // Not fatal: the dropped footnotes fall back to off-page display. Logged so a
+    // chapter that silently loses its later footnotes is diagnosable.
+    LOG_DBG("EHP", "Footnote body pool full after %d bodies; remainder fall back to off-page", state.count);
+  }
+
   return state.count;
 }
 
@@ -1699,7 +1776,8 @@ const char* ChapterHtmlSlimParser::lookupFootnoteText(const char* href) const {
   fragment++;  // skip '#'
   for (int i = 0; i < footnoteBodyEntryCount; i++) {
     if (strcmp(footnoteBodyEntries[i].id, fragment) == 0) {
-      return footnoteBodyEntries[i].text[0] != '\0' ? footnoteBodyEntries[i].text : nullptr;
+      // Pool-owned and null-terminated; valid until footnoteBodyPool.reset().
+      return footnoteBodyPool.get(footnoteBodyEntries[i].textOffset);
     }
   }
   return nullptr;
@@ -1712,10 +1790,11 @@ int ChapterHtmlSlimParser::lookupFootnoteLineCount(const char* href, const int w
   fragment++;
   for (int i = 0; i < footnoteBodyEntryCount; i++) {
     if (strcmp(footnoteBodyEntries[i].id, fragment) == 0) {
-      if (footnoteBodyEntries[i].text[0] == '\0') return 0;
+      const char* body = footnoteBodyPool.get(footnoteBodyEntries[i].textOffset);
+      if (!body) return 0;
       if (footnoteBodyEntries[i].cachedLineCount < 0) {
         footnoteBodyEntries[i].cachedLineCount =
-            static_cast<int16_t>(Page::countWrappedLines(renderer, fontId, footnoteBodyEntries[i].text, width));
+            static_cast<int16_t>(Page::countWrappedLines(renderer, fontId, body, width));
       }
       return footnoteBodyEntries[i].cachedLineCount;
     }
@@ -1727,7 +1806,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
   const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
 
   if (!currentPage) {
-    currentPage.reset(new Page());
+    currentPage.reset(new (std::nothrow) Page());
     currentPageNextY = 0;
   }
 
@@ -1777,7 +1856,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
   if (currentPageNextY + lineHeight > effectiveViewportH || forceBreakForAnchorAlignment) {
     completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
     completedPageCount++;
-    currentPage.reset(new Page());
+    currentPage.reset(new (std::nothrow) Page());
     currentPageNextY = 0;
   }
 
@@ -1854,7 +1933,7 @@ void ChapterHtmlSlimParser::makePages() {
   }
 
   if (!currentPage) {
-    currentPage.reset(new Page());
+    currentPage.reset(new (std::nothrow) Page());
     currentPageNextY = 0;
   }
 
