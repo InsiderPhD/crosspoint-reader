@@ -20,7 +20,6 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "util/ProgressAutoSync.h"
 #include "util/WifiTimeSync.h"
 
 namespace {
@@ -270,8 +269,6 @@ void KOReaderSyncActivity::performUpload() {
 
 void KOReaderSyncActivity::onEnter() {
   Activity::onEnter();
-  // A background autosync may hold the radio; this screen takes it over.
-  ProgressAutoSync::preempt();
 
   // Check for credentials first
   if (!KOREADER_STORE.hasCredentials()) {

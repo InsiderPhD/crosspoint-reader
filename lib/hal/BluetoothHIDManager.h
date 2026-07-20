@@ -11,6 +11,26 @@ class NimBLEClient;
 class NimBLERemoteCharacteristic;
 class NimBLEAdvertisedDevice;
 
+// Outcome of the last lifecycle/connection call, for the UI to render.
+//
+// A code rather than a string: this layer sits below I18n and must not depend on
+// it, but every one of these ends up in front of the user. `lastError` is kept
+// alongside purely as English detail for the serial log.
+enum class BtStatus : uint8_t {
+  None = 0,
+  Connected,
+  NotEnoughMemory,
+  HeapFragmented,
+  StartFailed,
+  ScanFailed,
+  NotEnabled,
+  ClientFailed,
+  ConnectFailed,
+  NoHidService,
+  NoReportChar,
+  SubscribeFailed,
+};
+
 struct BluetoothDevice {
   std::string address;
   std::string name;
@@ -116,7 +136,8 @@ class BluetoothHIDManager {
   void saveState();
   void loadState();
 
-  std::string lastError;
+  std::string lastError;                 // English detail, for logs
+  BtStatus lastStatus = BtStatus::None;  // Translatable outcome, for the UI
 
   // BLE callbacks (public for NimBLE callbacks)
   void onScanResult(NimBLEAdvertisedDevice* advertisedDevice);

@@ -26,10 +26,6 @@ class EpubReaderActivity final : public Activity {
   unsigned long readingSpeedLastTurnMs = 0UL;
   unsigned long readingSessionStartMs = 0UL;
   uint32_t sessionPageTurns = 0;
-  // sessionPageTurns at the moment a background autosync was spawned. If it has
-  // moved by the time the sync completes, pages were rendered while WiFi held
-  // its heap and the screen may need a full refresh.
-  uint32_t pageTurnsAtAutosyncStart = 0;
   bool bookFinishedRecorded = false;
   unsigned long pageTurnDuration = 0UL;
   // Signals that the next render should reposition within the newly loaded section
@@ -92,8 +88,13 @@ class EpubReaderActivity final : public Activity {
   // still alive. Main task only. Returns nullptr when the position can't be
   // built or the allocation fails.
   std::unique_ptr<ProgressAutoSync::Payload> buildAutosyncPayload(const ProgressAutoSync::Trigger& trigger);
-  // Threshold check + spawn, called from pageTurn().
-  void maybeAutosync();
+  // Arm on a threshold crossing, fire on the 2nd page of a chapter. Called from
+  // pageTurn() (main task only — never from render()).
+  // Returns false when the reader was torn down (epub reload failed -> Home).
+  bool maybeAutosync();
+  // Blocking push: releases the section and Epub, syncs, reloads. Takes the
+  // reader unresponsive for a few seconds; see ProgressAutoSync.h for why.
+  bool runAutosyncNow();
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void toggleBluetoothFromReader();

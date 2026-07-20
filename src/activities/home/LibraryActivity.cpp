@@ -25,7 +25,6 @@
 #include "components/icons/bookfusion24.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
-#include "util/ProgressAutoSync.h"
 #include "util/WifiTimeSync.h"
 
 namespace {
@@ -314,7 +313,6 @@ void LibraryActivity::render(RenderLock&&) {
     // stack heap is freed before the metadata recache's heavy allocations —
     // avoids a cold-boot OOM/contention crash. No-op after the ~10s boot window.
     WifiTimeSync::preempt();
-    ProgressAutoSync::preempt();
     enumerateBooks();
     initialLoadPending = false;
     // Fall through.

@@ -408,27 +408,34 @@ void EpubReaderActivity::onExit() {
   READING_STATS.endSession();
   CLIPPINGS.unload();
 
-  if (SETTINGS.autosyncMode != CrossPointSettings::AUTOSYNC_OFF) {
-    // Join any in-flight background push before we tear down — deep sleep
-    // follows this on the sleep path and would kill it mid-TLS.
-    ProgressAutoSync::preempt();
-  }
+  // On Exit mode: snapshot the position while the book is still loaded, but
+  // don't push until after the teardown below — the TLS handshake needs the
+  // heap the section and Epub are holding (see ProgressAutoSync.h).
+  std::unique_ptr<ProgressAutoSync::Payload> exitPayload;
   if (SETTINGS.autosyncMode == CrossPointSettings::AUTOSYNC_ON_EXIT && epub && TimeUtils::wasTimeSyncedThisBoot()) {
-    // Blocking on purpose: a detached task cannot survive the deep sleep that
-    // follows. Heap is plentiful here — nothing renders during onExit().
     const auto trigger = ProgressAutoSync::providerFor(epub->getPath());
     if (trigger.provider != ProgressAutoSync::Provider::None) {
-      if (const auto payload = buildAutosyncPayload(trigger)) {
-        if (ProgressAutoSync::hasUnsyncedProgress(*payload)) {
-          LOG_INF("PAS", "Autosync on exit: pushing progress");
-          ProgressAutoSync::pushBlocking(*payload);
-        }
+      exitPayload = buildAutosyncPayload(trigger);
+      if (exitPayload && !ProgressAutoSync::hasUnsyncedProgress(*exitPayload)) {
+        exitPayload.reset();  // nothing new since the last sync
       }
     }
   }
 
   section.reset();
   epub.reset();
+
+  if (exitPayload) {
+    if (auto* fcm = renderer.getFontCacheManager()) {
+      fcm->clearCache();
+    }
+    if (ProgressAutoSync::heapAllowsPush()) {
+      LOG_INF("PAS", "Autosync on exit: pushing progress");
+      // Blocking by necessity: this is the last point before deep sleep cuts
+      // power, so a detached task would be killed mid-TLS.
+      ProgressAutoSync::pushBlocking(*exitPayload);
+    }
+  }
 }
 
 void EpubReaderActivity::loop() {
@@ -438,14 +445,6 @@ void EpubReaderActivity::loop() {
   }
 
   READING_STATS.tickActiveSession();
-
-  // A background autosync just finished. If pages were rendered while it held
-  // the WiFi/TLS heap, the grayscale path may have degraded — clear any residue
-  // with one full refresh. No popup was drawn, so when the sync landed between
-  // turns (the common case) this costs nothing.
-  if (ProgressAutoSync::consumeCompletion() && sessionPageTurns != pageTurnsAtAutosyncStart) {
-    pagesUntilFullRefresh = 1;
-  }
 
   // Record book completion on the main task (not render task) to avoid racing stats store.
   if (!bookFinishedRecorded && currentSpineIndex >= epub->getSpineItemsCount()) {
@@ -1123,7 +1122,11 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     recordStatsProgress();
   }
 
-  maybeAutosync();
+  // Returns false when the autosync teardown could not reload the book and
+  // sent us Home — the activity is finishing, so don't request another render.
+  if (!maybeAutosync()) {
+    return;
+  }
 
   lastPageTurnTime = millis();
   requestUpdate();
@@ -1833,23 +1836,75 @@ std::unique_ptr<ProgressAutoSync::Payload> EpubReaderActivity::buildAutosyncPayl
   return payload;
 }
 
-void EpubReaderActivity::maybeAutosync() {
+bool EpubReaderActivity::maybeAutosync() {
   // Cheapest possible bail-out: this runs on every page turn.
   if (SETTINGS.autosyncMode == CrossPointSettings::AUTOSYNC_OFF || !epub || !section || section->pageCount <= 0) {
-    return;
+    return true;
+  }
+
+  // Fire an armed sync only on the second page of a chapter. That's the
+  // furthest point from silentIndexNextChapterIfNeeded()'s penultimate-page
+  // build of the next chapter — the 32KB-contiguous allocation most likely to
+  // fail if it collided with the WiFi stack. It's also a natural pause: the
+  // reader has just settled into a new chapter.
+  static constexpr int AUTOSYNC_FIRE_PAGE = 1;  // zero-based; the 2nd page
+  if (ProgressAutoSync::isArmed() && section->currentPage == AUTOSYNC_FIRE_PAGE) {
+    return runAutosyncNow();
   }
 
   const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
   const float bookPercent = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
+  ProgressAutoSync::armIfThresholdCrossed(epub->getPath(), currentSpineIndex, bookPercent);
+  return true;
+}
 
-  const auto trigger = ProgressAutoSync::shouldSync(epub->getPath(), currentSpineIndex, bookPercent);
-  if (trigger.provider == ProgressAutoSync::Provider::None) {
-    return;
+bool EpubReaderActivity::runAutosyncNow() {
+  const auto trigger = ProgressAutoSync::providerFor(epub->getPath());
+  auto payload = buildAutosyncPayload(trigger);
+  if (!payload) {
+    ProgressAutoSync::disarm();
+    return true;
   }
-  if (auto payload = buildAutosyncPayload(trigger)) {
-    pageTurnsAtAutosyncStart = sessionPageTurns;
-    ProgressAutoSync::start(std::move(payload));
+  const std::string epubPath = payload->epubPath;
+
+  // Release the chapter layout AND the book metadata before the TLS session,
+  // exactly as the manual sync does. The handshake is the allocation spike: two
+  // 16KB record buffers (fixed in the precompiled mbedtls) plus X509/RSA work.
+  // Without this the push simply does not fit — the reader idles around 70KB
+  // free and the WiFi stack alone takes ~40KB. The section reloads from its
+  // cache file on the next render; the Epub is reloaded below.
+  {
+    RenderLock lock(*this);
+    if (section) {
+      nextPageNumber = section->currentPage;
+      cachedChapterTotalPageCount = section->pageCount;
+      section.reset();
+    }
+    epub.reset();
   }
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    fcm->clearCache();  // re-warms on the next render
+  }
+
+  if (ProgressAutoSync::heapAllowsPush()) {
+    ProgressAutoSync::pushBlocking(*payload);
+  } else {
+    ProgressAutoSync::disarm();
+  }
+  payload.reset();
+
+  // Reload the book metadata released above. Failing here leaves the reader
+  // with no book, so bail to Home rather than rendering a half-dead activity.
+  {
+    RenderLock lock(*this);
+    epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+    if (!epub->load(true, SETTINGS.embeddedStyle == 0)) {
+      LOG_ERR("PAS", "Failed to reload epub after autosync");
+      onGoHome();
+      return false;
+    }
+  }
+  return true;
 }
 
 void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
@@ -2693,9 +2748,6 @@ void EpubReaderActivity::performKOReaderQuickSync() {
 }
 
 void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuccess, const char* syncTitle) {
-  // A background autosync may own the radio right now; this path tears WiFi
-  // down and reconnects, which would kill it mid-TLS.
-  ProgressAutoSync::preempt();
   const char* title = (syncTitle && syncTitle[0] != '\0') ? syncTitle : "BookFusion Sync";
   // Show connecting popup
   {

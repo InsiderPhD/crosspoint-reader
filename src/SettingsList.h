@@ -202,8 +202,8 @@ inline void appendReaderBehaviourSettings(std::vector<SettingInfo>& v) {
                // Silent background progress push. Turning this on disables the
                // Bluetooth remote (shared radio + heap); see bluetoothAllowed().
                SettingInfo::Enum(StrId::STR_AUTOSYNC, &CrossPointSettings::autosyncMode,
-                                 {StrId::STR_NONE_OPT, StrId::STR_AUTOSYNC_CHAPTER, StrId::STR_AUTOSYNC_1PCT,
-                                  StrId::STR_AUTOSYNC_5PCT, StrId::STR_AUTOSYNC_10PCT, StrId::STR_AUTOSYNC_ON_EXIT},
+                                 {StrId::STR_NONE_OPT, StrId::STR_AUTOSYNC_CHAPTER, StrId::STR_AUTOSYNC_5PCT,
+                                  StrId::STR_AUTOSYNC_10PCT, StrId::STR_AUTOSYNC_ON_EXIT},
                                  "autosyncMode", StrId::STR_CAT_READER),
            });
 }

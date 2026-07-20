@@ -234,18 +234,21 @@ class CrossPointSettings {
 
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
 
-  // Silent background progress push while reading (BookFusion or KOReader).
-  // Percent modes fire once the book progress has advanced that many
-  // percentage points since the last successful push; ON_EXIT pushes once when
-  // leaving the book instead. Only active when the boot NTP check succeeded —
-  // that's the firmware's proof that WiFi works this session.
+  // Silent progress push while reading (BookFusion or KOReader). Percent modes
+  // fire once the book progress has advanced that many percentage points since
+  // the last successful push; ON_EXIT pushes once when leaving the book
+  // instead. Only active when the boot NTP check succeeded — that's the
+  // firmware's proof that WiFi works this session.
+  //
+  // There is deliberately no 1% option: the push has to release the chapter
+  // layout and take the reader unresponsive for a few seconds (see
+  // ProgressAutoSync.h), and on a large omnibus 1% can land every page or two.
   enum AUTOSYNC : uint8_t {
     AUTOSYNC_OFF = 0,
     AUTOSYNC_EVERY_CHAPTER = 1,
-    AUTOSYNC_EVERY_1_PERCENT = 2,
-    AUTOSYNC_EVERY_5_PERCENT = 3,
-    AUTOSYNC_EVERY_10_PERCENT = 4,
-    AUTOSYNC_ON_EXIT = 5,
+    AUTOSYNC_EVERY_5_PERCENT = 2,
+    AUTOSYNC_EVERY_10_PERCENT = 3,
+    AUTOSYNC_ON_EXIT = 4,
     AUTOSYNC_COUNT
   };
 
@@ -474,8 +477,6 @@ class CrossPointSettings {
   // Chapter and On Exit (those don't use a percentage threshold).
   uint8_t getAutosyncPercentStep() const {
     switch (autosyncMode) {
-      case AUTOSYNC_EVERY_1_PERCENT:
-        return 1;
       case AUTOSYNC_EVERY_5_PERCENT:
         return 5;
       case AUTOSYNC_EVERY_10_PERCENT:

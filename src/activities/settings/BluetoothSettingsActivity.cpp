@@ -11,6 +11,40 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
+namespace {
+// The manager reports outcomes as codes because it sits below I18n; translate
+// them here, at the layer that actually draws them.
+const char* btStatusText(const BtStatus status) {
+  switch (status) {
+    case BtStatus::Connected:
+      return tr(STR_CONNECTED);
+    case BtStatus::NotEnoughMemory:
+      return tr(STR_BT_ERR_NO_MEMORY);
+    case BtStatus::HeapFragmented:
+      return tr(STR_BT_ERR_FRAGMENTED);
+    case BtStatus::StartFailed:
+      return tr(STR_BT_ERR_START_FAILED);
+    case BtStatus::ScanFailed:
+      return tr(STR_BT_ERR_SCAN_FAILED);
+    case BtStatus::NotEnabled:
+      return tr(STR_BT_ERR_NOT_ENABLED);
+    case BtStatus::ClientFailed:
+      return tr(STR_BT_ERR_CLIENT);
+    case BtStatus::ConnectFailed:
+      return tr(STR_BT_ERR_CONNECT);
+    case BtStatus::NoHidService:
+      return tr(STR_BT_ERR_NO_HID);
+    case BtStatus::NoReportChar:
+      return tr(STR_BT_ERR_NO_REPORT);
+    case BtStatus::SubscribeFailed:
+      return tr(STR_BT_ERR_SUBSCRIBE);
+    case BtStatus::None:
+      break;
+  }
+  return "";
+}
+}  // namespace
+
 void BluetoothSettingsActivity::onEnter() {
   Activity::onEnter();
 
@@ -76,7 +110,7 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     if (!btMgr) {
-      lastError = "BLE not available";
+      lastError = tr(STR_BT_NOT_AVAILABLE);
       LOG_ERR("BT", "BLE manager not available");
       requestUpdate();
       return;
@@ -92,22 +126,22 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
       if (btMgr->isEnabled()) {
         LOG_INF("BT", "Disabling Bluetooth...");
         if (btMgr->disable()) {
-          lastError = "Bluetooth disabled";
+          lastError = tr(STR_BT_DISABLED);
         } else {
-          lastError = "Failed to disable";
+          lastError = tr(STR_BT_DISABLE_FAILED);
         }
       } else {
         LOG_INF("BT", "Enabling Bluetooth...");
         if (btMgr->enable()) {
-          lastError = "Bluetooth enabled";
+          lastError = tr(STR_BT_ENABLED);
         } else {
-          lastError = btMgr->lastError.empty() ? "Failed to enable" : btMgr->lastError;
+          lastError = btStatusText(btMgr->lastStatus);
         }
       }
       requestUpdate();
     } else if (selectedIndex == kRemoteIndex) {
       if (!btMgr->isEnabled()) {
-        lastError = "Turn Bluetooth on first";
+        lastError = tr(STR_BT_TURN_ON_FIRST);
       } else if (SETTINGS.bleBondedDeviceAddr[0] != '\0') {
         // Forget the remembered remote: drop the connection and the bond.
         const std::string addr = SETTINGS.bleBondedDeviceAddr;
@@ -119,7 +153,7 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
         SETTINGS.bleBondedDeviceAddrType = 0;
         SETTINGS.saveToFile();
         btMgr->setBondedDevice("", "");
-        lastError = "Remote forgotten";
+        lastError = tr(STR_BT_REMOTE_FORGOTTEN);
       } else {
         // No remote yet: scan and show the picker.
         btMgr->startScan(10000);
@@ -169,7 +203,7 @@ void BluetoothSettingsActivity::handleDeviceListInput() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
     // Quick rescan
     LOG_INF("BT", "Quick rescan...");
-    lastError = "Scanning...";
+    lastError = tr(STR_SCANNING);
     btMgr->startScan(10000);
     lastScanTime = millis();
     selectedIndex = 0;
@@ -181,7 +215,7 @@ void BluetoothSettingsActivity::handleDeviceListInput() {
     // Check if "Refresh" is selected
     if (selectedIndex == static_cast<int>(devices.size())) {
       LOG_INF("BT", "Refreshing scan...");
-      lastError = "Scanning...";
+      lastError = tr(STR_SCANNING);
       btMgr->startScan(10000);
       lastScanTime = millis();
       selectedIndex = 0;
@@ -198,7 +232,7 @@ void BluetoothSettingsActivity::handleDeviceListInput() {
         LOG_DBG("BT", "Disconnecting from %s", addr.c_str());
         btMgr->disconnectFromDevice(addr);
       }
-      lastError = "Disconnected";
+      lastError = tr(STR_BT_DISCONNECTED);
       selectedIndex = 0;
       requestUpdate();
       return;
@@ -209,7 +243,7 @@ void BluetoothSettingsActivity::handleDeviceListInput() {
       const auto& device = devices[selectedIndex];
 
       LOG_INF("BT", "Connecting to %s (%s)", device.name.c_str(), device.address.c_str());
-      lastError = "Connecting...";
+      lastError = tr(STR_CONNECTING);
       requestUpdate();
 
       if (btMgr->connectToDevice(device.address)) {
@@ -221,10 +255,10 @@ void BluetoothSettingsActivity::handleDeviceListInput() {
         SETTINGS.saveToFile();
         btMgr->setBondedDevice(device.address, device.name);
 
-        lastError = "Bluetooth enabled";
+        lastError = tr(STR_BT_ENABLED);
         LOG_INF("BT", "Successfully connected to %s", device.name.c_str());
       } else {
-        lastError = btMgr->lastError.empty() ? "Connection failed" : btMgr->lastError;
+        lastError = btStatusText(btMgr->lastStatus);
         LOG_ERR("BT", "Failed to connect: %s", lastError.c_str());
       }
       requestUpdate();
@@ -254,17 +288,17 @@ void BluetoothSettingsActivity::renderMainMenu() {
   std::string statusLine;
   if (btMgr) {
     if (!btMgr->isEnabled()) {
-      statusLine = "Bluetooth is off";
+      statusLine = tr(STR_BT_IS_OFF);
     } else if (SETTINGS.bleBondedDeviceAddr[0] != '\0' && btMgr->isConnected(SETTINGS.bleBondedDeviceAddr)) {
-      statusLine =
-          std::string("Connected: ") + (SETTINGS.bleBondedDeviceName[0] ? SETTINGS.bleBondedDeviceName : "remote");
+      statusLine = std::string(tr(STR_BT_CONNECTED_TO)) + ": " +
+                   (SETTINGS.bleBondedDeviceName[0] ? SETTINGS.bleBondedDeviceName : tr(STR_BT_A_REMOTE));
     } else if (SETTINGS.bleBondedDeviceAddr[0] != '\0') {
-      statusLine = "Remote not connected - press its button";
+      statusLine = tr(STR_BT_REMOTE_NOT_CONNECTED);
     } else {
-      statusLine = "No remote paired";
+      statusLine = tr(STR_BT_NO_REMOTE_PAIRED);
     }
   } else {
-    statusLine = "Error initializing Bluetooth";
+    statusLine = tr(STR_BT_INIT_ERROR);
   }
 
   GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
@@ -334,7 +368,7 @@ void BluetoothSettingsActivity::renderDeviceList() {
   renderer.clearScreen();
 
   if (!btMgr) {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, "Bluetooth error");
+    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_BT_ERROR));
     return;
   }
 
@@ -350,13 +384,13 @@ void BluetoothSettingsActivity::renderDeviceList() {
   // Subheader with scan status
   std::string subheaderText;
   if (btMgr->isScanning()) {
-    subheaderText = "Searching for devices...";
+    subheaderText = tr(STR_BT_SEARCHING);
   } else {
     if (devices.empty()) {
-      subheaderText = "No devices found";
+      subheaderText = tr(STR_BT_NO_DEVICES);
     } else {
       char buf[64];
-      snprintf(buf, sizeof(buf), "%d device(s) available", (int)devices.size());
+      snprintf(buf, sizeof(buf), "%d %s", (int)devices.size(), tr(STR_BT_DEVICES_AVAILABLE));
       subheaderText = buf;
     }
   }
@@ -389,11 +423,11 @@ void BluetoothSettingsActivity::renderDeviceList() {
   }
 
   // Add action buttons after the full device list.
-  deviceLabels.push_back("< Rescan >");
+  deviceLabels.push_back(tr(STR_BT_RESCAN));
   deviceValues.push_back("");
 
   if (!connectedDevices.empty()) {
-    deviceLabels.push_back("< Disconnect All >");
+    deviceLabels.push_back(tr(STR_BT_DISCONNECT_ALL));
     deviceValues.push_back("");
   }
 
@@ -409,7 +443,7 @@ void BluetoothSettingsActivity::renderDeviceList() {
   // Help text
   GUI.drawHelpText(renderer,
                    Rect{0, pageHeight - metrics.buttonHintsHeight - metrics.contentSidePadding - 15, pageWidth, 20},
-                   "Up/Down: Scroll | Right: Rescan");
+                   tr(STR_BT_SCROLL_HINT));
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), tr(STR_DIR_LEFT), tr(STR_RETRY));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

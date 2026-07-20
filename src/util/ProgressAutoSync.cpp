@@ -7,19 +7,16 @@
 #include <KOReaderSyncClient.h>
 #include <KOReaderSyncStateStore.h>
 #include <Logging.h>
-#include <Memory.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#include <cmath>
 #include <cstring>
 
 #include "CrossPointSettings.h"
 #include "TimeUtils.h"
 #include "WifiCredentialStore.h"
-#include "WifiTimeSync.h"
 
 // Implemented in EpubReaderActivity.cpp — shared so the timestamp format stays
 // byte-identical to the manual sync paths (BookFusion sorts updated_at as a
@@ -30,18 +27,14 @@ extern BookFusionStoredPosition storedPositionFromBookFusion(const BookFusionPos
 
 namespace {
 
-// Heap required before we're willing to bring WiFi up underneath an active
-// reader. WiFi + lwIP is ~40-45KB and a TLS handshake peaks ~35KB on top of
-// that; the remaining ~30KB is the envelope the reader is known to render in
-// (KOReaderSyncClient documents "~46KB free after WiFi" as the working point).
-// The contiguous check is the one that actually matters in practice: a
-// fragmented heap fails the 16KB TLS record buffer even when total free looks
-// healthy. TUNABLE — validate against the MEMDIAG-style logs below on device.
-constexpr size_t kMinFreeHeap = 110 * 1024;
-constexpr size_t kMinLargestBlock = 32 * 1024;
+// Sanity floor checked AFTER the caller has released the section and Epub. The
+// manual sync reaches its handshake with ~61KB free and bottoms out around
+// 11KB, so anything below this means the release didn't recover what it should
+// and pushing would risk an OOM instead of a clean skip.
+constexpr size_t kMinFreeHeapAfterRelease = 45 * 1024;
 
 // Minimum gap between attempts. Bounds retry-on-failure and stops a book of
-// many tiny spine items from hammering the radio in Every Chapter mode.
+// many tiny spine items from re-syncing every chapter.
 constexpr uint32_t kCooldownMs = 60000;
 
 // Association wait, matching WifiTimeSync's silent boot task (corporate APs
@@ -49,15 +42,7 @@ constexpr uint32_t kCooldownMs = 60000;
 constexpr int kConnectPollMs = 100;
 constexpr int kConnectMaxIters = 80;
 
-// Preemption handshake, same single-writer discipline as WifiTimeSync:
-//   sTaskActive    — written by the task (and by start() before creation),
-//                    read by preempt()/isBusy()
-//   sStopRequested — written by preempt(), read by the task at its yield points
-//   sCompleted     — written by the task, consumed by the reader's loop()
-volatile bool sTaskActive = false;
-volatile bool sStopRequested = false;
-volatile bool sCompleted = false;
-
+bool sArmed = false;
 uint32_t sLastAttemptMs = 0;
 
 // Per-book provider cache, so a page turn costs no SD I/O after the first call.
@@ -67,7 +52,7 @@ uint32_t sProviderBookId = 0;
 
 // Per-book progress baseline. Seeded from the last-synced sidecar when there is
 // one, otherwise from the position at first check — so opening a book never
-// fires an immediate sync.
+// arms a sync immediately.
 bool sBaselineValid = false;
 float sBaselinePercent = 0.0f;
 int sBaselineSpine = 0;
@@ -124,20 +109,6 @@ void seedBaseline(const std::string& epubPath, const int spineIndex, const float
   sBaselineValid = true;
 }
 
-bool heapAllowsSync() {
-  const size_t freeHeap = esp_get_free_heap_size();
-  const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  if (freeHeap < kMinFreeHeap || largest < kMinLargestBlock) {
-    LOG_DBG("PAS", "Skipping autosync: heap %u free, %u largest (need %u/%u)", static_cast<unsigned>(freeHeap),
-            static_cast<unsigned>(largest), static_cast<unsigned>(kMinFreeHeap),
-            static_cast<unsigned>(kMinLargestBlock));
-    return false;
-  }
-  LOG_DBG("PAS", "Autosync gate passed: heap %u free, %u largest", static_cast<unsigned>(freeHeap),
-          static_cast<unsigned>(largest));
-  return true;
-}
-
 // Resolve the KOReader document hash, caching the expensive binary variant.
 std::string koDocumentHash(const std::string& epubPath) {
   if (KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME) {
@@ -177,7 +148,8 @@ bool pushBookFusion(const ProgressAutoSync::Payload& payload) {
   BookFusionBookIdStore::saveLastSyncedPosition(path, stored);
 
   // Reading-time delta is best-effort: a failure here doesn't fail the push,
-  // it just means the delta rolls into the next sync.
+  // it just means the delta rolls into the next sync. The connection is already
+  // up, so this second request has no handshake spike.
   if (payload.totalReadingMs > 0) {
     const uint64_t lastSyncedMs = BookFusionBookIdStore::loadLastSyncedReadingMs(path);
     if (payload.totalReadingMs > lastSyncedMs) {
@@ -237,8 +209,8 @@ bool pushKOReader(const ProgressAutoSync::Payload& payload) {
   return true;
 }
 
-// Bring WiFi up on the last-known network. Mirrors WifiTimeSync::silentBootTask
-// — deliberately short timeouts so a dead AP doesn't hold the radio on.
+// Bring WiFi up on the last-known network. Deliberately short timeouts so a
+// dead AP doesn't hold the reader hostage.
 bool connectSilently() {
   WIFI_STORE.loadFromFile();
   const std::string& lastSsid = WIFI_STORE.getLastConnectedSsid();
@@ -258,58 +230,16 @@ bool connectSilently() {
   } else {
     WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
   }
-  for (int i = 0; i < kConnectMaxIters && WiFi.status() != WL_CONNECTED && !sStopRequested; ++i) {
+  for (int i = 0; i < kConnectMaxIters && WiFi.status() != WL_CONNECTED; ++i) {
     vTaskDelay(kConnectPollMs / portTICK_PERIOD_MS);
   }
-  return !sStopRequested && WiFi.status() == WL_CONNECTED;
+  return WiFi.status() == WL_CONNECTED;
 }
 
 void teardownWifi() {
   WiFi.disconnect(false);
   vTaskDelay(50 / portTICK_PERIOD_MS);
   WiFi.mode(WIFI_OFF);
-}
-
-bool performPush(const ProgressAutoSync::Payload& payload) {
-  switch (payload.provider) {
-    case ProgressAutoSync::Provider::BookFusion:
-      return pushBookFusion(payload);
-    case ProgressAutoSync::Provider::KOReader:
-      return pushKOReader(payload);
-    default:
-      return false;
-  }
-}
-
-void autosyncTask(void* arg) {
-  // Take ownership immediately so every exit path below frees the payload.
-  std::unique_ptr<ProgressAutoSync::Payload> payload(static_cast<ProgressAutoSync::Payload*>(arg));
-
-  // The boot NTP task flips wasTimeSyncedThisBoot() before it finishes tearing
-  // WiFi down, so we can arrive here while it still owns the radio.
-  WifiTimeSync::preempt(2000);
-
-  bool pushed = false;
-  if (!sStopRequested && payload && connectSilently()) {
-    if (!sStopRequested) {
-      pushed = performPush(*payload);
-      if (pushed) {
-        sBaselinePercent = payload->bookPercent;
-        sBaselineSpine = payload->spineIndex;
-      }
-    }
-    teardownWifi();
-  } else if (!sStopRequested) {
-    // connectSilently() may have left the radio half-up on a failed association.
-    teardownWifi();
-  } else {
-    teardownWifi();
-    LOG_DBG("PAS", "Autosync preempted");
-  }
-
-  sCompleted = true;
-  sTaskActive = false;  // Last write: preempt() waits on this to know WiFi is down.
-  vTaskDelete(nullptr);
 }
 
 }  // namespace
@@ -324,29 +254,27 @@ Trigger providerFor(const std::string& epubPath) {
   return trigger;
 }
 
-Trigger shouldSync(const std::string& epubPath, const int spineIndex, const float bookPercent) {
-  Trigger trigger;
-
+bool armIfThresholdCrossed(const std::string& epubPath, const int spineIndex, const float bookPercent) {
   const uint8_t mode = SETTINGS.autosyncMode;
   if (mode == CrossPointSettings::AUTOSYNC_OFF || mode == CrossPointSettings::AUTOSYNC_ON_EXIT) {
-    return trigger;
+    return false;
+  }
+  if (sArmed) {
+    return true;  // already waiting for page 2
   }
   // The boot NTP attempt is our proof that WiFi works this session; without a
   // valid clock the sync timestamps would be meaningless anyway.
   if (!TimeUtils::wasTimeSyncedThisBoot()) {
-    return trigger;
-  }
-  if (sTaskActive) {
-    return trigger;
+    return false;
   }
   const uint32_t now = millis();
   if (sLastAttemptMs != 0 && (now - sLastAttemptMs) < kCooldownMs) {
-    return trigger;
+    return false;
   }
 
   resolveProvider(epubPath);
   if (sProvider == Provider::None) {
-    return trigger;
+    return false;
   }
 
   seedBaseline(epubPath, spineIndex, bookPercent);
@@ -361,81 +289,55 @@ Trigger shouldSync(const std::string& epubPath, const int spineIndex, const floa
     crossed = step > 0 && bookPercent >= sBaselinePercent + static_cast<float>(step);
   }
   if (!crossed) {
-    return trigger;
-  }
-
-  if (!heapAllowsSync()) {
-    return trigger;
-  }
-
-  trigger.provider = sProvider;
-  trigger.bookId = sProviderBookId;
-  return trigger;
-}
-
-bool start(std::unique_ptr<Payload> payload) {
-  if (!payload || payload->provider == Provider::None) {
-    return false;
-  }
-  if (sTaskActive) {
     return false;
   }
 
-  sStopRequested = false;
-  sCompleted = false;
-  sLastAttemptMs = millis();
-  // Mark active before the task exists so an early preempt() can't slip through
-  // the create-to-first-run gap.
-  sTaskActive = true;
-
-  // 8KB: the mbedTLS handshake and JSON parsing run on this stack. WifiTimeSync
-  // gets away with 4KB because SNTP does neither.
-  if (xTaskCreate(&autosyncTask, "PASync", 8192, payload.get(), 1, nullptr) != pdPASS) {
-    sTaskActive = false;
-    LOG_ERR("PAS", "Failed to create autosync task");
-    return false;
-  }
-  payload.release();  // the task owns it now
+  LOG_DBG("PAS", "Autosync armed at %.1f%% (baseline %.1f%%)", bookPercent, sBaselinePercent);
+  sArmed = true;
   return true;
 }
 
-bool isBusy() { return sTaskActive; }
+bool isArmed() { return sArmed; }
 
-bool consumeCompletion() {
-  if (!sCompleted) {
+void disarm() { sArmed = false; }
+
+bool heapAllowsPush() {
+  const size_t freeHeap = esp_get_free_heap_size();
+  const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  if (freeHeap < kMinFreeHeapAfterRelease) {
+    LOG_DBG("PAS", "Skipping push: only %u free after release, %u largest (need %u)", static_cast<unsigned>(freeHeap),
+            static_cast<unsigned>(largest), static_cast<unsigned>(kMinFreeHeapAfterRelease));
     return false;
   }
-  sCompleted = false;
+  LOG_DBG("PAS", "Push heap after release: %u free, %u largest", static_cast<unsigned>(freeHeap),
+          static_cast<unsigned>(largest));
   return true;
-}
-
-void preempt(const uint32_t maxWaitMs) {
-  if (!sTaskActive) return;
-
-  LOG_INF("PAS", "Preempting autosync");
-  sStopRequested = true;
-
-  constexpr uint32_t kPollMs = 20;
-  uint32_t waited = 0;
-  while (sTaskActive && waited < maxWaitMs) {
-    vTaskDelay(kPollMs / portTICK_PERIOD_MS);
-    waited += kPollMs;
-  }
-  if (sTaskActive) {
-    LOG_ERR("PAS", "Autosync preempt timed out after %ums", static_cast<unsigned>(waited));
-  }
 }
 
 bool pushBlocking(const Payload& payload) {
   if (payload.provider == Provider::None) {
     return false;
   }
+  sArmed = false;
   sLastAttemptMs = millis();
+
   if (!connectSilently()) {
     teardownWifi();
     return false;
   }
-  const bool pushed = performPush(payload);
+
+  bool pushed = false;
+  switch (payload.provider) {
+    case Provider::BookFusion:
+      pushed = pushBookFusion(payload);
+      break;
+    case Provider::KOReader:
+      pushed = pushKOReader(payload);
+      break;
+    default:
+      break;
+  }
+
   teardownWifi();
   if (pushed) {
     sBaselinePercent = payload.bookPercent;
@@ -481,6 +383,7 @@ bool hasUnsyncedProgress(const Payload& payload) {
 }
 
 void resetSessionBaseline() {
+  sArmed = false;
   sBaselineValid = false;
   sBaselinePercent = 0.0f;
   sBaselineSpine = 0;

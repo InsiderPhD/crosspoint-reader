@@ -134,12 +134,14 @@ bool BluetoothHIDManager::enable() {
   if (freeHeap < 75000) {
     LOG_ERR("BT", "Not enough free heap to enable Bluetooth (%u bytes)", freeHeap);
     lastError = "Not enough free memory";
+    lastStatus = BtStatus::NotEnoughMemory;
     return false;
   }
   if (largestBlock < BLE_CONTROLLER_MIN_BLOCK) {
     LOG_ERR("BT", "Heap too fragmented to enable Bluetooth (largest block %u, floor %u; free %u)", largestBlock,
             static_cast<unsigned>(BLE_CONTROLLER_MIN_BLOCK), freeHeap);
     lastError = "Memory too fragmented - restart to use Bluetooth";
+    lastStatus = BtStatus::HeapFragmented;
     return false;
   }
   // Above the floor we attempt regardless. Log the block size on every attempt so
@@ -162,6 +164,7 @@ bool BluetoothHIDManager::enable() {
   if (!NimBLEDevice::init("CrossPoint")) {
     LOG_ERR("BT", "NimBLEDevice::init failed (heap %u, largest %u)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     lastError = "Bluetooth failed to start";
+    lastStatus = BtStatus::StartFailed;
     return false;
   }
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);  // +9dBm
@@ -170,6 +173,7 @@ bool BluetoothHIDManager::enable() {
 
   _enabled = true;
   lastError = "";
+  lastStatus = BtStatus::None;
 
   LOG_INF("BT", "Bluetooth enabled successfully (heap %u, largest %u)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   loadState();
@@ -231,6 +235,7 @@ void BluetoothHIDManager::startScan(uint32_t durationMs) {
     LOG_ERR("BT", "Failed to get scan object");
     _scanning = false;
     lastError = "Scan failed";
+    lastStatus = BtStatus::ScanFailed;
     return;
   }
 
@@ -253,6 +258,7 @@ void BluetoothHIDManager::startScan(uint32_t durationMs) {
     LOG_ERR("BT", "Failed to start scan!");
     _scanning = false;
     lastError = "Scan failed";
+    lastStatus = BtStatus::ScanFailed;
     return;
   }
 
@@ -378,6 +384,7 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   if (!_enabled) {
     LOG_ERR("BT", "Cannot connect: Bluetooth not enabled");
     lastError = "Bluetooth not enabled";
+    lastStatus = BtStatus::NotEnabled;
     return false;
   }
 
@@ -407,6 +414,7 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
 
   if (!pClient) {
     lastError = "Failed to create BLE client";
+    lastStatus = BtStatus::ClientFailed;
     LOG_ERR("BT", "Failed to create BLE client");
     return false;
   }
@@ -442,6 +450,7 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
 
     if (!pClient->connect(bleAddress)) {
       lastError = "Connection failed";
+      lastStatus = BtStatus::ConnectFailed;
       LOG_ERR("BT", "Failed to connect to %s", address.c_str());
       return false;
     }
@@ -461,6 +470,7 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   NimBLERemoteService* pService = pClient->getService(HID_SERVICE_UUID);
   if (!pService) {
     lastError = "HID service not found";
+    lastStatus = BtStatus::NoHidService;
     LOG_ERR("BT", "Device %s doesn't have HID service", address.c_str());
     pClient->disconnect();
     return false;
@@ -506,6 +516,7 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
 
   if (reportChars.empty()) {
     lastError = "No input report characteristic found";
+    lastStatus = BtStatus::NoReportChar;
     LOG_ERR("BT", "No Report characteristic with notify/indicate found");
     pClient->disconnect();
     return false;
@@ -536,6 +547,7 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
 
   if (successfulSubscriptions == 0) {
     lastError = "Failed to subscribe to input reports";
+    lastStatus = BtStatus::SubscribeFailed;
     LOG_ERR("BT", "No HID report subscriptions succeeded for %s", address.c_str());
     pClient->disconnect();
     return false;
@@ -594,6 +606,7 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
 
   LOG_INF("BT", "Successfully connected to %s", address.c_str());
   lastError = "Connected";
+  lastStatus = BtStatus::Connected;
   return true;
 }
 

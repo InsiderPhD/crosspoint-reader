@@ -22,7 +22,6 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "util/ProgressAutoSync.h"
 #include "util/WifiTimeSync.h"
 
 namespace {
@@ -200,7 +199,6 @@ void GroupBrowserActivity::loadLibraryKeys() {
   // stack heap is freed before this recache's heavy per-book allocations —
   // avoids a cold-boot OOM/contention crash. No-op after the ~10s boot window.
   WifiTimeSync::preempt();
-  ProgressAutoSync::preempt();
   LibraryScan::enumerateBooks(bookPaths);
   bookKeys.assign(bookPaths.size(), std::string{});
   // Only series mode needs a per-book numeric sort key; leave it empty otherwise.
