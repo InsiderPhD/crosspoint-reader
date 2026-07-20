@@ -552,6 +552,10 @@ void loop() {
   const bool bleRecentActivity = btMgr.isEnabled() && btMgr.hasRecentActivity();
 
   renderer.setFadingFix(SETTINGS.fadingFix);
+  // A connected remote leaves ~10-20KB free; the JPEG decoder wants ~36KB. Rather
+  // than fail that allocation ten times per page (once per BW/grayscale pass for
+  // any image too small to cache), don't attempt it while the stack is up.
+  renderer.setImagesSuppressed(btMgr.isEnabled());
 
   if (Serial && millis() - lastMemPrint >= 10000) {
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, MaxAlloc: %d bytes", ESP.getFreeHeap(),

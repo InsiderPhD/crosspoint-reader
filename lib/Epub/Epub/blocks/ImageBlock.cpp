@@ -128,6 +128,11 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   FontCacheManager* fcm = renderer.getFontCacheManager();
   if (fcm && fcm->isScanning()) return;
 
+  // Images off (currently: while Bluetooth holds the heap the decoder needs).
+  // Layout already reserved this space at build time, so the page is unchanged
+  // apart from the image itself being blank.
+  if (renderer.areImagesSuppressed()) return;
+
   LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d)", x, y, imagePath.c_str(), width, height);
 
   const int screenWidth = renderer.getScreenWidth();

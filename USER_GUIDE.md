@@ -468,6 +468,10 @@ tedious. Either:
   for it waking up and reconnects within a couple of seconds.
 - Long-press gestures (such as chapter skip) work from the device's own buttons
   only. A remote press is always a single page turn.
+- **Images are hidden while the remote is connected.** Decoding a picture needs
+  more memory than is free with Bluetooth running, so illustrations draw blank.
+  The page layout is unchanged — text sits exactly where it otherwise would, and
+  the images come back as soon as you turn Bluetooth off.
 
 ### Why does Bluetooth keep turning itself off?
 

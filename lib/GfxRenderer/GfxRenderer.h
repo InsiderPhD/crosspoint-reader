@@ -36,6 +36,7 @@ class GfxRenderer {
   RenderMode renderMode;
   Orientation orientation;
   bool fadingFix;
+  bool imagesSuppressed = false;
   uint8_t* frameBuffer = nullptr;
   uint16_t panelWidth = HalDisplay::DISPLAY_WIDTH;
   uint16_t panelHeight = HalDisplay::DISPLAY_HEIGHT;
@@ -113,6 +114,15 @@ class GfxRenderer {
 
   // Fading fix control
   void setFadingFix(const bool enabled) { fadingFix = enabled; }
+
+  // Suppress image decoding during page render (layout is unaffected — the space
+  // an image occupies is fixed at build time and stays reserved, it just draws
+  // blank). Used when the BLE stack is up: the JPEG decoder needs ~36KB and only
+  // ~10-20KB is free with a remote connected, so every image decode fails — and
+  // because an uncacheable image re-decodes on each of the BW and grayscale
+  // passes, that is roughly ten guaranteed failures per page.
+  void setImagesSuppressed(const bool suppressed) { imagesSuppressed = suppressed; }
+  bool areImagesSuppressed() const { return imagesSuppressed; }
 
   // Screen ops
   int getScreenWidth() const;
