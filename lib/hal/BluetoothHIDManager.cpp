@@ -751,6 +751,16 @@ bool BluetoothHIDManager::hadRecentRemoteInput(unsigned long windowMs) const {
   return false;
 }
 
+unsigned long BluetoothHIDManager::lastRemoteInputMs() const {
+  unsigned long latest = 0;
+  for (const auto& device : _connectedDevices) {
+    if (device.lastRemoteInputMs > latest) {
+      latest = device.lastRemoteInputMs;
+    }
+  }
+  return latest;
+}
+
 // --- Direction-agnostic press detection ---
 //
 // Page turners agree on nothing: keycodes, report layout, and even whether a

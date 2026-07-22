@@ -131,6 +131,10 @@ class BluetoothHIDManager {
   // short pulses, so hold-duration is meaningless for them — callers use this to
   // suppress long-press gestures (e.g. chapter skip) right after remote input.
   bool hadRecentRemoteInput(unsigned long windowMs = 1500) const;
+  // millis() of the most recent report from any connected remote, or 0 if none
+  // has arrived. The settings screen watches this for changes to count
+  // individual presses — a decaying window can't distinguish two quick clicks.
+  unsigned long lastRemoteInputMs() const;
 
   // State persistence
   void saveState();
