@@ -127,10 +127,15 @@ void SettingsActivity::onEnter() {
   devSettings.push_back(SettingInfo::Action(StrId::STR_RESET_READING_STATS, SettingAction::ResetStats));
 
   readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_LAYOUT_PREVIEW, SettingAction::FontLayoutPreview));
+  // Font Download lives HERE, not inside the Font & Layout preview: launched
+  // from the preview, the whole live-preview state (prewarmed sample glyphs)
+  // stayed resident under the download's TLS session and ate its heap
+  // (observed on-device). From this list the route is as lean as it gets.
+  readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_DOWNLOAD, SettingAction::FontDownload));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_READER_CONTROLS, SettingAction::ReaderControls));
-  // Font family (built-in + SD) and Font Download are now edited inside the
-  // Font & Layout preview, so they are not listed separately here.
+  // Font family (built-in + SD) is edited inside the Font & Layout preview,
+  // so it is not listed separately here.
 
   // Assemble the visible category tabs. categoryNames and categoryLists stay in
   // lockstep. The Dev tab is only appended when Dev Mode is enabled.

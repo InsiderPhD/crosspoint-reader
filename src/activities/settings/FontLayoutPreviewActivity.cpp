@@ -9,7 +9,6 @@
 #include <cstdlib>
 #include <memory>
 
-#include "FontDownloadActivity.h"
 #include "MappedInputManager.h"
 #include "SdCardFontGlobals.h"
 #include "activities/reader/ReaderUtils.h"
@@ -188,7 +187,10 @@ const FontLayoutPreviewActivity::Row FontLayoutPreviewActivity::kRows[] = {
     {StrId::STR_TEXT_AA, RowKind::Toggle, &CrossPointSettings::textAntiAliasing, nullptr, 0, 0, 0, 0, false, false},
     {StrId::STR_ORIENTATION, RowKind::Enum, &CrossPointSettings::orientation, kOrientLabels,
      CrossPointSettings::ORIENTATION_COUNT, 0, 0, 0, false, true},
-    {StrId::STR_FONT_DOWNLOAD, RowKind::Action, nullptr, nullptr, 0, 0, 0, 0, false, false},
+    // Font Download deliberately NOT here: launching it from inside this
+    // activity keeps the whole live preview (prewarmed sample glyphs, preview
+    // state) resident under the download's TLS session — observed on-device
+    // eating the transfer's heap. It lives in the main Settings list instead.
 };
 const int FontLayoutPreviewActivity::kRowCount = sizeof(kRows) / sizeof(kRows[0]);
 
@@ -350,18 +352,9 @@ void FontLayoutPreviewActivity::prewarmSampleGlyphs() {
 }
 
 void FontLayoutPreviewActivity::activateRow(const Row& row) {
-  // The only action row is "Download fonts".
-  if (row.label != StrId::STR_FONT_DOWNLOAD) {
-    return;
-  }
-  startActivityForResult(std::make_unique<FontDownloadActivity>(renderer, mappedInput), [this](const ActivityResult&) {
-    ensureSdFontLoaded();  // a newly downloaded font may now be active
-    prewarmSampleGlyphs();
-    changed = true;
-    previewDirty = true;
-    fullRefreshNext = true;
-    requestUpdate();
-  });
+  // No action rows remain (Font Download moved to the main Settings list —
+  // see the kRows comment).
+  (void)row;
 }
 
 std::string FontLayoutPreviewActivity::rowValueText(const Row& row) const {
