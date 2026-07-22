@@ -20,6 +20,10 @@ class OtaUpdateActivity : public Activity {
 
   State state = WIFI_SELECTION;
   unsigned int lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
+  // True while the firmware image downloads: the screen freezes on a static
+  // card (the framebuffer is lent to the transfer's TLS session), then flips
+  // false for the flash phase, which renders a live progress bar.
+  bool downloadPhase = false;
   OtaUpdater updater;
 
   void onWifiSelectionComplete(bool success);

@@ -11,6 +11,12 @@
 
 namespace {
 constexpr char latestReleaseUrl[] = "https://api.github.com/repos/InsiderPhD/crosspoint-reader/releases/latest";
+
+// SD staging slot for the downloaded image, shared by downloadUpdate() and
+// flashUpdate(). Reuses the SD recovery temp path; kept on SD root so a
+// failed/interrupted flash leaves an obvious artifact rather than silently
+// consuming hidden space.
+constexpr char kTmpPath[] = "/firmware_ota.bin";
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
@@ -133,7 +139,7 @@ bool OtaUpdater::isUpdateNewer() const {
 
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
 
-OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgress, void* ctx) {
+OtaUpdater::OtaUpdaterError OtaUpdater::downloadUpdate() {
   if (!isUpdateNewer()) {
     return UPDATE_OLDER_ERROR;
   }
@@ -142,43 +148,56 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
     return INTERNAL_UPDATE_ERROR;
   }
 
-  // X3/X4 units reject otherwise-valid images via esp_image_verify (bogus efuse-blk-rev),
-  // so the streaming esp_https_ota path fails at finish on those devices. Instead download
-  // the .bin to SD, then raw-write the OTA partition + switch otadata, which bypasses the
-  // runtime verify (same scheme as SD recovery and the web flasher — see OtaBootSwitch.h).
-  uiProgressCb = onProgress;
-  uiProgressCtx = ctx;
-
-  // Reuse the SD recovery temp slot. Kept on SD root so a failed/interrupted flash leaves an
-  // obvious artifact rather than silently consuming hidden space.
-  static constexpr char kTmpPath[] = "/firmware_ota.bin";
-
   /* Disable WiFi power saving for a stable download. */
   esp_wifi_set_ps(WIFI_PS_NONE);
 
-  // Phase 1: download firmware.bin to SD. allowConfiguredAuth=false: never attach OPDS Basic
-  // auth to a firmware fetch.
+  // Download firmware.bin to SD, quietly: the caller holds the framebuffer
+  // lent to this transfer's TLS session, so nothing may render — progress is a
+  // serial-only per-MB heartbeat. allowConfiguredAuth=false: never attach OPDS
+  // Basic auth to a firmware fetch. Retried: a ~6MB transfer over a slow CDN
+  // can drop mid-stream, and the GitHub asset URL is stable across attempts.
   totalSize = otaSize;
-  processedSize = 0;
-  const auto dlResult = HttpDownloader::downloadToFile(
-      otaUrl, kTmpPath,
-      [this, onProgress, ctx](size_t downloaded, size_t total) {
-        processedSize = downloaded;
-        totalSize = total > 0 ? total : otaSize;
-        if (onProgress) onProgress(ctx);
-      },
-      /*allowConfiguredAuth=*/false);
+  auto dlResult = HttpDownloader::HTTP_ERROR;
+  constexpr int kMaxDownloadAttempts = 3;
+  for (int attempt = 1; attempt <= kMaxDownloadAttempts; attempt++) {
+    processedSize = 0;
+    size_t lastLoggedMB = 0;
+    dlResult = HttpDownloader::downloadToFile(
+        otaUrl, kTmpPath,
+        [this, &lastLoggedMB](size_t downloaded, size_t total) {
+          processedSize = downloaded;
+          totalSize = total > 0 ? total : otaSize;
+          const size_t mb = downloaded >> 20;
+          if (mb > lastLoggedMB) {
+            lastLoggedMB = mb;
+            LOG_DBG("OTA", "Download progress: %u/%u MB", (unsigned)mb, (unsigned)(totalSize >> 20));
+          }
+        },
+        /*allowConfiguredAuth=*/false, /*expectedSize=*/otaSize);
+
+    if (dlResult == HttpDownloader::OK) break;
+    LOG_ERR("OTA", "Firmware download attempt %d/%d failed: %d", attempt, kMaxDownloadAttempts, dlResult);
+  }
 
   esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 
   if (dlResult != HttpDownloader::OK) {
-    LOG_ERR("OTA", "Firmware download failed: %d", dlResult);
     Storage.remove(kTmpPath);
     return HTTP_ERROR;
   }
+  return OK;
+}
 
-  // Phase 2: raw-write + otadata switch. flashFromSdPath re-validates the image (header /
-  // segment table / XOR / SHA trailer) before writing.
+OtaUpdater::OtaUpdaterError OtaUpdater::flashUpdate(ProgressCallback onProgress, void* ctx) {
+  // X3/X4 units reject otherwise-valid images via esp_image_verify (bogus efuse-blk-rev),
+  // so the streaming esp_https_ota path fails at finish on those devices. Instead raw-write
+  // the OTA partition + switch otadata from the staged SD image, which bypasses the runtime
+  // verify (same scheme as SD recovery and the web flasher — see OtaBootSwitch.h).
+  // flashFromSdPath re-validates the image (header / segment table / XOR / SHA trailer)
+  // before writing.
+  uiProgressCb = onProgress;
+  uiProgressCtx = ctx;
+
   processedSize = 0;
   const auto flashResult = firmware_flash::flashFromSdPath(
       kTmpPath,

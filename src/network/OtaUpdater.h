@@ -33,7 +33,17 @@ class OtaUpdater {
   bool isUpdateNewer() const;
   const std::string& getLatestVersion() const;
   OtaUpdaterError checkForUpdate();
-  OtaUpdaterError installUpdate(ProgressCallback onProgress = nullptr, void* ctx = nullptr);
+
+  // The install is split so the caller can lend the framebuffer to the
+  // download's TLS session (TlsFramebufferBorrow) while a pre-painted static
+  // frame holds the panel — the ~6MB transfer drops mid-stream on this heap
+  // otherwise, exactly like the BookFusion book download did. downloadUpdate()
+  // is quiet (serial-only per-MB heartbeat, retries) and stages the image on
+  // SD; flashUpdate() raw-writes it with UI progress (no TLS, rendering is
+  // safe again). Call downloadUpdate() first; flashUpdate() consumes the
+  // staged file.
+  OtaUpdaterError downloadUpdate();
+  OtaUpdaterError flashUpdate(ProgressCallback onProgress = nullptr, void* ctx = nullptr);
 
  private:
   // UI progress callback + context, stashed during installUpdate() so the C-style
