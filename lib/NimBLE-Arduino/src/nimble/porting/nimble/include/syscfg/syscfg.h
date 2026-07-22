@@ -782,7 +782,9 @@
 #endif
 
 #ifndef MYNEWT_VAL_BLE_ATT_SVR_MAX_PREP_ENTRIES
-#define MYNEWT_VAL_BLE_ATT_SVR_MAX_PREP_ENTRIES (64)
+/* CrossPoint (vendored patch): backstop for esp_nimble_cfg.h — client-only HID
+ * central needs no prepared-write pool. See that header for rationale. */
+#define MYNEWT_VAL_BLE_ATT_SVR_MAX_PREP_ENTRIES (0)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_ATT_SVR_NOTIFY
@@ -1098,11 +1100,15 @@
 #endif
 
 #ifndef MYNEWT_VAL_BLE_STORE_MAX_BONDS
-#define MYNEWT_VAL_BLE_STORE_MAX_BONDS (3)
+/* CrossPoint (vendored patch): backstop for esp_nimble_cfg.h — one remembered
+ * remote. See that header for rationale. */
+#define MYNEWT_VAL_BLE_STORE_MAX_BONDS (1)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_STORE_MAX_CCCDS
-#define MYNEWT_VAL_BLE_STORE_MAX_CCCDS (8)
+/* CrossPoint (vendored patch): backstop for esp_nimble_cfg.h — subscriptions are
+ * re-established on connect, so 4 store slots suffice. */
+#define MYNEWT_VAL_BLE_STORE_MAX_CCCDS (4)
 #endif
 
 #ifdef CONFIG_BT_NIMBLE_MAX_EADS
