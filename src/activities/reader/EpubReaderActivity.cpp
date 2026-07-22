@@ -1868,11 +1868,12 @@ bool EpubReaderActivity::runAutosyncNow() {
   const std::string epubPath = payload->epubPath;
 
   // Release the chapter layout AND the book metadata before the TLS session,
-  // exactly as the manual sync does. The handshake is the allocation spike: two
-  // 16KB record buffers (fixed in the precompiled mbedtls) plus X509/RSA work.
-  // Without this the push simply does not fit — the reader idles around 70KB
-  // free and the WiFi stack alone takes ~40KB. The section reloads from its
-  // cache file on the next render; the Epub is reloaded below.
+  // exactly as the manual sync does. The wolfSSL handshake is far leaner than
+  // the old mbedTLS one (no 2x16KB contiguous record pair, X25519 key share),
+  // but the reader idles around 70KB free and the WiFi stack alone takes
+  // ~40KB, so this insurance stays until the new headroom is measured
+  // on-device with BLE up. The section reloads from its cache file on the
+  // next render; the Epub is reloaded below.
   {
     RenderLock lock(*this);
     if (section) {
@@ -2800,8 +2801,9 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     LOG_INF("BT", "Disabling Bluetooth for WiFi sync");
     btMgrSync.disable();
   }
-  // The TLS handshake alone wants ~45-50KB of heap (mbedTLS buffers). Drop the
-  // cached font glyphs as well; they re-warm on the next page render.
+  // Give the TLS handshake as much headroom as we can. wolfSSL needs far less
+  // than the old mbedTLS (~45-50KB), but dropping the cached font glyphs is
+  // cheap insurance; they re-warm on the next page render.
   if (auto* fcm = renderer.getFontCacheManager()) {
     fcm->clearCache();
   }
@@ -2918,12 +2920,14 @@ void EpubReaderActivity::performBookFusionSync() {
     return;
   }
   // Local position is captured; free the chapter layout AND the book metadata
-  // before the TLS session starts. The handshake is the allocation spike: two
-  // 16KB record buffers (fixed in the precompiled mbedtls) plus X509/RSA work —
-  // measured on-device to need everything we can free (MinFree hit 184 bytes
-  // with only the section released). The section reloads from its cache file,
-  // and the epub is reloaded right after the first request (the connection is
-  // reused afterwards, so later requests have no handshake spike).
+  // before the TLS session starts. Under the old mbedTLS transport the
+  // handshake spike (2x16KB contiguous record buffers + X509/RSA work) was
+  // measured to need everything we could free (MinFree hit 184 bytes with only
+  // the section released). wolfSSL's X25519 handshake is far leaner, but this
+  // release stays until the new headroom is measured on-device with BLE up.
+  // The section reloads from its cache file, and the epub is reloaded right
+  // after the first request (the connection is reused afterwards, so later
+  // requests have no handshake spike).
   {
     RenderLock lock(*this);
     if (section) {

@@ -3,8 +3,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <ReleaseJsonParser.h>
-#include <esp_crt_bundle.h>
-#include <esp_http_client.h>
+#include <SecureHttpClient.h>
 #include <esp_wifi.h>
 
 #include "FirmwareFlasher.h"
@@ -12,61 +11,47 @@
 
 namespace {
 constexpr char latestReleaseUrl[] = "https://api.github.com/repos/InsiderPhD/crosspoint-reader/releases/latest";
-
-size_t totalBytesReceived = 0;
-
-esp_err_t event_handler(esp_http_client_event_t* event) {
-  if (event->event_id != HTTP_EVENT_ON_DATA) return ESP_OK;
-  totalBytesReceived += event->data_len;
-  LOG_DBG("OTA", "HTTP chunk: %d bytes (total: %zu)", event->data_len, totalBytesReceived);
-  auto* parser = static_cast<ReleaseJsonParser*>(event->user_data);
-  parser->feed(static_cast<const char*>(event->data), event->data_len);
-  return ESP_OK;
-}
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
-  esp_err_t esp_err;
   ReleaseJsonParser releaseParser;
 
-  esp_http_client_config_t client_config = {
-      .url = latestReleaseUrl,
-      .event_handler = event_handler,
-      .buffer_size = 8192,
-      .buffer_size_tx = 8192,
-      .user_data = &releaseParser,
-      .skip_cert_common_name_check = true,
-      .crt_bundle_attach = esp_crt_bundle_attach,
-      .keep_alive_enable = true,
-  };
-
-  totalBytesReceived = 0;
   LOG_DBG("OTA", "Checking for update (current: %s)", CROSSPOINT_VERSION);
 
-  esp_http_client_handle_t client_handle = esp_http_client_init(&client_config);
-  if (!client_handle) {
-    LOG_ERR("OTA", "HTTP Client Handle Failed");
+  // Transport is freeink::SecureHttpClient (wolfSSL), the last esp-tls call
+  // site to migrate. setInsecure() is not a downgrade: the previous esp-tls
+  // config set skip_cert_common_name_check, which accepted any CA-signed cert
+  // for any hostname — and the firmware binary itself already downloads via
+  // HttpDownloader (insecure), with FirmwareFlasher re-validating the image
+  // (header / segment table / XOR / SHA trailer) before writing. Real
+  // supply-chain protection would be signed releases verified in the flasher,
+  // not TLS pinning here.
+  freeink::SecureHttpClient http;
+  http.setInsecure();
+  http.setTimeout(15000);
+  // GitHub's API rejects UA-less requests.
+  http.setUserAgent("CrossPoint-ESP32-" CROSSPOINT_VERSION);
+  if (!http.begin(latestReleaseUrl)) {
+    LOG_ERR("OTA", "Bad release URL");
     return INTERNAL_UPDATE_ERROR;
   }
 
-  esp_err = esp_http_client_set_header(client_handle, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
-  if (esp_err != ESP_OK) {
-    LOG_ERR("OTA", "esp_http_client_set_header Failed : %s", esp_err_to_name(esp_err));
-    esp_http_client_cleanup(client_handle);
-    return INTERNAL_UPDATE_ERROR;
-  }
+  // The release JSON (tens of KB with the release notes) streams straight
+  // through the parser — never buffered whole.
+  size_t totalBytesReceived = 0;
+  const int httpCode = http.GET([&](const uint8_t* data, size_t len) {
+    totalBytesReceived += len;
+    releaseParser.feed(reinterpret_cast<const char*>(data), len);
+    return true;
+  });
 
-  esp_err = esp_http_client_perform(client_handle);
-  if (esp_err != ESP_OK) {
-    LOG_ERR("OTA", "esp_http_client_perform Failed : %s", esp_err_to_name(esp_err));
-    esp_http_client_cleanup(client_handle);
+  if (httpCode < 0) {
+    LOG_ERR("OTA", "Release check request failed: %d", httpCode);
     return HTTP_ERROR;
   }
-
-  esp_err = esp_http_client_cleanup(client_handle);
-  if (esp_err != ESP_OK) {
-    LOG_ERR("OTA", "esp_http_client_cleanup Failed : %s", esp_err_to_name(esp_err));
-    return INTERNAL_UPDATE_ERROR;
+  if (httpCode != 200) {
+    LOG_ERR("OTA", "Release check HTTP %d", httpCode);
+    return HTTP_ERROR;
   }
 
   LOG_DBG("OTA", "Response received: %zu bytes total", totalBytesReceived);

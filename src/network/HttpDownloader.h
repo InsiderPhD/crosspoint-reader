@@ -6,7 +6,7 @@
 
 /**
  * HTTP client utility for fetching content and downloading files.
- * Wraps NetworkClientSecure and HTTPClient for HTTPS requests.
+ * Wraps freeink::SecureHttpClient (wolfSSL TLS 1.3) for HTTPS requests.
  */
 class HttpDownloader {
  public:

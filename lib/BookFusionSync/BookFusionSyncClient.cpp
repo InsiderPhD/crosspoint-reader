@@ -1,10 +1,9 @@
 #include "BookFusionSyncClient.h"
 
 #include <ArduinoJson.h>
-#include <HTTPClient.h>
 #include <Logging.h>
+#include <SecureHttpClient.h>
 #include <Stream.h>
-#include <WiFiClientSecure.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -14,12 +13,6 @@
 #include "StreamingJsonParser.h"
 
 namespace {
-// Small TLS buffers so the handshake fits the ESP32-C3's heap even when it is
-// fragmented (the Arduino WiFiClientSecure default of 16KB in + 16KB out needs
-// two large contiguous blocks and was observed failing after the BLE stack had
-// run). Same approach as lib/KOReaderSync/KOReaderSyncClient.cpp.
-constexpr int HTTP_BUF_SIZE = 2048;
-
 // Growable response-body collector for JSON endpoints.
 struct ResponseBuffer {
   char* data = nullptr;
@@ -36,51 +29,54 @@ struct ResponseBuffer {
     capacity = size;
     return true;
   }
+
+  // Append a body chunk, growing geometrically (realloc-per-chunk would
+  // fragment the heap). Keeps data null-terminated for the JSON parsers.
+  bool append(const uint8_t* src, size_t n) {
+    if (n == 0) return true;
+    const int needed = len + static_cast<int>(n) + 1;
+    if (needed > capacity) {
+      int newCap = capacity > 0 ? capacity * 2 : 512;
+      while (newCap < needed) newCap *= 2;
+      if (!ensure(newCap)) return false;
+    }
+    memcpy(data + len, src, n);
+    len += static_cast<int>(n);
+    data[len] = '\0';
+    return true;
+  }
 };
 
 // One shared connection for the whole session: BookFusion flows issue several
 // requests to the same host back-to-back (get/set progress, paged search), and
 // each fresh TLS handshake is both slow and the most memory-hungry moment in
-// the flow (2x16KB record buffers). setReuse keeps the socket alive between
-// requests until closeConnection().
+// the flow. setReuse keeps the socket alive between requests until
+// closeConnection().
 //
-// Transport is Arduino HTTPClient/WiFiClientSecure with setInsecure() — the
-// project's historical trust model (encrypted, server not authenticated). An
-// esp_http_client port with certificate verification was tried and reverted:
-// the framework's CA bundle fails on BookFusion's Sectigo chain, its esp-tls
-// forbids skipping verification, and pinned roots still require a correct
-// device clock (the leaf cert's validity window starts Apr 2026).
-WiFiClientSecure* g_secure = nullptr;
-HTTPClient* g_http = nullptr;
+// Transport is freeink::SecureHttpClient (wolfSSL, TLS 1.3) with setInsecure()
+// — the project's historical trust model (encrypted, server not
+// authenticated). This replaced Arduino HTTPClient/WiFiClientSecure, whose
+// precompiled mbedTLS fixes the record buffers at 16KB in + 16KB out (two
+// large CONTIGUOUS blocks) and spikes further on X509/RSA bignum work — the
+// documented X3 sync OOM. SecureClient pins the TLS 1.3 key_share to X25519
+// (fixed 32-byte field math, no bignum temporaries), so the handshake fits a
+// fragmented heap without borrowing the framebuffer.
+freeink::SecureHttpClient* g_client = nullptr;
 
 bool acquireClient() {
-  if (g_http) return true;
-  g_secure = new WiFiClientSecure();
-  if (!g_secure) return false;
-  g_secure->setInsecure();
-  g_http = new HTTPClient();
-  if (!g_http) {
-    delete g_secure;
-    g_secure = nullptr;
-    return false;
-  }
-  g_http->setReuse(true);
-  g_http->setConnectTimeout(10000);  // ms: TCP connect
-  g_http->setTimeout(15000);         // ms: response read
+  if (g_client) return true;
+  g_client = new freeink::SecureHttpClient();
+  if (!g_client) return false;
+  g_client->setInsecure();
+  g_client->setReuse(true);
+  g_client->setTimeout(15000);  // ms: connect + response read
   return true;
 }
 
 void dropConnection() {
-  if (g_http) {
-    g_http->end();
-    delete g_http;
-    g_http = nullptr;
-  }
-  if (g_secure) {
-    g_secure->stop();
-    delete g_secure;
-    g_secure = nullptr;
-  }
+  // ~SecureHttpClient ends the kept-alive connection.
+  delete g_client;
+  g_client = nullptr;
 }
 
 // Perform one request on the shared connection.
@@ -95,64 +91,66 @@ int performRequest(const char* url, const char* method, const char* contentType,
   LOG_DBG("BFS", "HTTPS %s %s (heap: %u, max alloc: %u)", method, url, (unsigned)ESP.getFreeHeap(),
           (unsigned)ESP.getMaxAllocHeap());
 
-  if (!g_http->begin(*g_secure, url)) {
-    LOG_ERR("BFS", "HTTP begin failed");
+  if (!g_client->begin(url)) {
+    LOG_ERR("BFS", "HTTP begin failed (bad URL)");
     dropConnection();
     return -1;
   }
-  g_http->addHeader("Accept", BookFusionSyncClient::API_ACCEPT);
+  g_client->addHeader("Accept", BookFusionSyncClient::API_ACCEPT);
   if (authenticated) {
     const std::string bearer = "Bearer " + BF_TOKEN_STORE.getToken();
-    g_http->addHeader("Authorization", bearer.c_str());
+    g_client->addHeader("Authorization", bearer);
   }
   if (contentType) {
-    g_http->addHeader("Content-Type", contentType);
-  }
-  if (totalCountOut) {
-    static const char* kCollectedHeaders[] = {"Total-Count"};
-    g_http->collectHeaders(kCollectedHeaders, 1);
+    g_client->addHeader("Content-Type", contentType);
   }
 
-  const int httpCode =
-      body ? g_http->sendRequest(method, reinterpret_cast<uint8_t*>(const_cast<char*>(body->c_str())), body->length())
-           : g_http->sendRequest(method);
+  // The body streams through this sink as it arrives; getStatus() is already
+  // valid when it runs (headers are parsed before the body is read).
+  // - respStream: only a 200 body reaches the caller's stream; error bodies
+  //   are drained so the connection stays reusable.
+  // - respBuf: buffered regardless of status — pollForToken parses the JSON
+  //   error body of a 400 (OAuth authorization_pending).
+  bool sinkError = false;
+  const freeink::SecureHttpClient::DataCallback onData = [&](const uint8_t* data, size_t len) {
+    if (respStream != nullptr) {
+      if (g_client->getStatus() != 200) return true;  // drain error body
+      if (respStream->write(data, len) != len) {
+        sinkError = true;
+        return false;
+      }
+      return true;
+    }
+    if (respBuf != nullptr) {
+      if (!respBuf->append(data, len)) {
+        LOG_ERR("BFS", "Response buffer allocation failed (%d + %u bytes)", respBuf->len, (unsigned)len);
+        sinkError = true;
+        return false;
+      }
+      return true;
+    }
+    return true;  // no sink: drain
+  };
+
+  const int httpCode = g_client->sendRequest(method, body ? reinterpret_cast<const uint8_t*>(body->c_str()) : nullptr,
+                                             body ? body->length() : 0, onData);
 
   if (httpCode < 0) {
-    LOG_ERR("BFS", "HTTP request failed: %d (heap: %u)", httpCode, (unsigned)ESP.getFreeHeap());
+    // wolfSSL has no lastError() equivalent; heap + max-alloc distinguish a
+    // memory failure (contiguous ceiling exhausted) from a network one.
+    LOG_ERR("BFS", "HTTP request failed: %d (heap: %u, maxalloc: %u)", httpCode, (unsigned)ESP.getFreeHeap(),
+            (unsigned)ESP.getMaxAllocHeap());
     dropConnection();
     return -1;
   }
 
   if (totalCountOut) {
-    const String totalHeader = g_http->header("Total-Count");
-    *totalCountOut = totalHeader.length() > 0 ? totalHeader.toInt() : 0;
+    const std::string totalHeader = g_client->getHeader("Total-Count");
+    *totalCountOut = totalHeader.empty() ? 0 : atoi(totalHeader.c_str());
   }
 
-  bool sinkError = false;
-  if (respStream) {
-    if (httpCode == 200) {
-      if (g_http->writeToStream(respStream) < 0) {
-        sinkError = true;
-      }
-    } else {
-      g_http->getString();  // drain the error body so the connection stays reusable
-    }
-  } else if (respBuf) {
-    const String responseBody = g_http->getString();
-    if (respBuf->ensure(responseBody.length() + 1)) {
-      memcpy(respBuf->data, responseBody.c_str(), responseBody.length() + 1);
-      respBuf->len = responseBody.length();
-    } else {
-      LOG_ERR("BFS", "Response buffer allocation failed (%u bytes)", (unsigned)responseBody.length());
-      sinkError = true;
-    }
-  } else {
-    g_http->getString();  // drain
-  }
-
-  // With setReuse, end() keeps the socket open when the server allows it.
-  g_http->end();
-
+  // SecureHttpClient keeps the socket open for reuse when the response was
+  // cleanly framed; an aborted/truncated body already closed it.
   if (sinkError) {
     return -2;
   }
