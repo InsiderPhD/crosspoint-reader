@@ -15,6 +15,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReadingStatsStore.h"
+#include "TlsFramebufferBorrow.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -163,29 +164,36 @@ void BookFusionSyncActivity::performPush() {
   requestUpdateAndWait();
 
   BookFusionPosition uploadedBfPos = localBfPos;
-  const auto result = BookFusionSyncClient::setProgress(bookId, localBfPos, &uploadedBfPos);
-
-  // Reading-time tracking: compute unsent delta and push it to the track endpoint.
-  // This is best-effort — a tracking failure doesn't fail the overall push.
   uint32_t readingTimeSentSeconds = 0;
-  if (result == BookFusionSyncClient::OK) {
-    const std::string epubPath = epub->getPath();
-    const ReadingBookStats* bookStats = READING_STATS.findBook(epubPath);
-    if (bookStats && bookStats->totalReadingMs > 0) {
-      const uint64_t currentTotalMs = bookStats->totalReadingMs;
-      const uint64_t lastSyncedMs = BookFusionBookIdStore::loadLastSyncedReadingMs(epubPath.c_str());
-      if (currentTotalMs > lastSyncedMs) {
-        const uint32_t durationSeconds = static_cast<uint32_t>((currentTotalMs - lastSyncedMs) / 1000u);
-        if (durationSeconds >= 5) {
-          char loggedAt[40] = {};
-          if (formatLocalSyncTimestamp(loggedAt, sizeof(loggedAt))) {
-            const auto trackResult = BookFusionSyncClient::trackReadingTime(bookId, durationSeconds, loggedAt);
-            if (trackResult == BookFusionSyncClient::OK) {
-              BookFusionBookIdStore::saveLastSyncedReadingMs(epubPath.c_str(), currentTotalMs);
-              readingTimeSentSeconds = durationSeconds;
-            } else {
-              LOG_DBG("BFS", "Reading time tracking failed (non-fatal): %s",
-                      BookFusionSyncClient::errorString(trackResult));
+  auto result = BookFusionSyncClient::NETWORK_ERROR;
+  {
+    // Lend the framebuffer to wolfSSL for the whole network block (one reused
+    // connection: setProgress + trackReadingTime). The guard holds the render
+    // lock and closes the connection in its dtor — before the result draw below.
+    TlsFramebufferBorrow borrow(renderer);
+    result = BookFusionSyncClient::setProgress(bookId, localBfPos, &uploadedBfPos);
+
+    // Reading-time tracking: compute unsent delta and push it to the track endpoint.
+    // This is best-effort — a tracking failure doesn't fail the overall push.
+    if (result == BookFusionSyncClient::OK) {
+      const std::string epubPath = epub->getPath();
+      const ReadingBookStats* bookStats = READING_STATS.findBook(epubPath);
+      if (bookStats && bookStats->totalReadingMs > 0) {
+        const uint64_t currentTotalMs = bookStats->totalReadingMs;
+        const uint64_t lastSyncedMs = BookFusionBookIdStore::loadLastSyncedReadingMs(epubPath.c_str());
+        if (currentTotalMs > lastSyncedMs) {
+          const uint32_t durationSeconds = static_cast<uint32_t>((currentTotalMs - lastSyncedMs) / 1000u);
+          if (durationSeconds >= 5) {
+            char loggedAt[40] = {};
+            if (formatLocalSyncTimestamp(loggedAt, sizeof(loggedAt))) {
+              const auto trackResult = BookFusionSyncClient::trackReadingTime(bookId, durationSeconds, loggedAt);
+              if (trackResult == BookFusionSyncClient::OK) {
+                BookFusionBookIdStore::saveLastSyncedReadingMs(epubPath.c_str(), currentTotalMs);
+                readingTimeSentSeconds = durationSeconds;
+              } else {
+                LOG_DBG("BFS", "Reading time tracking failed (non-fatal): %s",
+                        BookFusionSyncClient::errorString(trackResult));
+              }
             }
           }
         }
@@ -246,7 +254,13 @@ void BookFusionSyncActivity::performPull() {
   requestUpdateAndWait();
 
   BookFusionPosition remoteBfPos;
-  const auto result = BookFusionSyncClient::getProgress(bookId, remoteBfPos);
+  auto result = BookFusionSyncClient::NETWORK_ERROR;
+  {
+    // Lend the framebuffer to wolfSSL for the handshake; the guard closes the
+    // connection and frees the render lock before the draws below.
+    TlsFramebufferBorrow borrow(renderer);
+    result = BookFusionSyncClient::getProgress(bookId, remoteBfPos);
+  }
 
   RenderLock lock(*this);
   if (result == BookFusionSyncClient::NOT_FOUND) {

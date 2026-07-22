@@ -25,4 +25,14 @@ namespace BookFusionCoverCache {
 bool refresh(const std::string& coverUrl, const Epub& epub, int coverHeight, char* outThumbPath = nullptr,
              size_t outThumbPathLen = 0);
 
+// Split-phase variant for heap-constrained flows: `download` runs only the
+// network fetch (raw image into the cache dir), `convert` runs only the
+// JPEG/PNG→BMP conversions and removes the raw temp. This lets a caller lend
+// the framebuffer to each phase's hungry subsystem in turn — a
+// TlsFramebufferBorrow around download(), then a JpegScratchLease around
+// convert() — without the two leases ever aliasing the same memory.
+// refresh() == download() + convert().
+bool download(const std::string& coverUrl, const Epub& epub);
+bool convert(const Epub& epub, int coverHeight, char* outThumbPath = nullptr, size_t outThumbPathLen = 0);
+
 }  // namespace BookFusionCoverCache
