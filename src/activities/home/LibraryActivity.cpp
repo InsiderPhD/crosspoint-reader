@@ -368,13 +368,14 @@ void LibraryActivity::drawButtonHints() {
   // Same label set as HomeActivity (HomeActivity.cpp:407-409). When the book
   // options modal is open, btn1 shows Back to cancel; otherwise it's empty
   // because short-press Back goes home (long-press isn't yet bound to a label).
-  const auto labels = contextMenu.isOpen()
+  // Sort menu open: Back closes, Confirm selects the field / flips its direction.
+  const auto labels = (contextMenu.isOpen() || sortMenu.isOpen())
                           ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
                           : mappedInput.mapLabels(tr(STR_HOME), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  // Power short-press opens the sort menu; surface that as a sideways hint. Hidden while
-  // the context menu is open, where Power-to-sort is suppressed (see loop()).
-  if (!contextMenu.isOpen()) GUI.drawPowerButtonHint(renderer, tr(STR_SORT));
+  // Power short-press opens the sort menu; surface that as a sideways hint. Hidden while a
+  // modal is open (the context menu suppresses Power-to-sort; the sort menu is already up).
+  if (!contextMenu.isOpen() && !sortMenu.isOpen()) GUI.drawPowerButtonHint(renderer, tr(STR_SORT));
 }
 
 void LibraryActivity::refreshCurrentPageMeta() {
@@ -869,30 +870,27 @@ void LibraryActivity::loop() {
 
   // Power short-press → sort menu. Suppressed while the book context menu is open
   // or a sort rebuild is pending.
-  if (!contextMenu.isOpen() && !pendingSortRebuild && sortMenu.checkTrigger(mappedInput, currentSort)) {
+  if (!contextMenu.isOpen() && !pendingSortRebuild &&
+      sortMenu.checkTrigger(mappedInput, currentSort, ALL_SORT_OPTIONS, ALL_SORT_OPTIONS_COUNT)) {
     pageBufferStored = false;  // Modal overlay invalidates the snapshot.
     requestUpdate();
     return;
   }
   if (sortMenu.isOpen()) {
     SortMode picked;
-    bool cancelled = false;
-    if (sortMenu.handleInput(buttonNavigator, mappedInput, &picked, &cancelled)) {
-      if (!cancelled && picked != currentSort) {
+    if (sortMenu.handleInput(buttonNavigator, mappedInput, &picked)) {
+      // Menu closed: commit the chosen sort (a no-op re-sort is skipped).
+      if (picked != currentSort) {
         currentSort = picked;
         SETTINGS.sortMode = static_cast<uint8_t>(picked);
         SETTINGS.saveToFile();
         pendingSortRebuild = true;  // Render will show "Sorting…" and do the work.
         selectorIndex = 0;
         lastRenderedPage = static_cast<size_t>(-1);
-        pageBufferStored = false;
-      } else {
-        pageBufferStored = false;  // Modal overlay invalidates the snapshot.
       }
-      requestUpdate();
-    } else {
-      requestUpdate();
+      pageBufferStored = false;  // Modal overlay invalidates the snapshot.
     }
+    requestUpdate();  // Redraw for cursor/label changes while open, and on close.
     return;
   }
 

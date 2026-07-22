@@ -7,40 +7,51 @@
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
 
-bool SortMenu::checkTrigger(const MappedInputManager& input, SortMode current) {
+int SortMenu::optionIndexOf(SortMode m) const {
+  for (int i = 0; i < optionCount_; i++) {
+    if (options_[i].primary == m || options_[i].reverse == m) return i;
+  }
+  return -1;
+}
+
+bool SortMenu::checkTrigger(const MappedInputManager& input, SortMode current, const SortOption* options, int count) {
   if (showing_) return false;
   if (!input.wasReleased(MappedInputManager::Button::Power)) return false;
+  if (!options || count <= 0) return false;
 
   showing_ = true;
-  current_ = current;
-  selectedIndex_ = static_cast<int>(current);
+  chosen_ = current;
+  options_ = options;
+  optionCount_ = count;
+  // Open with the cursor on the active field when it's offered here; otherwise start at the top.
+  const int idx = optionIndexOf(current);
+  cursorIndex_ = (idx >= 0) ? idx : 0;
   return true;
 }
 
-bool SortMenu::handleInput(ButtonNavigator& nav, const MappedInputManager& input, SortMode* outPicked,
-                           bool* outCancelled) {
+bool SortMenu::handleInput(ButtonNavigator& nav, const MappedInputManager& input, SortMode* outMode) {
   if (!showing_) return false;
 
-  nav.onNext([this] { selectedIndex_ = (selectedIndex_ + 1) % SORT_MODE_COUNT; });
-  nav.onPrevious([this] { selectedIndex_ = (selectedIndex_ - 1 + SORT_MODE_COUNT) % SORT_MODE_COUNT; });
+  nav.onNext([this] { cursorIndex_ = (cursorIndex_ + 1) % optionCount_; });
+  nav.onPrevious([this] { cursorIndex_ = (cursorIndex_ - 1 + optionCount_) % optionCount_; });
 
   if (input.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (outPicked) *outPicked = static_cast<SortMode>(selectedIndex_);
-    if (outCancelled) *outCancelled = false;
-    showing_ = false;
-    return true;
+    const SortOption& opt = options_[cursorIndex_];
+    const bool hasReverse = (opt.reverse != opt.primary);
+    if (hasReverse && chosen_ == opt.primary) {
+      chosen_ = opt.reverse;  // active field → flip to reverse
+    } else if (hasReverse && chosen_ == opt.reverse) {
+      chosen_ = opt.primary;  // active field → flip back
+    } else {
+      chosen_ = opt.primary;  // newly selected field → primary direction
+    }
+    return false;  // stay open; host redraws the updated label
   }
 
-  if (input.wasReleased(MappedInputManager::Button::Back)) {
-    if (outCancelled) *outCancelled = true;
-    showing_ = false;
-    return true;
-  }
-
-  // A second Power short-press while the menu is open dismisses it without selecting,
-  // mirroring how a single tap toggles a modal in most UIs.
-  if (input.wasReleased(MappedInputManager::Button::Power)) {
-    if (outCancelled) *outCancelled = true;
+  // Back — or a second Power short-press — closes and commits the staged choice.
+  if (input.wasReleased(MappedInputManager::Button::Back) ||
+      input.wasReleased(MappedInputManager::Button::Power)) {
+    if (outMode) *outMode = chosen_;
     showing_ = false;
     return true;
   }
@@ -58,9 +69,10 @@ void SortMenu::render(GfxRenderer& renderer) const {
   constexpr int H_PAD = 14;
   constexpr int HEADER_H = 34;
   constexpr int OPTION_H = 30;
-  constexpr int OPTIONS = SORT_MODE_COUNT;
+  const int OPTIONS = optionCount_;
 
   const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
+  const int chosenIdx = optionIndexOf(chosen_);
   const int POPUP_H = HEADER_H + OPTIONS * OPTION_H + H_PAD;
   const int px = (pageWidth - POPUP_W) / 2;
   const int py = (pageHeight - POPUP_H) / 2;
@@ -73,19 +85,21 @@ void SortMenu::render(GfxRenderer& renderer) const {
 
   for (int i = 0; i < OPTIONS; i++) {
     const int optY = py + HEADER_H + i * OPTION_H;
-    const bool selected = (i == selectedIndex_);
+    const bool selected = (i == cursorIndex_);
     if (selected) {
       renderer.fillRect(px + BORDER, optY, POPUP_W - BORDER * 2, OPTION_H, true);
     }
-    const char* label = sortModeLabel(static_cast<SortMode>(i));
-    const bool isCurrent = (static_cast<SortMode>(i) == current_);
+    // The chosen field shows its active direction (e.g. "Author Z-A"); other fields show
+    // their primary/default direction. A bullet marks the chosen field.
+    const bool isChosen = (i == chosenIdx);
+    const char* label = sortModeLabel(isChosen ? chosen_ : options_[i].primary);
     char buf[64];
-    snprintf(buf, sizeof(buf), "%s%s", isCurrent ? "\xE2\x80\xA2 " : "  ", label);
+    snprintf(buf, sizeof(buf), "%s%s", isChosen ? "\xE2\x80\xA2 " : "  ", label);
     renderer.drawText(UI_10_FONT_ID, px + H_PAD, optY + (OPTION_H - lineH) / 2, buf, !selected);
   }
 }
 
 void SortMenu::close() {
   showing_ = false;
-  selectedIndex_ = 0;
+  cursorIndex_ = 0;
 }

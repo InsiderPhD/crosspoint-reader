@@ -6,6 +6,8 @@
 
 #include "../Activity.h"
 #include "components/BookContextMenu.h"
+#include "components/SortMenu.h"
+#include "sorting/SortMode.h"
 #include "util/ButtonNavigator.h"
 
 // Whole-library "grouped folders" browse mode, reached via SETTINGS.folderView
@@ -47,6 +49,12 @@ class GroupBrowserActivity final : public Activity {
 
   ButtonNavigator buttonNavigator;
   BookContextMenu contextMenu;
+  SortMenu sortMenu;
+
+  // Active sort for the books inside a folder. Initialised in onEnter from
+  // SETTINGS.groupSortMode, falling back to the per-grouping default (Series order for
+  // Series, Name A-Z otherwise) when unset or not offered in this mode. See sortModesForMode().
+  SortMode currentSort = SortMode::AlphabeticAsc;
 
   // Whole-library book paths and their raw key strings (tags = ", "-joined; author =
   // a single name). Parallel vectors; bookKeys[i] is empty when the book has no
@@ -59,15 +67,19 @@ class GroupBrowserActivity final : public Activity {
   // mode so it costs nothing there. A float is 4 bytes vs a std::string's ~16-32.
   std::vector<float> bookSeriesIndex;
 
-  // Level-0 folders: unique group display strings (first-seen casing), alpha-sorted,
-  // with the ungrouped catch-all ("Untagged"/"Unknown Author") appended last when any
-  // book is ungrouped. Counts are parallel to `groups`.
+  // Level-0 folders: unique group display strings (first-seen casing), alpha-sorted.
+  // Counts are parallel to `groups`. Ungrouped books are NOT a folder — they sit loose
+  // in `rootBookIdx` and render after the folders (see the root list layout below).
   std::vector<std::string> groups;
   std::vector<uint16_t> groupCounts;
-  bool hasUngrouped = false;
+
+  // Ungrouped ("no tag/author/series") books, as indices into bookPaths, sorted by
+  // currentSort. Shown loose at the root, immediately after the folders. The root list is
+  // therefore [folders 0..groups.size()) then [loose books] — folders always come first.
+  std::vector<uint16_t> rootBookIdx;
 
   // Level-1: indices into bookPaths for the currently opened group. selectedGroupIndex
-  // < 0 means we're at level 0 (the folder list). Titles are the filename stem
+  // < 0 means we're at the root list (folders + loose books). Titles are the filename stem
   // (folder-browser convention), computed on the fly from bookPaths.
   int selectedGroupIndex = -1;
   std::vector<uint16_t> groupBookIdx;
@@ -82,19 +94,34 @@ class GroupBrowserActivity final : public Activity {
 
   // Read every book's cached key (whole-library SD pass) then build the folders.
   void loadLibraryKeys();
-  // Build groups/groupCounts/hasUngrouped from the in-memory bookKeys (no SD access).
+  // Build groups/groupCounts and the loose rootBookIdx from the in-memory bookKeys (no SD).
   void computeGroups();
   // Split a raw ", "-joined key string into trimmed, deduped group keys (tags or
   // co-authors). Empty output = ungrouped.
   void splitKeys(const std::string& raw, std::vector<std::string>& out) const;
   // Rebuild groupBookIdx for `selectedGroupIndex` from in-memory data.
   void buildGroupBookList();
+  // Sort a set of bookPaths indices in place by currentSort (shared by the folder list and
+  // the loose root books). Date-added is stat'd on demand only when that mode is active.
+  void sortBookIndices(std::vector<uint16_t>& idx) const;
   // Apply a context-menu action to `path`, then refresh the current list.
   void dispatchBookAction(BookContextMenu::Action action, const std::string& path, const std::string& title);
 
   const char* headerLabel() const;
-  const char* ungroupedLabel() const;
 
+  // Root list layout: folders occupy [0, groups.size()), loose books follow.
+  size_t rootListSize() const { return groups.size() + rootBookIdx.size(); }
+  bool isFolderRow(size_t row) const { return row < groups.size(); }
+  // Path of the book the selector is on, or "" when it's on a folder / out of range.
+  std::string selectedBookPath() const;
+
+  // The sort fields offered for the current grouping mode (Series adds "Series order";
+  // Tags/Authors offer the name/opened/progress/date-added fields). Returns a pointer to a
+  // static constexpr array and writes its length to `count`.
+  const SortOption* sortOptionsForMode(int& count) const;
+  // The default sort when SETTINGS.groupSortMode is unset/invalid for this grouping mode.
+  SortMode defaultSortForMode() const;
+
+  // True at the root list (folders + loose books); false inside an opened folder.
   bool atGroupList() const { return selectedGroupIndex < 0; }
-  bool isUngroupedIndex(int idx) const { return hasUngrouped && idx == static_cast<int>(groups.size()) - 1; }
 };

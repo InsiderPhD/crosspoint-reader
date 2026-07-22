@@ -209,6 +209,16 @@ void UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title, con
 }
 
 void UITheme::drawSyncProgressPopup(GfxRenderer& renderer, const char* title, const char* statusMessage) {
+  // Some callers compose multi-part messages with '\n'; the glyph renderer has
+  // no glyph for codepoint 10 and wrappedText doesn't treat it as a break, so
+  // flatten newlines to spaces and let the wrapping do its job.
+  char sanitized[160];
+  strlcpy(sanitized, statusMessage ? statusMessage : "", sizeof(sanitized));
+  for (char* c = sanitized; *c; ++c) {
+    if (*c == '\n' || *c == '\r') *c = ' ';
+  }
+  statusMessage = sanitized;
+
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   constexpr int POPUP_W = 320;

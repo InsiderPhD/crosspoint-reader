@@ -8,6 +8,7 @@
 #include "CrossPointSettings.h"
 #include "EpubReaderMenuActivity.h"
 #include "activities/Activity.h"
+#include "util/ProgressAutoSync.h"
 
 class EpubReaderActivity final : public Activity {
   std::shared_ptr<Epub> epub;
@@ -83,8 +84,20 @@ class EpubReaderActivity final : public Activity {
   // only (never render()): see ActivityManager::isOnRenderTask. The SD write is debounced
   // inside READING_STATS.updateProgress().
   void recordStatsProgress();
+  // Snapshot everything a background progress push needs while epub/section are
+  // still alive. Main task only. Returns nullptr when the position can't be
+  // built or the allocation fails.
+  std::unique_ptr<ProgressAutoSync::Payload> buildAutosyncPayload(const ProgressAutoSync::Trigger& trigger);
+  // Arm on a threshold crossing, fire on the 2nd page of a chapter. Called from
+  // pageTurn() (main task only — never from render()).
+  // Returns false when the reader was torn down (epub reload failed -> Home).
+  bool maybeAutosync();
+  // Blocking push: releases the section and Epub, syncs, reloads. Takes the
+  // reader unresponsive for a few seconds; see ProgressAutoSync.h for why.
+  bool runAutosyncNow();
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
+  void toggleBluetoothFromReader();
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   void applyOrientation(uint8_t orientation);
   // Drops the cached section so the current chapter re-paginates on the next render,

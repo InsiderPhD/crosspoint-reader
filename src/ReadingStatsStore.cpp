@@ -26,6 +26,10 @@ constexpr unsigned long SESSION_HEARTBEAT_MS = 60UL * 1000UL;
 constexpr unsigned long DEFERRED_SAVE_INTERVAL_MS = 30UL * 1000UL;
 constexpr size_t MAX_SESSION_LOG_ENTRIES = 256;
 constexpr uint32_t STATS_RETENTION_DAYS = 366;
+// How many days PAST the reference day a bucket may sit before the future-side
+// prune treats it as bogus-clock garbage. Timezone presets span UTC-12..UTC+14,
+// so a legitimate bucket can be up to 2 ordinals ahead of the reference.
+constexpr uint32_t STATS_FUTURE_GRACE_DAYS = 2;
 
 bool isLeapYear(const int year) { return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0); }
 
@@ -578,8 +582,20 @@ bool ReadingStatsStore::pruneToCurrentMonth(const uint32_t referenceDayOrdinal) 
   const uint32_t retentionStartOrdinal =
       (referenceDayOrdinal >= (STATS_RETENTION_DAYS - 1)) ? (referenceDayOrdinal - (STATS_RETENTION_DAYS - 1)) : 1;
 
-  auto keepDay = [retentionStartOrdinal, referenceDayOrdinal](const ReadingDayStats& stats) {
-    return stats.dayOrdinal >= retentionStartOrdinal && stats.dayOrdinal <= referenceDayOrdinal;
+  // Days are only ever bucketed from a live valid clock (flushActiveSessionToBuckets),
+  // but referenceDayOrdinal can come from a stale fallback (APP_STATE.lastKnownValidTimestamp,
+  // book timestamps) on a boot where the clock hasn't synced yet. A session that crossed
+  // local midnight just before such a boot then sits one day "in the future" relative to
+  // the stale reference, and pruning it destroys legitimately-recorded reading time.
+  // Only prune future-dated days when the clock is valid RIGHT NOW, and even then keep a
+  // grace window for timezone changes; otherwise leave the future side alone (it gets
+  // re-checked on the next prune after the clock syncs).
+  const uint32_t futureLimitOrdinal = isClockValid(TimeUtils::getCurrentValidTimestamp())
+                                          ? referenceDayOrdinal + STATS_FUTURE_GRACE_DAYS
+                                          : UINT32_MAX;
+
+  auto keepDay = [retentionStartOrdinal, futureLimitOrdinal](const ReadingDayStats& stats) {
+    return stats.dayOrdinal >= retentionStartOrdinal && stats.dayOrdinal <= futureLimitOrdinal;
   };
 
   bool changed = false;
@@ -664,12 +680,12 @@ bool ReadingStatsStore::pruneToCurrentMonth(const uint32_t referenceDayOrdinal) 
 
   const size_t sessionLogBefore = sessionLog.size();
   sessionLog.erase(std::remove_if(sessionLog.begin(), sessionLog.end(),
-                                  [retentionStartOrdinal, referenceDayOrdinal](const ReadingSessionLogEntry& entry) {
+                                  [retentionStartOrdinal, futureLimitOrdinal](const ReadingSessionLogEntry& entry) {
                                     // dayOrdinal == 0 is the "no date yet" sentinel: keep these regardless of the
                                     // retention window so the user can still assign them a date from the Sessions UI.
                                     // (Total count is still bounded by MAX_SESSION_LOG_ENTRIES in appendSessionLogEntry.)
                                     return entry.dayOrdinal != 0 && (entry.dayOrdinal < retentionStartOrdinal ||
-                                                                     entry.dayOrdinal > referenceDayOrdinal);
+                                                                     entry.dayOrdinal > futureLimitOrdinal);
                                   }),
                  sessionLog.end());
   if (sessionLogBefore != sessionLog.size()) {

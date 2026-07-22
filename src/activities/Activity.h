@@ -44,6 +44,10 @@ class Activity {
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
   virtual bool isReaderActivity() const { return false; }
+  // Bluetooth (BLE page-turner) is only allowed to stay up in activities that
+  // actually use it — the reader and the Bluetooth settings screen. Everywhere
+  // else the main loop shuts the stack down to return its heap.
+  virtual bool keepsBluetoothActive() const { return isReaderActivity(); }
   virtual ScreenshotInfo getScreenshotInfo() const { return {}; }
 
   // Start a new activity without destroying the current one

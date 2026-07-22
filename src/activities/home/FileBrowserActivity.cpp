@@ -253,25 +253,24 @@ void FileBrowserActivity::loop() {
   }
   // Power short-press → sort menu. Suppressed during book-options modal and while
   // a sort rebuild is pending.
-  if (!showingBookOptions && !pendingSortRebuild && sortMenu.checkTrigger(mappedInput, currentSort)) {
+  if (!showingBookOptions && !pendingSortRebuild &&
+      sortMenu.checkTrigger(mappedInput, currentSort, ALL_SORT_OPTIONS, ALL_SORT_OPTIONS_COUNT)) {
     requestUpdate();
     return;
   }
   if (sortMenu.isOpen()) {
     SortMode picked;
-    bool cancelled = false;
-    if (sortMenu.handleInput(buttonNavigator, mappedInput, &picked, &cancelled)) {
-      if (!cancelled && picked != currentSort) {
+    if (sortMenu.handleInput(buttonNavigator, mappedInput, &picked)) {
+      // Menu closed: commit the chosen sort (a no-op re-sort is skipped).
+      if (picked != currentSort) {
         currentSort = picked;
         SETTINGS.sortMode = static_cast<uint8_t>(picked);
         SETTINGS.saveToFile();
         pendingSortRebuild = true;
         selectorIndex = 0;
       }
-      requestUpdate();
-    } else {
-      requestUpdate();
     }
+    requestUpdate();  // Redraw for cursor/label changes while open, and on close.
     return;
   }
 
@@ -641,14 +640,15 @@ void FileBrowserActivity::render(RenderLock&&) {
   // STR_SELECT instead. Directories in the same picker still descend, so keep STR_OPEN there.
   const bool selectingFirmwareFile = mode == Mode::PickFirmware && !files.empty() && files[selectorIndex].back() != '/';
   const char* confirmLabel = files.empty() ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
-  const auto labels = showingBookOptions
+  // Sort menu open: Back closes, Confirm selects the field / flips its direction.
+  const auto labels = (showingBookOptions || sortMenu.isOpen())
                           ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
                           : mappedInput.mapLabels(backLabel, confirmLabel, files.empty() ? "" : tr(STR_DIR_UP),
                                                   files.empty() ? "" : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  // Power short-press opens the sort menu; surface that as a sideways hint. Hidden during
-  // the book-options modal, where Power-to-sort is suppressed (see loop()).
-  if (!showingBookOptions) GUI.drawPowerButtonHint(renderer, tr(STR_SORT));
+  // Power short-press opens the sort menu; surface that as a sideways hint. Hidden while a
+  // modal is open (book-options suppresses Power-to-sort; the sort menu is already up).
+  if (!showingBookOptions && !sortMenu.isOpen()) GUI.drawPowerButtonHint(renderer, tr(STR_SORT));
 
   if (showingBookOptions) {
     const auto lastSlash = bookOptionsPath.rfind('/');

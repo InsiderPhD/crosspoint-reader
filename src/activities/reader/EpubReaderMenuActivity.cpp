@@ -1,12 +1,17 @@
 #include "EpubReaderMenuActivity.h"
 
+#include <BluetoothHIDManager.h>
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/ReadingStatsAnalytics.h"
+#include "util/TimeUtils.h"
 
 EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                const std::string& title, const int currentPage, const int totalPages,
@@ -26,7 +31,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
 
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes) {
   std::vector<MenuItem> items;
-  items.reserve(10);
+  items.reserve(18);  // 9 fixed + footnotes + bookmarks/clippings/sync pairs + 2 dev-mode items
   items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
   if (hasFootnotes) {
     items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
@@ -36,20 +41,32 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   items.push_back({MenuAction::FONT_LAYOUT, StrId::STR_FONT_LAYOUT_PREVIEW});
   items.push_back({MenuAction::READER_CONTROLS, StrId::STR_READER_CONTROLS});
   items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});
-  items.push_back({MenuAction::READING_SPEED, StrId::STR_READING_SPEED});
   items.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
-  items.push_back({MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS});
-  items.push_back({MenuAction::ADD_BOOKMARK, StrId::STR_CREATE_BOOKMARK});
-  items.push_back({MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING});
-  items.push_back({MenuAction::VIEW_CLIPPINGS, StrId::STR_VIEW_CLIPPINGS});
+  // Bookmarks / clippings / sync rows can be hidden by users who bind these
+  // functions to reader controls instead (Settings > Reader).
+  if (SETTINGS.readerMenuBookmarks) {
+    items.push_back({MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS});
+    items.push_back({MenuAction::ADD_BOOKMARK, StrId::STR_CREATE_BOOKMARK});
+  }
+  if (SETTINGS.readerMenuClippings) {
+    items.push_back({MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING});
+    items.push_back({MenuAction::VIEW_CLIPPINGS, StrId::STR_VIEW_CLIPPINGS});
+  }
   // Screenshot is a developer/testing action — only surface it in Dev Mode.
   if (SETTINGS.devMode) {
     items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
   }
+  // Bluetooth remote toggle: only shown once a remote has been paired
+  // (pairing itself lives in Settings > Bluetooth Page Turner), and hideable
+  // like the bookmarks/clippings/sync rows (Settings > Reader).
+  if (SETTINGS.readerMenuBluetooth && SETTINGS.bleBondedDeviceAddr[0] != '\0' && SETTINGS.bluetoothAllowed()) {
+    items.push_back({MenuAction::TOGGLE_BLUETOOTH, StrId::STR_BT_REMOTE_TOGGLE});
+  }
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
-  items.push_back({MenuAction::MARK_AS_COMPLETED, StrId::STR_MARK_AS_READ});
-  items.push_back({MenuAction::SYNC_PUSH, StrId::STR_SYNC_PUSH_PROGRESS});
-  items.push_back({MenuAction::SYNC_PULL, StrId::STR_SYNC_PULL_PROGRESS});
+  if (SETTINGS.readerMenuSync) {
+    items.push_back({MenuAction::SYNC_PUSH, StrId::STR_SYNC_PUSH_PROGRESS});
+    items.push_back({MenuAction::SYNC_PULL, StrId::STR_SYNC_PULL_PROGRESS});
+  }
   // Delete Book Cache is a testing aid — only surface it in Dev Mode.
   if (SETTINGS.devMode) {
     items.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
@@ -98,10 +115,6 @@ void EpubReaderMenuActivity::loop() {
       pendingButtonHints = (pendingButtonHints + 1) % CrossPointSettings::BUTTON_HINTS_MODE_COUNT;
       requestUpdate();
       return;
-    }
-
-    if (selectedAction == MenuAction::READING_SPEED) {
-      return;  // display-only row
     }
 
     setResult(
@@ -163,22 +176,57 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   };
 
   std::string progressLine;
+  if (SETTINGS.readingSpeedSecondsPerPage > 0) {
+    char speedBuf[16];
+    const unsigned spp = SETTINGS.readingSpeedSecondsPerPage;
+    if (spp < 60) {
+      snprintf(speedBuf, sizeof(speedBuf), "%us/pg", spp);
+    } else {
+      snprintf(speedBuf, sizeof(speedBuf), "%um%us/pg", spp / 60, spp % 60);
+    }
+    progressLine += speedBuf;
+    progressLine += " | ";
+  }
   if (totalPages > 0) {
-    progressLine = "Ch " + std::to_string(currentPage) + "/" + std::to_string(totalPages);
+    progressLine += "Ch " + std::to_string(currentPage) + "/" + std::to_string(totalPages);
     if (timeLeftChapterSeconds > 0) {
       progressLine += " " + formatMins(timeLeftChapterSeconds);
     }
-    progressLine += "  |  ";
+    progressLine += " | ";
   }
   progressLine += "Book " + std::to_string(bookProgressPercent) + "%";
   if (timeLeftBookSeconds > 0) {
     progressLine += " " + formatMins(timeLeftBookSeconds);
   }
 
-  renderer.drawCenteredText(UI_10_FONT_ID, 45, progressLine.c_str());
+  const int summaryY = 45 + contentY;
+  renderer.drawCenteredText(UI_10_FONT_ID, summaryY, progressLine.c_str());
+
+  // Status line: clock + date (hidden while the clock has never been set —
+  // getCurrentValidTimestamp() returns 0 then) and today's reading vs the
+  // daily goal. Past the goal it keeps showing actual/goal (e.g. "17m / 15m").
+  std::string statusLine;
+  const uint32_t nowTs = TimeUtils::getCurrentValidTimestamp();
+  const std::string clockText = TimeUtils::formatTime(nowTs);
+  if (!clockText.empty()) {
+    statusLine += clockText + " " + TimeUtils::formatShortDate(nowTs) + " | ";
+  }
+  // Autosync needs the boot NTP check to have succeeded (that's how the
+  // firmware knows WiFi works this session). When it didn't, autosync is
+  // silently inactive — say so rather than leaving the user to wonder.
+  if (SETTINGS.autosyncMode != CrossPointSettings::AUTOSYNC_OFF && !TimeUtils::wasTimeSyncedThisBoot()) {
+    statusLine += tr(STR_AUTOSYNC_OFF_NOTICE);
+    statusLine += " | ";
+  }
+  statusLine += ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTodayReadingMs()) + " / " +
+                ReadingStatsAnalytics::formatDurationHm(SETTINGS.getDailyGoalMs());
+
+  const int summaryLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int statusY = summaryY + summaryLineHeight + 2;
+  renderer.drawCenteredText(UI_10_FONT_ID, statusY, statusLine.c_str());
 
   // Menu Items
-  const int startY = 75 + contentY;
+  const int startY = statusY + summaryLineHeight + 10;
   constexpr int lineHeight = 30;
 
   for (size_t i = 0; i < menuItems.size(); ++i) {
@@ -205,31 +253,26 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
       renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, value, !isSelected);
     }
 
+    if (menuItems[i].action == MenuAction::TOGGLE_BLUETOOTH) {
+      // Show WHICH remote is active rather than a bare "On".
+      std::string value;
+      if (BluetoothHIDManager::getInstance().isEnabled()) {
+        value = SETTINGS.bleBondedDeviceName[0]
+                    ? renderer.truncatedText(UI_10_FONT_ID, SETTINGS.bleBondedDeviceName, 160)
+                    : tr(STR_STATE_ON);
+      } else {
+        value = tr(STR_STATE_OFF);
+      }
+      const auto width = renderer.getTextWidth(UI_10_FONT_ID, value.c_str());
+      renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, value.c_str(), !isSelected);
+    }
+
     if (menuItems[i].action == MenuAction::AUTO_PAGE_TURN) {
       char valueBuf[24];
       if (selectedPageTurnOption == 1 && SETTINGS.readingSpeedSecondsPerPage > 0) {
         snprintf(valueBuf, sizeof(valueBuf), "Auto (~%us)", static_cast<unsigned>(SETTINGS.readingSpeedSecondsPerPage));
       } else {
         snprintf(valueBuf, sizeof(valueBuf), "%s", pageTurnLabels[selectedPageTurnOption]);
-      }
-      const auto width = renderer.getTextWidth(UI_10_FONT_ID, valueBuf);
-      renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, valueBuf, !isSelected);
-    }
-
-    if (menuItems[i].action == MenuAction::READING_SPEED) {
-      char valueBuf[16];
-      if (SETTINGS.readingSpeedSecondsPerPage == 0) {
-        snprintf(valueBuf, sizeof(valueBuf), "--");
-      } else if (SETTINGS.readingSpeedSecondsPerPage < 60) {
-        snprintf(valueBuf, sizeof(valueBuf), "~%us/page", static_cast<unsigned>(SETTINGS.readingSpeedSecondsPerPage));
-      } else {
-        const unsigned mins = SETTINGS.readingSpeedSecondsPerPage / 60;
-        const unsigned secs = SETTINGS.readingSpeedSecondsPerPage % 60;
-        if (secs == 0) {
-          snprintf(valueBuf, sizeof(valueBuf), "~%um/page", mins);
-        } else {
-          snprintf(valueBuf, sizeof(valueBuf), "~%um%us/page", mins, secs);
-        }
       }
       const auto width = renderer.getTextWidth(UI_10_FONT_ID, valueBuf);
       renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, valueBuf, !isSelected);

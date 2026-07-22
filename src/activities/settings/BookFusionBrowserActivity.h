@@ -42,7 +42,7 @@ class BookFusionBrowserActivity final : public Activity {
   State state = CATEGORY_SELECTION;
   ButtonNavigator buttonNavigator;
 
-  BookFusionSearchResult searchResult;  // Current page of 10 books plus cover URLs (~5 KB)
+  BookFusionSearchResult searchResult;                           // Current page of 10 books plus cover URLs (~5 KB)
   bool downloadedFlags[BookFusionSearchResult::MAX_BOOKS] = {};  // true if the book file already exists on SD
   int selectedIndex = 0;
   int currentPage = 1;
@@ -73,11 +73,10 @@ class BookFusionBrowserActivity final : public Activity {
   // Large enough for pre-signed S3 URLs with safety margin (can be >2000 chars).
   char downloadUrl[4096] = {};
   char downloadTitle[64] = {};
-  size_t downloadProgress = 0;
-  size_t downloadTotal = 0;
-  unsigned long lastProgressUpdateMs = 0;  // Throttle progress updates
-  char downloadedCoverPath[96] = {};       // Resolved thumb BMP path for DOWNLOAD_COMPLETE popup
-  int pendingDownloadIndex = -1;           // Book awaiting CONFIRM_LARGE_DOWNLOAD acceptance
+  char downloadAuthor[64] = {};       // For the frozen Downloading info card
+  size_t downloadTotal = 0;           // Expected size (API download_size) for the Filesize line
+  char downloadedCoverPath[96] = {};  // Resolved thumb BMP path for DOWNLOAD_COMPLETE popup
+  int pendingDownloadIndex = -1;      // Book awaiting CONFIRM_LARGE_DOWNLOAD acceptance
   // Phase label shown on the Downloading screen — "Connecting…" → "Downloading…"
   // → "Saving…". Updated at each long-running step so the user can see the activity
   // isn't stuck. Empty string falls back to the generic Downloading label.

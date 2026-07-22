@@ -26,7 +26,7 @@ std::unique_ptr<PageLine> PageLine::deserialize(FsFile& file) {
   serialization::readPod(file, yPos);
 
   auto tb = TextBlock::deserialize(file);
-  return std::unique_ptr<PageLine>(new PageLine(std::move(tb), xPos, yPos));
+  return std::unique_ptr<PageLine>(new (std::nothrow) PageLine(std::move(tb), xPos, yPos));
 }
 
 void PageImage::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
@@ -49,7 +49,7 @@ std::unique_ptr<PageImage> PageImage::deserialize(FsFile& file) {
   serialization::readPod(file, yPos);
 
   auto ib = ImageBlock::deserialize(file);
-  return std::unique_ptr<PageImage>(new PageImage(std::move(ib), xPos, yPos));
+  return std::unique_ptr<PageImage>(new (std::nothrow) PageImage(std::move(ib), xPos, yPos));
 }
 
 void PageHorizontalRule::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
@@ -159,7 +159,10 @@ int Page::countWrappedLines(GfxRenderer& renderer, const int fontId, const char*
     if (!*p) break;
     int wLen = 0;
     const char* wStart = p;
-    while (*p && *p != ' ') { p++; wLen++; }
+    while (*p && *p != ' ') {
+      p++;
+      wLen++;
+    }
     int wCopy = wLen < (int)sizeof(wordBuf) - 1 ? wLen : (int)sizeof(wordBuf) - 1;
     memcpy(wordBuf, wStart, wCopy);
     wordBuf[wCopy] = '\0';
@@ -198,8 +201,8 @@ int Page::countWrappedLines(GfxRenderer& renderer, const int fontId, const char*
 }
 
 namespace {
-void drawWrappedText(GfxRenderer& renderer, const int fontId, const char* text, const int x, int& y,
-                     const int maxWidth, const int lineH) {
+void drawWrappedText(GfxRenderer& renderer, const int fontId, const char* text, const int x, int& y, const int maxWidth,
+                     const int lineH) {
   char lineBuf[120];
   char wordBuf[48];
   int lineLen = 0;
@@ -209,7 +212,10 @@ void drawWrappedText(GfxRenderer& renderer, const int fontId, const char* text, 
     if (!*p) break;
     int wLen = 0;
     const char* wStart = p;
-    while (*p && *p != ' ') { p++; wLen++; }
+    while (*p && *p != ' ') {
+      p++;
+      wLen++;
+    }
     int wCopy = wLen < (int)sizeof(wordBuf) - 1 ? wLen : (int)sizeof(wordBuf) - 1;
     memcpy(wordBuf, wStart, wCopy);
     wordBuf[wCopy] = '\0';
@@ -250,8 +256,8 @@ void drawWrappedText(GfxRenderer& renderer, const int fontId, const char* text, 
 }
 }  // namespace
 
-void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xOffset,
-                           const int viewportBottom, const int viewportWidth) const {
+void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xOffset, const int viewportBottom,
+                           const int viewportWidth) const {
   const int lineH = renderer.getLineHeight(fontId);
   const int effectiveBottom = viewportBottom - lineH / 2;
 
@@ -318,7 +324,7 @@ bool Page::serialize(FsFile& file) const {
 }
 
 std::unique_ptr<Page> Page::deserialize(FsFile& file) {
-  auto page = std::unique_ptr<Page>(new Page());
+  auto page = std::unique_ptr<Page>(new (std::nothrow) Page());
 
   uint16_t count;
   serialization::readPod(file, count);

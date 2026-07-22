@@ -1,53 +1,51 @@
 # KatiePoint User Guide
 
-Welcome to the **KatiePoint** firmware. This guide outlines the hardware controls, navigation, and reading features of the device.
+Welcome to **KatiePoint** — a heavily-customised fork of CrossPoint firmware for the **Xteink X4** (and X3) e-paper reader. This guide covers the hardware controls, navigation, and reading features of the device.
 
-- [KatiePoint User Guide](#katiepoint-user-guide)
-  - [1. Hardware Overview](#1-hardware-overview)
-    - [Button Layout](#button-layout)
-  - [2. Power \& Startup](#2-power--startup)
-    - [Power On / Off](#power-on--off)
-    - [First Launch](#first-launch)
-  - [3. Screens](#3-screens)
-    - [3.1 Home Screen](#31-home-screen)
-    - [3.2 Reading Mode](#32-reading-mode)
-    - [3.3 Browse Files Screen](#33-browse-files-screen)
-    - [3.4 Recent Books Screen](#34-recent-books-screen)
-    - [3.5 File Transfer Screen](#35-file-transfer-screen)
-      - [3.5.1 Calibre Wireless Transfers](#351-calibre-wireless-transfers)
-    - [3.6 Settings](#36-settings)
-      - [3.6.1 Display](#361-display)
-      - [3.6.2 Reader](#362-reader)
-      - [3.6.3 Controls](#363-controls)
-      - [3.6.4 System](#364-system)
-      - [3.6.5 KOReader Sync Quick Setup](#365-koreader-sync-quick-setup)
-    - [3.7 Sleep Screen](#37-sleep-screen)
-  - [4. Reading Mode](#4-reading-mode)
-    - [Page Turning](#page-turning)
-    - [Chapter Navigation](#chapter-navigation)
-    - [System Navigation](#system-navigation)
-    - [Supported Languages](#supported-languages)
-  - [5. Chapter Selection Screen](#5-chapter-selection-screen)
-  - [6. Current Limitations \& Roadmap](#6-current-limitations--roadmap)
-  - [7. Troubleshooting Issues \& Escaping Bootloop](#7-troubleshooting-issues--escaping-bootloop)
+> [!NOTE]
+> KatiePoint has diverged substantially from upstream CrossPoint. If you have used CrossPoint before, the sections on the **[Home Screen](#3-home-screen)**, **[Getting Books onto the Device](#5-getting-books-onto-the-device)**, **[Sync](#10-sync-bookfusion--koreader)**, **[Reading Stats](#9-reading-stats)**, and the **[Settings Reference](#12-settings-reference)** are the ones most worth reading. For the full technical changelog, see [CHANGES.md](./CHANGES.md).
 
+## Contents
+
+- [1. Hardware Overview](#1-hardware-overview)
+- [2. Power & Startup](#2-power--startup)
+- [3. Home Screen](#3-home-screen)
+- [4. Reading Mode](#4-reading-mode)
+- [5. Getting Books onto the Device](#5-getting-books-onto-the-device)
+- [6. Browsing Your Library](#6-browsing-your-library)
+- [7. The Reader Menu](#7-the-reader-menu)
+- [8. Bookmarks & Clippings](#8-bookmarks--clippings)
+- [9. Reading Stats](#9-reading-stats)
+- [10. Sync (BookFusion & KOReader)](#10-sync-bookfusion--koreader)
+- [11. Bluetooth Page Turner](#11-bluetooth-page-turner)
+- [12. Settings Reference](#12-settings-reference)
+- [13. Sleep Screen](#13-sleep-screen)
+- [14. Firmware Updates](#14-firmware-updates)
+- [15. Supported Languages](#supported-languages)
+- [16. Troubleshooting & Escaping Bootloop](#16-troubleshooting--escaping-bootloop)
+
+---
 
 ## 1. Hardware Overview
 
-The device utilises the standard buttons on the Xteink X4 (in the same layout as the manufacturer firmware, by default):
+KatiePoint runs on the **Xteink X4** and **X3**. Physical button positions differ slightly between models, but the *logical* functions are the same.
 
-### Button Layout
+### Button Layout (X4)
+
 | Location        | Buttons                                              |
 | --------------- | ---------------------------------------------------- |
-| **Bottom Edge** | **Back**, **Confirm**, **Left**, **Right**           |
-| **Right Side**  | **Power**, **Volume Up**, **Volume Down**, **Reset** |
+| **Bottom Edge** | **Back**, **Confirm**, **Left**, **Right** (front buttons — remappable) |
+| **Right Side**  | **Up** / **Down** (page turn), **Power**, **Reset**  |
 
-Button layout can be customized in the **[Controls Settings](#363-controls)**.
+On the **X3**, the **Power** button is on the top-right; the **Up**/**Down** buttons sit on the right edge. On the **X4**, Power is on the right edge above Up/Down.
+
+The four **front buttons** (Back / Confirm / Left / Right) can be reassigned to different physical positions in **Settings → System → Remap Front Buttons**. Throughout this guide, button names refer to their *logical* role, not a fixed physical position.
 
 ### Taking a Screenshot
-When the Power Button and Volume Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
 
-Alternatively, while reading a book, press the **Confirm** button to open the reader menu and select **Take screenshot**.
+- Press **Power + Down** at the same time to save a screenshot to `screenshots/` on the SD card.
+- Or, while reading, open the **[Reader Menu](#7-the-reader-menu)** and choose **Take Screenshot**.
+- You can also bind **Screenshot** to any reader button (see **[Reader Controls](#reader-tab)**).
 
 ---
 
@@ -55,158 +53,293 @@ Alternatively, while reading a book, press the **Confirm** button to open the re
 
 ### Power On / Off
 
-To turn the device on or off, **press and hold the Power button for approximately half a second**.
-In the **[Controls Settings](#363-controls)** you can configure the power button to turn the device off with a short press instead of a long one.
-
-To reboot the device (for example after a firmware update or if it's frozen), press and release the Reset button, and then quickly press and hold the Power button for a few seconds.
+- **Turn on/off:** press and hold **Power** for about half a second.
+- You can configure a **short** Power press to do something else (page turn, sleep, sync, bookmark) — see **[Short Power Button](#system-tab)**. When a short press is repurposed, turning the device *off* requires a long press.
+- **Reboot / recover:** press and release **Reset**, then quickly press and hold **Power** for a few seconds.
 
 ### First Launch
 
-Upon turning the device on for the first time, you will be placed on the **[Home](#31-home-screen)** screen.
-
-> [!NOTE]
-> On subsequent restarts, the firmware will automatically reopen the last book you were reading.
+On first boot you land on the **[Home Screen](#3-home-screen)**. On later restarts, KatiePoint automatically reopens the last book you were reading.
 
 ---
 
-## 3. Screens
+## 3. Home Screen
 
-### 3.1 Home Screen
+The Home screen is the main hub. Its layout depends on the **UI Theme** (Settings → Display → UI Theme):
 
-The Home screen is the main entry point to the firmware. From here you can navigate to **[Reading Mode](#4-reading-mode)** with the most recently read book, the **[Browse Files](#33-browse-files-screen)** screen, the **[Recent Books](#34-recent-books-screen)** screen, the **[File Transfer](#35-file-transfer-screen)** screen, or **[Settings](#36-settings)**.
+| Theme | Home layout |
+|-------|-------------|
+| **Classic** | Original KatiePoint look; one recent-book tile plus the menu. |
+| **Lyra** | Rounded elements and menu icons; one recent-book tile. |
+| **Lyra Extended** | Like Lyra, but shows the **3** most recent books instead of 1. |
+| **Lyra Library** | Replaces the recent tile with a paginated **cover grid** of every book on the SD card (the Library view). |
 
-### 3.2 Reading Mode
+### Recent-book tile
 
-See [Reading Mode](#4-reading-mode) below for more information.
+Shows your most recently opened book(s) with cover, title, author, and progress.
 
-### 3.3 Browse Files Screen
+- **Confirm** on a tile → open that book.
+- **Long-press Confirm** on a tile → open the **Book Options** popup (an inline modal): *Mark as Read, Reset Progress, Shelve, Delete, Reindex, Regenerate Cover*. This does not navigate away from Home.
 
-The Browse Files screen acts as a file and folder browser.
+<img src="docs/images/user-guide/home-book-options.png" alt="Home screen with the Book Options popup open on a recent-book tile" width="300">
 
-* **Navigate List:** Use **Left** (or **Volume Up**), or **Right** (or **Volume Down**) to move the selection cursor up and down through folders and books. You can also long-press these buttons to scroll a full page up or down.
-* **Open Selection:** Press **Confirm** to open a folder or read a selected book. 
-* **Delete Files:** Hold and release **Confirm** to delete the selected file. You will be given an option to either confirm or cancel deletion. Folder deletion is not supported.
+### Library cover grid (Lyra Library theme)
 
-### 3.4 Recent Books Screen
+A 3-column paginated grid of every book on the card. Cover thumbnails are cached to the SD card. Selecting a book opens it; long-pressing **Confirm** opens the same Book Options popup as the recent tile.
 
-The Recent Books screen lists the most recently opened books in a chronological view, displaying title and author.
+<p>
+<img src="docs/images/user-guide/library-grid.png" alt="Library cover grid showing book covers with titles, authors, and progress" width="300">
+<img src="docs/images/user-guide/library-book-options.png" alt="Book Options popup opened from the Library cover grid" width="300">
+</p>
 
-### 3.5 File Transfer Screen
+### Home menu
 
-The File Transfer screen allows you to upload new e-books to the device. When you enter the screen, you'll be prompted with a WiFi selection dialog and then your X4 will start hosting a web server.
+The menu (shown at the bottom, or as icons in Lyra themes) contains:
 
-See the [webserver docs](./docs/webserver.md) for more information on how to connect to the web server and upload files.
+- **Browse Files** — the file/folder browser (see **[Browsing Your Library](#6-browsing-your-library)**).
+- **OPDS Browser** — *only shown when an OPDS server URL is configured.* Browse and download from an OPDS catalogue.
+- **File Transfer** — get books onto the device (see **[Getting Books onto the Device](#5-getting-books-onto-the-device)**).
+- **Reading Stats** — your reading statistics (see **[Reading Stats](#9-reading-stats)**).
+- **Settings** — device configuration (see **[Settings Reference](#12-settings-reference)**).
+
+**Navigate:** use **Left/Up** and **Right/Down** (or the side **Up/Down** buttons) to move the cursor; **Confirm** to select.
+
+---
+
+## 4. Reading Mode
+
+Once a book is open, the buttons change to reading functions.
+
+### Page Turning
+
+| Action            | Buttons                          |
+| ----------------- | -------------------------------- |
+| **Previous Page** | **Left** *or* side **Up**        |
+| **Next Page**     | **Right** *or* side **Down**     |
+
+If **Short Power Button** is set to **Page Turn**, a short Power press also turns the page.
+
+### Chapter Navigation
+
+- **Next chapter:** press and *hold* **Right** (or side **Down**) briefly, then release.
+- **Previous chapter:** press and *hold* **Left** (or side **Up**) briefly, then release.
+
+This behaviour is configurable. By default long-press skips chapters; you can change long-press to *scroll a page* instead, and every reader button's short- and long-press action can be reassigned — see **[Reader Controls](#reader-tab)**.
+
+### System Navigation
+
+- **Return Home:** press **Back**.
+- **Return to Browse Files:** press and *hold* **Back**.
+- **Reader Menu:** press **Confirm** (see **[The Reader Menu](#7-the-reader-menu)**).
+
+### On-screen button hints
+
+KatiePoint can draw small labels next to each physical button while reading, so you always know what each press does. Enable via **Settings → Reader → Show Button Hints** or the **Button Hints** reader-menu action. Hint modes: **None**, **Short Press**, **Long Press**, **Front Only (Short)**, **Front Only (Long)**. Hints are X3/X4-aware and never overlap page text.
+
+<img src="docs/images/user-guide/reading-button-hints.png" alt="Reading a book with on-screen button hints along the side and bottom edges" width="300">
+
+### Auto-Turn
+
+Automatically turns the page on a timer. Set via the reader menu (**Auto Page Turn**): **Off**, **Auto**, or a fixed interval (60s / 50s / 40s / 35s / 30s / 25s / 20s). **Auto** uses your calibrated reading speed and shows the estimate inline, e.g. `Auto (~45s)`; if no speed has been measured yet, Auto behaves as Off.
+
+### Bionic Reading
+
+An optional mode that bolds the leading portion of each word to guide the eye. Toggle it in **Settings → Reader → Bionic Reading**, or bind **Bionic** to a reader button. Changing it re-lays out the text, so cached pages regenerate the first time you open a book afterwards.
+
+Off (left) vs. on (right):
+
+<p>
+<img src="docs/images/user-guide/bionic-reading-off.png" alt="A page of text with Bionic Reading off — uniform text weight" width="300">
+<img src="docs/images/user-guide/bionic-reading-on.png" alt="The same page with Bionic Reading on — the leading portion of each word is bolded" width="300">
+</p>
+
+---
+
+## 5. Getting Books onto the Device
+
+KatiePoint reads **`.epub`**, **`.txt`**, and **`.xtc`** files. There are several ways to load them.
+
+### SD card (offline)
+
+Insert the SD card into a computer and copy files anywhere on it. KatiePoint scans the whole card. When you add files this way, the file browser sees them immediately; the Library cover grid may need a rescan (**Settings → Developer → Recache Library**, with Developer Mode on).
+
+### File Transfer menu
+
+**Home → File Transfer** offers four wireless options:
+
+1. **Join Network** — connects to your WiFi and hosts a web upload server. Open the shown URL in a browser on the same network to drag-and-drop books (and manage files / fonts / settings). See the [webserver docs](./docs/webserver.md).
+
+   <img src="docs/images/user-guide/web-file-manager.png" alt="The device's web File Manager page in a browser, showing folders and EPUBs with upload, new-folder, and delete actions" width="600">
+2. **Calibre Wireless** — receive books sent from Calibre's *Send to device*. Install the [crosspoint_reader Calibre plugin](https://github.com/crosspoint-reader/calibre-plugins/releases) (Preferences → Plugins → Load plugin from file), then on the device choose *Calibre Wireless* and join a network. Your computer must be on the same WiFi.
+3. **Create Hotspot** — the device becomes its own access point when no shared WiFi is available; join it from your computer, then use the web uploader.
+4. **BookFusion Library** — browse and download from your linked [BookFusion](https://www.bookfusion.com/) cloud library (see **[Sync](#10-sync-bookfusion--koreader)** for account linking).
+
+### OPDS Browser
+
+If you run an OPDS catalogue (e.g. Calibre Content Server), set it up in **Settings → System → OPDS Browser** (for Calibre Content Server, append `/opds` to the URL). Only HTTP **Basic** auth is supported — if using Calibre with auth, switch it from Digest to Basic. Once configured, **OPDS Browser** appears on the Home menu.
+
+### Download from URL
+
+**Settings → Developer → Download from URL** (Developer Mode) fetches a file (e.g. a `firmware.bin` or an EPUB) directly to the SD card by URL.
 
 > [!TIP]
-> Advanced users can also manage files programmatically or via the command line using `curl`. See the [webserver docs](./docs/webserver.md) for details.
+> Large, image-heavy EPUBs (10 MB+) can be slow to convert and use a lot of memory. When downloading such a book from BookFusion you'll get a size warning first. For faster covers/thumbnails, pre-optimise EPUBs with a converter such as [epub-to-xtc-converter](https://github.com/bigbag/epub-to-xtc-converter).
 
-### 3.5.1 Calibre Wireless Transfers
+---
 
-KatiePoint supports sending books from Calibre using the KatiePoint Reader device plugin.
+## 6. Browsing Your Library
 
-1. Install the plugin in Calibre:
-   - Head to https://github.com/crosspoint-reader/calibre-plugins/releases to download the latest version of the crosspoint_reader plugin.
-   - Download the zip file.
-   - Open Calibre → Preferences → Plugins → Load plugin from file → Select the zip file.
-2. On the device: File Transfer → Connect to Calibre → Join a network.
-3. Make sure your computer is on the same WiFi network.
-4. In Calibre, click "Send to device" to transfer books.
+### Browse Files
 
-### 3.6 Settings
+A file/folder browser over the SD card.
 
-The Settings screen allows you to configure the device's behavior. There are a few settings you can adjust:
+- **Navigate:** **Left/Up** and **Right/Down** move the cursor; long-press to jump a full page.
+- **Open:** **Confirm** opens a folder or reads a book.
+- **Delete:** hold and release **Confirm** to delete the selected file (with a confirm/cancel prompt). Folder deletion is not supported.
+- **Progress column:** each row shows a right-aligned marker — `X` (finished, ≥90%), a percentage like `21%` (in progress), or blank (unopened / directory).
+- A **`& `** prefix marks books linked to your BookFusion account.
 
-#### 3.6.1 Display
+<img src="docs/images/user-guide/browse-files.png" alt="Browse Files list showing books with right-aligned progress percentages and the Sort tab" width="300">
 
-- **Sleep Screen**: Which sleep screen to display when the device sleeps:
-  - "Dark" (default) - The default dark KatiePoint logo sleep screen
-  - "Light" - The same default sleep screen, on a white background
-  - "Custom" - Custom images from the SD card; see [Sleep Screen](#37-sleep-screen) below for more information
-  - "Cover" - The book cover image (Note: this is experimental and may not work as expected)
-  - "None" - A blank screen
-  - "Cover + Custom" - The book cover image, falls back to "Custom" behavior
-- **Sleep Screen Cover Mode**: How to display the book cover when "Cover" sleep screen is selected:
-  - "Fit" (default) - Scale the image down to fit centered on the screen, padding with white borders as necessary
-  - "Crop" - Scale the image down and crop as necessary to try to fill the screen (Note: this is experimental and may not work as expected)
-- **Sleep Screen Cover Filter**: What filter will be applied to the book cover when "Cover" sleep screen is selected:
-  - "None" (default) - The cover image will be converted to a grayscale image and displayed as it is
-  - "Contrast" - The image will be displayed as a black & white image without grayscale conversion
-  - "Inverted" - The image will be inverted as in white & black and will be displayed without grayscale conversion
-- **Status Bar**: Configure the status bar displayed while reading:
-  - "None" - No status bar
-  - "No Progress" - Show status bar without reading progress
-  - "Full w/ Percentage" - Show status bar with book progress (as percentage)
-  - "Full w/ Book Bar" - Show status bar with book progress (as bar)
-  - "Book Bar Only" - Show book progress (as bar)
-  - "Full w/ Chapter Bar" - Show status bar with chapter progress (as bar)
-- **Hide Battery %**: Configure where to suppress the battery percentage display in the status bar; the battery icon will still be shown:
-  - "Never" (default) - Always show battery percentage
-  - "In Reader" - Show battery percentage everywhere except in reading mode
-  - "Always" - Always hide battery percentage
-- **Refresh Frequency**: Set how often the screen does a full refresh while reading to reduce ghosting; options are every 1, 5, 10, 15, or 30 pages.
+### Folder views
 
-- **UI Theme**: Set which UI theme to use:
-  - "Classic" - The original KatiePoint theme
-  - "Lyra" - The new theme for KatiePoint featuring rounded elements and menu icons
-  - "Lyra Extended" - Lyra, but displays 3 books instead of 1 on the **[Home Screen](#31-home-screen)**
-- **Sunlight Fading Fix**: Configure whether to enable a software-fix for the issue where white X4 models may fade when used in direct sunlight:
-  - "OFF" (default) - Disable the fix
-  - "ON" - Enable the fix
+**Settings → Display → Folder View** changes how Browse Files is organised:
 
-#### 3.6.2 Reader
-- **Reader Font Family**: Choose the font used for reading:
-  - "Bookerly" (default) - Amazon's reading font
-  - "Noto Sans" - Google's sans-serif font
-  - "Open Dyslexic" - Font designed for readers with dyslexia
-- **Reader Font Size**: Adjust the text size for reading; options are "Small", "Medium" (default), "Large", or "X Large".
+| View | Behaviour |
+|------|-----------|
+| **Folders** (default) | Real SD-card directory structure. |
+| **Tags** | Groups books by tag (from BookFusion / metadata). |
+| **Authors** | Groups books by author. |
+| **Series** | Groups books by series. |
 
-- **Reader Line Spacing**: Adjust the spacing between lines; options are "Tight", "Normal" (default), or "Wide".
-- **Reader Screen Margin**: Controls the screen margins in Reading Mode between 5 and 40 pixels in 5-pixel increments.
-- **Reader Paragraph Alignment**: Set the alignment of paragraphs; options are "Justified" (default), "Left", "Center", or "Right".
-- **Embedded Style**: Whether to use the EPUB file's embedded HTML and CSS stylisation and formatting; options are "ON" or "OFF".
-- **Hyphenation**: Whether to hyphenate text in Reading Mode; options are "ON" or "OFF".
-- **Reading Orientation**: Set the screen orientation for reading EPUB files:
-  - "Portrait" (default) - Standard portrait orientation
-  - "Landscape CW" - Landscape, rotated clockwise
-  - "Inverted" - Portrait, upside down
-  - "Landscape CCW" - Landscape, rotated counter-clockwise
-- **Extra Paragraph Spacing**: Set how to handle paragraph breaks:
-  - "ON" - Vertical space will be added between paragraphs in Reading Mode
-  - "OFF" - Paragraphs will not have vertical space added, but will have first-line indentation
-- **Text Anti-Aliasing**: Whether to show smooth grey edges (anti-aliasing) on text in reading mode. Note this slows down page turns slightly.
+Tags / Authors / Series present a list of groups; open a group to see its books.
 
-#### 3.6.3 Controls
+### Sorting
 
-- **Remap Front Buttons**: A menu for customising the function of each bottom edge button.
-- **Side Button Layout (reader)**: Swap the order of the up and down volume buttons from "Prev/Next" (default) to "Next/Prev". This change is only in effect when reading.
+Lists (Library, Recent Books, File Browser) are sortable. **Short-press Power** opens the **Sort Menu**; the chosen mode persists across reboots. Modes include: Name A–Z / Z–A, Author A–Z / Z–A, Recently / Least-recently opened, Most / Least read, Newest / Oldest on device, Date added, **BookFusion first / last**, and **Tag A–Z / Z–A**.
 
-- **Long-press Chapter Skip**: Set whether long-pressing page turn buttons skips to the next/previous chapter:
-  - "Chapter Skip" (default) - Long-pressing skips to next/previous chapter
-  - "Page Scroll" - Long-pressing scrolls a page up/down
-- **Short Power Button Click**: Controls the effect of a short click of the power button:
-  - "Ignore" (default) - Require a long press to turn off the device
-  - "Sleep" - A short press puts the device into sleep mode
-  - "Page Turn" - A short press in reading mode turns to the next page; a long press turns the device off
+<img src="docs/images/user-guide/sort-menu.png" alt="Sort menu listing all sort modes with Most read selected" width="300">
 
-#### 3.6.4 System
+---
 
-- **Time to Sleep**: Set the duration of inactivity before the device automatically goes to sleep; options are 1, 5, 10 (default), 15 or 30 minutes.
+## 7. The Reader Menu
 
-- **WiFi Networks**: Connect to WiFi networks for file transfers and firmware updates.
-- **KOReader Sync**: Options for setting up KOReader for syncing book progress.
-- **OPDS Browser**: Configure OPDS server settings for browsing and downloading books. Set the server URL (for Calibre Content Server, add `/opds` to the end), and optionally configure username and password for servers requiring authentication. Note: Only HTTP Basic authentication is supported. If using Calibre Content Server with authentication enabled, you must set it to use Basic authentication instead of the default Digest authentication.
-- **Clear Reading Cache**: Clear the internal SD card cache.
-- **Check for updates**: Check for KatiePoint firmware updates over WiFi.
-- **Language**: Set the system language (see **[Supported Languages](#supported-languages)** for more information).
+Press **Confirm** while reading to open the reader menu.
 
-#### 3.6.5 KOReader Sync Quick Setup
+<img src="docs/images/user-guide/reader-menu.png" alt="Reader menu showing chapter position, time-left estimate, and the list of actions" width="300">
 
-KatiePoint can sync reading progress with KOReader-compatible sync servers.
-It also interoperates with KOReader apps/devices when they use the same server and credentials.
+Available actions:
 
-##### Option A: Free Public Server (`sync.koreader.rocks`)
+| Action | What it does |
+|--------|--------------|
+| **Select Chapter** | Table of contents — jump to any chapter. |
+| **Footnotes** | *(shown only when the page has footnotes)* View footnotes in a menu. |
+| **Go to Percent** | Jump to a position by percentage. |
+| **Auto Page Turn** | Set the auto-turn interval (see **[Auto-Turn](#auto-turn)**). |
+| **Reading Speed** | View / calibrate your reading speed (drives Auto-Turn and time-left estimates). |
+| **Rotate Screen** | Change orientation (Portrait / Landscape CW / Inverted / Landscape CCW). |
+| **Button Hints** | Toggle on-screen button-hint mode. |
+| **Bluetooth Remote** | *(shown when a remote is paired)* Turn the BLE page turner on/off — see **[Bluetooth Page Turner](#11-bluetooth-page-turner)**. |
+| **Font & Layout** | Live font/layout preview editor. |
+| **Reader Controls** | Rebind per-button reader actions. |
+| **Bookmarks** | View and jump to saved bookmarks. |
+| **Add Bookmark** | Bookmark the current page. |
+| **Save Clipping** | Save a text clipping/highlight from the current page. |
+| **View Clippings** | Browse saved clippings for this book. |
+| **Take Screenshot** | Save the current screen to `screenshots/`. |
+| **Display QR** | Show a QR code (e.g. to open a link). |
+| **Book Info** | Full metadata panel (see below). |
+| **Mark as Completed** | Sets progress to 100%, counts the book as finished, returns Home. |
+| **Go Home** | Close the book and return to the Home screen. |
+| **Sync: Push / Pull** | Upload or apply reading progress with your sync server. |
+| **Delete Cache** | Clear this book's cached layout (forces a re-parse). |
 
-1. Register a user once (only if needed):
+### Book Info panel
+
+**Book Info** shows the open book's full metadata: series & number, bookshelf, categories, lists, publisher, published date, tags, rating, language, and the full description (or "No description available"). Series/shelf/tags/rating/description are populated for books synced from BookFusion.
+
+<img src="docs/images/user-guide/book-info.png" alt="Book Info panel with cover, author, lists, publisher, progress, and full description" width="300">
+
+### Footnotes
+
+**Settings → Reader → Footnotes** chooses how footnotes appear:
+
+- **On page** — footnote text is rendered at the bottom of the referencing page, beneath a horizontal rule. Layout reserves space so it never overlaps the body text.
+- **In menu** — footnotes are collected into the reader menu instead.
+
+---
+
+## 8. Bookmarks & Clippings
+
+- **Bookmarks** mark a page so you can jump back to it. Add one with the reader menu's **Add Bookmark** (or bind **Bookmark** to a button / long-press / short-Power). View and jump via **Bookmarks**.
+- **Clippings** save passages of text from a book. Use **Save Clipping** while reading, then **View Clippings** to review them. Clippings are text-only.
+
+When saving a clipping you pick the start and end lines directly on the page — the selected passage is shown highlighted:
+
+<img src="docs/images/user-guide/save-clipping.png" alt="Save Clipping line-selection view with the chosen passage highlighted on the page" width="300">
+
+---
+
+## 9. Reading Stats
+
+Open from **Home → Reading Stats**. Tracks sessions across `.epub`, `.txt`, and `.xtc`. Metrics include **Reading Time, Pages Read, Books Finished, Sessions, Average Session, Reading Speed,** and **In Progress**. Books at **≥90%** count as finished.
+
+Stats are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), and **Sessions**:
+
+<p>
+<img src="docs/images/user-guide/stats-overview.png" alt="Reading Stats Overview tab with streak, daily goal, totals, and reading profile scores" width="300">
+<img src="docs/images/user-guide/stats-month.png" alt="Reading Stats Month tab showing a calendar heat-map of daily reading time" width="300">
+</p>
+
+### Configuring stats (Settings → Stats tab)
+
+- **Daily Reading Goal** — 5 / 10 / 15 / 30 / 60 min.
+- **Minimum Session Length** — the shortest activity (1 / 3 / 5 min) that counts as a session.
+- **Set Date** / **Time Zone** — keep timestamps and streaks accurate.
+- **Export Reading Stats / Import Reading Stats / Export to StoryGraph** — back up or move your stats.
+- **"If Found" contact** — a contact string (e.g. a phone number) that can be shown on the sleep screen.
+
+<img src="docs/images/user-guide/settings-stats.png" alt="Settings Stats tab with daily goal, session length, sleep-screen stat slots, and export options" width="300">
+
+### Sleep-screen stats
+
+You can surface up to **three** reading stats on the sleep screen. **Settings → Stats → Sleep Stat 1 / 2 / 3** each pick one of: Today, Daily Goal, This Week, Streak, This Month, Total, Books Finished, "If Found" contact, Book Progress, Daily Average, Days This Month, Week Streak, Goal Remaining, or Book Time Left (or **None**).
+
+---
+
+## 10. Sync (BookFusion & KOReader)
+
+KatiePoint supports two independent progress-sync systems.
+
+### BookFusion
+
+Links your [BookFusion](https://www.bookfusion.com/) cloud account.
+
+1. **Settings → System → BookFusion Sync** → link your account with the on-screen **device code** (OAuth).
+2. Browse your cloud library from **Home → File Transfer → BookFusion Library**, filtered by category (Currently Reading / Favorites / Plan to Read / Completed / All Books) or by your own bookshelves, and **download** EPUBs straight to the SD card. A tick marks books already on the device.
+
+   <p>
+   <img src="docs/images/user-guide/bookfusion-shelves.png" alt="BookFusion library browser listing categories and bookshelves" width="300">
+   <img src="docs/images/user-guide/bookfusion-plan-to-read.png" alt="Plan to Read shelf with downloaded books ticked and others available to download" width="300">
+   </p>
+
+   And here's what browsing and downloading from the BookFusion library looks like:
+
+   <img src="docs/images/user-guide/bookfusion-demo.gif" alt="Animated demo of browsing the BookFusion library and downloading a book on the device" width="300">
+
+3. **Sync progress & reading time** bidirectionally: **long-press Confirm** while reading (or the reader menu's **Sync** entries).
+
+   <img src="docs/images/user-guide/bookfusion-push-progress.png" alt="BookFusion Push Local Progress confirmation showing position and reading time synced" width="300">
+
+BookFusion also pulls rich metadata (series, bookshelf, tags, rating, lists, description) into the **[Book Info](#book-info-panel)** panel, adds **BookFusion first/last** and **Tag A–Z/Z–A** sort modes, and marks synced books with a **`& `** prefix in all list views. Book covers for BookFusion books always come from the API image (not the EPUB).
+
+### KOReader Sync Quick Setup
+
+KatiePoint syncs reading position with KOReader-compatible sync servers, and interoperates with KOReader apps/devices using the same server and credentials.
+
+#### Option A: Free Public Server (`sync.koreader.rocks`)
+
+1. Register a user once (only if you don't already have KOReader Sync credentials):
 
 ```bash
 USERNAME="user"
@@ -219,27 +352,21 @@ curl -i "https://sync.koreader.rocks/users/create" \
   --data "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD_MD5\"}"
 ```
 
-Already have KOReader Sync credentials? Skip registration; basic sync only requires using the same existing username/password on all devices.
+An `HTTP 402` with `{"code":2002,"message":"Username is already registered."}` means the name is taken — pick another or use that account.
 
-When this returns `HTTP 402` with `{"code":2002,"message":"Username is already registered."}`, pick a different username or use that existing account.
-
-2. On each KatiePoint device:
-   - Go to **Settings -> System -> KOReader Sync**.
-   - Set **Username** and **Password** (enter the plain password; KatiePoint computes MD5 internally, and use the same values on all devices).
-   - Set **Sync Server URL** to `https://sync.koreader.rocks`, or leave it empty (both use the same default KOReader sync server).
+2. On each KatiePoint device: **Settings → System → KOReader Sync**.
+   - Set **Username** and **Password** (enter the *plain* password; KatiePoint computes MD5 internally). Use the same values on every device.
+   - Set **Sync Server URL** to `https://sync.koreader.rocks`, or leave it empty (same default).
    - Run **Authenticate**.
 
-3. While reading, press **Confirm** to open the reader menu, then select **Sync Progress**.
-   - Choose **Apply Remote** to jump to remote progress.
-   - Choose **Upload Local** to push current progress.
+3. While reading, open the reader menu → **Sync**. Choose **Apply Remote** to jump to the remote position, or **Upload Local** to push your current progress.
 
-##### Option B: Self-Hosted Server (Docker Compose)
+#### Option B: Self-Hosted Server (Docker Compose)
 
 1. Start a sync server:
 
 ```bash
-mkdir -p kosync-quickstart
-cd kosync-quickstart
+mkdir -p kosync-quickstart && cd kosync-quickstart
 
 cat > compose.yaml <<'YAML'
 services:
@@ -255,31 +382,18 @@ services:
     restart: unless-stopped
 YAML
 
-# Docker
-docker compose up -d
-
-# Podman (alternative)
-podman compose up -d
+docker compose up -d   # or: podman compose up -d
 ```
 
 > [!NOTE]
-> `ENABLE_USER_REGISTRATION=true` is convenient for first setup. After creating your users, set it to `false` (or remove it) to avoid unexpected registrations.
+> `ENABLE_USER_REGISTRATION=true` is convenient for first setup. Set it to `false` afterwards to avoid unexpected registrations.
 
-2. Verify the server:
+2. Verify: `curl -H "Accept: application/vnd.koreader.v1+json" "http://<server-ip>:17200/healthcheck"` → `{"state":"OK"}`.
 
-```bash
-curl -H "Accept: application/vnd.koreader.v1+json" "http://<server-ip>:17200/healthcheck"
-# Expected: {"state":"OK"}
-```
-
-3. Register a user once.
-KatiePoint authenticates against KOReader Sync (`koreader/kosync`) using an MD5 key, so register using the MD5 of your password:
+3. Register a user (KatiePoint authenticates with the MD5 of the password):
 
 > [!WARNING]
-> Sending a reusable MD5-derived password over plain HTTP is insecure.
-> Create unique sync-only credentials and do not reuse main account passwords.
-> Prefer `https://<server-ip>:7200` whenever traffic leaves a fully trusted LAN or when using untrusted networks.
-> Use `curl -k` only for self-signed certificate testing.
+> Sending a reusable MD5-derived password over plain HTTP is insecure. Create unique sync-only credentials — don't reuse your main password. Prefer the HTTPS listener (`https://<server-ip>:7200`) on untrusted networks; use `curl -k` only for self-signed-cert testing.
 
 ```bash
 USERNAME="user"
@@ -292,119 +406,245 @@ curl -i "http://<server-ip>:17200/users/create" \
   --data "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD_MD5\"}"
 ```
 
-If this returns `HTTP 402` with `{"code":2002,"message":"Username is already registered."}`, the account already exists.
+4. On each device: **Settings → System → KOReader Sync** → set Username/Password (plain password), **Sync Server URL** = `http://<server-ip>:17200` (or `https://<server-ip>:7200`), then **Authenticate**.
 
-4. On each KatiePoint device:
-   - Go to **Settings -> System -> KOReader Sync**.
-   - Set **Username** and **Password** (enter the plain password; KatiePoint computes MD5 internally, and use the same values on all devices).
-   - Set **Sync Server URL** to `http://<server-ip>:17200`.
-   - Run **Authenticate**.
+5. Sync from the reader menu as in Option A.
 
-If you use the HTTPS listener, use `https://<server-ip>:7200` (`curl -k` only for self-signed certificate testing).
+**Document Matching** (KOReader Sync settings) chooses how books are matched across devices: **Filename** or **Binary** (content hash).
 
-5. While reading, press **Confirm** to open the reader menu, then select **Sync Progress**.
-   - Choose **Apply Remote** to jump to remote progress.
-   - Choose **Upload Local** to push current progress.
+---
 
-### 3.7 Sleep Screen
+## 11. Bluetooth Page Turner
 
-The **Sleep Screen** setting controls what is displayed when the device goes to sleep:
+KatiePoint can pair with cheap BLE page-turner remotes and clickers (Bluetooth HID devices) so you can turn pages without touching the device.
 
-| Mode | Behavior |
-|------|----------|
-| **Dark** (default) | The KatiePoint logo on a dark background. |
-| **Light** | The KatiePoint logo on a white background. |
-| **Custom** | A custom image from the SD card (see below). Falls back to **Dark** if no custom image is found. |
-| **Cover** | The cover of the currently open book. Falls back to **Dark** if no book is open. |
-| **Cover + Custom** | The cover of the currently open book. Falls back to **Custom** behavior if no book is open. |
-| **None** | A blank screen. |
+> **Fair warning:** this feature is experimental. Cheap remotes all speak slightly different dialects, and Bluetooth is a serious RAM hog on this hardware — so KatiePoint is deliberately strict about when it runs.
 
-#### Cover settings
+<img src="docs/images/user-guide/bluetooth-page-turner.gif" alt="Animated demo: turning Bluetooth on from the reader, the remote reconnecting, and pages turning from the handheld clicker" width="300">
 
-When using **Cover** or **Cover + Custom**, two additional settings apply:
+### Every button turns the page forward
 
-- **Sleep Screen Cover Mode**: **Fit** (scale to fit, white borders) or **Crop** (scale and crop to fill the screen).
-- **Sleep Screen Cover Filter**: **None** (grayscale), **Contrast** (black & white), or **Inverted** (inverted black & white).
+KatiePoint does **not** map remote buttons to separate forward/back actions. *Any*
+button on the remote turns one page forward.
 
-#### Custom images
+This is deliberate. Cheap clickers disagree about almost everything — some send a
+different code per button, some send the *same* code for every button, and
+one-button models alternate between two codes on each press. Trying to tell those
+apart was unreliable in practice, so KatiePoint doesn't try. There is no button
+mapping step, and nothing to configure.
 
-To use custom sleep images, set the sleep screen mode to **Custom** or **Cover + Custom**, then place images on the SD card:
+The trade-off: **you cannot page backwards with the remote.** Use the device's own
+buttons for that. Remotes that only send data while a button is held (rather than
+on press) are not supported.
 
-- **Multiple Images (recommended):** Create a `.sleep` directory in the root of the SD card and place any number of `.bmp` images inside. One will be randomly selected each time the device sleeps. (A directory named `sleep` is also accepted as a fallback.)
-- **Single Image:** Place a file named `sleep.bmp` in the root directory. This is used as a fallback if no valid images are found in the `.sleep`/`sleep` directory.
+### Pairing a remote
+
+1. **Put the remote into pairing mode first.** This is the step most people miss —
+   the remote must be actively advertising or it will not appear in the scan. How
+   you do it varies by model; commonly it is holding a button for a few seconds
+   until an LED flashes. Check your remote's instructions.
+2. Go to **Settings → System → Bluetooth Page Turner**.
+3. Set **Bluetooth** to On, then choose **No remote - connect one** to scan.
+4. Pick your remote from the list (unnamed devices that aren't input devices are
+   hidden automatically). Once connected, it's remembered for reconnection.
+
+When it connects, KatiePoint spends about a second watching the remote sit idle so
+it can learn what "no button pressed" looks like for that model. Don't hold a
+button during those first couple of seconds after connecting.
+
+### Give yourself a way to turn it back on
+
+**Do this while you're setting up, not later.** Bluetooth turns itself off often
+(see below), and if you have no quick way to switch it on, using a remote becomes
+tedious. Either:
+
+- Keep the **Bluetooth Remote** row visible in the reader menu (**Settings → Reader
+  → Bluetooth in Menu**), or
+- Bind **Bluetooth Remote** to a button via **Settings → Reader Controls** — this
+  is the faster option, and pressing the bound button again turns it off and frees
+  the memory.
+
+### Day-to-day use
+
+- If the remote stops responding, **press one of its buttons** — the device listens
+  for it waking up and reconnects within a couple of seconds.
+- Long-press gestures (such as chapter skip) work from the device's own buttons
+  only. A remote press is always a single page turn.
+- **Images are hidden while the remote is connected.** Decoding a picture needs
+  more memory than is free with Bluetooth running, so illustrations draw blank.
+  The page layout is unchanged — text sits exactly where it otherwise would, and
+  the images come back as soon as you turn Bluetooth off.
+
+### Why does Bluetooth keep turning itself off?
+
+By design. Bluetooth needs a large slice of the device's very limited RAM, so
+KatiePoint shuts it down whenever that memory is needed elsewhere: during
+**syncing**, while **indexing chapters**, when you **leave the reader** (home
+screen, library, settings), and in **sleep**.
+
+**It never turns itself back on — including after a sync.** This catches people
+out: you sync, carry on reading, and the remote is silently dead. Flip the
+reader-menu row or press your bound button to bring it back.
+
+That is not laziness on the device's part. Bringing Bluetooth up immediately after
+a WiFi session is unreliable on this chip — it has been observed to freeze the
+device outright — so re-enabling is always left as a deliberate choice you make
+once the radio has settled.
+
+Occasionally the toggle will refuse with a memory message. Bluetooth needs one
+large *unbroken* run of free memory, and after heavy activity the free memory can
+be plentiful but fragmented into pieces too small to use. Turning a page or two,
+or leaving and re-entering the book, usually frees a large enough run; a restart
+always will.
+
+---
+
+## 12. Settings Reference
+
+Settings are organised into tabs, selected via the top ribbon: **Display**, **Reader**, **Stats**, **System**, and **Developer** (only when Developer Mode is on). Most of these are also editable from the web settings page (File Transfer → Join Network).
+
+### Display tab
+
+- **Sleep Screen** — Dark / Light / Custom / Cover / None / Cover + Custom (see **[Sleep Screen](#13-sleep-screen)**).
+- **Sleep Cover Mode** — Fit / Crop (when using a cover sleep screen).
+- **Sleep Cover Filter** — None (grayscale) / Contrast / Inverted.
+- **Seamless Sleep Screen** — Never / After Timeout / Always.
+- **Hide Battery %** — Never / In Reader / Always (icon still shown).
+- **Refresh Frequency** — full-refresh every 1 / 5 / 10 / 15 / 30 pages (reduces ghosting).
+- **UI Theme** — Classic / Lyra / Lyra Extended / Lyra Library (see **[Home Screen](#3-home-screen)**).
+- **Sunlight Fading Fix** — software fix for white X4 units fading in direct sunlight.
+- **Reader Dark Mode** — invert reading to light-on-dark.
+- **Folder View** — Folders / Tags / Authors / Series (see **[Folder views](#folder-views)**).
+
+### Reader tab
+
+- **Font Family** — Bookerly / Inter / Open Dyslexic / Monospace. SD-card fonts can also be loaded (see [sd-card-fonts](./docs/sd-card-fonts.md)).
+- **Font Size** — Small / Medium / Large / X-Large (plus an X-Small size).
+- **Line Spacing** — Tight / Normal / Wide.
+- **Screen Margin** — 5–40 px in 5-px steps.
+- **Paragraph Alignment** — Justify / Left / Center / Right / Book's Style.
+- **Embedded Style** — use the EPUB's own HTML/CSS formatting.
+- **Orientation** — Portrait / Landscape CW / Inverted / Landscape CCW.
+- **Extra Paragraph Spacing** — space between paragraphs vs. first-line indent.
+- **Text Anti-Aliasing** — smooth grey edges on text (slightly slower page turns).
+- **Images** — Display / Placeholder / Suppress.
+- **Footnotes** — On page / In menu.
+- **Bionic Reading** — bold word-starts (see **[Bionic Reading](#bionic-reading)**).
+- **Show Button Hints** — None / Short Press / Long Press / Front Only Short / Front Only Long.
+- **Font & Layout Preview** *(action)* — live split-screen font/layout editor: the sample page at the top re-renders as you change each option below.
+
+  <img src="docs/images/user-guide/font-layout-preview.png" alt="Font and Layout preview with a live sample page above the list of font and spacing options" width="300">
+
+- **Customise Status Bar** *(action)* — see below.
+- **Reader Controls** *(action)* — bind a **short-press** and **long-press** action to each reader button. Choose from Chapter Forward/Back, Menu, Files, Sync, Bookmark, Screenshot, Mark Finished, Auto Turn, Bionic, Button Hints, Rotate, and more. Bindings attach to *logical* button roles, so they survive front-button remaps. There's a live preview; **Confirm** cycles, **Back** saves.
+
+  <p>
+  <img src="docs/images/user-guide/reader-controls.png" alt="Reader Controls screen listing short- and long-press bindings for every reader button" width="300">
+  <img src="docs/images/user-guide/reader-controls-demo.gif" alt="Animated demo of rebinding reader buttons and using them" width="300">
+  </p>
+
+#### Customise Status Bar
+
+Configure what the reading status bar shows: **Chapter Page Count**, **Book Progress %**, **Progress Bar** (Book / Chapter / Hide) and its **thickness** (Thin / Medium / Thick), **Title** (Book / Chapter / Hide), **Battery**, **Time Left** (Hide / Chapter / Book), and a **Clock** (with UTC offset and 12h/24h format). These are also editable from the web settings page.
+
+### Stats tab
+
+See **[Reading Stats](#9-reading-stats)** — Daily Reading Goal, Minimum Session Length, Sleep Stat slots 1–3, "If Found" contact, Set Date, Time Zone, and Export/Import (incl. StoryGraph).
+
+### System tab
+
+- **Front Button Follows Orientation** — front-button roles rotate with the screen.
+- **Remap Front Buttons** *(action)* — reassign the four front buttons to different physical positions.
+- **Short Power Button** — what a short Power press does: Sync / Page Turn / Force Refresh / Sleep / Create Bookmark.
+- **Long-press Action** — the reader long-press action (Sync / Page Turn / Force Refresh / Sleep / Create Bookmark).
+- **Tilt Page Turn** *(X3 only, when the IMU is present)* — Off / Normal / Inverted.
+- **WiFi Networks** *(action)* — manage saved networks.
+- **Bluetooth Page Turner** *(action)* — pair a BLE remote (see **[Bluetooth Page Turner](#11-bluetooth-page-turner)**).
+- **KOReader Sync** *(action)* — see **[KOReader Sync](#koreader-sync-quick-setup)**.
+- **BookFusion Sync** *(action)* — link/manage your BookFusion account.
+- **OPDS Browser** *(action)* — server URL, username, password.
+- **Check for Updates** *(action)* — OTA firmware update over WiFi.
+- **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.
+- **Language** *(action)* — set the UI language.
+- **Time to Sleep** — auto-sleep after 1 / 5 / 10 / 15 / 30 min of inactivity.
+- **Show Hidden Files** — show dotfiles in the browser.
+- **Developer Mode** — reveals the Developer tab.
+
+### Developer tab *(Developer Mode only)*
+
+<img src="docs/images/user-guide/settings-developer.png" alt="Settings Developer tab with cache, metadata, BookFusion refresh, download, and stats-reset actions" width="300">
+
+- **Clear Reading Cache** — wipe the `.crosspoint/` cache (forces re-parse of all books).
+- **Recache Library** — rebuild the Library cover-grid index.
+- **Recache Metadata** — rebuild book metadata.
+- **Refresh BookFusion Metadata** — re-pull metadata for linked books.
+- **Download from URL** — fetch a file to the SD card by URL.
+- **Reset Reading Stats** — clear all statistics.
+
+---
+
+## 13. Sleep Screen
+
+The **Sleep Screen** setting controls what shows when the device sleeps:
+
+| Mode | Behaviour |
+|------|-----------|
+| **Dark** (default) | KatiePoint logo on a dark background. |
+| **Light** | Logo on a white background. |
+| **Custom** | A custom image from the SD card (see below); falls back to Dark. |
+| **Cover** | Cover of the currently open book; falls back to Dark if no book is open. |
+| **Cover + Custom** | Book cover, falling back to Custom behaviour. |
+| **None** | Blank screen. |
+
+**Cover settings** (for Cover / Cover + Custom): **Cover Mode** — Fit (scale to fit, white borders) or Crop (scale & fill); **Cover Filter** — None (grayscale), Contrast (B&W), or Inverted.
+
+**Custom images:**
+
+- **Multiple (recommended):** create a `.sleep` directory at the SD-card root and drop in any number of `.bmp` files — one is chosen at random each sleep. (A `sleep` directory is also accepted.)
+- **Single:** place `sleep.bmp` at the SD-card root as a fallback.
 
 > [!TIP]
-> For best results:
-> - Use uncompressed BMP files with 24-bit color depth
-> - X4: Use a resolution of 480x800 pixels to match the device's screen resolution.
-> - X3: Use a resolution of 528x792 pixels to match the device's screen resolution.
+> Use uncompressed 24-bit BMPs. Match your screen: **X4 = 480×800**, **X3 = 528×792**.
+
+You can also overlay up to three reading stats on the sleep screen — see **[Sleep-screen stats](#sleep-screen-stats)**. Here's a Custom (dark) sleep screen with the weekly streak, daily goal, and book-time-left stats shown at the bottom:
+
+<img src="docs/images/user-guide/sleep-screen.jpg" alt="Device asleep showing a custom dark sleep screen with weekly streak boxes, daily goal met, and time left in book" width="300">
 
 ---
 
-## 4. Reading Mode
+## 14. Firmware Updates
 
-Once you have opened a book, the button layout changes to facilitate reading.
+- **Over the air:** **Settings → System → Check for Updates** pulls the latest release. An SD card must be inserted while it stages the image.
+- **From SD card:** put a release `firmware.bin` on the card and use **Settings → System → SD Firmware Update**.
+- **From URL:** **Settings → Developer → Download from URL**.
 
-### Page Turning
-| Action            | Buttons                              |
-| ----------------- | ------------------------------------ |
-| **Previous Page** | Press **Left** _or_ **Volume Up**    |
-| **Next Page**     | Press **Right** _or_ **Volume Down** |
-
-The role of the volume (side) buttons can be swapped in the **[Controls Settings](#363-controls)**.
-
-If the **Short Power Button Click** setting is set to "Page Turn", you can also turn to the next page by briefly pressing the Power button.
-
-### Chapter Navigation
-* **Next Chapter:** Press and **hold** the **Right** (or **Volume Down**) button briefly, then release.
-* **Previous Chapter:** Press and **hold** the **Left** (or **Volume Up**) button briefly, then release.
-
-This feature can be disabled in the **[Controls Settings](#363-controls)** to help avoid changing chapters by mistake.
-
-
-### System Navigation
-* **Return to Home:** Press the **Back** button to close the book and return to the **[Home](#31-home-screen)** screen.
-* **Return to Browse Files:** Press and hold the **Back** button to close the book and return to the **[Browse Files](#33-browse-files-screen)** screen.
-* **Chapter Menu:** Press **Confirm** to open the **[Table of Contents/Chapter Selection](#5-chapter-selection-screen)** screen.
-
-### Supported Languages
-
-KatiePoint renders text using the following Unicode character blocks, enabling support for a wide range of languages:
-
-*   **Latin Script (Basic, Supplement, Extended-A):** Covers English, German, French, Spanish, Portuguese, Italian, Dutch, Swedish, Norwegian, Danish, Finnish, Polish, Czech, Hungarian, Romanian, Slovak, Slovenian, Turkish, and others.
-*   **Cyrillic Script (Standard and Extended):** Covers Russian, Ukrainian, Belarusian, Bulgarian, Serbian, Macedonian, Kazakh, Kyrgyz, Mongolian, and others.
-
-What is not supported: Chinese, Japanese, Korean, Vietnamese, Hebrew, Arabic, Greek and Farsi.
+Prebuilt firmware is on the [Releases page](https://github.com/InsiderPhD/crosspoint-reader/releases).
 
 ---
 
-## 5. Chapter Selection Screen
+## Supported Languages
 
-Accessible by pressing **Confirm** while inside a book.
+KatiePoint renders text using these Unicode blocks:
 
-1.  Use **Left** (or **Volume Up**), or **Right** (or **Volume Down**) to highlight the desired chapter.
-2.  Press **Confirm** to jump to that chapter.
-3.  *Alternatively, press **Back** to cancel and return to your current page.*
+- **Latin (Basic, Supplement, Extended-A):** English, German, French, Spanish, Portuguese, Italian, Dutch, Swedish, Norwegian, Danish, Finnish, Polish, Czech, Hungarian, Romanian, Slovak, Slovenian, Turkish, and others.
+- **Cyrillic (Standard and Extended):** Russian, Ukrainian, Belarusian, Bulgarian, Serbian, Macedonian, Kazakh, Kyrgyz, Mongolian, and others.
 
----
+**Not supported:** Chinese, Japanese, Korean, Vietnamese, Hebrew, Arabic, Greek, Farsi.
 
-## 6. Current Limitations & Roadmap
-
-Please note that this firmware is currently in active development. The following features are **not yet supported** but are planned for future updates:
-
-* **Images:** Embedded images in e-books will not render.
-* **Cover Images:** Large cover images embedded into EPUB require several seconds (~10s for ~2000 pixel tall image) to convert for sleep screen and home screen thumbnail. Consider optimizing the EPUB with e.g. https://github.com/bigbag/epub-to-xtc-converter to speed this up.
+The **UI language** (menus and messages) is set in **Settings → System → Language**. Available UI languages include English, Spanish, French, German, Italian, Portuguese, Russian, Ukrainian, Polish, Swedish, and Norwegian.
 
 ---
 
-## 7. Troubleshooting Issues & Escaping Bootloop
+## 16. Troubleshooting & Escaping Bootloop
 
-If an issue or crash is encountered while using KatiePoint, feel free to raise an issue ticket and attach the serial monitor logs. The logs can be obtained by connecting the device to a computer and starting a serial monitor. Either [Serial Monitor](https://www.serialmonitor.org/) or the following command can be used:
+If you hit a crash, please open an issue and attach serial-monitor logs. Connect the device by USB and run:
 
 ```
 pio device monitor
 ```
 
-If the device is stuck in a bootloop, press and release the Reset button. Then, press and hold on to the configured Back button and the Power Button to boot to the Home Screen.
+(or use a browser tool like [Serial Monitor](https://www.serialmonitor.org/)).
 
-There can be issues with broken cache or config. In this case, delete the `.crosspoint` directory on your SD card (or consider deleting only `settings.bin`, `state.bin`, or `epub_*` cache directories in the `.crosspoint/` folder).
+**Stuck in a bootloop?** Press and release **Reset**, then hold **Back + Power** to boot to the Home screen (skipping auto-reopen of the last book).
+
+**Corrupt cache or config?** Delete the `.crosspoint` directory on the SD card — or, more surgically, just `settings.bin`, `state.bin`, or an `epub_*` cache folder inside `.crosspoint/`. See also [docs/troubleshooting.md](./docs/troubleshooting.md).

@@ -3,8 +3,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <ReleaseJsonParser.h>
-#include <esp_crt_bundle.h>
-#include <esp_http_client.h>
+#include <SecureHttpClient.h>
 #include <esp_wifi.h>
 
 #include "FirmwareFlasher.h"
@@ -13,60 +12,52 @@
 namespace {
 constexpr char latestReleaseUrl[] = "https://api.github.com/repos/InsiderPhD/crosspoint-reader/releases/latest";
 
-size_t totalBytesReceived = 0;
-
-esp_err_t event_handler(esp_http_client_event_t* event) {
-  if (event->event_id != HTTP_EVENT_ON_DATA) return ESP_OK;
-  totalBytesReceived += event->data_len;
-  LOG_DBG("OTA", "HTTP chunk: %d bytes (total: %zu)", event->data_len, totalBytesReceived);
-  auto* parser = static_cast<ReleaseJsonParser*>(event->user_data);
-  parser->feed(static_cast<const char*>(event->data), event->data_len);
-  return ESP_OK;
-}
+// SD staging slot for the downloaded image, shared by downloadUpdate() and
+// flashUpdate(). Reuses the SD recovery temp path; kept on SD root so a
+// failed/interrupted flash leaves an obvious artifact rather than silently
+// consuming hidden space.
+constexpr char kTmpPath[] = "/firmware_ota.bin";
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
-  esp_err_t esp_err;
   ReleaseJsonParser releaseParser;
 
-  esp_http_client_config_t client_config = {
-      .url = latestReleaseUrl,
-      .event_handler = event_handler,
-      .buffer_size = 8192,
-      .buffer_size_tx = 8192,
-      .user_data = &releaseParser,
-      .skip_cert_common_name_check = true,
-      .crt_bundle_attach = esp_crt_bundle_attach,
-      .keep_alive_enable = true,
-  };
-
-  totalBytesReceived = 0;
   LOG_DBG("OTA", "Checking for update (current: %s)", CROSSPOINT_VERSION);
 
-  esp_http_client_handle_t client_handle = esp_http_client_init(&client_config);
-  if (!client_handle) {
-    LOG_ERR("OTA", "HTTP Client Handle Failed");
+  // Transport is freeink::SecureHttpClient (wolfSSL), the last esp-tls call
+  // site to migrate. setInsecure() is not a downgrade: the previous esp-tls
+  // config set skip_cert_common_name_check, which accepted any CA-signed cert
+  // for any hostname — and the firmware binary itself already downloads via
+  // HttpDownloader (insecure), with FirmwareFlasher re-validating the image
+  // (header / segment table / XOR / SHA trailer) before writing. Real
+  // supply-chain protection would be signed releases verified in the flasher,
+  // not TLS pinning here.
+  freeink::SecureHttpClient http;
+  http.setInsecure();
+  http.setTimeout(15000);
+  // GitHub's API rejects UA-less requests.
+  http.setUserAgent("CrossPoint-ESP32-" CROSSPOINT_VERSION);
+  if (!http.begin(latestReleaseUrl)) {
+    LOG_ERR("OTA", "Bad release URL");
     return INTERNAL_UPDATE_ERROR;
   }
 
-  esp_err = esp_http_client_set_header(client_handle, "User-Agent", "CrossPoint-ESP32-" CROSSPOINT_VERSION);
-  if (esp_err != ESP_OK) {
-    LOG_ERR("OTA", "esp_http_client_set_header Failed : %s", esp_err_to_name(esp_err));
-    esp_http_client_cleanup(client_handle);
-    return INTERNAL_UPDATE_ERROR;
-  }
+  // The release JSON (tens of KB with the release notes) streams straight
+  // through the parser — never buffered whole.
+  size_t totalBytesReceived = 0;
+  const int httpCode = http.GET([&](const uint8_t* data, size_t len) {
+    totalBytesReceived += len;
+    releaseParser.feed(reinterpret_cast<const char*>(data), len);
+    return true;
+  });
 
-  esp_err = esp_http_client_perform(client_handle);
-  if (esp_err != ESP_OK) {
-    LOG_ERR("OTA", "esp_http_client_perform Failed : %s", esp_err_to_name(esp_err));
-    esp_http_client_cleanup(client_handle);
+  if (httpCode < 0) {
+    LOG_ERR("OTA", "Release check request failed: %d", httpCode);
     return HTTP_ERROR;
   }
-
-  esp_err = esp_http_client_cleanup(client_handle);
-  if (esp_err != ESP_OK) {
-    LOG_ERR("OTA", "esp_http_client_cleanup Failed : %s", esp_err_to_name(esp_err));
-    return INTERNAL_UPDATE_ERROR;
+  if (httpCode != 200) {
+    LOG_ERR("OTA", "Release check HTTP %d", httpCode);
+    return HTTP_ERROR;
   }
 
   LOG_DBG("OTA", "Response received: %zu bytes total", totalBytesReceived);
@@ -148,7 +139,7 @@ bool OtaUpdater::isUpdateNewer() const {
 
 const std::string& OtaUpdater::getLatestVersion() const { return latestVersion; }
 
-OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgress, void* ctx) {
+OtaUpdater::OtaUpdaterError OtaUpdater::downloadUpdate() {
   if (!isUpdateNewer()) {
     return UPDATE_OLDER_ERROR;
   }
@@ -157,43 +148,56 @@ OtaUpdater::OtaUpdaterError OtaUpdater::installUpdate(ProgressCallback onProgres
     return INTERNAL_UPDATE_ERROR;
   }
 
-  // X3/X4 units reject otherwise-valid images via esp_image_verify (bogus efuse-blk-rev),
-  // so the streaming esp_https_ota path fails at finish on those devices. Instead download
-  // the .bin to SD, then raw-write the OTA partition + switch otadata, which bypasses the
-  // runtime verify (same scheme as SD recovery and the web flasher — see OtaBootSwitch.h).
-  uiProgressCb = onProgress;
-  uiProgressCtx = ctx;
-
-  // Reuse the SD recovery temp slot. Kept on SD root so a failed/interrupted flash leaves an
-  // obvious artifact rather than silently consuming hidden space.
-  static constexpr char kTmpPath[] = "/firmware_ota.bin";
-
   /* Disable WiFi power saving for a stable download. */
   esp_wifi_set_ps(WIFI_PS_NONE);
 
-  // Phase 1: download firmware.bin to SD. allowConfiguredAuth=false: never attach OPDS Basic
-  // auth to a firmware fetch.
+  // Download firmware.bin to SD, quietly: the caller holds the framebuffer
+  // lent to this transfer's TLS session, so nothing may render — progress is a
+  // serial-only per-MB heartbeat. allowConfiguredAuth=false: never attach OPDS
+  // Basic auth to a firmware fetch. Retried: a ~6MB transfer over a slow CDN
+  // can drop mid-stream, and the GitHub asset URL is stable across attempts.
   totalSize = otaSize;
-  processedSize = 0;
-  const auto dlResult = HttpDownloader::downloadToFile(
-      otaUrl, kTmpPath,
-      [this, onProgress, ctx](size_t downloaded, size_t total) {
-        processedSize = downloaded;
-        totalSize = total > 0 ? total : otaSize;
-        if (onProgress) onProgress(ctx);
-      },
-      /*allowConfiguredAuth=*/false);
+  auto dlResult = HttpDownloader::HTTP_ERROR;
+  constexpr int kMaxDownloadAttempts = 3;
+  for (int attempt = 1; attempt <= kMaxDownloadAttempts; attempt++) {
+    processedSize = 0;
+    size_t lastLoggedMB = 0;
+    dlResult = HttpDownloader::downloadToFile(
+        otaUrl, kTmpPath,
+        [this, &lastLoggedMB](size_t downloaded, size_t total) {
+          processedSize = downloaded;
+          totalSize = total > 0 ? total : otaSize;
+          const size_t mb = downloaded >> 20;
+          if (mb > lastLoggedMB) {
+            lastLoggedMB = mb;
+            LOG_DBG("OTA", "Download progress: %u/%u MB", (unsigned)mb, (unsigned)(totalSize >> 20));
+          }
+        },
+        /*allowConfiguredAuth=*/false, /*expectedSize=*/otaSize);
+
+    if (dlResult == HttpDownloader::OK) break;
+    LOG_ERR("OTA", "Firmware download attempt %d/%d failed: %d", attempt, kMaxDownloadAttempts, dlResult);
+  }
 
   esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 
   if (dlResult != HttpDownloader::OK) {
-    LOG_ERR("OTA", "Firmware download failed: %d", dlResult);
     Storage.remove(kTmpPath);
     return HTTP_ERROR;
   }
+  return OK;
+}
 
-  // Phase 2: raw-write + otadata switch. flashFromSdPath re-validates the image (header /
-  // segment table / XOR / SHA trailer) before writing.
+OtaUpdater::OtaUpdaterError OtaUpdater::flashUpdate(ProgressCallback onProgress, void* ctx) {
+  // X3/X4 units reject otherwise-valid images via esp_image_verify (bogus efuse-blk-rev),
+  // so the streaming esp_https_ota path fails at finish on those devices. Instead raw-write
+  // the OTA partition + switch otadata from the staged SD image, which bypasses the runtime
+  // verify (same scheme as SD recovery and the web flasher — see OtaBootSwitch.h).
+  // flashFromSdPath re-validates the image (header / segment table / XOR / SHA trailer)
+  // before writing.
+  uiProgressCb = onProgress;
+  uiProgressCtx = ctx;
+
   processedSize = 0;
   const auto flashResult = firmware_flash::flashFromSdPath(
       kTmpPath,

@@ -164,6 +164,30 @@ namespace {
 constexpr int MAX_MCU_HEIGHT = 16;
 constexpr size_t JPEG_DECODER_SIZE = 20 * 1024;
 constexpr size_t MIN_FREE_HEAP = JPEG_DECODER_SIZE + 32 * 1024;
+// With a scratch lease carrying the decoder object and MCU buffer, the heap
+// only serves the small allocations (bmpRow, scaling accumulators, ditherer):
+// a few KB even at the 2048px effective-width bound. 16KB keeps a margin.
+constexpr size_t MIN_FREE_HEAP_WITH_SCRATCH = 16 * 1024;
+
+// Single global slot for a caller-lent scratch region (see JpegScratchLease).
+// Layout while a conversion runs: [JPEGDEC object][MCU row buffer].
+uint8_t* g_scratch = nullptr;
+size_t g_scratchLen = 0;
+bool g_scratchInUse = false;
+
+// Align the JPEGDEC placement address up; the framebuffer pointer itself may
+// not be aligned for a class type.
+uint8_t* scratchAlignedBase() {
+  const uintptr_t raw = reinterpret_cast<uintptr_t>(g_scratch);
+  const uintptr_t aligned = (raw + alignof(std::max_align_t) - 1) & ~(alignof(std::max_align_t) - 1);
+  return reinterpret_cast<uint8_t*>(aligned);
+}
+
+size_t scratchUsableLen() {
+  if (g_scratch == nullptr) return 0;
+  const size_t skip = static_cast<size_t>(scratchAlignedBase() - g_scratch);
+  return skip >= g_scratchLen ? 0 : g_scratchLen - skip;
+}
 
 // Static file pointer for JPEGDEC open callback.
 // Safe in single-threaded embedded context; never accessed concurrently.
@@ -402,21 +426,65 @@ int bmpDrawCallback(JPEGDRAW* pDraw) {
   return ctx->error ? 0 : 1;
 }
 
+// Free a JPEGDEC allocated by the block below: placement-destroy when it lives
+// in the scratch lease (the scratch slot is released with it), delete when it
+// came from the heap.
+void freeJpegDec(JPEGDEC* jpeg, const bool fromScratch) {
+  if (jpeg == nullptr) return;
+  if (fromScratch) {
+    jpeg->~JPEGDEC();
+    g_scratchInUse = false;
+  } else {
+    delete jpeg;
+  }
+}
+
 }  // namespace
+
+JpegScratchLease::JpegScratchLease(uint8_t* buffer, size_t length) {
+  if (g_scratch != nullptr || buffer == nullptr) return;
+  g_scratch = buffer;
+  g_scratchLen = length;
+  if (scratchUsableLen() < sizeof(JPEGDEC)) {
+    g_scratch = nullptr;
+    g_scratchLen = 0;
+    return;
+  }
+  registered = true;
+}
+
+JpegScratchLease::~JpegScratchLease() {
+  if (registered) {
+    g_scratch = nullptr;
+    g_scratchLen = 0;
+    g_scratchInUse = false;
+  }
+}
 
 // Internal implementation with configurable target size and bit depth
 bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bmpOut, int targetWidth, int targetHeight,
                                                      bool oneBit, bool crop) {
   LOG_DBG("JPG", "Converting JPEG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : "2-bit", targetWidth, targetHeight);
 
-  if (ESP.getFreeHeap() < MIN_FREE_HEAP) {
-    LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", ESP.getFreeHeap(), MIN_FREE_HEAP);
+  // The decoder object (and, below, the MCU buffer) comes from the scratch
+  // lease when one is active, so the heap only has to cover the small buffers.
+  const bool useScratch = g_scratch != nullptr && !g_scratchInUse && scratchUsableLen() >= sizeof(JPEGDEC);
+  const size_t minFreeHeap = useScratch ? MIN_FREE_HEAP_WITH_SCRATCH : MIN_FREE_HEAP;
+  if (ESP.getFreeHeap() < minFreeHeap) {
+    LOG_ERR("JPG", "Not enough heap for JPEG decoder (%u free, need %u)", ESP.getFreeHeap(), (unsigned)minFreeHeap);
     return false;
   }
 
   s_jpegFile = &jpegFile;
 
-  JPEGDEC* jpeg = new (std::nothrow) JPEGDEC();
+  JPEGDEC* jpeg = nullptr;
+  if (useScratch) {
+    g_scratchInUse = true;
+    jpeg = new (scratchAlignedBase()) JPEGDEC();
+    LOG_DBG("JPG", "JPEG decoder in %u-byte scratch lease", (unsigned)scratchUsableLen());
+  } else {
+    jpeg = new (std::nothrow) JPEGDEC();
+  }
   if (!jpeg) {
     LOG_ERR("JPG", "Failed to allocate JPEG decoder");
     return false;
@@ -425,7 +493,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   int rc = jpeg->open("", bmpJpegOpen, bmpJpegClose, bmpJpegRead, bmpJpegSeek, bmpDrawCallback);
   if (rc != 1) {
     LOG_ERR("JPG", "JPEG open failed (err=%d)", jpeg->getLastError());
-    delete jpeg;
+    freeJpegDec(jpeg, useScratch);
     return false;
   }
 
@@ -445,7 +513,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   if (srcWidth <= 0 || srcHeight <= 0 || srcWidth > RAW_SANITY_WIDTH || srcHeight > RAW_SANITY_HEIGHT) {
     LOG_DBG("JPG", "Image invalid or insanely large (%dx%d)", srcWidth, srcHeight);
     jpeg->close();
-    delete jpeg;
+    freeJpegDec(jpeg, useScratch);
     return false;
   }
 
@@ -490,7 +558,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     LOG_DBG("JPG", "Image still too large after 1/%d scale (%dx%d effective, max %dx%d)", 1 << scaleShift, srcWidth,
             srcHeight, MAX_EFFECTIVE_WIDTH, MAX_EFFECTIVE_HEIGHT);
     jpeg->close();
-    delete jpeg;
+    freeJpegDec(jpeg, useScratch);
     return false;
   }
 
@@ -560,30 +628,42 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
   ctx.callbackCount = 0;
   ctx.error = false;
 
-  // RAII guard: frees all heap resources on any return path
+  // RAII guard: frees all heap resources on any return path. Scratch-lease
+  // residents (decoder object, possibly the MCU buffer) are released back to
+  // the lease instead of the heap.
   struct Cleanup {
     BmpConvertCtx& ctx;
     JPEGDEC* jpeg;
+    bool jpegFromScratch;
+    bool mcuFromScratch;
     ~Cleanup() {
       delete[] ctx.rowAccum;
       delete[] ctx.rowCount;
       delete ctx.atkinsonDitherer;
       delete ctx.fsDitherer;
       delete ctx.atkinson1BitDitherer;
-      free(ctx.mcuBuf);
+      if (!mcuFromScratch) free(ctx.mcuBuf);
       free(ctx.bmpRow);
       jpeg->close();
-      delete jpeg;
+      freeJpegDec(jpeg, jpegFromScratch);
     }
-  } cleanup{ctx, jpeg};
+  } cleanup{ctx, jpeg, useScratch, false};
 
-  // MCU row buffer: MAX_MCU_HEIGHT rows × srcWidth columns of grayscale
-  ctx.mcuBuf = static_cast<uint8_t*>(malloc(MAX_MCU_HEIGHT * srcWidth));
+  // MCU row buffer: MAX_MCU_HEIGHT rows × srcWidth columns of grayscale.
+  // Carved from the scratch lease after the decoder object when it fits — the
+  // two big blocks together are what a fragmented heap cannot serve.
+  const size_t mcuBytes = static_cast<size_t>(MAX_MCU_HEIGHT) * srcWidth;
+  if (useScratch && scratchUsableLen() >= sizeof(JPEGDEC) + mcuBytes) {
+    ctx.mcuBuf = scratchAlignedBase() + sizeof(JPEGDEC);
+    cleanup.mcuFromScratch = true;
+  } else {
+    ctx.mcuBuf = static_cast<uint8_t*>(malloc(mcuBytes));
+  }
   if (!ctx.mcuBuf) {
-    LOG_ERR("JPG", "Failed to allocate MCU buffer (%d bytes)", MAX_MCU_HEIGHT * srcWidth);
+    LOG_ERR("JPG", "Failed to allocate MCU buffer (%u bytes)", (unsigned)mcuBytes);
     return false;
   }
-  memset(ctx.mcuBuf, 0, MAX_MCU_HEIGHT * srcWidth);
+  memset(ctx.mcuBuf, 0, mcuBytes);
 
   ctx.bmpRow = static_cast<uint8_t*>(malloc(bytesPerRow));
   if (!ctx.bmpRow) {

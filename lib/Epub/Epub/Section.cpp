@@ -1,7 +1,9 @@
 #include "Section.h"
 
 #include <Arduino.h>
+#include <GfxRenderer.h>
 #include <HalStorage.h>
+#include <InflateReader.h>
 #include <Logging.h>
 #include <Serialization.h>
 #include <esp_heap_caps.h>
@@ -172,34 +174,60 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
     Storage.mkdir(sectionsDir.c_str());
   }
 
-  // Retry logic for SD card timing issues
+  // Lend the inflate its 32KB dictionary out of the framebuffer for the duration
+  // of the unzip, instead of asking the heap for a contiguous block it may no
+  // longer be able to produce. See InflateScratchLease for the measurements.
+  //
+  // Safe here specifically because: (a) e-ink is bistable, so the panel keeps
+  // showing the current page with no framebuffer backing it, and (b) the indexing
+  // popup is not drawn until parseAndBuildPages(), which is after this lease has
+  // been released. Nothing renders between these braces.
+  bool borrowedFramebuffer = false;
   bool success = false;
   uint32_t fileSize = 0;
-  for (int attempt = 0; attempt < 3 && !success; attempt++) {
-    if (attempt > 0) {
-      LOG_DBG("SCT", "Retrying stream (attempt %d)...", attempt + 1);
-      delay(50);  // Brief delay before retry
+  {
+    InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
+    borrowedFramebuffer = scratch.active();
+    if (borrowedFramebuffer) {
+      LOG_DBG("SCT", "Unzipping with a framebuffer-leased dictionary (largest free block %u)",
+              static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
     }
 
-    // Remove any incomplete file from previous attempt before retrying
-    if (Storage.exists(tmpHtmlPath.c_str())) {
-      Storage.remove(tmpHtmlPath.c_str());
+    // Retry logic for SD card timing issues
+    for (int attempt = 0; attempt < 3 && !success; attempt++) {
+      if (attempt > 0) {
+        LOG_DBG("SCT", "Retrying stream (attempt %d)...", attempt + 1);
+        delay(50);  // Brief delay before retry
+      }
+
+      // Remove any incomplete file from previous attempt before retrying
+      if (Storage.exists(tmpHtmlPath.c_str())) {
+        Storage.remove(tmpHtmlPath.c_str());
+      }
+
+      FsFile tmpHtml;
+      if (!Storage.openFileForWrite("SCT", tmpHtmlPath, tmpHtml)) {
+        continue;
+      }
+      success = epub->readItemContentsToStream(localPath, tmpHtml, 1024);
+      fileSize = tmpHtml.size();
+      // Explicitly close() file before calling Storage.remove()
+      tmpHtml.close();
+
+      // If streaming failed, remove the incomplete file immediately
+      if (!success && Storage.exists(tmpHtmlPath.c_str())) {
+        Storage.remove(tmpHtmlPath.c_str());
+        LOG_DBG("SCT", "Removed incomplete temp file after failed attempt");
+      }
     }
 
-    FsFile tmpHtml;
-    if (!Storage.openFileForWrite("SCT", tmpHtmlPath, tmpHtml)) {
-      continue;
-    }
-    success = epub->readItemContentsToStream(localPath, tmpHtml, 1024);
-    fileSize = tmpHtml.size();
-    // Explicitly close() file before calling Storage.remove()
-    tmpHtml.close();
+  }  // lease released: the framebuffer is ours to paint into again
 
-    // If streaming failed, remove the incomplete file immediately
-    if (!success && Storage.exists(tmpHtmlPath.c_str())) {
-      Storage.remove(tmpHtmlPath.c_str());
-      LOG_DBG("SCT", "Removed incomplete temp file after failed attempt");
-    }
+  // The lease overwrote the framebuffer with dictionary bytes. Clear it so the
+  // indexing popup below does not composite over garbage; the reader repaints the
+  // page in full once the build finishes.
+  if (borrowedFramebuffer) {
+    renderer.clearScreen();
   }
 
   if (!success) {

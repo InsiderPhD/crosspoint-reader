@@ -6,8 +6,6 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 
-#include "util/WifiTimeSync.h"
-
 #include <algorithm>
 #include <cassert>
 
@@ -22,6 +20,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/WifiTimeSync.h"
 
 namespace {
 CrossPointPosition makeLocalPositionWithParagraph(const int spineIndex, const int page, const int totalPages,
@@ -511,7 +510,8 @@ void KOReaderSyncActivity::connectWifiWithPopup() {
     // No saved networks, show error popup
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "No WiFi networks configured.\nPlease set up WiFi in Settings first.");
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC),
+                                     "No WiFi networks configured.\nPlease set up WiFi in Settings first.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -530,7 +530,8 @@ void KOReaderSyncActivity::connectWifiWithPopup() {
     // Network found but no credentials
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "WiFi credentials not found.\nPlease reconnect in Settings.");
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC),
+                                     "WiFi credentials not found.\nPlease reconnect in Settings.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -559,7 +560,7 @@ void KOReaderSyncActivity::connectWifiWithPopup() {
 
   // Wait for connection with timeout
   int attempts = 0;
-  const int maxAttempts = 100; // 10 seconds
+  const int maxAttempts = 100;  // 10 seconds
 
   while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
     vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -569,7 +570,7 @@ void KOReaderSyncActivity::connectWifiWithPopup() {
     if (attempts % 10 == 0) {
       RenderLock lock(*this);
       char statusMsg[64];
-      snprintf(statusMsg, sizeof(statusMsg), "Connecting to WiFi...\n(%d/%d)", attempts/10, maxAttempts/10);
+      snprintf(statusMsg, sizeof(statusMsg), "Connecting to WiFi...\n(%d/%d)", attempts / 10, maxAttempts / 10);
       UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), statusMsg);
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
@@ -597,7 +598,8 @@ void KOReaderSyncActivity::connectWifiWithPopup() {
     // Show failure popup
     {
       RenderLock lock(*this);
-      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC), "WiFi connection failed.\nPlease check your settings.");
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_KOREADER_SYNC),
+                                     "WiFi connection failed.\nPlease check your settings.");
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }

@@ -43,6 +43,21 @@ class HalGPIO {
   InputManager inputMgr;
 #endif
 
+  // Virtual button overlay (Bluetooth HID injection). Bit N mirrors button index N.
+  // desired* is written asynchronously (NimBLE callback context); update() latches it
+  // once per frame so activities see a coherent pressed/released edge model.
+  uint8_t virtualButtonState = 0;
+  uint8_t desiredVirtualButtonState = 0;
+  uint8_t previousVirtualButtonState = 0;
+  // Presses that arrived since the last update() latch. Some remotes send
+  // press and release 1-2ms apart — far inside one loop iteration — so the
+  // desired state alone would rise and fall between latches and the press
+  // would never be observed. Each pending press is exposed for >=1 frame.
+  uint8_t pendingVirtualPresses = 0;
+  unsigned long virtualPressStart[7] = {0};
+  unsigned long virtualPressFinish[7] = {0};
+  unsigned long virtualLastActivityTime[7] = {0};
+
   bool lastUsbConnected = false;
   bool usbStateChanged = false;
 
@@ -70,6 +85,13 @@ class HalGPIO {
   bool wasReleased(uint8_t buttonIndex) const;
   bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
+  unsigned long getHeldTime(uint8_t buttonIndex) const;
+
+  // Virtual button injection (for Bluetooth HID remotes)
+  void setVirtualButtonState(uint8_t buttonIndex, bool pressed);
+  void injectButtonPress(uint8_t buttonIndex);
+  void clearVirtualButtons();
+  void updateVirtualButtonActivity(uint8_t buttonIndex);
 
   // Setup wake up GPIO and enter deep sleep
   void startDeepSleep();

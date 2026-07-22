@@ -234,6 +234,24 @@ class CrossPointSettings {
 
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
 
+  // Silent progress push while reading (BookFusion or KOReader). Percent modes
+  // fire once the book progress has advanced that many percentage points since
+  // the last successful push; ON_EXIT pushes once when leaving the book
+  // instead. Only active when the boot NTP check succeeded — that's the
+  // firmware's proof that WiFi works this session.
+  //
+  // There is deliberately no 1% option: the push has to release the chapter
+  // layout and take the reader unresponsive for a few seconds (see
+  // ProgressAutoSync.h), and on a large omnibus 1% can land every page or two.
+  enum AUTOSYNC : uint8_t {
+    AUTOSYNC_OFF = 0,
+    AUTOSYNC_EVERY_CHAPTER = 1,
+    AUTOSYNC_EVERY_5_PERCENT = 2,
+    AUTOSYNC_EVERY_10_PERCENT = 3,
+    AUTOSYNC_ON_EXIT = 4,
+    AUTOSYNC_COUNT
+  };
+
   // Reader button action — assignable to any button/press-type in the reader context.
   enum READER_ACTION : uint8_t {
     READER_ACTION_NONE = 0,
@@ -258,6 +276,7 @@ class CrossPointSettings {
     READER_ACTION_BUTTON_HINTS = 19,
     READER_ACTION_ROTATE_SCREEN = 20,
     READER_ACTION_CREATE_CLIPPING = 21,
+    READER_ACTION_TOGGLE_BLUETOOTH = 22,
     READER_ACTION_COUNT
   };
 
@@ -322,6 +341,11 @@ class CrossPointSettings {
   // Last-chosen sort order in list activities (Library / Recents / FileBrowser).
   // Stored as a SortMode value; defaults to AlphabeticAsc on first run.
   uint8_t sortMode = 0;
+  // Last-chosen sort order in the grouped (Tags/Authors/Series) browse view. Kept separate
+  // from `sortMode` because the grouped view offers a different mode set and Series defaults
+  // to series order. Sentinel 0xFF = "unset" → GroupBrowserActivity picks the per-mode
+  // default (Series order for Series, else Name A-Z). Any real SortMode overrides it.
+  uint8_t groupSortMode = 0xFF;
   // EPUB reading orientation settings
   // 0 = portrait (default), 1 = landscape clockwise, 2 = inverted, 3 = landscape counter-clockwise
   uint8_t orientation = PORTRAIT;
@@ -371,6 +395,10 @@ class CrossPointSettings {
   uint8_t embeddedStyle = 1;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // BLE bonded remote identity, so the firmware can auto-reconnect after reboot
+  char bleBondedDeviceAddr[18] = "";
+  char bleBondedDeviceName[32] = "";
+  uint8_t bleBondedDeviceAddrType = 0;
   // "Browse Files" view: FOLDERS = the SD directory tree (default), TAGS = whole-library
   // tag folders (each book tag presented as a folder).
   uint8_t folderView = FOLDER_VIEW_FOLDERS;
@@ -386,6 +414,14 @@ class CrossPointSettings {
   // Reader button-hint bar mode (BUTTON_HINTS_MODE): Off / Short-press / Long-press labels.
   // Reserves layout space, so changing it reflows the current chapter. Reader-only.
   uint8_t showButtonHints = BUTTON_HINTS_OFF;
+  // Reader-menu entry visibility (1 = shown). For users who bind these functions
+  // to reader controls and don't want the duplicate menu rows.
+  uint8_t readerMenuClippings = 1;  // Save Clipping / View Clippings
+  uint8_t readerMenuBookmarks = 1;  // Add Bookmark / Bookmarks
+  uint8_t readerMenuSync = 1;       // Sync Push / Sync Pull
+  uint8_t readerMenuBluetooth = 1;  // Bluetooth Remote toggle
+  // Silent background progress sync while reading (AUTOSYNC enum).
+  uint8_t autosyncMode = AUTOSYNC_OFF;
   // Long press confirm button action (0 = refresh, 1 = sync, 2 = none, 3 = bookmark)
   uint8_t longPressAction = LONG_PRESS_REFRESH;
   // Dark mode (inverts entire UI except images)
@@ -437,6 +473,25 @@ class CrossPointSettings {
     const uint8_t idx = (minSessionMinutes < MIN_SESSION_COUNT) ? minSessionMinutes : MIN_SESSION_3_MIN;
     return MINUTES[idx] * 60UL * 1000UL;
   }
+  // Percentage-point step for the percent autosync modes; 0 for Off, Every
+  // Chapter and On Exit (those don't use a percentage threshold).
+  uint8_t getAutosyncPercentStep() const {
+    switch (autosyncMode) {
+      case AUTOSYNC_EVERY_5_PERCENT:
+        return 5;
+      case AUTOSYNC_EVERY_10_PERCENT:
+        return 10;
+      default:
+        return 0;
+    }
+  }
+  // Bluetooth and autosync cannot coexist: the BLE stack holds ~56KB (and wants
+  // a >=30KB contiguous block), it shares the single radio with WiFi, and
+  // bringing the BT controller up right after esp_wifi_stop() hard-freezes the
+  // device — which is exactly the sequence a mid-reading autosync creates.
+  // Autosync wins; the remote comes back when the user sets Autosync to Off.
+  bool bluetoothAllowed() const { return autosyncMode == AUTOSYNC_OFF; }
+
   int getReaderFontId() const;
   int getCodeFontId() const;
 

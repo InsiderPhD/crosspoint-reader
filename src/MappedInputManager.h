@@ -22,9 +22,12 @@ class MappedInputManager {
   bool wasAnyPressed() const;
   bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
+  unsigned long getHeldTime(Button button) const;
   Labels mapLabels(const char* back, const char* confirm, const char* previous, const char* next) const;
   // Returns the raw front button index that was pressed this frame (or -1 if none).
   int getPressedFrontButton() const;
+  // Resolves a logical button to the physical hardware index (used for BLE virtual injection).
+  uint8_t getPhysicalButtonIndex(Button button) const;
 
  private:
   HalGPIO& gpio;

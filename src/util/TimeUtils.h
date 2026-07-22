@@ -20,6 +20,8 @@ bool wasTimeSyncedThisBoot();
 const char* getCurrentTimeZoneLabel();
 std::string formatDate(uint32_t epochSeconds, bool appendBang = false);
 std::string formatDateTime(uint32_t epochSeconds, bool appendBang = false);
+std::string formatTime(uint32_t epochSeconds);
+std::string formatShortDate(uint32_t epochSeconds);
 std::string formatDateParts(int year, unsigned month, unsigned day, bool appendBang = false);
 std::string formatMonthYear(int year, unsigned month);
 

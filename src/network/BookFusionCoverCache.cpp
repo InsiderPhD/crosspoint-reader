@@ -117,8 +117,7 @@ bool convertBookFusionCoverImage(const std::string& srcPath, const std::string& 
 
 namespace BookFusionCoverCache {
 
-bool refresh(const std::string& coverUrlRaw, const Epub& epub, int coverHeight, char* outThumbPath,
-             size_t outThumbPathLen) {
+bool download(const std::string& coverUrlRaw, const Epub& epub) {
   const std::string coverUrl = normalizeBookFusionCoverUrl(coverUrlRaw.c_str());
   if (coverUrl.empty()) {
     LOG_DBG("BFC", "No BookFusion cover URL to refresh for %s", epub.getCachePath().c_str());
@@ -132,6 +131,11 @@ bool refresh(const std::string& coverUrlRaw, const Epub& epub, int coverHeight, 
     LOG_ERR("BFC", "Failed to download BookFusion API cover into %s", epub.getCachePath().c_str());
     return false;
   }
+  return true;
+}
+
+bool convert(const Epub& epub, int coverHeight, char* outThumbPath, size_t outThumbPathLen) {
+  const std::string tempCoverPath = epub.getCachePath() + "/.bookfusion-cover";
 
   const int thumbTargetWidth = coverHeight * 0.6f;
   const int thumbTargetHeight = coverHeight;
@@ -152,6 +156,12 @@ bool refresh(const std::string& coverUrlRaw, const Epub& epub, int coverHeight, 
 
   LOG_DBG("BFC", "BookFusion cover cache result: thumb=%d fit=%d crop=%d", thumbOk, fitOk, cropOk);
   return thumbOk;
+}
+
+bool refresh(const std::string& coverUrlRaw, const Epub& epub, int coverHeight, char* outThumbPath,
+             size_t outThumbPathLen) {
+  if (!download(coverUrlRaw, epub)) return false;
+  return convert(epub, coverHeight, outThumbPath, outThumbPathLen);
 }
 
 }  // namespace BookFusionCoverCache

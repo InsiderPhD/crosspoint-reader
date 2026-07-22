@@ -6,6 +6,7 @@
 
 #include "MappedInputManager.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/reader/TlsFramebufferBorrow.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/OtaUpdater.h"
@@ -85,7 +86,7 @@ void OtaUpdateActivity::render(RenderLock&&) {
   const auto top = (pageHeight - height) / 2;
 
   float updaterProgress = 0;
-  if (state == UPDATE_IN_PROGRESS) {
+  if (state == UPDATE_IN_PROGRESS && !downloadPhase) {
     LOG_DBG("OTA", "Update progress: %d / %d", updater.getProcessedSize(), updater.getTotalSize());
     updaterProgress = static_cast<float>(updater.getProcessedSize()) / static_cast<float>(updater.getTotalSize());
     // Only update every 2% at the most
@@ -106,6 +107,35 @@ void OtaUpdateActivity::render(RenderLock&&) {
 
     const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_UPDATE), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  } else if (state == UPDATE_IN_PROGRESS && downloadPhase) {
+    // Static download card, painted once and then frozen: the framebuffer is
+    // lent to the transfer's TLS session, so nothing can render until the
+    // download finishes (same scheme as the BookFusion book download).
+    char line[96];
+    int y = top - height * 2;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DOWNLOADING), true, EpdFontFamily::BOLD);
+    y += height + metrics.verticalSpacing;
+    renderer.drawCenteredText(UI_10_FONT_ID, y,
+                              (std::string(tr(STR_NEW_VERSION)) + updater.getLatestVersion()).c_str());
+    y += height + metrics.verticalSpacing;
+    if (updater.getOtaSize() > 0) {
+      // Same observed transfer rate as the BookFusion download card.
+      constexpr size_t kEstimatedBytesPerSec = 30 * 1024;
+      const unsigned estSec =
+          static_cast<unsigned>((updater.getOtaSize() + kEstimatedBytesPerSec - 1) / kEstimatedBytesPerSec);
+      char sizeStr[16];
+      snprintf(sizeStr, sizeof(sizeStr), "%.1f MB", updater.getOtaSize() / (1024.0f * 1024.0f));
+      if (estSec > 90) {
+        snprintf(line, sizeof(line), tr(STR_DOWNLOAD_SIZE_MIN_FORMAT), sizeStr, (estSec + 59) / 60);
+      } else {
+        snprintf(line, sizeof(line), tr(STR_DOWNLOAD_SIZE_SEC_FORMAT), sizeStr, estSec);
+      }
+      renderer.drawCenteredText(UI_10_FONT_ID, y, line);
+    }
+    y += height + metrics.verticalSpacing;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DOWNLOAD_WAIT));
+    y += height + metrics.verticalSpacing;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_OTA_KEEP_ON), true, EpdFontFamily::BOLD);
   } else if (state == UPDATE_IN_PROGRESS) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATING));
 
@@ -122,6 +152,8 @@ void OtaUpdateActivity::render(RenderLock&&) {
     renderer.drawCenteredText(
         UI_10_FONT_ID, y,
         (std::to_string(updater.getProcessedSize()) + " / " + std::to_string(updater.getTotalSize())).c_str());
+    y += height + metrics.verticalSpacing;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_OTA_KEEP_ON), true, EpdFontFamily::BOLD);
   } else if (state == NO_UPDATE) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NO_UPDATE), true, EpdFontFamily::BOLD);
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
@@ -146,16 +178,39 @@ void OtaUpdateActivity::loop() {
       {
         RenderLock lock(*this);
         state = UPDATE_IN_PROGRESS;
+        downloadPhase = true;
       }
+      // Paint the static download card and wait for it to reach the panel:
+      // the e-ink holds it with no RAM while the framebuffer below is lent to
+      // the transfer's TLS session for the whole ~6MB download.
       requestUpdateAndWait();
-      const auto res = updater.installUpdate(
-          [](void* ctx) {
-            // immediate=true notifies the render task directly. The default deferred path only
-            // sets a flag consumed at the end of ActivityManager::loop(), which never runs while
-            // installUpdate() blocks this task.
-            static_cast<OtaUpdateActivity*>(ctx)->requestUpdate(true);
-          },
-          this);
+
+      auto res = OtaUpdater::HTTP_ERROR;
+      {
+        TlsFramebufferBorrow borrow(renderer);
+        res = updater.downloadUpdate();
+      }
+      {
+        RenderLock lock(*this);
+        downloadPhase = false;
+        // The borrow scrambled the framebuffer; force the next paint through
+        // (the 2% throttle would otherwise skip it and leave garbage visible).
+        lastUpdaterPercentage = UNINITIALIZED_PERCENTAGE;
+      }
+
+      if (res == OtaUpdater::OK) {
+        // Full repaint into the flash-progress layout, then raw-write. No TLS
+        // in this phase, so live progress rendering is safe again.
+        requestUpdateAndWait();
+        res = updater.flashUpdate(
+            [](void* ctx) {
+              // immediate=true notifies the render task directly. The default deferred path only
+              // sets a flag consumed at the end of ActivityManager::loop(), which never runs while
+              // flashUpdate() blocks this task.
+              static_cast<OtaUpdateActivity*>(ctx)->requestUpdate(true);
+            },
+            this);
+      }
 
       if (res != OtaUpdater::OK) {
         LOG_DBG("OTA", "Update failed: %d", res);
