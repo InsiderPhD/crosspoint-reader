@@ -236,7 +236,7 @@ void EpubReaderClippingListActivity::deleteSelectedClipping() {
   detailLines.clear();
   detailLayoutWidth = 0;
   detailLinesPerPage = 0;
-  clippings = CLIPPINGS.getClippings();
+  // clippings references the store's vector, so the removeClippingAt() above is already visible.
   if (clippings.empty()) {
     selectedIndex = 0;
   } else if (selectedIndex >= static_cast<int>(clippings.size())) {

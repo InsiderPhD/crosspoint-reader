@@ -36,8 +36,6 @@ class OpdsBookBrowserActivity final : public Activity {
   int selectorIndex = 0;
   std::string errorMessage;
   std::string statusMessage;
-  size_t downloadProgress = 0;
-  size_t downloadTotal = 0;
 
   void checkAndConnectWifi();
   void launchWifiSelection();

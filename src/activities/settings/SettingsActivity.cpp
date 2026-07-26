@@ -27,6 +27,7 @@
 #include "SdCardFontGlobals.h"
 #include "SdFirmwareUpdateActivity.h"
 #include "SettingsList.h"
+#include "SleepStatsSettingsActivity.h"
 #include "StatsDataActivity.h"
 #include "StatusBarSettingsActivity.h"
 #include "TimeZoneSelectActivity.h"
@@ -67,6 +68,15 @@ void SettingsActivity::onEnter() {
     // on-device keyboard entry path, so it is edited from the web UI only. The
     // web UI iterates getSettingsList() directly, so it still sees this entry.
     if (setting.key && std::strcmp(setting.key, "returnContact") == 0) continue;
+    // Device-only override: the three sleep-stat slots are edited on-device from
+    // the dedicated Sleep Screen Stats screen (with a live preview) launched by
+    // the action row below, so they are hidden from this flat Stats list. They
+    // stay in getSettingsList() so the web UI and JSON round-trip still see them.
+    if (setting.key &&
+        (std::strcmp(setting.key, "sleepStatSlot1") == 0 || std::strcmp(setting.key, "sleepStatSlot2") == 0 ||
+         std::strcmp(setting.key, "sleepStatSlot3") == 0)) {
+      continue;
+    }
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       displaySettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_READER) {
@@ -90,6 +100,10 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
+  // Sleep Screen Stats: opens the dedicated picker + live-preview screen for the
+  // three sleep-stat slots (the flat slot rows are skipped above). Sits with the
+  // other stat settings, above the date/timezone/data-management actions.
+  statsSettings.push_back(SettingInfo::Action(StrId::STR_SLEEP_SCREEN_STATS, SettingAction::SleepStats));
   // Stats tab device-only actions (date/timezone pickers). The daily goal +
   // min-session-length Enum entries are already populated above from
   // SettingsList — these actions go below them.
@@ -127,10 +141,15 @@ void SettingsActivity::onEnter() {
   devSettings.push_back(SettingInfo::Action(StrId::STR_RESET_READING_STATS, SettingAction::ResetStats));
 
   readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_LAYOUT_PREVIEW, SettingAction::FontLayoutPreview));
+  // Font Download lives HERE, not inside the Font & Layout preview: launched
+  // from the preview, the whole live-preview state (prewarmed sample glyphs)
+  // stayed resident under the download's TLS session and ate its heap
+  // (observed on-device). From this list the route is as lean as it gets.
+  readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_DOWNLOAD, SettingAction::FontDownload));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_READER_CONTROLS, SettingAction::ReaderControls));
-  // Font family (built-in + SD) and Font Download are now edited inside the
-  // Font & Layout preview, so they are not listed separately here.
+  // Font family (built-in + SD) is edited inside the Font & Layout preview,
+  // so it is not listed separately here.
 
   // Assemble the visible category tabs. categoryNames and categoryLists stay in
   // lockstep. The Dev tab is only appended when Dev Mode is enabled.
@@ -353,6 +372,9 @@ void SettingsActivity::toggleCurrentSetting() {
         // Portrait on exit; just reload the (possibly changed) active font.
         startActivityForResult(std::make_unique<FontLayoutPreviewActivity>(renderer, mappedInput),
                                [this](const ActivityResult&) { ensureSdFontLoaded(); });
+        break;
+      case SettingAction::SleepStats:
+        startActivityForResult(std::make_unique<SleepStatsSettingsActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::None:
         // Do nothing

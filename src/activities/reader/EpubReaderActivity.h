@@ -98,6 +98,12 @@ class EpubReaderActivity final : public Activity {
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   void toggleBluetoothFromReader();
+  // Called from the idle loop: if Bluetooth is wanted but the stack is down (e.g.
+  // a section build tore it out), and the page has settled, free the chapter
+  // layout + glyph cache and re-enable the stack — the same heap-freeing the
+  // manual toggle does, which is the only way to get the controller's contiguous
+  // block back with a book open on X3. Silent; the page reloads from cache.
+  void maybeAutoRestoreBluetooth();
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   void applyOrientation(uint8_t orientation);
   // Drops the cached section so the current chapter re-paginates on the next render,

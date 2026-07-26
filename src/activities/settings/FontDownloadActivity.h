@@ -37,16 +37,8 @@ class FontDownloadActivity : public Activity {
   bool preventAutoSleep() override { return state_ == LOADING_MANIFEST || state_ == DOWNLOADING; }
   bool skipLoopDelay() override { return true; }
 
- private:
-  enum State {
-    WIFI_SELECTION,
-    LOADING_MANIFEST,
-    FAMILY_LIST,
-    DOWNLOADING,
-    COMPLETE,
-    ERROR,
-  };
-
+  // Public: the streaming manifest parser (FontDownloadActivity.cpp) builds
+  // these directly as the HTTP body arrives.
   struct ManifestFile {
     std::string name;
     size_t size = 0;
@@ -62,6 +54,16 @@ class FontDownloadActivity : public Activity {
     bool hasUpdate = false;
   };
 
+ private:
+  enum State {
+    WIFI_SELECTION,
+    LOADING_MANIFEST,
+    FAMILY_LIST,
+    DOWNLOADING,
+    COMPLETE,
+    ERROR,
+  };
+
   State state_ = WIFI_SELECTION;
   FontInstaller fontInstaller_;
   ButtonNavigator buttonNavigator_;
@@ -71,11 +73,9 @@ class FontDownloadActivity : public Activity {
   std::vector<ManifestFamily> families_;
   int selectedIndex_ = 0;
 
-  // Download progress
+  // Download progress (file counter only — transfers are quiet/frozen-screen)
   size_t currentFileIndex_ = 0;
   size_t currentFileTotal_ = 0;
-  size_t fileProgress_ = 0;
-  size_t fileTotal_ = 0;
   int downloadingFamilyIndex_ = 0;
   std::string errorMessage_;
 

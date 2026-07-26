@@ -547,7 +547,13 @@
 #endif
 
 #ifndef MYNEWT_VAL_BLE_ATT_SVR_MAX_PREP_ENTRIES
-#define MYNEWT_VAL_BLE_ATT_SVR_MAX_PREP_ENTRIES (64)
+/* CrossPoint (vendored patch): this firmware is a client-only HID central and
+ * hosts no local attributes that accept queued long-writes, so the 64-entry
+ * prepared-write pool (~768B of static BSS, resident even while Bluetooth is
+ * OFF) is pure dead weight. 0 removes the array entirely; ble_att_svr_init()
+ * skips pool init behind its `> 0` guard, and a stray prepare-write request
+ * just gets an "insufficient resources" ATT error (os_memblock_get -> NULL). */
+#define MYNEWT_VAL_BLE_ATT_SVR_MAX_PREP_ENTRIES (0)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_ATT_SVR_NOTIFY
@@ -983,11 +989,21 @@
 #endif
 
 #ifndef MYNEWT_VAL_BLE_STORE_MAX_BONDS
-#define MYNEWT_VAL_BLE_STORE_MAX_BONDS CONFIG_BT_NIMBLE_MAX_BONDS
+/* CrossPoint (vendored patch): the framework bakes MAX_BONDS=3; this firmware
+ * remembers exactly one page-turner remote. Sizing the RAM-backed key store
+ * (our_secs/peer_secs/rpa_recs/local_irks, ~426B static BSS) to 1 reclaims RAM
+ * that is resident even with Bluetooth OFF. Changed at the macro (not the
+ * array) so every bounds-check in ble_store_config.c/nvs.c/conf.c stays in
+ * sync. */
+#define MYNEWT_VAL_BLE_STORE_MAX_BONDS (1)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_STORE_MAX_CCCDS
-#define MYNEWT_VAL_BLE_STORE_MAX_CCCDS CONFIG_BT_NIMBLE_MAX_CCCDS
+/* CrossPoint (vendored patch): framework bakes 8; one HID remote exposes only a
+ * handful of report characteristics, and subscriptions are re-established on
+ * every connect regardless of what was persisted, so 4 store slots are ample
+ * and shave the resident (BT-OFF) BSS. */
+#define MYNEWT_VAL_BLE_STORE_MAX_CCCDS (4)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_STORE_MAX_CSFCS

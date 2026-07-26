@@ -60,6 +60,8 @@ class ClippingStore {
 
   static bool hasAnyClippings();
   static bool getAllClippedBooks(std::vector<ClippedBookEntry>& out);
+  // True when a clippings file exists on SD for this book (cheap existence check; nothing loaded).
+  static bool hasForFilePath(const std::string& filePath, const std::string& bookType);
   static void deleteForFilePath(const std::string& filePath, const std::string& bookType);
   static bool migrateForFilePath(const std::string& oldFilePath, const std::string& newFilePath,
                                  const std::string& title, const std::string& author, const std::string& bookType);

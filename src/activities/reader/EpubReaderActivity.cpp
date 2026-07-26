@@ -75,7 +75,21 @@ const std::vector<unsigned long> PAGE_TURN_DURATIONS_MS = {0,       0,       600
                                                            35000UL, 30000UL, 25000UL, 20000UL};
 
 void enterDeepSleepFromReaderAction() {
-  HalPowerManager::Lock powerLock;
+  HalPowerManager::Lock powerLock;  // hold full CPU speed across the BLE teardown + sleep prep
+
+  // BLE cannot survive deep sleep; shut the stack down cleanly so the remote
+  // disconnects instead of timing out and NimBLE releases its heap. main.cpp's
+  // enterDeepSleep() already does this, but the reader's own sleep path did not —
+  // harmless while BLE was usually torn down by a section build, but auto-restore
+  // now leaves the stack up at sleep time, and sleeping with the NimBLE host still
+  // live hangs into a watchdog reset. Runs under powerLock so the disconnect's own
+  // HalPowerManager::Lock is a no-op and the CPU never drops to low-power mid-teardown.
+  auto& btMgr = BluetoothHIDManager::getInstance();
+  if (btMgr.isEnabled()) {
+    LOG_INF("BT", "Disabling Bluetooth before deep sleep (reader)");
+    btMgr.disable();
+  }
+
   APP_STATE.lastSleepFromReader = true;
   APP_STATE.saveToFile();
 
@@ -642,6 +656,12 @@ void EpubReaderActivity::loop() {
       executeReaderAction(CrossPointSettings::READER_ACTION_PAGE_BACK);
     }
   }
+
+  // Idle only: every button action above returns early, so reaching here means the
+  // reader is sitting on a settled page — the right moment to bring a wanted-but-
+  // torn-down Bluetooth stack back (frees the chapter layout, so keep it off the
+  // input path).
+  maybeAutoRestoreBluetooth();
 }
 
 // Translate an absolute percent into a spine index plus a normalized position
@@ -723,6 +743,11 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
     return;
   }
   const bool turningOn = !btMgr.isEnabled();
+  // Record the user's intent up front. When turning on, this arms maybeAutoRestore()
+  // so the stack comes back by itself after the memory-critical operations that tear
+  // it down (chapter/section build, sync); when turning off, it disarms that restore
+  // so the stack stays down.
+  btMgr.setBluetoothWanted(turningOn);
   {
     RenderLock lock(*this);
     if (SETTINGS.darkMode) renderer.invertScreen();
@@ -758,6 +783,56 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
     btMgr.disable();
   }
   pagesUntilFullRefresh = 1;
+  requestUpdate();
+}
+
+void EpubReaderActivity::maybeAutoRestoreBluetooth() {
+  auto& btMgr = BluetoothHIDManager::getInstance();
+  // Cheap outs first — most idle frames leave here immediately.
+  if (btMgr.isEnabled() || !btMgr.isBluetoothWanted()) {
+    return;
+  }
+  // Only restore when a chapter is resident: freeing it is what buys the
+  // controller's contiguous block, so this guarantees we NEVER enable() on an
+  // un-freed (possibly fragmented) heap — the exact state that hangs controller
+  // init. If section is null (mid-build / empty chapter) we simply wait.
+  if (!section) {
+    return;
+  }
+  // Let the page settle before doing a heap-freeing restore: it avoids stacking a
+  // re-render on top of a chapter-turn burst, and gives the section build's
+  // transient allocations time to free so the controller's contiguous block is
+  // actually there. This is the "wait longer after a chapter loads" the X3 needs.
+  static constexpr unsigned long BT_AUTO_RESTORE_SETTLE_MS = 3000;
+  if (millis() - lastPageTurnTime < BT_AUTO_RESTORE_SETTLE_MS) {
+    return;
+  }
+  // Gate + rate-limit live in the manager (wanted, not paused, WiFi settle).
+  if (!btMgr.beginAutoRestoreAttempt()) {
+    return;
+  }
+
+  LOG_INF("BT", "Auto-restoring Bluetooth: freeing chapter layout for the controller's heap");
+  // Free exactly what the manual toggle frees — the resident chapter layout and the
+  // glyph cache — so esp_bt_controller_init() gets its >=30KB contiguous block. The
+  // position is preserved and the section reloads from cache on the redraw below.
+  {
+    RenderLock lock(*this);
+    if (section) {
+      cachedSpineIndex = currentSpineIndex;
+      cachedChapterTotalPageCount = section->pageCount;
+      nextPageNumber = section->currentPage;
+      section.reset();
+    }
+  }
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    fcm->clearCache();
+  }
+  if (!btMgr.enable()) {
+    LOG_INF("BT", "Auto-restore enable() failed (heap still too tight); will retry after backoff");
+  }
+  // Redraw: reloads the section from cache (images stay suppressed while wanted, so
+  // the page looks identical) and clears the transiently-null section state.
   requestUpdate();
 }
 
@@ -842,8 +917,11 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResult(
           std::make_unique<EpubReaderClippingListActivity>(renderer, mappedInput, CLIPPINGS.getClippings()),
           [this](const ActivityResult& result) {
-            if (!result.isCancelled) {
-              handleClippingJump(std::get<ClippingJumpResult>(result.data));
+            // get_if: a default ActivityResult is not cancelled but holds monostate, and
+            // std::get on the wrong alternative aborts under -fno-exceptions.
+            const auto* jump = result.isCancelled ? nullptr : std::get_if<ClippingJumpResult>(&result.data);
+            if (jump) {
+              handleClippingJump(*jump);
             } else {
               requestUpdate();
             }
@@ -1134,12 +1212,11 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
 
 // TODO: Failure handling
 namespace {
-// An em-space (U+2003) prefix marks a first-line paragraph indent in the laid-out text.
-bool clipHasEmSpacePrefix(const std::string& s) {
-  return s.size() >= 3 && static_cast<unsigned char>(s[0]) == 0xE2 && static_cast<unsigned char>(s[1]) == 0x80 &&
-         static_cast<unsigned char>(s[2]) == 0x83;
+// Visible text of a laid-out word: skips the U+2003 paragraph-indent marker without copying.
+const char* clipVisibleText(const std::string& s) {
+  const char* text = s.c_str();
+  return clipword::hasEmSpacePrefix(text) ? text + 3 : text;
 }
-std::string clipStripEmSpacePrefix(const std::string& s) { return clipHasEmSpacePrefix(s) ? s.substr(3) : s; }
 }  // namespace
 
 void EpubReaderActivity::startClipSelection() {
@@ -1149,7 +1226,7 @@ void EpubReaderActivity::startClipSelection() {
   }
 
   int orientedMarginTop = 0, orientedMarginRight = 0, orientedMarginBottom = 0, orientedMarginLeft = 0;
-  std::vector<WordRef> words;
+  WordList clipWords;
   const int readerFontId = SETTINGS.getReaderFontId();
   int startPage = 0;
   std::string bookTitle;
@@ -1167,12 +1244,39 @@ void EpubReaderActivity::startClipSelection() {
     const int lineHeight = renderer.getLineHeight(readerFontId);
     startPage = section->currentPage;
     const int pagesToLoad = std::min(3, section->pageCount - startPage);
-    words.reserve(static_cast<size_t>(std::max(0, pagesToLoad)) * 80);
 
     for (int pageIdx = 0; pageIdx < pagesToLoad; ++pageIdx) {
       section->currentPage = startPage + pageIdx;
       auto page = section->loadPageFromSectionFile();
       if (!page) break;
+
+      // Counting pass over the in-memory page (no allocations) so the word vector and text
+      // pool grow with one exact reserve per page. Letting push_back double through ~900
+      // 48-byte entries previously demanded a ~46KB contiguous block mid-growth, which
+      // abort()ed on the fragmented reader heap.
+      size_t pageWordCount = 0;
+      size_t pagePoolBytes = 0;
+      for (const auto& element : page->elements) {
+        if (element->getTag() != TAG_PageLine) continue;
+        const auto& line = static_cast<const PageLine&>(*element);
+        if (!line.getBlock()) continue;
+
+        const auto& block = *line.getBlock();
+        const auto& wordList = block.getWords();
+        const size_t count = std::min({wordList.size(), block.getWordXpos().size(), block.getWordStyles().size()});
+        for (size_t i = 0; i < count; ++i) {
+          if (clipword::isBlank(clipVisibleText(wordList[i]))) continue;
+          pageWordCount++;
+          pagePoolBytes += wordList[i].size() + 1;  // +1 for the '\0' terminator in the pool
+        }
+      }
+      if (clipWords.textPool.size() + pagePoolBytes > UINT16_MAX) {
+        // WordRef::textOffset is uint16_t; unreachable in practice (3 pages is ~12KB of text).
+        LOG_ERR("CLIP", "Clipping text pool would exceed 64KB; stopping at page %d", pageIdx);
+        break;
+      }
+      clipWords.words.reserve(clipWords.words.size() + pageWordCount);
+      clipWords.textPool.reserve(clipWords.textPool.size() + pagePoolBytes);
 
       for (const auto& element : page->elements) {
         if (element->getTag() != TAG_PageLine) continue;
@@ -1194,25 +1298,26 @@ void EpubReaderActivity::startClipSelection() {
           renderer.ensureSdCardFontReady(readerFontId, joined.c_str(), styleMask);
         }
         for (size_t i = 0; i < count; ++i) {
-          const std::string visibleWord = clipStripEmSpacePrefix(wordList[i]);
-          if (visibleWord.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+          if (clipword::isBlank(clipVisibleText(wordList[i]))) continue;
 
           const auto textStyle = static_cast<EpdFontFamily::Style>(styles[i] & ~EpdFontFamily::UNDERLINE);
           int wordWidth = renderer.getTextAdvanceX(readerFontId, wordList[i].c_str(), textStyle);
           if (wordWidth <= 0) continue;
 
           WordRef word;
-          word.x = orientedMarginLeft + line.xPos + xpos[i];
-          word.y = orientedMarginTop + line.yPos;
+          word.textOffset = static_cast<uint16_t>(clipWords.textPool.size());
+          word.x = static_cast<int16_t>(orientedMarginLeft + line.xPos + xpos[i]);
+          word.y = static_cast<int16_t>(orientedMarginTop + line.yPos);
           if (i + 1 < count && xpos[i + 1] > xpos[i]) {
             wordWidth = std::min(wordWidth, static_cast<int>(xpos[i + 1] - xpos[i]));
           }
-          word.w = wordWidth;
-          word.h = lineHeight;
-          word.pageIdx = pageIdx;
-          word.text = wordList[i];
+          word.w = static_cast<int16_t>(wordWidth);
+          word.h = static_cast<int16_t>(lineHeight);
+          word.pageIdx = static_cast<uint8_t>(pageIdx);
           word.style = textStyle;
-          words.push_back(std::move(word));
+          clipWords.textPool.append(wordList[i]);
+          clipWords.textPool.push_back('\0');
+          clipWords.words.push_back(word);
         }
       }
     }
@@ -1221,17 +1326,21 @@ void EpubReaderActivity::startClipSelection() {
 
     // Mark paragraph starts (em-space indent, or a visibly indented first line) so exported
     // clipping text can insert paragraph breaks.
-    auto endsWithHyphen = [](const std::string& word) { return !word.empty() && word.back() == '-'; };
+    auto endsWithHyphen = [](const char* word) {
+      const size_t len = strlen(word);
+      return len > 0 && word[len - 1] == '-';
+    };
     const int indentThreshold = renderer.getLineHeight(readerFontId) / 2;
     int previousLineFirstIdx = -1;
+    auto& words = clipWords.words;
     for (int i = 0; i < static_cast<int>(words.size()); ++i) {
       const bool newLine = i == 0 || words[i].pageIdx != words[i - 1].pageIdx || words[i].y != words[i - 1].y;
       if (!newLine) continue;
 
-      const bool byEmSpace = clipHasEmSpacePrefix(words[i].text);
+      const bool byEmSpace = clipword::hasEmSpacePrefix(clipWords.textOf(words[i]));
       const bool byIndent = !byEmSpace && previousLineFirstIdx >= 0 &&
                             words[i].x > words[previousLineFirstIdx].x + indentThreshold &&
-                            !endsWithHyphen(words[i - 1].text);
+                            !endsWithHyphen(clipWords.textOf(words[i - 1]));
       if (byEmSpace || byIndent) {
         words[i].paragraphStart = true;
       }
@@ -1246,19 +1355,22 @@ void EpubReaderActivity::startClipSelection() {
     author = epub->getAuthor();
   }
 
-  if (words.empty()) {
+  if (clipWords.words.empty()) {
     LOG_ERR("CLIP", "No selectable words on current EPUB page");
     requestUpdate();
     return;
   }
 
   startActivityForResult(
-      std::make_unique<ClipSelectionActivity>(renderer, mappedInput, std::move(words), readerFontId, *section,
+      std::make_unique<ClipSelectionActivity>(renderer, mappedInput, std::move(clipWords), readerFontId, *section,
                                               startPage, orientedMarginTop, orientedMarginLeft),
       [this, bookTitle = std::move(bookTitle), author = std::move(author),
        chapterTitle = std::move(chapterTitle)](const ActivityResult& result) {
-        if (!result.isCancelled) {
-          const auto& clip = std::get<ClippingResult>(result.data);
+        // get_if, not get: a default ActivityResult is NOT cancelled but holds monostate, and
+        // std::get on the wrong alternative aborts under -fno-exceptions.
+        const auto* clipPtr = result.isCancelled ? nullptr : std::get_if<ClippingResult>(&result.data);
+        if (clipPtr) {
+          const auto& clip = *clipPtr;
           if (!clip.text.empty()) {
             const size_t clippingIndex = CLIPPINGS.getClippings().size();
             const auto addResult =
@@ -2743,6 +2855,9 @@ void EpubReaderActivity::performKOReaderQuickSync() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   delay(100);
+  // Start the BLE re-init settle clock: the WiFi->BT controller handoff freezes
+  // this chip if it happens too soon. Auto-restore honours BLE_WIFI_SETTLE_MS.
+  BluetoothHIDManager::getInstance().noteWifiActivity();
 
   pagesUntilFullRefresh = 1;
   requestUpdateAndWait();
@@ -3161,6 +3276,9 @@ void EpubReaderActivity::performBookFusionSync() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   delay(100);
+  // Start the BLE re-init settle clock: the WiFi->BT controller handoff freezes
+  // this chip if it happens too soon. Auto-restore honours BLE_WIFI_SETTLE_MS.
+  BluetoothHIDManager::getInstance().noteWifiActivity();
 
   // Force a full refresh on the next render to clear residue from the popup
   // sequence (4× fast refresh in the sync flow above) and any grayscale

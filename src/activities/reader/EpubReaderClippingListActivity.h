@@ -12,16 +12,20 @@
 // delete the selected clipping. Returns a ClippingJumpResult when the user jumps.
 class EpubReaderClippingListActivity final : public Activity {
  public:
+  // Holds a reference into the ClippingStore singleton rather than a copy: 64 clippings of up
+  // to 512B text each is ~40KB of avoidable heap. The store stays loaded for the whole book
+  // (the reader is this activity's parent), so the reference outlives the activity; deletions
+  // through removeClippingAt() are visible immediately via the same vector.
   EpubReaderClippingListActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                 std::vector<Clipping> clippings)
-      : Activity("EpubClippingList", renderer, mappedInput), clippings(std::move(clippings)) {}
+                                 const std::vector<Clipping>& clippings)
+      : Activity("EpubClippingList", renderer, mappedInput), clippings(clippings) {}
 
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
 
  private:
-  std::vector<Clipping> clippings;
+  const std::vector<Clipping>& clippings;
   std::string detailText;
   std::vector<std::string> detailLines;
   ButtonNavigator buttonNavigator;

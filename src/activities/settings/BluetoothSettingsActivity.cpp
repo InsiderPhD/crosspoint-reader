@@ -57,6 +57,13 @@ void BluetoothSettingsActivity::onEnter() {
   btMgr = &BluetoothHIDManager::getInstance();
   LOG_INF("BT", "BluetoothHIDManager ready");
 
+  // Diagnostic: this is the one screen where the user actively tests a remote
+  // (the live press-count box below), so log every raw HID frame as [BTDBG]
+  // while we're here. Lets a press that isn't turning a page be told apart from
+  // a press that never arrives. Scoped to the screen (cleared in onExit) so it
+  // never spams the log during normal reading.
+  btMgr->setDebugCaptureEnabled(true);
+
   requestUpdate();
 }
 
@@ -65,6 +72,11 @@ void BluetoothSettingsActivity::onExit() {
   // NimBLE callbacks firing into an activity that is about to be deleted.
   if (btMgr && btMgr->isScanning()) {
     btMgr->stopScan();
+  }
+  // Stop the raw-frame [BTDBG] logging enabled in onEnter — it is a debugging
+  // aid for this screen only, not something to leave running behind us.
+  if (btMgr) {
+    btMgr->setDebugCaptureEnabled(false);
   }
   Activity::onExit();
 }
@@ -162,6 +174,9 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
       }
       if (btMgr->isEnabled()) {
         LOG_INF("BT", "Disabling Bluetooth...");
+        // Clear the session flag so auto-restore doesn't bring the stack back
+        // after the user explicitly turned it off here.
+        btMgr->setBluetoothWanted(false);
         if (btMgr->disable()) {
           lastError = tr(STR_BT_DISABLED);
         } else {
@@ -169,6 +184,9 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
         }
       } else {
         LOG_INF("BT", "Enabling Bluetooth...");
+        // Arm auto-restore: the remote should return by itself after later
+        // memory-critical operations (chapter builds, syncs) tear the stack down.
+        btMgr->setBluetoothWanted(true);
         if (btMgr->enable()) {
           lastError = tr(STR_BT_ENABLED);
         } else {

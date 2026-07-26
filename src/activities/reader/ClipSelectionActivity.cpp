@@ -14,20 +14,11 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 
-namespace {
-
-bool hasEmSpace(const std::string& text) {
-  return text.size() >= 3 && static_cast<unsigned char>(text[0]) == 0xE2 &&
-         static_cast<unsigned char>(text[1]) == 0x80 && static_cast<unsigned char>(text[2]) == 0x83;
-}
-
-}  // namespace
-
-ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                             std::vector<WordRef> words, const int fontId, Section& section,
-                                             const int startPageInSection, const int marginTop, const int marginLeft)
+ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList,
+                                             const int fontId, Section& section, const int startPageInSection,
+                                             const int marginTop, const int marginLeft)
     : Activity("ClipSelection", renderer, mappedInput),
-      words(std::move(words)),
+      wordList(std::move(wordList)),
       fontId(fontId),
       section(section),
       startPageInSection(startPageInSection),
@@ -37,7 +28,7 @@ ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputM
 void ClipSelectionActivity::onEnter() {
   Activity::onEnter();
 
-  if (words.empty()) {
+  if (wordList.words.empty()) {
     LOG_ERR("CLIP", "No words available for selection");
     ActivityResult result;
     result.isCancelled = true;
@@ -47,7 +38,7 @@ void ClipSelectionActivity::onEnter() {
   }
 
   savedSectionPage = section.currentPage;
-  currentDisplayPage = words[cursorIdx].pageIdx;
+  currentDisplayPage = wordList.words[cursorIdx].pageIdx;
   requestUpdate();
 }
 
@@ -57,7 +48,7 @@ void ClipSelectionActivity::onExit() {
 }
 
 void ClipSelectionActivity::loop() {
-  const int total = static_cast<int>(words.size());
+  const int total = static_cast<int>(wordList.words.size());
   using Button = MappedInputManager::Button;
 
   auto moveCursor = [this](const int nextIdx) {
@@ -90,7 +81,7 @@ void ClipSelectionActivity::loop() {
     } else {
       const int from = std::min(startMarkIdx, cursorIdx);
       const int to = std::max(startMarkIdx, cursorIdx);
-      auto result = ClipTextBuilder::build(words, from, to, total, startPageInSection, section.pageCount);
+      auto result = ClipTextBuilder::build(wordList, from, to, total, startPageInSection, section.pageCount);
       if (const auto paragraphIndex = section.getParagraphIndexForPage(result.sectionPage)) {
         result.paragraphIndex = *paragraphIndex;
       }
@@ -117,7 +108,7 @@ void ClipSelectionActivity::loop() {
 void ClipSelectionActivity::render(RenderLock&&) {
   // Re-render the page the cursor is on (no framebuffer snapshot — see header), then overlay
   // the selection/cursor highlights on top.
-  if (!renderSelectionPage(words[cursorIdx].pageIdx)) return;
+  if (!renderSelectionPage(wordList.words[cursorIdx].pageIdx)) return;
 
   prewarmHighlightedWords();
   drawHighlights();
@@ -152,8 +143,9 @@ bool ClipSelectionActivity::renderSelectionPage(const int pageIdx) {
 }
 
 void ClipSelectionActivity::applyWordStyle(const WordRef& word, const ClipWordStyle& style) const {
+  const char* text = wordList.textOf(word);
   const auto textStyle = static_cast<EpdFontFamily::Style>(word.style & ~EpdFontFamily::UNDERLINE);
-  const int skipX = hasEmSpace(word.text) ? renderer.getTextAdvanceX(fontId, "\xe2\x80\x83", textStyle) : 0;
+  const int skipX = clipword::hasEmSpacePrefix(text) ? renderer.getTextAdvanceX(fontId, "\xe2\x80\x83", textStyle) : 0;
   const int drawX = word.x + skipX;
   const int drawW = word.w - skipX;
   if (drawW <= 0) return;
@@ -170,10 +162,9 @@ void ClipSelectionActivity::applyWordStyle(const WordRef& word, const ClipWordSt
     renderer.drawRect(drawX, word.y, drawW, word.h, !invert);
   }
 
-  if (word.text.find_first_not_of(" \t") != std::string::npos) {
+  if (!clipword::isBlank(text)) {
     const bool textBlack = !invert;
-    renderer.drawText(fontId, drawX, word.y, hasEmSpace(word.text) ? word.text.c_str() + 3 : word.text.c_str(),
-                      textBlack, textStyle);
+    renderer.drawText(fontId, drawX, word.y, clipword::hasEmSpacePrefix(text) ? text + 3 : text, textBlack, textStyle);
   }
 
   if ((style.flags & ClipWordStyle::UNDERLINE) != 0) {
@@ -196,7 +187,7 @@ void ClipSelectionActivity::prewarmHighlightedWords() const {
     if (word.pageIdx != currentDisplayPage) return;
     const uint8_t styleIdx = static_cast<uint8_t>(word.style) & 0x03;
     if (styleIdx >= prewarmTextByStyle.size()) return;
-    prewarmTextByStyle[styleIdx] += word.text;
+    prewarmTextByStyle[styleIdx] += wordList.textOf(word);
     prewarmTextByStyle[styleIdx].push_back(' ');
   };
 
@@ -204,11 +195,11 @@ void ClipSelectionActivity::prewarmHighlightedWords() const {
     const int from = std::min(startMarkIdx, cursorIdx);
     const int to = std::max(startMarkIdx, cursorIdx);
     for (int i = from; i <= to; i++) {
-      appendWord(words[i]);
+      appendWord(wordList.words[i]);
     }
   }
 
-  appendWord(words[cursorIdx]);
+  appendWord(wordList.words[cursorIdx]);
 
   for (uint8_t styleIdx = 0; styleIdx < prewarmTextByStyle.size(); styleIdx++) {
     if (!prewarmTextByStyle[styleIdx].empty()) {
@@ -221,6 +212,7 @@ void ClipSelectionActivity::drawHighlights() {
   static constexpr ClipWordStyle selectionStyle{ClipWordStyle::FILL | ClipWordStyle::UNDERLINE, Color::LightGray};
   static constexpr ClipWordStyle cursorStyle{ClipWordStyle::INVERT, Color::LightGray};
 
+  const auto& words = wordList.words;
   if (startMarkIdx != -1) {
     const int from = std::min(startMarkIdx, cursorIdx);
     const int to = std::max(startMarkIdx, cursorIdx);
@@ -237,6 +229,7 @@ void ClipSelectionActivity::drawHighlights() {
 }
 
 int ClipSelectionActivity::lineForward(const int idx) const {
+  const auto& words = wordList.words;
   const int total = static_cast<int>(words.size());
   const int lineY = words[idx].y;
   const int page = words[idx].pageIdx;
@@ -247,6 +240,7 @@ int ClipSelectionActivity::lineForward(const int idx) const {
 }
 
 int ClipSelectionActivity::lineBackward(const int idx) const {
+  const auto& words = wordList.words;
   const int lineY = words[idx].y;
   const int page = words[idx].pageIdx;
   int i = idx - 1;

@@ -9,6 +9,7 @@
 
 #include "MappedInputManager.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/reader/TlsFramebufferBorrow.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -87,15 +88,26 @@ void DownloadUpdateFromUrlActivity::performDownloadAndFlash() {
   }
   requestUpdateAndWait();
 
-  const auto dlResult = HttpDownloader::downloadToFile(
-      url, kTmpPath,
-      [this](size_t downloaded, size_t total) {
-        downloadedBytes = downloaded;
-        totalBytes = total;
-        // immediate=true: we're in a blocking sync loop, so wake the render task directly.
-        requestUpdate(true);
-      },
-      /*allowConfiguredAuth=*/false);
+  // The DOWNLOADING frame just painted is static: the screen freezes on it
+  // while the framebuffer is lent to the transfer's TLS session (same scheme
+  // as GitHub OTA). Progress is a serial-only per-MB heartbeat.
+  auto dlResult = HttpDownloader::HTTP_ERROR;
+  {
+    TlsFramebufferBorrow borrow(renderer);
+    size_t lastLoggedMB = 0;
+    dlResult = HttpDownloader::downloadToFile(
+        url, kTmpPath,
+        [this, &lastLoggedMB](size_t downloaded, size_t total) {
+          downloadedBytes = downloaded;
+          totalBytes = total;
+          const size_t mb = downloaded >> 20;
+          if (mb > lastLoggedMB) {
+            lastLoggedMB = mb;
+            LOG_DBG("FWURL", "Download progress: %u MB", (unsigned)mb);
+          }
+        },
+        /*allowConfiguredAuth=*/false);
+  }
 
   if (dlResult != HttpDownloader::OK) {
     LOG_ERR("FWURL", "Download failed: %d", dlResult);
@@ -184,7 +196,12 @@ void DownloadUpdateFromUrlActivity::render(RenderLock&&) {
   if (state == State::CONNECTING_WIFI) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_CONNECTING));
   } else if (state == State::DOWNLOADING) {
-    if (!drawProgress(tr(STR_DOWNLOADING), downloadedBytes, totalBytes)) return;
+    // Static frame — the framebuffer is lent to the transfer's TLS session;
+    // no live progress until the flash phase.
+    renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_DOWNLOADING), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, top + lineHeight + metrics.verticalSpacing, tr(STR_DOWNLOAD_WAIT));
+    renderer.drawCenteredText(UI_10_FONT_ID, top + (lineHeight + metrics.verticalSpacing) * 2,
+                              tr(STR_FIRMWARE_UPDATE_DO_NOT_POWER_OFF));
   } else if (state == State::FLASHING) {
     if (!drawProgress(tr(STR_UPDATING), writtenBytes, totalBytes)) return;
     const int y = top + lineHeight + metrics.verticalSpacing + metrics.progressBarHeight + metrics.verticalSpacing;

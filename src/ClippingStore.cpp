@@ -298,6 +298,10 @@ bool ClippingStore::getAllClippedBooks(std::vector<ClippedBookEntry>& out) {
   return true;
 }
 
+bool ClippingStore::hasForFilePath(const std::string& filePath, const std::string& bookType) {
+  return Storage.exists(storeFilePathForBook(filePath, bookType).c_str());
+}
+
 void ClippingStore::deleteForFilePath(const std::string& filePath, const std::string& bookType) {
   const std::string path = storeFilePathForBook(filePath, bookType);
   if (Storage.exists(path.c_str())) {

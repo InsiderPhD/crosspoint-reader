@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <multi_heap.h>
+#include <wolfssl/ssl.h>
 #include <wolfssl/wolfcrypt/memory.h>
 
 #include <cstdint>
@@ -19,10 +20,17 @@ multi_heap_handle_t g_fbHeap = nullptr;
 uint8_t* g_fbStart = nullptr;
 uint8_t* g_fbEnd = nullptr;
 bool g_hooksInstalled = false;
-// Route the session object and record buffers (>=4KB; the input buffer grows
-// to ~17KB on full-size 16KB TLS records) into the arena; small crypto
-// temporaries stay on the normal heap, which keeps its largest block intact.
-constexpr size_t FB_MIN_ALLOC = 4096;
+// Route essentially EVERYTHING wolfSSL allocates into the arena — session
+// object, record buffers (the input buffer grows to ~17KB on full-size 16KB
+// TLS records), and all crypto/cert temporaries down to 128 bytes. This
+// threshold has been walked down twice from on-device aborts: at 4KB the
+// 1-4KB cert/bignum allocations drained a 27KB heap; at 1KB the *sub-1KB*
+// small-stack crypto allocations still did (observed: SecureHttpClient's
+// ~1.9KB response-header std::string failing with terminate() while parsing
+// GitHub's 302). The heap must stay free for lwIP and the HTTP client's C++
+// strings; the 48KB arena carries the whole TLS session. tlsMalloc falls back
+// to the heap when the arena is full, so the floor is safety, not a cap.
+constexpr size_t FB_MIN_ALLOC = 128;
 
 bool inArena(const void* p) {
   return p != nullptr && g_fbStart != nullptr && static_cast<const uint8_t*>(p) >= g_fbStart &&
@@ -72,6 +80,18 @@ void* tlsRealloc(void* p, size_t size) {
 }  // namespace
 
 TlsFramebufferBorrow::TlsFramebufferBorrow(GfxRenderer& renderer) {
+  // Initialize wolfSSL's process-wide state BEFORE any arena exists, so its
+  // long-lived globals (RNG state etc.) are allocated on the normal heap for
+  // the firmware's lifetime. With the low routing threshold, letting the
+  // first-ever TLS session lazily init them INSIDE a borrow would place them
+  // in the arena — clobbered by the next paint and freed across the arena
+  // boundary later. One-time; wolfSSL_Init is refcounted and never cleaned up.
+  static bool wolfSslInitDone = false;
+  if (!wolfSslInitDone) {
+    wolfSSL_Init();
+    wolfSslInitDone = true;
+  }
+
   // lock_ (render lock) is already held by the time we reach here (member init),
   // so the render task cannot draw into the framebuffer while we repurpose it.
   uint8_t* fb = renderer.getFrameBuffer();

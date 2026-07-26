@@ -53,6 +53,15 @@ constexpr unsigned long BASELINE_LEARN_MS = 1000;     // Post-connect window to 
 constexpr uint8_t VOLATILE_CHANGE_THRESHOLD = 3;      // Byte changes in a window => free-running, mask it
 constexpr unsigned long MIN_PRESS_INTERVAL_MS = 120;  // Floor between injected page turns
 constexpr unsigned long STUCK_ACTIVE_MS = 2500;       // Active this long with churning bytes => re-learn
+
+// RAII flag: while alive, tells pauseForMemory() that loop-task BLE work is in
+// flight so it waits (or skips) instead of tearing the stack down underneath us.
+// Used by updateActivity() and checkAutoReconnect().
+struct MaintenanceBusyScope {
+  volatile bool& flag;
+  explicit MaintenanceBusyScope(volatile bool& f) : flag(f) { flag = true; }
+  ~MaintenanceBusyScope() { flag = false; }
+};
 }  // namespace
 
 // Global static for singleton
@@ -295,8 +304,16 @@ void BluetoothHIDManager::startBackgroundScan() {
   }
   pScan->setScanCallbacks(&scanCallbacks, false);
   pScan->setActiveScan(false);  // passive: the advertiser's address is all we need
-  pScan->setInterval(1600);     // 1000ms interval...
-  pScan->setWindow(80);         // ...with a 50ms window: ~5% radio duty while disconnected
+  // A cheap HID clicker (e.g. AB Shutter3) only advertises in a short burst when
+  // one of its buttons is pressed, then goes quiet again. At ~5% radio duty
+  // (50ms every 1000ms) those bursts almost always land in the 95% the radio
+  // isn't listening, so a press-to-wake reconnect silently fails. Listen nearly
+  // continuously instead (90ms window every 100ms, ~90% duty) so a press is
+  // caught within one advertising interval. This only runs while the remote is
+  // disconnected, and BLE's own inactivity timeout still powers the stack down
+  // after a few minutes idle, so the higher drain is bounded to active use.
+  pScan->setInterval(160);  // 100ms interval...
+  pScan->setWindow(144);    // ...with a 90ms window: ~90% radio duty while reconnecting
   // This scan runs for as long as the remote stays disconnected — possibly the
   // whole reading session — so retaining results would leak steadily. We only
   // compare addresses in the callback and keep nothing.
@@ -703,11 +720,58 @@ bool BluetoothHIDManager::pauseForMemory() {
 }
 
 void BluetoothHIDManager::endMemoryPause() {
-  // Deliberately leaves the stack down: the user re-enables it via the
-  // reader-menu or Bluetooth settings toggle.
+  // Leaves the stack down: the reader's maybeAutoRestoreBluetooth() brings it back
+  // once the heavy operation's heap is free again (the "reconnect on chapter load"
+  // path), or the user re-enables it via a toggle.
   _memoryPaused = false;
   _maintenanceSuspended = false;
-  LOG_INF("BT", "Memory pause ended (stack stays down until user input)");
+  LOG_INF("BT", "Memory pause ended (auto-restore will re-enable when heap allows)");
+}
+
+void BluetoothHIDManager::setBluetoothWanted(bool wanted) {
+  if (_bluetoothWanted == wanted) {
+    return;
+  }
+  _bluetoothWanted = wanted;
+  if (wanted) {
+    // Arm an immediate first restore attempt (clear the rate-limit clock).
+    _lastRestoreAttemptMs = 0;
+  }
+  LOG_INF("BT", "Bluetooth %s", wanted ? "wanted (auto-restore armed)" : "no longer wanted (auto-restore off)");
+}
+
+void BluetoothHIDManager::noteWifiActivity() {
+  _lastWifiActivityMs = millis();
+  if (_lastWifiActivityMs == 0) {
+    _lastWifiActivityMs = 1;  // 0 is the "never" sentinel; keep a real timestamp
+  }
+}
+
+bool BluetoothHIDManager::beginAutoRestoreAttempt() {
+  // Pure gate + rate-limit stamp. Does not allocate, touch the radio, or enable —
+  // the reader frees the chapter layout and calls enable() when this returns true.
+  if (_enabled || !_bluetoothWanted) {
+    return false;
+  }
+  // The render task is mid memory-critical-section (a section build). Setting
+  // _maintenanceSuspended is how pauseForMemory() fences the loop task out; honour
+  // it, and never restore while paused.
+  if (_memoryPaused || _maintenanceSuspended) {
+    return false;
+  }
+  const unsigned long now = millis();
+  if (_lastRestoreAttemptMs != 0 && now - _lastRestoreAttemptMs < BLE_RESTORE_RETRY_MS) {
+    return false;
+  }
+  // WiFi settle: refuse to bring the BT controller up until the chip has had
+  // quiet time since the last WiFi teardown (see BLE_WIFI_SETTLE_MS).
+  if (_lastWifiActivityMs != 0 && now - _lastWifiActivityMs < BLE_WIFI_SETTLE_MS) {
+    return false;
+  }
+  _lastRestoreAttemptMs = now;
+  LOG_INF("BT", "Auto-restore window open (heap %u, largest %u, %lums since WiFi) — reader will free layout + enable",
+          ESP.getFreeHeap(), ESP.getMaxAllocHeap(), _lastWifiActivityMs ? now - _lastWifiActivityMs : 0UL);
+  return true;
 }
 
 void BluetoothHIDManager::setButtonInjector(std::function<void(uint8_t, bool)> injector) {
@@ -792,6 +856,9 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
       device->baselineStartMs = nowMs;
       device->baselineFrames = 1;
       memcpy(device->idleFrame, frame, HID_FRAME_BYTES);
+      for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
+        if (frame[i] == 0) device->byteSeenZero |= static_cast<uint8_t>(1u << i);
+      }
       return false;
     }
 
@@ -800,6 +867,9 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
         if (frame[i] != device->idleFrame[i] && device->byteChangeCount[i] < 0xFF) {
           device->byteChangeCount[i]++;
         }
+        // A byte that visits 0x00 is resting between presses (a keycode), not a
+        // free-running counter — remember that so we never mask it below.
+        if (frame[i] == 0) device->byteSeenZero |= static_cast<uint8_t>(1u << i);
       }
       memcpy(device->idleFrame, frame, HID_FRAME_BYTES);
       if (device->baselineFrames < 0xFFFF) {
@@ -816,7 +886,17 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
       memset(device->idleFrame, 0, HID_FRAME_BYTES);
     } else {
       for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
-        if (device->byteChangeCount[i] >= VOLATILE_CHANGE_THRESHOLD) {
+        if (device->byteSeenZero & static_cast<uint8_t>(1u << i)) {
+          // This byte returned to 0x00 during the window, so it is the remote's
+          // signal byte (a keycode that rests at 0 between presses), NOT a
+          // free-running counter. Its true idle is 0 — even if the window
+          // happened to close on a press frame — and it must never be masked or
+          // the detector goes blind. This is what keeps a press-only clicker
+          // (AB Shutter3: byte0 = E9 pressed / 00 released) working even when
+          // the user presses during the learn window.
+          device->idleFrame[i] = 0;
+        } else if (device->byteChangeCount[i] >= VOLATILE_CHANGE_THRESHOLD) {
+          // Stayed non-zero on every frame AND churned: a real rolling counter.
           device->volatileMask |= static_cast<uint8_t>(1u << i);
         }
       }
@@ -947,13 +1027,6 @@ void BluetoothHIDManager::onHIDNotify(NimBLERemoteCharacteristic* pChar, uint8_t
   g_instance->_buttonInjector(button, false);
   LOG_INF("BT", ">>> REMOTE PRESS -> page forward (button %u) <<<", static_cast<unsigned>(button));
 }
-namespace {
-struct MaintenanceBusyScope {
-  volatile bool& flag;
-  explicit MaintenanceBusyScope(volatile bool& f) : flag(f) { flag = true; }
-  ~MaintenanceBusyScope() { flag = false; }
-};
-}  // namespace
 
 void BluetoothHIDManager::updateActivity() {
   if (_maintenanceSuspended) {

@@ -12,6 +12,7 @@
 #include "SilentRestart.h"
 #include "activities/home/LibraryActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/reader/TlsFramebufferBorrow.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -152,13 +153,13 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   }
 
   if (state == BrowserState::DOWNLOADING) {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 40, tr(STR_DOWNLOADING));
+    // Static frame: the screen freezes on this while the framebuffer is lent
+    // to the transfer's TLS session — no live progress (serial has a per-MB
+    // heartbeat instead).
+    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 40, tr(STR_DOWNLOADING), true, EpdFontFamily::BOLD);
     auto title = renderer.truncatedText(UI_10_FONT_ID, statusMessage.c_str(), pageWidth - 40);
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 10, title.c_str());
-    if (downloadTotal > 0) {
-      GUI.drawProgressBar(renderer, Rect{50, pageHeight / 2 + 20, pageWidth - 100, 20}, downloadProgress,
-                          downloadTotal);
-    }
+    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 20, tr(STR_DOWNLOAD_WAIT));
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
@@ -199,6 +200,9 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   std::string url = (path.find("http") == 0) ? path : UrlUtils::buildUrl(SETTINGS.opdsServerUrl, path);
   OpdsParser parser;
   {
+    // Lend the framebuffer to the catalog fetch's TLS session ("Loading…" is
+    // already queued/painted; nothing renders during the call).
+    TlsFramebufferBorrow borrow(renderer);
     OpdsParserStream stream{parser};
     if (!HttpDownloader::fetchUrl(url, stream)) {
       state = BrowserState::ERROR;
@@ -265,8 +269,10 @@ void OpdsBookBrowserActivity::navigateBack() {
 void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   state = BrowserState::DOWNLOADING;
   statusMessage = book.title;
-  downloadProgress = downloadTotal = 0;
-  requestUpdate(true);
+  // Paint the static download frame and wait for it: the screen stays frozen
+  // on it while the framebuffer is lent to the transfer's TLS session below
+  // (same scheme as BookFusion book downloads and OTA).
+  requestUpdateAndWait();
 
   // Build full download URL relative to the current feed, not the root server URL
   const std::string feedUrl = UrlUtils::buildUrl(SETTINGS.opdsServerUrl, currentPath);
@@ -275,12 +281,23 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
       "/" + StringUtils::sanitizeFilename((book.author.empty() ? "" : book.author + " - ") + book.title) + ".epub";
   LOG_DBG("OPDS", "Downloading: %s -> %s", downloadUrl.c_str(), filename.c_str());
 
-  const auto result =
-      HttpDownloader::downloadToFile(downloadUrl, filename, [this](const size_t downloaded, const size_t total) {
-        downloadProgress = downloaded;
-        downloadTotal = total;
-        requestUpdate(true);
-      });
+  auto result = HttpDownloader::HTTP_ERROR;
+  {
+    TlsFramebufferBorrow borrow(renderer);
+    size_t lastLoggedMB = 0;
+    result = HttpDownloader::downloadToFile(
+        downloadUrl, filename, [&lastLoggedMB](const size_t downloaded, const size_t total) {
+          const size_t mb = downloaded >> 20;
+          if (mb > lastLoggedMB) {
+            lastLoggedMB = mb;
+            if (total > 0) {
+              LOG_DBG("OPDS", "Download progress: %u/%u MB", (unsigned)mb, (unsigned)(total >> 20));
+            } else {
+              LOG_DBG("OPDS", "Download progress: %u MB", (unsigned)mb);
+            }
+          }
+        });
+  }
 
   if (result == HttpDownloader::OK) {
     Epub(filename, "/.crosspoint").clearCache();

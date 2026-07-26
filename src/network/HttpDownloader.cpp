@@ -3,6 +3,7 @@
 #include <Logging.h>
 #include <SecureHttpClient.h>
 #include <StreamString.h>
+#include <WiFi.h>
 #include <esp_heap_caps.h>
 
 #include <cstring>
@@ -73,7 +74,12 @@ bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent) {
   });
 
   if (httpCode != 200 || sinkError) {
-    LOG_ERR("HTTP", "Fetch failed: %d%s", httpCode, sinkError ? " (sink error)" : "");
+    // -1 = transport (TCP connect / write / status line). Log where THIS
+    // device sits on the network — a saved-credentials auto-join onto the
+    // wrong SSID/subnet makes LAN servers unreachable and is otherwise
+    // invisible in the logs.
+    LOG_ERR("HTTP", "Fetch failed: %d%s (ip=%s, rssi=%d)", httpCode, sinkError ? " (sink error)" : "",
+            WiFi.localIP().toString().c_str(), WiFi.RSSI());
     return false;
   }
 

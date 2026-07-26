@@ -16,6 +16,11 @@ class FontCacheManager {
   void setFontDecompressor(FontDecompressor* d);
 
   void clearCache();
+  // clearCache() plus each SD font's persistent advance cache — those survive
+  // a normal clear by design (they amortize SD reads across passes) but can
+  // hold 10KB+ after a reading session. Use before heap-critical work
+  // (network transfers); the cost is re-indexing on the next SD-font render.
+  void clearCachesDeep();
   void prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask = 0x0F);
   void logStats(const char* label = "render");
   void resetStats();
