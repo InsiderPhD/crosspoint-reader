@@ -2,6 +2,7 @@
 
 #include <FsHelpers.h>
 #include <HalStorage.h>
+#include <InflateReader.h>
 
 #include "CrossPointSettings.h"
 #include "Epub.h"
@@ -29,8 +30,17 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
   }
 
   auto epub = std::unique_ptr<Epub>(new Epub(path, "/.crosspoint"));
-  if (epub->load(true, SETTINGS.embeddedStyle == 0)) {
-    return epub;
+  {
+    // A stale book.bin (cache-version bump) forces a metadata rebuild here, and the
+    // rebuild's inflate needs one 32KB CONTIGUOUS dictionary — the allocation that
+    // fails first once WiFi/BLE have ever fragmented the heap (largest block caps
+    // just under 32768 for the rest of the boot). Lend the idle framebuffer as the
+    // dictionary, exactly as Section.cpp does for section builds: e-ink is bistable
+    // so the panel keeps its image, and nothing renders while load() runs.
+    InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
+    if (epub->load(true, SETTINGS.embeddedStyle == 0)) {
+      return epub;
+    }
   }
 
   LOG_ERR("READER", "Failed to load epub");

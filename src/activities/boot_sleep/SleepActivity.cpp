@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <InflateReader.h>
 #include <Txt.h>
 #include <Xtc.h>
 
@@ -322,8 +323,15 @@ void SleepActivity::renderCoverSleepScreen() const {
     // Handle EPUB file
     LOG_DBG("SLP", "EPUB path; loading metadata + ensuring cover bmp (cropped=%d)", cropped);
     Epub lastEpub(APP_STATE.openEpubPath, "/.crosspoint");
-    // Skip loading css since we only need metadata here
-    if (!lastEpub.load(true, true)) {
+    // Skip loading css since we only need metadata here. The framebuffer is lent to
+    // the load's inflate as its 32KB dictionary (heap may have no contiguous block
+    // left this deep into a session); released before any drawing below.
+    bool lastEpubLoaded;
+    {
+      InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
+      lastEpubLoaded = lastEpub.load(true, true);
+    }
+    if (!lastEpubLoaded) {
       LOG_ERR("SLP", "Failed to load last epub");
       return (this->*renderNoCoverSleepScreen)();
     }

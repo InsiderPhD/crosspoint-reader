@@ -8,6 +8,7 @@
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <InflateReader.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <WiFi.h>
@@ -2011,6 +2012,9 @@ bool EpubReaderActivity::runAutosyncNow() {
   {
     RenderLock lock(*this);
     epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+    // Framebuffer-leased inflate dictionary: this reload runs right after a WiFi/TLS
+    // session, when the heap is at its most fragmented (see ReaderActivity::loadEpub).
+    InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
     if (!epub->load(true, SETTINGS.embeddedStyle == 0)) {
       LOG_ERR("PAS", "Failed to reload epub after autosync");
       onGoHome();
@@ -3075,6 +3079,9 @@ void EpubReaderActivity::performBookFusionSync() {
   {
     RenderLock lock(*this);
     epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+    // Framebuffer-leased inflate dictionary: this reload runs right after a WiFi/TLS
+    // session, when the heap is at its most fragmented (see ReaderActivity::loadEpub).
+    InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
     if (!epub->load(true, SETTINGS.embeddedStyle == 0)) {
       LOG_ERR("BFS", "Failed to reload epub after sync request");
       onGoHome();
