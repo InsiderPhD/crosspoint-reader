@@ -461,7 +461,11 @@ class CrossPointSettings {
   static CrossPointSettings& getInstance() { return instance; }
 
   uint16_t getPowerButtonDuration() const {
-    return (shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP) ? 10 : 400;
+    // A short press always wakes from deep sleep — the 400ms hold gate (an
+    // anti-pocket-wake measure tied to the legacy shortPwrBtn field) made wake
+    // feel unresponsive, and the field it keyed on is no longer what the
+    // Reader Controls UI writes anyway.
+    return 10;
   }
   uint64_t getDailyGoalMs() const {
     static constexpr uint32_t MINUTES[] = {5, 10, 15, 30, 60};
