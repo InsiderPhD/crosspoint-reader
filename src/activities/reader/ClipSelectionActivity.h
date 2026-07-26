@@ -34,7 +34,7 @@ struct ClipWordStyle {
 // buffer would OOM alongside the reader's resident section/font caches on the ESP32-C3.
 class ClipSelectionActivity final : public Activity {
  public:
-  ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::vector<WordRef> words, int fontId,
+  ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList, int fontId,
                         Section& section, int startPageInSection, int marginTop, int marginLeft);
 
   void onEnter() override;
@@ -44,7 +44,7 @@ class ClipSelectionActivity final : public Activity {
   bool isReaderActivity() const override { return true; }
 
  private:
-  std::vector<WordRef> words;
+  WordList wordList;
   int fontId = 0;
   Section& section;
   int startPageInSection = 0;

@@ -12,6 +12,7 @@
 #include "../util/ConfirmationActivity.h"
 #include "BookDetailsActivity.h"
 #include "BookFusionBookIdStore.h"
+#include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
@@ -307,6 +308,8 @@ void FileBrowserActivity::loop() {
         bookOptionsAuthor.clear();
         bookOptionsProgress = -1;
       }
+      bookOptionsHasClippings =
+          FsHelpers::hasEpubExtension(bookOptionsPath) && ClippingStore::hasForFilePath(bookOptionsPath, "epub");
       requestUpdate();
       return;
     }
@@ -314,7 +317,8 @@ void FileBrowserActivity::loop() {
 
   if (showingBookOptions) {
     int optionIds[UITheme::BOOK_OPTIONS_COUNT];
-    const int optionCount = UITheme::getVisibleBookOptions(optionIds, UITheme::BOOK_OPTIONS_COUNT);
+    const int optionCount =
+        UITheme::getVisibleBookOptions(optionIds, UITheme::BOOK_OPTIONS_COUNT, bookOptionsHasClippings);
     buttonNavigator.onNext([this, optionCount] {
       bookOptionsIndex = (bookOptionsIndex + 1) % optionCount;
       requestUpdate();
@@ -372,6 +376,14 @@ void FileBrowserActivity::loop() {
                                    RECENT_BOOKS.saveToFile();
                                    reload();
                                  }
+                               });
+      } else if (opt == UITheme::BOOK_OPT_DELETE_CLIPPINGS) {
+        startActivityForResult(std::make_unique<ConfirmationActivity>(
+                                   renderer, mappedInput, tr(STR_DELETE_CLIPPINGS) + std::string("?"), title),
+                               [path](const ActivityResult& res) {
+                                 // Removes only the on-device store; the Kindle-style export in
+                                 // /My Clippings.txt is append-only and keeps the text.
+                                 if (!res.isCancelled) ClippingStore::deleteForFilePath(path, "epub");
                                });
       } else if (opt == UITheme::BOOK_OPT_BOOK_INFO) {
         // Build the folder-scoped list of navigable books (epub/xtc) in display
@@ -655,7 +667,7 @@ void FileBrowserActivity::render(RenderLock&&) {
     const std::string folder =
         (lastSlash != std::string::npos) ? bookOptionsPath.substr(0, lastSlash) : bookOptionsPath;
     UITheme::drawBookOptionsPopup(renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(), folder.c_str(),
-                                  bookOptionsProgress, bookOptionsIndex);
+                                  bookOptionsProgress, bookOptionsIndex, bookOptionsHasClippings);
   }
 
   sortMenu.render(renderer);

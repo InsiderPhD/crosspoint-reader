@@ -174,6 +174,9 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
       }
       if (btMgr->isEnabled()) {
         LOG_INF("BT", "Disabling Bluetooth...");
+        // Clear the session flag so auto-restore doesn't bring the stack back
+        // after the user explicitly turned it off here.
+        btMgr->setBluetoothWanted(false);
         if (btMgr->disable()) {
           lastError = tr(STR_BT_DISABLED);
         } else {
@@ -181,6 +184,9 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
         }
       } else {
         LOG_INF("BT", "Enabling Bluetooth...");
+        // Arm auto-restore: the remote should return by itself after later
+        // memory-critical operations (chapter builds, syncs) tear the stack down.
+        btMgr->setBluetoothWanted(true);
         if (btMgr->enable()) {
           lastError = tr(STR_BT_ENABLED);
         } else {

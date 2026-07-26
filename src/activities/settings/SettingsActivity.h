@@ -38,6 +38,7 @@ enum class SettingAction {
   FontFamily,
   FontDownload,
   FontLayoutPreview,
+  SleepStats,
 };
 
 struct SettingInfo {

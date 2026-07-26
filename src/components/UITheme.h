@@ -27,21 +27,23 @@ class UITheme {
 
   // Book context menu — shared across HomeActivity, FileBrowserActivity,
   // and RecentBooksActivity.
-  static constexpr int BOOK_OPTIONS_COUNT = 6;
+  static constexpr int BOOK_OPTIONS_COUNT = 7;
   static constexpr int BOOK_OPT_MARK_READ = 0;
   static constexpr int BOOK_OPT_RESET_PROGRESS = 1;
   static constexpr int BOOK_OPT_SHELVE = 2;
   static constexpr int BOOK_OPT_DELETE = 3;
   static constexpr int BOOK_OPT_REINDEX = 4;
   static constexpr int BOOK_OPT_BOOK_INFO = 5;
+  static constexpr int BOOK_OPT_DELETE_CLIPPINGS = 6;
 
   // Fills ids[] with the BOOK_OPT_* values currently visible (honoring Dev Mode —
-  // Delete Book Cache is hidden when Dev Mode is off) and returns the count. Used by
-  // both drawBookOptionsPopup (labels) and the host activities (index -> option id).
-  static int getVisibleBookOptions(int* ids, int maxIds);
+  // Delete Book Cache is hidden when Dev Mode is off; Delete Clippings appears only when
+  // the book has a clippings file) and returns the count. Used by both
+  // drawBookOptionsPopup (labels) and the host activities (index -> option id).
+  static int getVisibleBookOptions(int* ids, int maxIds, bool includeDeleteClippings);
 
   static void drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author, const char* folderPath,
-                                   int progressPercent, int selectedOptionIndex);
+                                   int progressPercent, int selectedOptionIndex, bool includeDeleteClippings);
 
   static void drawSyncProgressPopup(GfxRenderer& renderer, const char* title, const char* statusMessage);
 

@@ -40,6 +40,7 @@ class FileBrowserActivity final : public Activity {
   std::string bookOptionsTitle;
   std::string bookOptionsAuthor;
   int bookOptionsProgress = -1;
+  bool bookOptionsHasClippings = false;
 
   // Files state
   std::string basepath = "/";

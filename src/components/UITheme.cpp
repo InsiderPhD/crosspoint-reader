@@ -129,6 +129,8 @@ const char* bookOptionLabel(int optionId) {
       return tr(STR_DELETE_FROM_DEVICE);
     case UITheme::BOOK_OPT_REINDEX:
       return tr(STR_DELETE_CACHE);
+    case UITheme::BOOK_OPT_DELETE_CLIPPINGS:
+      return tr(STR_DELETE_CLIPPINGS);
     case UITheme::BOOK_OPT_BOOK_INFO:
       return tr(STR_BOOK_INFO);
     default:
@@ -137,7 +139,7 @@ const char* bookOptionLabel(int optionId) {
 }
 }  // namespace
 
-int UITheme::getVisibleBookOptions(int* ids, int maxIds) {
+int UITheme::getVisibleBookOptions(int* ids, int maxIds, const bool includeDeleteClippings) {
   int n = 0;
   const auto add = [&](int id) {
     if (n < maxIds) ids[n++] = id;
@@ -146,13 +148,14 @@ int UITheme::getVisibleBookOptions(int* ids, int maxIds) {
   add(BOOK_OPT_RESET_PROGRESS);
   add(BOOK_OPT_SHELVE);
   add(BOOK_OPT_DELETE);
+  if (includeDeleteClippings) add(BOOK_OPT_DELETE_CLIPPINGS);
   if (SETTINGS.devMode) add(BOOK_OPT_REINDEX);  // "Delete Book Cache" — testing only
   add(BOOK_OPT_BOOK_INFO);
   return n;
 }
 
 void UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author, const char* folderPath,
-                                   int progressPercent, int selectedOptionIndex) {
+                                   int progressPercent, int selectedOptionIndex, const bool includeDeleteClippings) {
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   constexpr int POPUP_W = 420;
@@ -168,7 +171,7 @@ void UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title, con
   const int titleBlockH = LINE_V_PAD + static_cast<int>(titleLines.size()) * lineH + LINE_V_PAD;
 
   int ids[BOOK_OPTIONS_COUNT];
-  const int optionCount = getVisibleBookOptions(ids, BOOK_OPTIONS_COUNT);
+  const int optionCount = getVisibleBookOptions(ids, BOOK_OPTIONS_COUNT, includeDeleteClippings);
   const int popupH = titleBlockH + INFO_COUNT * INFO_H + optionCount * OPTION_H + H_PAD;
   const int px = (pageWidth - POPUP_W) / 2;
   const int py = (pageHeight - popupH) / 2;

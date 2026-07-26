@@ -22,11 +22,20 @@ constexpr int FOOTNOTE_HINT_HEIGHT = 20;
 constexpr size_t SECTION_BUILD_INFLATE_BYTES = 32768;
 constexpr size_t SECTION_BUILD_HEADROOM_BYTES = 8192;
 constexpr size_t SECTION_BUILD_REQUIRED_BLOCK = SECTION_BUILD_INFLATE_BYTES + SECTION_BUILD_HEADROOM_BYTES;
+// A build also bleeds the heap through hundreds of small allocations (parsed
+// words, SD-font advance tables, per-page block data) that no single-block
+// check models. Measured on hardware: a bionic + SD-font rebuild starting at
+// 58KB total free aborted mid-parse (ParsedText::addWord), so demand real
+// cumulative headroom before declaring that a build "fits".
+constexpr size_t SECTION_BUILD_REQUIRED_FREE_TOTAL = 64 * 1024;
 
 inline size_t largestFreeBlock() { return heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT); }
 
 /** True when a section build would fit right now without freeing anything. */
-inline bool sectionBuildFitsNow() { return largestFreeBlock() >= SECTION_BUILD_REQUIRED_BLOCK; }
+inline bool sectionBuildFitsNow() {
+  return largestFreeBlock() >= SECTION_BUILD_REQUIRED_BLOCK &&
+         heap_caps_get_free_size(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT) >= SECTION_BUILD_REQUIRED_FREE_TOTAL;
+}
 
 inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
   switch (orientation) {
@@ -70,7 +79,18 @@ struct PageTurnResult {
  * 12KB largest block, comfortably under the 32KB inflate buffer that dominates a
  * build, so the exclusion no longer earned its cost and was removed.
  */
-inline uint8_t effectiveFootnoteDisplay() { return SETTINGS.footnoteDisplay; }
+inline uint8_t effectiveFootnoteDisplay() {
+  // Bionic reading makes section builds meaningfully heavier (bold advance
+  // tables to fetch, per-word split data to compute and store), and on-page
+  // footnotes stack the pre-scan's second inflate reader plus the 12KB body
+  // pool on top — the combination aborted a build on-device (ParsedText::
+  // addWord, 2026-07-23). With bionic on, footnotes fall back to the
+  // reader-menu list; the stored preference is untouched and takes effect
+  // again as soon as bionic is switched off. Both values feed the section
+  // cache validation, so the downgrade rebuilds consistently.
+  if (SETTINGS.bionicReading) return CrossPointSettings::FOOTNOTE_IN_MENU;
+  return SETTINGS.footnoteDisplay;
+}
 
 /** True when footnotes should be laid out on the page for this build/render. */
 inline bool footnotesOnPage() { return effectiveFootnoteDisplay() == CrossPointSettings::FOOTNOTE_ON_PAGE; }

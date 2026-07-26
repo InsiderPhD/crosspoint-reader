@@ -62,6 +62,8 @@ struct ConnectedDevice {
   uint8_t prevFrame[HID_FRAME_BYTES] = {0};  // Previous report, for churn detection
   uint8_t volatileMask = 0;                  // Bit i set => byte i free-runs, ignore it
   uint8_t byteChangeCount[HID_FRAME_BYTES] = {0};
+  uint8_t byteSeenZero = 0;                  // Bit i set => byte i was 0x00 at least once while learning
+                                             // (=> it rests at 0, it's the keycode, never mask it)
   unsigned long baselineStartMs = 0;  // Start of the post-connect learning window
   uint16_t baselineFrames = 0;        // Frames seen during the learning window
   bool baselineReady = false;
@@ -124,6 +126,32 @@ class BluetoothHIDManager {
   void endMemoryPause();  // clears the paused state (does not enable)
   bool isMemoryPaused() const { return _memoryPaused; }
 
+  // "Bluetooth wanted" session flag. Set when the user turns the remote on
+  // (reader menu / settings toggle), cleared when they turn it off or Bluetooth
+  // is disallowed (autosync). It SURVIVES every system-driven teardown — a
+  // section-build memory pause, leaving and re-entering the reader, a WiFi sync —
+  // so the reader's auto-restore can bring the stack back once conditions allow,
+  // instead of staying down until a manual re-toggle. Runtime only:
+  // never persisted, so a fresh boot starts with Bluetooth off (boot-time BLE
+  // reservation was rejected as too costly for non-BLE users).
+  void setBluetoothWanted(bool wanted);
+  bool isBluetoothWanted() const { return _bluetoothWanted; }
+
+  // Record that WiFi was just powered down (call at a sync's WiFi teardown).
+  // Bringing the BT controller up too soon after esp_wifi_stop() hard-freezes
+  // this chip, so beginAutoRestoreAttempt() refuses until BLE_WIFI_SETTLE_MS passes.
+  void noteWifiActivity();
+
+  // Gate for an automatic restore, called from the reader's idle loop. Returns
+  // true (and stamps the rate-limit clock) only when it's a good moment to bring
+  // the stack back: wanted, currently down, not mid memory-pause, and the WiFi
+  // settle window elapsed. It does NOT enable — the CALLER must first free the
+  // heap the controller needs (drop the chapter layout + glyph cache, as the
+  // manual toggle does) and then call enable(). This split exists because on the
+  // heap-tight X3 the only way to get a >=30KB contiguous block with a book open
+  // is to release the resident section first, which only the reader can do.
+  bool beginAutoRestoreAttempt();
+
   // Check if BLE has had activity recently (within last 4 minutes)
   // Used by power manager to prevent sleep during BLE use
   bool hasRecentActivity() const;
@@ -174,11 +202,25 @@ class BluetoothHIDManager {
   bool _memoryPaused = false;
   volatile bool _maintenanceSuspended = false;  // render task asks loop-task maintenance to stand down
   volatile bool _maintenanceBusy = false;       // loop-task maintenance currently executing
+  bool _bluetoothWanted = false;                // user asked for the remote; survives system teardowns
+  unsigned long _lastWifiActivityMs = 0;        // millis() of the last WiFi power-down; gates re-init
+  unsigned long _lastRestoreAttemptMs = 0;      // rate-limits maybeAutoRestore()
   std::string _bondedDeviceAddress;
   std::string _bondedDeviceName;
 
   // Inactivity timeout (milliseconds)
   static constexpr unsigned long INACTIVITY_TIMEOUT_MS = 300000;  // 5 minutes
+  // Minimum quiet time after a WiFi teardown before the BT controller may be
+  // re-initialised. The WiFi->BT controller handoff hard-freezes this chip when
+  // it happens too soon; a 500ms settle was measured to still freeze, so keep a
+  // generous margin. WiFi is fully powered down (WIFI_OFF) at the sync teardown,
+  // and this defers the re-init to a later loop iteration rather than firing it
+  // immediately after esp_wifi_stop() — the two together are what make it safe.
+  static constexpr unsigned long BLE_WIFI_SETTLE_MS = 3000;
+  // Backoff between automatic restore attempts. Each attempt (in the reader) frees
+  // the chapter layout and re-renders, so a persistently-failing enable must not
+  // retry every loop — keep this generous.
+  static constexpr unsigned long BLE_RESTORE_RETRY_MS = 5000;
   unsigned long lastMaintenanceCheck = 0;
 };
 

@@ -30,6 +30,7 @@
 #include "SdCardFontSystem.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
+#include "activities/RenderLock.h"  // RenderLock::peek() for the BLE auto-restore render gate
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -534,15 +535,23 @@ void loop() {
   // after esp_wifi_stop() hard-freezes the device — which is exactly what a
   // mid-reading autosync teardown would set up.
   const bool bleAllowedHere = activityManager.keepsBluetoothActive() && SETTINGS.bluetoothAllowed();
-  // Note: there is deliberately NO automatic re-enable. Whenever the stack goes
-  // down (leaving the reader, a section-build memory pause, a WiFi sync, deep
-  // sleep), it stays down until the user flips the reader-menu or Bluetooth
-  // settings toggle — turning a chunk of heap on is always an explicit choice.
-  // Leaving the reader/BT settings: power the stack down immediately so its
-  // ~56KB is back in the heap before whatever comes next (home browsing, and
-  // especially a book open with its spine/section cache builds). The session
-  // flag survives, so the first button press back in the reader re-enables it.
+  // Autosync is mutually exclusive with the remote (shared radio + heap), so its
+  // being on means the user cannot want Bluetooth — clear the flag so nothing
+  // tries to restore the stack underneath a background sync.
+  if (!SETTINGS.bluetoothAllowed()) {
+    btMgr.setBluetoothWanted(false);
+  }
+  // The stack goes down for many reasons (leaving the reader, a section-build
+  // memory pause, a WiFi sync, deep sleep). When it does, the "Bluetooth wanted"
+  // session flag survives so the stack can be brought back without a manual
+  // re-toggle. The restore itself lives in the reader (EpubReaderActivity, driven
+  // off beginAutoRestoreAttempt()), because on the heap-tight X3 re-enabling with a
+  // book open requires releasing the resident chapter layout first — something only
+  // the reader can do. Here we only power the stack DOWN when it's not allowed.
   if (btMgr.isEnabled() && !bleAllowedHere) {
+    // Leaving the reader/BT settings: power the stack down immediately so its
+    // ~56KB is back in the heap before whatever comes next (home browsing, and
+    // especially a book open with its spine/section cache builds).
     LOG_INF("MAIN", "Disabling Bluetooth (%s)",
             SETTINGS.bluetoothAllowed() ? "outside reader/settings" : "autosync enabled");
     btMgr.disable();
@@ -552,10 +561,17 @@ void loop() {
   const bool bleRecentActivity = btMgr.isEnabled() && btMgr.hasRecentActivity();
 
   renderer.setFadingFix(SETTINGS.fadingFix);
-  // A connected remote leaves ~10-20KB free; the JPEG decoder wants ~36KB. Rather
-  // than fail that allocation ten times per page (once per BW/grayscale pass for
-  // any image too small to cache), don't attempt it while the stack is up.
-  renderer.setImagesSuppressed(btMgr.isEnabled());
+  // Suppress images whenever Bluetooth is in play — the stack being UP *or* the user
+  // wanting it (auto-restore may have it momentarily down for a section build). Two
+  // reasons: (1) a connected remote leaves ~10-20KB free and the JPEG decoder wants
+  // ~36KB, so the decode would fail ten times per page; (2) more importantly, the
+  // decode fragments the heap into the 20-30KB zone where a following BLE controller
+  // init HANGS (frozen device). Gating on "wanted" means the decoder never runs while
+  // a remote is in use, so the heap stays defragmented and auto-restore's enable()
+  // always finds a clean contiguous block. Suppression is render-time only (layout
+  // reserved the space at build time), so it neither invalidates the section cache
+  // nor changes the page — the image area is simply left blank.
+  renderer.setImagesSuppressed(btMgr.isEnabled() || btMgr.isBluetoothWanted());
 
   if (Serial && millis() - lastMemPrint >= 10000) {
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, MaxAlloc: %d bytes", ESP.getFreeHeap(),

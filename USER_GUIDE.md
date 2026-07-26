@@ -278,6 +278,17 @@ When saving a clipping you pick the start and end lines directly on the page —
 
 <img src="docs/images/user-guide/save-clipping.png" alt="Save Clipping line-selection view with the chosen passage highlighted on the page" width="300">
 
+### Clipping limit and exports
+
+Each book can hold up to **64 clippings** on the device. Every clipping you save is *also* appended to **`My Clippings.txt`** in the root of the SD card (the same Kindle-style format), and the device never deletes or trims that file — it is your permanent export.
+
+When a book shows **"Clipping limit reached."**, free up its slots and start again — your text is already safe in `My Clippings.txt`:
+
+- **Delete one clipping**: in **View Clippings**, select it and **hold Confirm** for about a second.
+- **Delete all of a book's clippings**: long-press the book in the file browser and choose **Delete Clippings** from the Book Options menu (the entry only appears for books that have clippings).
+
+Neither action touches `My Clippings.txt`, so copy it off the SD card whenever you want a backup of everything you've highlighted.
+
 ---
 
 ## 9. Reading Stats
