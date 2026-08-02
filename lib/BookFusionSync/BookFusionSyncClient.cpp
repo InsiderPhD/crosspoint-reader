@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <SecureHttpClient.h>
 #include <Stream.h>
+#include <esp_task_wdt.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -113,6 +114,7 @@ int performRequest(const char* url, const char* method, const char* contentType,
   //   error body of a 400 (OAuth authorization_pending).
   bool sinkError = false;
   const freeink::SecureHttpClient::DataCallback onData = [&](const uint8_t* data, size_t len) {
+    esp_task_wdt_reset();  // book downloads are network-bound; feed the loop WDT per chunk
     if (respStream != nullptr) {
       if (g_client->getStatus() != 200) return true;  // drain error body
       if (respStream->write(data, len) != len) {

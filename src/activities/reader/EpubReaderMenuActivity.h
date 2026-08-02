@@ -28,6 +28,7 @@ class EpubReaderMenuActivity final : public Activity {
     TOGGLE_BLUETOOTH,
     DISPLAY_QR,
     GO_HOME,
+    AUTOSYNC,
     SYNC_PUSH,
     SYNC_PULL,
     DELETE_CACHE
@@ -62,10 +63,15 @@ class EpubReaderMenuActivity final : public Activity {
   uint8_t pendingOrientation = 0;
   uint8_t selectedPageTurnOption = 0;
   uint8_t pendingButtonHints = 0;
+  uint8_t pendingAutosyncMode = 0;
   const std::vector<StrId> orientationLabels = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
                                                 StrId::STR_LANDSCAPE_CCW};
   const std::vector<StrId> buttonHintsLabels = {StrId::STR_NONE_OPT, StrId::STR_SHORT_PRESS, StrId::STR_LONG_PRESS,
                                                 StrId::STR_HINTS_FRONT_SHORT, StrId::STR_HINTS_FRONT_LONG};
+  // Mirrors the Settings > Reader "Progress Autosync" enum order (STR_NONE_OPT is
+  // the Off entry). Kept in sync with CrossPointSettings::AUTOSYNC.
+  const std::vector<StrId> autosyncLabels = {StrId::STR_NONE_OPT, StrId::STR_AUTOSYNC_CHAPTER, StrId::STR_AUTOSYNC_5PCT,
+                                             StrId::STR_AUTOSYNC_10PCT, StrId::STR_AUTOSYNC_ON_EXIT};
   const std::vector<const char*> pageTurnLabels = {
       I18N.get(StrId::STR_STATE_OFF), "Auto", "60s", "50s", "40s", "35s", "30s", "25s", "20s"};
   int currentPage = 0;

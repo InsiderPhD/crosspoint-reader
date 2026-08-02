@@ -394,23 +394,33 @@ void CrossPointWebServer::handleStatus() const {
   server->send(200, "application/json", json);
 }
 
-void CrossPointWebServer::scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const {
+bool CrossPointWebServer::scanFiles(const char* path, uint32_t offset, uint32_t limit,
+                                    const std::function<void(FileInfo)>& callback) const {
+  // Absolute bound on raw entries walked per request. A corrupt FAT chain can
+  // make openNextFile() loop forever, and the wdt reset below would keep that
+  // alive silently — this cap turns it into a logged, terminating request.
+  constexpr uint32_t MAX_RAW_ENTRIES = 10000;
+
   FsFile root = Storage.open(path);
   if (!root) {
     LOG_DBG("WEB", "Failed to open directory: %s", path);
-    return;
+    return false;
   }
 
   if (!root.isDirectory()) {
     LOG_DBG("WEB", "Not a directory: %s", path);
     root.close();
-    return;
+    return false;
   }
 
-  LOG_DBG("WEB", "Scanning files in: %s", path);
+  LOG_DBG("WEB", "Scanning files in: %s (offset=%u limit=%u)", path, static_cast<unsigned>(offset),
+          static_cast<unsigned>(limit));
 
   FsFile file = root.openNextFile();
   char name[500];
+  uint32_t visibleIdx = 0;  // Index over non-hidden entries; offset/limit apply to this.
+  uint32_t rawCount = 0;
+  bool hasMore = false;
   while (file) {
     file.getName(name, sizeof(name));
     auto fileName = String(name);
@@ -429,27 +439,50 @@ void CrossPointWebServer::scanFiles(const char* path, const std::function<void(F
     }
 
     if (!shouldHide) {
-      FileInfo info;
-      info.name = fileName;
-      info.isDirectory = file.isDirectory();
-
-      if (info.isDirectory) {
-        info.size = 0;
-        info.isEpub = false;
-      } else {
-        info.size = file.size();
-        info.isEpub = isEpubFile(info.name);
+      if (visibleIdx >= offset + limit) {
+        // One visible entry past the window is enough to know a next page exists.
+        hasMore = true;
+        file.close();
+        break;
       }
+      if (visibleIdx >= offset) {
+        FileInfo info;
+        info.name = fileName;
+        info.isDirectory = file.isDirectory();
 
-      callback(info);
+        if (info.isDirectory) {
+          info.size = 0;
+          info.isEpub = false;
+        } else {
+          info.size = file.size();
+          info.isEpub = isEpubFile(info.name);
+        }
+
+        callback(info);
+      }
+      ++visibleIdx;
     }
 
     file.close();
+    if (++rawCount >= MAX_RAW_ENTRIES) {
+      LOG_ERR("WEB", "Aborting scan of %s after %u raw entries (corrupt directory?)", path,
+              static_cast<unsigned>(rawCount));
+      break;
+    }
+    // TEMP diagnostic (web scan hang triage): progress lines make a slow or
+    // looping directory walk visible on serial.
+    if (rawCount % 25 == 0) {
+      LOG_DBG("WEB", "Scan progress: %u entries in %s, last='%s', heap=%u", static_cast<unsigned>(rawCount), path,
+              name, static_cast<unsigned>(ESP.getFreeHeap()));
+    }
     yield();               // Yield to allow WiFi and other tasks to process during long scans
     esp_task_wdt_reset();  // Reset watchdog to prevent timeout on large directories
     file = root.openNextFile();
   }
   root.close();
+  LOG_DBG("WEB", "Scan complete: %u raw entries in %s, hasMore=%d", static_cast<unsigned>(rawCount), path,
+          hasMore ? 1 : 0);
+  return hasMore;
 }
 
 bool CrossPointWebServer::isEpubFile(const String& filename) const { return FsHelpers::hasEpubExtension(filename); }
@@ -473,15 +506,30 @@ void CrossPointWebServer::handleFileListData() const {
     }
   }
 
+  // Pagination: bounds both the SD walk and the streamed response per request,
+  // so one huge (or corrupt) directory can't wedge the main loop for minutes.
+  constexpr uint32_t DEFAULT_PAGE_SIZE = 100;
+  constexpr uint32_t MAX_PAGE_SIZE = 200;
+  uint32_t offset = 0;
+  uint32_t limit = DEFAULT_PAGE_SIZE;
+  if (server->hasArg("offset")) {
+    offset = strtoul(server->arg("offset").c_str(), nullptr, 10);
+  }
+  if (server->hasArg("limit")) {
+    limit = strtoul(server->arg("limit").c_str(), nullptr, 10);
+    if (limit == 0) limit = DEFAULT_PAGE_SIZE;
+    if (limit > MAX_PAGE_SIZE) limit = MAX_PAGE_SIZE;
+  }
+
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
-  server->sendContent("[");
+  server->sendContent("{\"items\":[");
   char output[512];
   constexpr size_t outputSize = sizeof(output);
   bool seenFirst = false;
   JsonDocument doc;
 
-  scanFiles(currentPath.c_str(), [this, &output, &doc, seenFirst](const FileInfo& info) mutable {
+  const bool hasMore = scanFiles(currentPath.c_str(), offset, limit, [this, &output, &doc, seenFirst](const FileInfo& info) mutable {
     doc.clear();
     doc["name"] = info.name;
     doc["size"] = info.size;
@@ -495,17 +543,32 @@ void CrossPointWebServer::handleFileListData() const {
       return;
     }
 
+    // TEMP diagnostic (web scan hang triage): under heap starvation lwIP can
+    // stall each chunk send for seconds, which looks like a hard hang.
+    const uint32_t sendStart = millis();
     if (seenFirst) {
       server->sendContent(",");
     } else {
       seenFirst = true;
     }
     server->sendContent(output);
+    const uint32_t sendMs = millis() - sendStart;
+    if (sendMs > 500) {
+      LOG_DBG("WEB", "Slow sendContent: %ums for '%s', heap=%u", static_cast<unsigned>(sendMs), info.name.c_str(),
+              static_cast<unsigned>(ESP.getFreeHeap()));
+    }
   });
-  server->sendContent("]");
+  if (hasMore) {
+    char tail[48];
+    snprintf(tail, sizeof(tail), "],\"nextOffset\":%u}", static_cast<unsigned>(offset + limit));
+    server->sendContent(tail);
+  } else {
+    server->sendContent("]}");
+  }
   // End of streamed response, empty chunk to signal client
   server->sendContent("");
-  LOG_DBG("WEB", "Served file listing page for path: %s", currentPath.c_str());
+  LOG_DBG("WEB", "Served file listing page for path: %s (offset=%u hasMore=%d)", currentPath.c_str(),
+          static_cast<unsigned>(offset), hasMore ? 1 : 0);
 }
 
 void CrossPointWebServer::handleDownload() const {

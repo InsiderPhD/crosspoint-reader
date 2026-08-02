@@ -142,7 +142,10 @@ std::string getPanicInfo(bool full) {
 
 bool isRebootFromPanic() {
   const auto resetReason = esp_reset_reason();
-  return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP;
+  // Watchdog resets count as panics: the loop-task WDT (armed in setup())
+  // panics when the main loop wedges, and its trace shows where it was stuck.
+  return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP || resetReason == ESP_RST_TASK_WDT ||
+         resetReason == ESP_RST_INT_WDT;
 }
 
 }  // namespace HalSystem

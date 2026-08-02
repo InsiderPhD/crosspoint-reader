@@ -424,19 +424,35 @@ void TxtReaderActivity::renderPage() {
 }
 
 void TxtReaderActivity::renderStatusBar() const {
+  using CPS = CrossPointSettings;
   const float progress = totalPages > 0 ? (currentPage + 1) * 100.0f / totalPages : 0;
-  std::string title;
-  if (SETTINGS.statusBarTitle != CrossPointSettings::STATUS_BAR_TITLE::HIDE_TITLE) {
-    title = txt->getTitle();
+
+  // A .txt has no chapters, so map its single title into whichever title slot is
+  // placed (chapter takes precedence, matching the default centred layout).
+  std::string bookTitle;
+  std::string chapterTitle;
+  if (SETTINGS.statusBarChapterTitlePos != CPS::SB_POS_HIDE) {
+    chapterTitle = txt->getTitle();
+  } else if (SETTINGS.statusBarBookTitlePos != CPS::SB_POS_HIDE) {
+    bookTitle = txt->getTitle();
   }
-  uint32_t timeLeftSeconds = 0;
-  if (SETTINGS.statusBarTimeLeft != CrossPointSettings::TIME_LEFT_HIDE && SETTINGS.readingSpeedSecondsPerPage > 0) {
+
+  // Likewise, the single remaining-time estimate fills whichever time-left slot is placed.
+  uint32_t bookTimeLeftSeconds = 0;
+  uint32_t chapterTimeLeftSeconds = 0;
+  if (SETTINGS.readingSpeedSecondsPerPage > 0) {
     const int pagesLeft = totalPages - currentPage - 1;
     if (pagesLeft > 0) {
-      timeLeftSeconds = static_cast<uint32_t>(pagesLeft) * SETTINGS.readingSpeedSecondsPerPage;
+      const uint32_t seconds = static_cast<uint32_t>(pagesLeft) * SETTINGS.readingSpeedSecondsPerPage;
+      if (SETTINGS.statusBarChapterTimeLeftPos != CPS::SB_POS_HIDE) {
+        chapterTimeLeftSeconds = seconds;
+      } else if (SETTINGS.statusBarBookTimeLeftPos != CPS::SB_POS_HIDE) {
+        bookTimeLeftSeconds = seconds;
+      }
     }
   }
-  GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title, 0, 0, timeLeftSeconds);
+  GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, bookTitle, chapterTitle, chapterTimeLeftSeconds,
+                    bookTimeLeftSeconds);
 }
 
 void TxtReaderActivity::saveProgress() const {

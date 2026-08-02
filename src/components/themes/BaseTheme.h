@@ -179,9 +179,16 @@ class BaseTheme {
                               const std::function<UIIcon(int index)>& rowIcon) const;
   virtual Rect drawPopup(const GfxRenderer& renderer, const char* message) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
-  virtual void drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
-                             const int pageCount, std::string title, const int paddingBottom = 0,
-                             const int textYOffset = 0, const uint32_t timeLeftSeconds = 0) const;
+  // Draws the reader status bar. Each element (battery, book/chapter title,
+  // book %, chapter page count, book/chapter time-left, clock, bookmark) carries
+  // its own Hide/Left/Middle/Right position in settings and is laid out into the
+  // matching cluster here. centerOverride, when non-empty, replaces the titles
+  // with a single centred string (used for the auto page-turn banner).
+  virtual void drawStatusBar(GfxRenderer& renderer, float bookProgress, int currentPage, int pageCount,
+                             const std::string& bookTitle, const std::string& chapterTitle,
+                             uint32_t chapterTimeLeftSeconds = 0, uint32_t bookTimeLeftSeconds = 0,
+                             bool isPageBookmarked = false, int paddingBottom = 0, int textYOffset = 0,
+                             const std::string& centerOverride = std::string()) const;
   virtual void drawHelpText(const GfxRenderer& renderer, Rect rect, const char* label) const;
   virtual void drawTextField(const GfxRenderer& renderer, Rect rect, const int textWidth, bool cursorMode = false,
                              int contentStartX = 0, int contentWidth = 0) const;

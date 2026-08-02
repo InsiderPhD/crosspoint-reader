@@ -1,6 +1,7 @@
 #include "HomeActivity.h"
 
 #include <Bitmap.h>
+#include <BluetoothHIDManager.h>
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -8,9 +9,12 @@
 #include <I18n.h>
 #include <Utf8.h>
 #include <Xtc.h>
+#include <esp_heap_caps.h>
 
 #include <cstring>
 #include <vector>
+
+#include "SilentRestart.h"
 
 #include "../util/ConfirmationActivity.h"
 #include "BookDetailsActivity.h"
@@ -21,6 +25,10 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+
+// Largest-free-block floor below which arriving home triggers a defrag restart.
+// See the checkpoint comment in onEnter() for how this value was chosen.
+static constexpr size_t FRAG_RESTART_THRESHOLD = 24 * 1024;
 
 int HomeActivity::getMenuItemCount() const {
   int count = 4;  // File Browser, File transfer, Stats, Settings
@@ -117,6 +125,28 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
 void HomeActivity::onEnter() {
   Activity::onEnter();
+
+  // Heap defragmentation checkpoint. Long reader sessions (32KB inflate blocks,
+  // JPEG decode) and a BLE enable/disable cycle (freeing NimBLE returns ~48KB but
+  // barely moves the largest block) fragment the heap in ways free() can't undo;
+  // a silent reboot is the only real defrag. Home is the safe moment: no book
+  // open, previous activity destroyed, nothing in flight. Fresh boot has ~33KB
+  // largest block, so 24KB means "meaningfully degraded" — and also sits at the
+  // floor of the 20-30KB zone where a later BLE controller init can hang.
+  // Guards: skip while Bluetooth is wanted (enable state is per-session, so a
+  // reboot would silently kill a connected remote), and skip in the first 20s
+  // after boot so a device whose baseline is below the threshold can never
+  // reboot-loop (the post-restart goHome always lands inside this window).
+  if (millis() > 20000 && !BluetoothHIDManager::getInstance().isBluetoothWanted() &&
+      !BluetoothHIDManager::getInstance().isEnabled()) {
+    const size_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    if (largestBlock < FRAG_RESTART_THRESHOLD) {
+      LOG_INF("HOME", "Heap fragmented (largest block %u < %u), silent restart to defrag",
+              static_cast<unsigned>(largestBlock), static_cast<unsigned>(FRAG_RESTART_THRESHOLD));
+      silentRestart();
+      return;  // Not reached — ESP.restart() does not return — but keeps intent clear.
+    }
+  }
 
   // Check if OPDS browser URL is configured
   hasOpdsUrl = strlen(SETTINGS.opdsServerUrl) > 0;

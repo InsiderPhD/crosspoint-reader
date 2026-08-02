@@ -69,6 +69,16 @@ class CrossPointSettings {
     XTC_STATUS_BAR_TOP = 2,
     XTC_STATUS_BAR_MODE_COUNT
   };
+  // Per-element status-bar position. Each element cycles Hide -> Left -> Middle
+  // -> Right; this single picker replaces the old show/hide toggles and
+  // Book/Chapter enums so any element can sit in any cluster independently.
+  enum STATUS_BAR_POS : uint8_t {
+    SB_POS_HIDE = 0,
+    SB_POS_LEFT = 1,
+    SB_POS_MIDDLE = 2,
+    SB_POS_RIGHT = 3,
+    STATUS_BAR_POS_COUNT
+  };
 
   enum ORIENTATION {
     PORTRAIT = 0,       // 480x800 logical coordinates (current default)
@@ -311,7 +321,12 @@ class CrossPointSettings {
   uint8_t sleepStatSlot3 = SLEEP_STAT_NONE;
   // Contact (e.g. phone number) shown by the SLEEP_STAT_RETURN "if found" line. Empty = unset.
   char returnContact[32] = "";
-  // Status bar settings (statusBar retained for migration only)
+  // Status bar settings.
+  // The legacy toggle/enum fields below (statusBar, statusBarChapterPageCount,
+  // statusBarBookProgressPercentage, statusBarTitle, statusBarBattery,
+  // statusBarTimeLeft) are retained for one-time migration only — the live
+  // layout is driven by the per-element statusBar*Pos fields further down. See
+  // migrateStatusBarPositions().
   uint8_t statusBar = FULL;
   uint8_t statusBarChapterPageCount = 1;
   uint8_t statusBarBookProgressPercentage = 1;
@@ -321,6 +336,27 @@ class CrossPointSettings {
   uint8_t statusBarBattery = 1;
   uint8_t statusBarTimeLeft = TIME_LEFT_HIDE;
   uint8_t xtcStatusBarMode = XTC_STATUS_BAR_HIDE;
+  // Per-element cluster positions (STATUS_BAR_POS). Defaults reproduce the
+  // classic layout: battery + bookmark on the left, chapter title centred,
+  // chapter page count and book percentage on the right.
+  uint8_t statusBarBatteryPos = SB_POS_LEFT;
+  uint8_t statusBarBookTitlePos = SB_POS_HIDE;
+  uint8_t statusBarChapterTitlePos = SB_POS_MIDDLE;
+  uint8_t statusBarBookPercentPos = SB_POS_RIGHT;
+  uint8_t statusBarChapterPagePos = SB_POS_RIGHT;
+  uint8_t statusBarBookTimeLeftPos = SB_POS_HIDE;
+  uint8_t statusBarChapterTimeLeftPos = SB_POS_HIDE;
+  uint8_t statusBarClockPos = SB_POS_HIDE;
+  // Bookmark indicator: shows only on pages that carry a bookmark.
+  uint8_t statusBarBookmarkPos = SB_POS_LEFT;
+  // Bluetooth remote state: reports Down (stack off) / Up (on, no remote linked)
+  // / Connected. Hidden by default — opt-in for page-turner users.
+  uint8_t statusBarBluetoothPos = SB_POS_HIDE;
+  // Extra empty pixels reserved above the status bar (between body text and the
+  // bar). 0 = classic layout; capped at STATUS_BAR_TOP_MARGIN_MAX.
+  static constexpr uint8_t STATUS_BAR_TOP_MARGIN_MAX = 20;
+  static constexpr uint8_t STATUS_BAR_TOP_MARGIN_STEP = 4;
+  uint8_t statusBarTopMargin = 0;
   // Clock display in status bar (X3 only, requires DS3231 RTC)
   uint8_t statusBarClock = 0;
   // Clock UTC offset in quarter-hour steps, biased by 48 so it fits in uint8_t.
@@ -399,6 +435,14 @@ class CrossPointSettings {
   char bleBondedDeviceAddr[18] = "";
   char bleBondedDeviceName[32] = "";
   uint8_t bleBondedDeviceAddrType = 0;
+  // Learned two-button mapping for the bonded remote: the HID report byte index
+  // and value that identify each button's press (see BluetoothHIDManager's
+  // structural press detector). Index 0xFF = unmapped, meaning every press pages
+  // forward. Taught by the mapping wizard in Bluetooth settings.
+  uint8_t bleBackSigIndex = 0xFF;
+  uint8_t bleBackSigValue = 0;
+  uint8_t bleFwdSigIndex = 0xFF;
+  uint8_t bleFwdSigValue = 0;
   // "Browse Files" view: FOLDERS = the SD directory tree (default), TAGS = whole-library
   // tag folders (each book tag presented as a folder).
   uint8_t folderView = FOLDER_VIEW_FOLDERS;
@@ -489,13 +533,6 @@ class CrossPointSettings {
         return 0;
     }
   }
-  // Bluetooth and autosync cannot coexist: the BLE stack holds ~56KB (and wants
-  // a >=30KB contiguous block), it shares the single radio with WiFi, and
-  // bringing the BT controller up right after esp_wifi_stop() hard-freezes the
-  // device — which is exactly the sequence a mid-reading autosync creates.
-  // Autosync wins; the remote comes back when the user sets Autosync to Off.
-  bool bluetoothAllowed() const { return autosyncMode == AUTOSYNC_OFF; }
-
   int getReaderFontId() const;
   int getCodeFontId() const;
 
@@ -510,6 +547,11 @@ class CrossPointSettings {
   // One-time migration: applies legacy per-action settings (longPressAction, shortPwrBtn,
   // longPressChapterSkip, sideButtonLayout) to the new per-button action fields.
   static void migrateReaderActions(CrossPointSettings& settings);
+
+  // One-time migration: derives the per-element statusBar*Pos fields from the
+  // legacy status-bar show/hide toggles and Book/Chapter enums. Called when a
+  // settings file predates the position fields (they are absent from the JSON).
+  static void migrateStatusBarPositions(CrossPointSettings& settings);
 
  private:
   bool loadFromBinaryFile();

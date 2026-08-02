@@ -3,6 +3,7 @@
 #include <Logging.h>
 #include <WiFi.h>
 #include <driver/gpio.h>
+#include <esp_bt.h>
 #include <esp_sleep.h>
 #include <soc/gpio_num.h>
 
@@ -43,17 +44,26 @@ void HalPowerManager::setPowerSaving(bool enabled) {
     enabled = false;
   }
 
+  // The BLE controller's timing budget assumes >=80MHz (Espressif's DFS floor
+  // with BT enabled). At LOW_POWER_FREQ the controller drops advertisement
+  // reports and misses connection events — and scan start/stop at 10MHz has
+  // hard-frozen the device with no panic output (observed 2026-07-30, right
+  // after the inactivity disconnect dropped back to low-power mid-scan-cycle).
+  const int lowFreq =
+      esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE ? LOW_POWER_FREQ : BLE_LOW_POWER_FREQ;
+
   // Note: We don't use mutex here to avoid too much overhead,
   // it's not very important if we read a slightly stale value for currentLockMode
   const LockMode mode = currentLockMode;
 
-  if (mode == None && enabled && !isLowPower) {
-    LOG_DBG("PWR", "Going to low-power mode");
-    if (!setCpuFrequencyMhz(LOW_POWER_FREQ)) {
-      LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", LOW_POWER_FREQ);
+  if (mode == None && enabled && (!isLowPower || appliedLowFreq != lowFreq)) {
+    LOG_DBG("PWR", "Going to low-power mode (%d MHz)", lowFreq);
+    if (!setCpuFrequencyMhz(lowFreq)) {
+      LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", lowFreq);
       return;
     }
     isLowPower = true;
+    appliedLowFreq = lowFreq;
 
   } else if ((!enabled || mode != None) && isLowPower) {
     LOG_DBG("PWR", "Restoring normal CPU frequency");

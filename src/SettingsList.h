@@ -199,8 +199,9 @@ inline void appendReaderBehaviourSettings(std::vector<SettingInfo>& v) {
                                    "readerMenuBluetooth", StrId::STR_CAT_READER),
                SettingInfo::Toggle(StrId::STR_MENU_SYNC, &CrossPointSettings::readerMenuSync, "readerMenuSync",
                                    StrId::STR_CAT_READER),
-               // Silent background progress push. Turning this on disables the
-               // Bluetooth remote (shared radio + heap); see bluetoothAllowed().
+               // Silent background progress push. Coexists with a Bluetooth remote:
+               // when a push fires the BLE stack is torn down for the WiFi session and
+               // auto-restored afterwards (see EpubReaderActivity::runAutosyncNow).
                SettingInfo::Enum(StrId::STR_AUTOSYNC, &CrossPointSettings::autosyncMode,
                                  {StrId::STR_NONE_OPT, StrId::STR_AUTOSYNC_CHAPTER, StrId::STR_AUTOSYNC_5PCT,
                                   StrId::STR_AUTOSYNC_10PCT, StrId::STR_AUTOSYNC_ON_EXIT},
@@ -370,42 +371,65 @@ inline void appendOpdsSettings(std::vector<SettingInfo>& v) {
 
 // --- Status Bar Settings (web-only, uses StatusBarSettingsActivity) ---
 inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
-  v.insert(
-      v.end(),
-      {
-          SettingInfo::Toggle(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPageCount,
-                              "statusBarChapterPageCount", StrId::STR_CUSTOMISE_STATUS_BAR),
-          SettingInfo::Toggle(StrId::STR_BOOK_PROGRESS_PERCENTAGE, &CrossPointSettings::statusBarBookProgressPercentage,
-                              "statusBarBookProgressPercentage", StrId::STR_CUSTOMISE_STATUS_BAR),
-          SettingInfo::Enum(StrId::STR_PROGRESS_BAR, &CrossPointSettings::statusBarProgressBar,
-                            {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE}, "statusBarProgressBar",
-                            StrId::STR_CUSTOMISE_STATUS_BAR),
-          SettingInfo::Enum(
-              StrId::STR_PROGRESS_BAR_THICKNESS, &CrossPointSettings::statusBarProgressBarThickness,
-              {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM, StrId::STR_PROGRESS_BAR_THICK},
-              "statusBarProgressBarThickness", StrId::STR_CUSTOMISE_STATUS_BAR),
-          SettingInfo::Enum(StrId::STR_TITLE, &CrossPointSettings::statusBarTitle,
-                            {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE}, "statusBarTitle",
-                            StrId::STR_CUSTOMISE_STATUS_BAR),
-          SettingInfo::Toggle(StrId::STR_BATTERY, &CrossPointSettings::statusBarBattery, "statusBarBattery",
-                              StrId::STR_CUSTOMISE_STATUS_BAR),
-          SettingInfo::Enum(StrId::STR_TIME_LEFT, &CrossPointSettings::statusBarTimeLeft,
-                            {StrId::STR_HIDE, StrId::STR_CHAPTER, StrId::STR_BOOK}, "statusBarTimeLeft",
-                            StrId::STR_CUSTOMISE_STATUS_BAR),
-          // Clock entries (web settings only; device UI uses ClockOffsetActivity for the offset).
-          // Range 0..104 = quarter-hour steps from UTC-12:00 to UTC+14:00, biased by 48.
-          SettingInfo::Toggle(StrId::STR_CLOCK, &CrossPointSettings::statusBarClock, "statusBarClock",
-                              StrId::STR_CUSTOMISE_STATUS_BAR),
-          SettingInfo::Value(StrId::STR_CLOCK_UTC_OFFSET, &CrossPointSettings::clockUtcOffsetQ, {0, 104, 1},
-                             "clockUtcOffsetQ", StrId::STR_CUSTOMISE_STATUS_BAR),
-          SettingInfo::Enum(StrId::STR_CLOCK_FORMAT, &CrossPointSettings::clockFormat,
-                            {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H}, "clockFormat",
-                            StrId::STR_CUSTOMISE_STATUS_BAR),
-          // Persistence flag for NTP debounce. Resetting from the web UI forces a re-sync
-          // on next WiFi connect, which is useful when crossing time zones.
-          SettingInfo::Toggle(StrId::STR_CLOCK_SYNCED, &CrossPointSettings::clockHasBeenSynced, "clockHasBeenSynced",
-                              StrId::STR_CUSTOMISE_STATUS_BAR),
-      });
+  v.insert(v.end(),
+           {
+               // Per-element cluster positions (Hide / Left / Center / Right). These replace
+               // the legacy show/hide toggles and Book/Chapter enums; every element can now
+               // sit in any cluster independently.
+               SettingInfo::Enum(StrId::STR_BATTERY, &CrossPointSettings::statusBarBatteryPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBatteryPos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOK_TITLE, &CrossPointSettings::statusBarBookTitlePos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBookTitlePos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CHAPTER_TITLE, &CrossPointSettings::statusBarChapterTitlePos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarChapterTitlePos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOK_PROGRESS_PERCENTAGE, &CrossPointSettings::statusBarBookPercentPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBookPercentPos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPagePos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarChapterPagePos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOK_TIME_LEFT, &CrossPointSettings::statusBarBookTimeLeftPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBookTimeLeftPos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CHAPTER_TIME_LEFT, &CrossPointSettings::statusBarChapterTimeLeftPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarChapterTimeLeftPos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOKMARK, &CrossPointSettings::statusBarBookmarkPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBookmarkPos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BLUETOOTH, &CrossPointSettings::statusBarBluetoothPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBluetoothPos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_PROGRESS_BAR, &CrossPointSettings::statusBarProgressBar,
+                                 {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE}, "statusBarProgressBar",
+                                 StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(
+                   StrId::STR_PROGRESS_BAR_THICKNESS, &CrossPointSettings::statusBarProgressBarThickness,
+                   {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM, StrId::STR_PROGRESS_BAR_THICK},
+                   "statusBarProgressBarThickness", StrId::STR_CUSTOMISE_STATUS_BAR),
+               // Extra empty pixels reserved between the body text and the status bar.
+               SettingInfo::Value(StrId::STR_STATUS_BAR_TOP_MARGIN, &CrossPointSettings::statusBarTopMargin,
+                                  {0, CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX,
+                                   CrossPointSettings::STATUS_BAR_TOP_MARGIN_STEP},
+                                  "statusBarTopMargin", StrId::STR_CUSTOMISE_STATUS_BAR),
+               // Clock entries (web settings only; device UI uses ClockOffsetActivity for the offset).
+               // Range 0..104 = quarter-hour steps from UTC-12:00 to UTC+14:00, biased by 48.
+               SettingInfo::Enum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClockPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarClockPos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Value(StrId::STR_CLOCK_UTC_OFFSET, &CrossPointSettings::clockUtcOffsetQ, {0, 104, 1},
+                                  "clockUtcOffsetQ", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CLOCK_FORMAT, &CrossPointSettings::clockFormat,
+                                 {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H}, "clockFormat",
+                                 StrId::STR_CUSTOMISE_STATUS_BAR),
+               // Persistence flag for NTP debounce. Resetting from the web UI forces a re-sync
+               // on next WiFi connect, which is useful when crossing time zones.
+               SettingInfo::Toggle(StrId::STR_CLOCK_SYNCED, &CrossPointSettings::clockHasBeenSynced,
+                                   "clockHasBeenSynced", StrId::STR_CUSTOMISE_STATUS_BAR),
+           });
 }
 
 }  // namespace SettingsListDetail

@@ -5,6 +5,7 @@
 #include <StreamString.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
+#include <esp_task_wdt.h>
 
 #include <cstring>
 
@@ -65,6 +66,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent) {
   // error bodies are drained without reaching the caller's stream.
   bool sinkError = false;
   const int httpCode = http.GET([&](const uint8_t* data, size_t len) {
+    esp_task_wdt_reset();  // download length is network-bound; feed the loop WDT per chunk
     if (http.getStatus() != 200) return true;
     if (outContent.write(data, len) != len) {
       sinkError = true;
@@ -133,6 +135,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   size_t downloaded = 0;
 
   const int httpCode = http.GET([&](const uint8_t* data, size_t len) {
+    esp_task_wdt_reset();  // download length is network-bound; feed the loop WDT per chunk
     if (http.getStatus() != 200) return true;  // drain error body
     if (!fileOpen) {
       if (Storage.exists(destPath.c_str())) {

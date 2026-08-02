@@ -14,7 +14,19 @@ class BluetoothSettingsActivity : public Activity {
   // radios feel the same: a dedicated scanning screen you can back out of, a
   // plain list of what was found, and an explicit connected/failed result —
   // rather than folding actions into the list as pseudo-rows.
-  enum class ViewMode { MAIN_MENU, SCANNING, DEVICE_LIST, CONNECTING, CONNECTED, CONNECT_FAILED };
+  // MAP_BACK / MAP_FORWARD are the button-mapping wizard: each step captures the
+  // same button twice (a one-button "toggle" remote alternates codes per press,
+  // and the double capture is what exposes it).
+  enum class ViewMode {
+    MAIN_MENU,
+    SCANNING,
+    DEVICE_LIST,
+    CONNECTING,
+    CONNECTED,
+    CONNECT_FAILED,
+    MAP_BACK,
+    MAP_FORWARD
+  };
 
   ViewMode viewMode = ViewMode::MAIN_MENU;
   int selectedIndex = 0;
@@ -30,6 +42,15 @@ class BluetoothSettingsActivity : public Activity {
   unsigned long lastSeenRemoteInputMs = 0;
   unsigned long lastRemotePressAtMs = 0;
   uint32_t remotePressCount = 0;
+
+  // Button-mapping wizard state. Each step locks a signature after two matching
+  // presses; the back step's result is held here until the forward step confirms.
+  unsigned long lastSeenMapPressMs = 0;
+  uint8_t mapStepPresses = 0;  // presses captured in the current step (0 or 1)
+  uint8_t mapStepSigIndex = 0;
+  uint8_t mapStepSigValue = 0;
+  uint8_t mapBackSigIndex = 0;
+  uint8_t mapBackSigValue = 0;
 
   static constexpr uint32_t SCAN_DURATION_MS = 10000;
 
@@ -67,6 +88,17 @@ class BluetoothSettingsActivity : public Activity {
   void beginScan();
   void connectToSelected();
   void disconnectAll();
+
+  // Button-mapping wizard (MAP_BACK / MAP_FORWARD view modes).
+  void beginButtonMapping();
+  void handleMappingInput();
+  // Polls the manager for a captured press and advances the wizard.
+  void pollMappingPress();
+  // Leaves the wizard for the main menu. Saves the learned pair, clears the
+  // mapping (indistinguishable buttons), or keeps the old one (cancel).
+  enum class MappingOutcome { SAVED, CLEARED, CANCELLED };
+  void endButtonMapping(MappingOutcome outcome);
+  void renderMapping() const;
 
   std::string getSignalStrengthIndicator(const int32_t rssi) const;
 };

@@ -1,5 +1,6 @@
 #include "EpubReaderActivity.h"
 
+#include <BluetoothHIDManager.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
@@ -13,6 +14,7 @@
 #include <Memory.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
+#include <esp_log.h>
 #include <esp_system.h>
 
 #include <algorithm>
@@ -75,8 +77,30 @@ constexpr unsigned long bookmarkMessageDurationMs = 1500;
 const std::vector<unsigned long> PAGE_TURN_DURATIONS_MS = {0,       0,       60000UL, 50000UL, 40000UL,
                                                            35000UL, 30000UL, 25000UL, 20000UL};
 
+// A page render's single largest contiguous need is the ~3KB glyph-group temp
+// buffer (page buffers are ~1.5KB per style, grayscale scratch degrades to 2KB).
+// Below this largest-free-block floor the render degrades glyph-by-glyph and
+// unchecked allocations abort, so the BLE stack is paused instead (see
+// renderContents). Deliberately snug: the steady BT-up largest block sits ~8KB
+// on the X4, and an 8KB threshold made every render pause the stack, ping-
+// ponging against auto-restore. Trip only when the ~3KB temp genuinely won't fit.
+constexpr uint32_t BT_RENDER_MIN_LARGEST_BLOCK = 4096;
+// After a guard pause, hold auto-restore off this long (its normal retry is ~5s,
+// which re-created the tight heap and ping-ponged). A page turn's chapter-build
+// pause is NOT deferred — only the guard sets this.
+constexpr unsigned long BT_GUARD_RESTORE_DEFER_MS = 60000;
+
 void enterDeepSleepFromReaderAction() {
   HalPowerManager::Lock powerLock;  // hold full CPU speed across the BLE teardown + sleep prep
+
+  // IDF/NimBLE logging routes through log_printfv -> newlib vfprintf, a ~2KB
+  // transient stack frame. The sleep sequence already runs loopTask near its 8KB
+  // limit (activity teardown -> progress/stats JSON -> SdFat SPI); an IDF log
+  // firing at that depth overflowed it by 4 bytes (stack protection fault,
+  // 2026-07-29 — only reachable with BLE up, which is the only source of IDF
+  // logs in this path). We're powering off: drop IDF logs for the remainder.
+  // Runtime-only; logging is back on the wake reboot.
+  esp_log_level_set("*", ESP_LOG_NONE);
 
   // BLE cannot survive deep sleep; shut the stack down cleanly so the remote
   // disconnects instead of timing out and NimBLE releases its heap. main.cpp's
@@ -341,6 +365,7 @@ void EpubReaderActivity::onEnter() {
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
 
   epub->setupCacheDir();
+  reloadBookmarkCache();
 
   FsFile f;
   if (Storage.openFileForRead("ERS", epub->getCachePath() + "/progress.bin", f)) {
@@ -730,19 +755,6 @@ void EpubReaderActivity::jumpToPercent(int percent) {
 
 void EpubReaderActivity::toggleBluetoothFromReader() {
   auto& btMgr = BluetoothHIDManager::getInstance();
-  // Reachable via a bound button even though the menu row is hidden — explain
-  // rather than silently doing nothing.
-  if (!SETTINGS.bluetoothAllowed()) {
-    RenderLock lock(*this);
-    if (SETTINGS.darkMode) renderer.invertScreen();
-    GUI.drawPopup(renderer, tr(STR_BT_OFF_AUTOSYNC));
-    if (SETTINGS.darkMode) renderer.invertScreen();
-    renderer.displayBuffer();
-    delay(1500);
-    pagesUntilFullRefresh = 1;
-    requestUpdate();
-    return;
-  }
   const bool turningOn = !btMgr.isEnabled();
   // Record the user's intent up front. When turning on, this arms maybeAutoRestore()
   // so the stack comes back by itself after the memory-critical operations that tear
@@ -758,9 +770,13 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
   }
   if (turningOn) {
     // The BLE stack wants ~56KB and the page must still be renderable
-    // afterwards. Free the chapter layout (reloads from cache) and the
-    // glyph cache (re-warms) before starting it — enabling with a book
-    // loaded otherwise leaves single-digit KB and the next render OOMs.
+    // afterwards. Free the chapter layout (reloads from cache), the book
+    // metadata (reloaded below) and the glyph cache (re-warms) before
+    // starting it. The Epub release matters as much as the section's: with
+    // its spine/TOC strings resident the controller's chunks interleave
+    // with them, and the free heap left for the next render is shredded —
+    // single-digit KB with no glyph-buffer-sized block on the X3.
+    const std::string epubPath = epub ? epub->getPath() : std::string();
     {
       RenderLock lock(*this);
       if (section) {
@@ -768,6 +784,7 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
         cachedChapterTotalPageCount = section->pageCount;
         section.reset();
       }
+      epub.reset();
     }
     if (auto* fcm = renderer.getFontCacheManager()) {
       fcm->clearCache();
@@ -779,6 +796,11 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
       vTaskDelay(1500 / portTICK_PERIOD_MS);
+    }
+    // The Epub comes back whether or not enable() succeeded — the reader
+    // can't render without it.
+    if (!epubPath.empty() && !reloadEpubAfterBluetooth(epubPath)) {
+      return;
     }
   } else {
     btMgr.disable();
@@ -797,7 +819,7 @@ void EpubReaderActivity::maybeAutoRestoreBluetooth() {
   // controller's contiguous block, so this guarantees we NEVER enable() on an
   // un-freed (possibly fragmented) heap — the exact state that hangs controller
   // init. If section is null (mid-build / empty chapter) we simply wait.
-  if (!section) {
+  if (!section || !epub) {
     return;
   }
   // Let the page settle before doing a heap-freeing restore: it avoids stacking a
@@ -814,9 +836,12 @@ void EpubReaderActivity::maybeAutoRestoreBluetooth() {
   }
 
   LOG_INF("BT", "Auto-restoring Bluetooth: freeing chapter layout for the controller's heap");
-  // Free exactly what the manual toggle frees — the resident chapter layout and the
-  // glyph cache — so esp_bt_controller_init() gets its >=30KB contiguous block. The
-  // position is preserved and the section reloads from cache on the redraw below.
+  // Free exactly what the manual toggle frees — the resident chapter layout, the
+  // Epub and the glyph cache — so esp_bt_controller_init() gets its >=30KB
+  // contiguous block AND the post-enable heap isn't shredded around the spine/TOC
+  // strings. The position is preserved; the section reloads from cache on the
+  // redraw below and the Epub is reloaded here.
+  const std::string epubPath = epub->getPath();
   {
     RenderLock lock(*this);
     if (section) {
@@ -825,6 +850,7 @@ void EpubReaderActivity::maybeAutoRestoreBluetooth() {
       nextPageNumber = section->currentPage;
       section.reset();
     }
+    epub.reset();
   }
   if (auto* fcm = renderer.getFontCacheManager()) {
     fcm->clearCache();
@@ -832,9 +858,29 @@ void EpubReaderActivity::maybeAutoRestoreBluetooth() {
   if (!btMgr.enable()) {
     LOG_INF("BT", "Auto-restore enable() failed (heap still too tight); will retry after backoff");
   }
+  // The Epub comes back whether or not enable() succeeded — the reader can't
+  // render without it.
+  if (!reloadEpubAfterBluetooth(epubPath)) {
+    return;
+  }
   // Redraw: reloads the section from cache (images stay suppressed while wanted, so
   // the page looks identical) and clears the transiently-null section state.
   requestUpdate();
+}
+
+bool EpubReaderActivity::reloadEpubAfterBluetooth(const std::string& epubPath) {
+  RenderLock lock(*this);
+  epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
+  // Framebuffer-leased inflate dictionary: this reload runs right after the BLE
+  // stack's ~56KB landed, when the heap can't spare the inflate scratch malloc
+  // (see ReaderActivity::loadEpub).
+  InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
+  if (!epub->load(true, SETTINGS.embeddedStyle == 0)) {
+    LOG_ERR("BT", "Failed to reload epub after Bluetooth enable");
+    onGoHome();
+    return false;
+  }
+  return true;
 }
 
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action) {
@@ -890,6 +936,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResult(std::make_unique<EpubReaderBookmarksActivity>(renderer, mappedInput, epub, epub->getPath(),
                                                                            currentSpineIndex, currentSpinePageCount),
                              [this](const ActivityResult& result) {
+                               reloadBookmarkCache();
                                if (!result.isCancelled) {
                                  const auto& jump = std::get<SyncResult>(result.data);
                                  RenderLock lock(*this);
@@ -971,6 +1018,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           section.reset();
           epub->clearCache();
           epub->setupCacheDir();
+          reloadBookmarkCache();
           saveProgress(backupSpine, backupPage, backupPageCount);
         }
       }
@@ -1858,6 +1906,7 @@ EpubReaderActivity::BookmarkToggleResult EpubReaderActivity::addBookmark() {
       LOG_ERR("ERS", "Failed to save bookmark to %s", path.c_str());
       return BookmarkToggleResult::None;
     }
+    cachedBookmarks = std::move(bookmarks);
     return BookmarkToggleResult::Removed;
   } else {
     bookmarks.insert(bookmarks.begin(), entry);
@@ -1865,8 +1914,36 @@ EpubReaderActivity::BookmarkToggleResult EpubReaderActivity::addBookmark() {
       LOG_ERR("ERS", "Failed to save bookmark to %s", path.c_str());
       return BookmarkToggleResult::None;
     }
+    cachedBookmarks = std::move(bookmarks);
     return BookmarkToggleResult::Added;
   }
+}
+
+void EpubReaderActivity::reloadBookmarkCache() {
+  cachedBookmarks.clear();
+  if (!epub) {
+    return;
+  }
+  const std::string path = BookmarkUtil::getBookmarkPath(epub->getPath());
+  if (Storage.exists(path.c_str())) {
+    String json = Storage.readFile(path.c_str());
+    if (!json.isEmpty()) {
+      JsonSettingsIO::loadBookmarks(cachedBookmarks, json.c_str());
+    }
+  }
+}
+
+bool EpubReaderActivity::isCurrentPageBookmarked() const {
+  if (!section || cachedBookmarks.empty()) {
+    return false;
+  }
+  // Match on the cached page mapping the bookmark was created with; bookmarks made
+  // under a different pagination (font size change etc.) simply don't light up.
+  return std::any_of(cachedBookmarks.begin(), cachedBookmarks.end(), [this](const BookmarkEntry& b) {
+    return b.computedSpineIndex == static_cast<uint16_t>(currentSpineIndex) &&
+           b.computedChapterProgress == static_cast<uint16_t>(section->currentPage) &&
+           b.computedChapterPageCount == static_cast<uint16_t>(section->pageCount);
+  });
 }
 
 void EpubReaderActivity::recordStatsProgress() {
@@ -1980,6 +2057,16 @@ bool EpubReaderActivity::runAutosyncNow() {
   }
   const std::string epubPath = payload->epubPath;
 
+  // Autosync coexists with a Bluetooth remote. The BLE stack holds ~56KB and
+  // shares the single radio with WiFi, so it MUST come down before the push —
+  // otherwise the WiFi+TLS session has no heap. Pausing it here (rather than
+  // leaving it to the section-build path) also keeps the loop-task auto-restore
+  // fenced out for the whole memory-critical section. If Bluetooth is "wanted",
+  // the reader's maybeAutoRestoreBluetooth() brings the stack back once the push
+  // is done, the WiFi settle timer has elapsed, and a chapter is resident again.
+  std::optional<BleMemoryPause> blePause;
+  blePause.emplace();
+
   // Release the chapter layout AND the book metadata before the TLS session,
   // exactly as the manual sync does. The wolfSSL handshake is far leaner than
   // the old mbedTLS one (no 2x16KB contiguous record pair, X25519 key share),
@@ -2002,6 +2089,10 @@ bool EpubReaderActivity::runAutosyncNow() {
 
   if (ProgressAutoSync::heapAllowsPush()) {
     ProgressAutoSync::pushBlocking(*payload);
+    // Bringing the BT controller up right after esp_wifi_stop() hard-freezes
+    // this chip if it happens too soon. Stamp the WiFi-off time so the BLE
+    // auto-restore honours BLE_WIFI_SETTLE_MS before re-enabling.
+    BluetoothHIDManager::getInstance().noteWifiActivity();
   } else {
     ProgressAutoSync::disarm();
   }
@@ -2028,6 +2119,27 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
   const auto t0 = millis();
+
+  // Degraded-heap guard: with the BLE stack (and especially a connected remote)
+  // resident, the heap can fragment to where the render's contiguous
+  // allocations no longer fit even with ~10KB total free — glyphs go missing
+  // and any unchecked allocation aborts the device. Tear the stack down instead
+  // (same BleMemoryPause the section builds use, safe from the render task);
+  // the freed ~50KB defragments the render, and the reader's auto-restore
+  // re-enables BLE once the page settles. The remote reconnects on its next
+  // press. Crashing loses the reading session; a reconnect press does not.
+  {
+    auto& btMgr = BluetoothHIDManager::getInstance();
+    if (btMgr.isEnabled() && ESP.getMaxAllocHeap() < BT_RENDER_MIN_LARGEST_BLOCK) {
+      LOG_INF("ERS", "Largest free block %u < %lu before render; pausing Bluetooth to defragment",
+              ESP.getMaxAllocHeap(), (unsigned long)BT_RENDER_MIN_LARGEST_BLOCK);
+      BleMemoryPause blePause;  // stack goes down now; flag clears at scope end so auto-restore can re-arm
+      // Without the defer, restore's ~5s retry re-enables into the same tight
+      // heap and the guard fires again — an endless enable/reload/pause cycle.
+      btMgr.deferAutoRestore(BT_GUARD_RESTORE_DEFER_MS);
+    }
+  }
+
   auto* fcm = renderer.getFontCacheManager();
   fcm->resetStats();
 
@@ -2048,8 +2160,14 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   LOG_DBG("ERS", "Heap: before=%lu after=%lu delta=%ld", heapBefore, heapAfter,
           (int32_t)heapAfter - (int32_t)heapBefore);
 
-  // Force special handling for pages with images when anti-aliasing is on
-  bool imagePageWithAA = page->hasImages() && SETTINGS.textAntiAliasing;
+  // Force special handling for pages with images when anti-aliasing is on.
+  // Skipped when images are suppressed (e.g. Bluetooth holds the heap): the image
+  // area is blank, so the slow blank+double-refresh+gray-cleanup dance would only
+  // burn several CPU-bound seconds per page for nothing. That stall is what makes
+  // a BLE clicker feel dead on image pages — its one-shot press pulses collapse or
+  // debounce away while the render task churns. Blank image => render like plain
+  // text, and page turns stay responsive.
+  bool imagePageWithAA = page->hasImages() && SETTINGS.textAntiAliasing && !renderer.areImagesSuppressed();
 
   page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
   if (ReaderUtils::footnotesOnPage())
@@ -2104,19 +2222,33 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // (DirectPixelWriter) honor the active strip target.
   // Skipped in dark mode — AA LUT is computed for black-on-white.
   if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode && renderer.supportsStripGrayscale()) {
-    constexpr int STRIP_ROWS = 80;
     const int gh = renderer.getDisplayHeight();
     const int gwBytes = renderer.getDisplayWidthBytes();
 
-    auto scratch = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(gwBytes) * STRIP_ROWS);
+    // A tight or fragmented heap (typical with Bluetooth resident) often can't
+    // fit the full 8KB scratch, which used to drop AA for the page. Shorter
+    // strips need proportionally more render passes per plane (band culling
+    // keeps each pass cheap), so degrade the strip height before giving up.
+    int stripRows = 0;
+    std::unique_ptr<uint8_t[]> scratch;
+    for (const int tryRows : {80, 40, 20}) {
+      scratch = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(gwBytes) * tryRows);
+      if (scratch) {
+        stripRows = tryRows;
+        break;
+      }
+    }
     if (!scratch) {
-      LOG_ERR("ERS", "OOM: grayscale strip scratch (%d bytes); skipping AA this page", gwBytes * STRIP_ROWS);
+      LOG_ERR("ERS", "OOM: grayscale strip scratch (even %d bytes); skipping AA this page", gwBytes * 20);
     } else {
+      if (stripRows != 80) {
+        LOG_INF("ERS", "Grayscale strip scratch degraded to %d rows (%d bytes)", stripRows, gwBytes * stripRows);
+      }
       // Bands may be streamed in any order: X4 windows each via setRamArea, X3
       // via PTL.
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-      for (int y = 0; y < gh; y += STRIP_ROWS) {
-        const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
+      for (int y = 0; y < gh; y += stripRows) {
+        const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(0x00);
         page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
@@ -2130,8 +2262,8 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
       // MSB plane.
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-      for (int y = 0; y < gh; y += STRIP_ROWS) {
-        const int rows = (gh - y < STRIP_ROWS) ? (gh - y) : STRIP_ROWS;
+      for (int y = 0; y < gh; y += stripRows) {
+        const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(0x00);
         page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
@@ -2216,73 +2348,86 @@ void EpubReaderActivity::renderStatusBar() const {
   const float sectionChapterProg = (pageCount > 0) ? (static_cast<float>(currentPage) / pageCount) : 0;
   const float bookProgress = epub->calculateProgress(currentSpineIndex, sectionChapterProg) * 100;
 
-  std::string title;
+  using CPS = CrossPointSettings;
 
+  // Auto page-turn banner replaces the titles in the centre cluster while active.
+  std::string centerOverride;
   int textYOffset = 0;
-
   if (automaticPageTurnActive) {
     if (autoPageTurnMode) {
-      title = tr(STR_AUTO_TURN_ENABLED) + std::string("Auto");
+      centerOverride = tr(STR_AUTO_TURN_ENABLED) + std::string("Auto");
     } else {
-      title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(pageTurnDuration / 1000) + "s";
+      centerOverride = tr(STR_AUTO_TURN_ENABLED) + std::to_string(pageTurnDuration / 1000) + "s";
     }
 
-    // calculates textYOffset when rendering title in status bar
+    // Offset the banner text when there is no status/progress-bar strip below it.
     const uint8_t statusBarHeight = UITheme::getInstance().getStatusBarHeight();
-
-    // offsets text if no status bar or progress bar only
     if (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight()) {
       textYOffset += UITheme::getInstance().getMetrics().statusBarVerticalMargin;
     }
+  }
 
-  } else if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::CHAPTER_TITLE) {
-    title = tr(STR_UNNAMED);
+  // Book and chapter titles are independent, positionable elements; only build the
+  // ones that are actually placed (the chapter lookup touches the TOC).
+  std::string bookTitle;
+  if (SETTINGS.statusBarBookTitlePos != CPS::SB_POS_HIDE) {
+    bookTitle = epub->getTitle();
+  }
+  std::string chapterTitle;
+  if (SETTINGS.statusBarChapterTitlePos != CPS::SB_POS_HIDE) {
+    chapterTitle = tr(STR_UNNAMED);
     const int tocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);
     if (tocIndex != -1) {
       const auto tocItem = epub->getTocItem(tocIndex);
-      title = tocItem.title;
+      chapterTitle = tocItem.title;
     }
-
-  } else if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE) {
-    title = epub->getTitle();
   }
 
-  uint32_t timeLeftSeconds = 0;
-  if (SETTINGS.statusBarTimeLeft != CrossPointSettings::TIME_LEFT_HIDE && SETTINGS.readingSpeedSecondsPerPage > 0) {
-    int pagesLeft = 0;
-    if (SETTINGS.statusBarTimeLeft == CrossPointSettings::TIME_LEFT_CHAPTER) {
-      pagesLeft = static_cast<int>(pageCount) - currentPage;
-    } else if (!spinePageCountCache.empty() && cachedTotalBookPages > 0) {
-      // Book: use actual per-chapter page counts from cache
-      int pagesBeforeChapter = 0;
-      for (int i = 0; i < currentSpineIndex && i < static_cast<int>(spinePageCountCache.size()); i++) {
-        pagesBeforeChapter += spinePageCountCache[i];
+  // Time-left: chapter and book remaining time are independent elements. Compute
+  // each only when it is placed and a reading-speed estimate exists.
+  uint32_t chapterTimeLeftSeconds = 0;
+  uint32_t bookTimeLeftSeconds = 0;
+  if (SETTINGS.readingSpeedSecondsPerPage > 0) {
+    if (SETTINGS.statusBarChapterTimeLeftPos != CPS::SB_POS_HIDE) {
+      const int pagesLeft = static_cast<int>(pageCount) - currentPage;
+      if (pagesLeft > 0) {
+        chapterTimeLeftSeconds = static_cast<uint32_t>(pagesLeft) * SETTINGS.readingSpeedSecondsPerPage;
       }
-      pagesLeft = cachedTotalBookPages - pagesBeforeChapter - currentPage;
-    } else {
-      // Fallback: estimate from current chapter's byte fraction of the book
-      const float sectionStart = epub->calculateProgress(currentSpineIndex, 0.0f);
-      const float sectionEnd = epub->calculateProgress(currentSpineIndex, 1.0f);
-      const float sectionFraction = sectionEnd - sectionStart;
-      pagesLeft = (sectionFraction > 0.001f)
-                      ? static_cast<int>((1.0f - bookProgress / 100.0f) / sectionFraction * pageCount)
-                      : static_cast<int>(pageCount) - currentPage;
     }
-    if (pagesLeft > 0) {
-      timeLeftSeconds = static_cast<uint32_t>(pagesLeft) * SETTINGS.readingSpeedSecondsPerPage;
+    if (SETTINGS.statusBarBookTimeLeftPos != CPS::SB_POS_HIDE) {
+      int pagesLeft = 0;
+      if (!spinePageCountCache.empty() && cachedTotalBookPages > 0) {
+        // Book: use actual per-chapter page counts from cache
+        int pagesBeforeChapter = 0;
+        for (int i = 0; i < currentSpineIndex && i < static_cast<int>(spinePageCountCache.size()); i++) {
+          pagesBeforeChapter += spinePageCountCache[i];
+        }
+        pagesLeft = cachedTotalBookPages - pagesBeforeChapter - currentPage;
+      } else {
+        // Fallback: estimate from current chapter's byte fraction of the book
+        const float sectionStart = epub->calculateProgress(currentSpineIndex, 0.0f);
+        const float sectionEnd = epub->calculateProgress(currentSpineIndex, 1.0f);
+        const float sectionFraction = sectionEnd - sectionStart;
+        pagesLeft = (sectionFraction > 0.001f)
+                        ? static_cast<int>((1.0f - bookProgress / 100.0f) / sectionFraction * pageCount)
+                        : static_cast<int>(pageCount) - currentPage;
+      }
+      if (pagesLeft > 0) {
+        bookTimeLeftSeconds = static_cast<uint32_t>(pagesLeft) * SETTINGS.readingSpeedSecondsPerPage;
+      }
     }
   }
 
   // Hints render in every orientation, but the reserved layout space only lines up in
   // portrait (the widgets draw in portrait coords). In landscape/inverted the hints
   // overlay the edge (read sideways) and no space is reserved.
-  const bool hintsActive = SETTINGS.showButtonHints != CrossPointSettings::BUTTON_HINTS_OFF;
-  const bool hintsReserved = hintsActive && SETTINGS.orientation == CrossPointSettings::PORTRAIT;
+  const bool hintsActive = SETTINGS.showButtonHints != CPS::BUTTON_HINTS_OFF;
+  const bool hintsReserved = hintsActive && SETTINGS.orientation == CPS::PORTRAIT;
 
   // When space is reserved for the hint bar, lift the status bar above it.
   const int statusPaddingBottom = hintsReserved ? UITheme::getInstance().getMetrics().buttonHintsHeight : 0;
-  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, statusPaddingBottom, textYOffset,
-                    timeLeftSeconds);
+  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, bookTitle, chapterTitle, chapterTimeLeftSeconds,
+                    bookTimeLeftSeconds, isCurrentPageBookmarked(), statusPaddingBottom, textYOffset, centerOverride);
 
   if (footnoteDepth > 0) {
     int ot, or_, ob, ol;
@@ -2428,6 +2573,12 @@ void EpubReaderActivity::openReaderMenu() {
                              SETTINGS.showButtonHints = menu.buttonHints;
                              SETTINGS.saveToFile();
                              reflowCurrentChapter();  // hint reservation changed — repaginate
+                           }
+                           // Autosync mode cycles in the menu and applies here on exit. It's a
+                           // pure setting change — no cache invalidation or reflow needed.
+                           if (menu.autosyncMode != SETTINGS.autosyncMode) {
+                             SETTINGS.autosyncMode = menu.autosyncMode;
+                             SETTINGS.saveToFile();
                            }
                            if (!result.isCancelled) {
                              onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));

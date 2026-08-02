@@ -23,6 +23,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
       title(title),
       pendingOrientation(currentOrientation),
       pendingButtonHints(SETTINGS.showButtonHints),
+      pendingAutosyncMode(SETTINGS.autosyncMode),
       currentPage(currentPage),
       totalPages(totalPages),
       bookProgressPercent(bookProgressPercent),
@@ -31,7 +32,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
 
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes) {
   std::vector<MenuItem> items;
-  items.reserve(18);  // 9 fixed + footnotes + bookmarks/clippings/sync pairs + 2 dev-mode items
+  items.reserve(19);  // 9 fixed + footnotes + bookmarks/clippings/autosync+sync + 2 dev-mode items
   items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
   if (hasFootnotes) {
     items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
@@ -59,11 +60,15 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   // Bluetooth remote toggle: only shown once a remote has been paired
   // (pairing itself lives in Settings > Bluetooth Page Turner), and hideable
   // like the bookmarks/clippings/sync rows (Settings > Reader).
-  if (SETTINGS.readerMenuBluetooth && SETTINGS.bleBondedDeviceAddr[0] != '\0' && SETTINGS.bluetoothAllowed()) {
+  if (SETTINGS.readerMenuBluetooth && SETTINGS.bleBondedDeviceAddr[0] != '\0') {
     items.push_back({MenuAction::TOGGLE_BLUETOOTH, StrId::STR_BT_REMOTE_TOGGLE});
   }
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
+  // Autosync sits with the manual sync rows and is hidden by the same toggle
+  // (Settings > Reader "Sync in Menu"). It cycles the Progress Autosync mode in
+  // place, applied on menu exit like the other cycling rows.
   if (SETTINGS.readerMenuSync) {
+    items.push_back({MenuAction::AUTOSYNC, StrId::STR_AUTOSYNC});
     items.push_back({MenuAction::SYNC_PUSH, StrId::STR_SYNC_PUSH_PROGRESS});
     items.push_back({MenuAction::SYNC_PULL, StrId::STR_SYNC_PULL_PROGRESS});
   }
@@ -117,14 +122,21 @@ void EpubReaderMenuActivity::loop() {
       return;
     }
 
-    setResult(
-        MenuResult{static_cast<int>(selectedAction), pendingOrientation, selectedPageTurnOption, pendingButtonHints});
+    if (selectedAction == MenuAction::AUTOSYNC) {
+      // Cycle the autosync mode preview locally; applied on menu exit.
+      pendingAutosyncMode = (pendingAutosyncMode + 1) % CrossPointSettings::AUTOSYNC_COUNT;
+      requestUpdate();
+      return;
+    }
+
+    setResult(MenuResult{static_cast<int>(selectedAction), pendingOrientation, selectedPageTurnOption,
+                         pendingButtonHints, pendingAutosyncMode});
     finish();
     return;
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     ActivityResult result;
     result.isCancelled = true;
-    result.data = MenuResult{-1, pendingOrientation, selectedPageTurnOption, pendingButtonHints};
+    result.data = MenuResult{-1, pendingOrientation, selectedPageTurnOption, pendingButtonHints, pendingAutosyncMode};
     setResult(std::move(result));
     finish();
     return;
@@ -276,6 +288,12 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
       }
       const auto width = renderer.getTextWidth(UI_10_FONT_ID, valueBuf);
       renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, valueBuf, !isSelected);
+    }
+
+    if (menuItems[i].action == MenuAction::AUTOSYNC) {
+      const char* value = I18N.get(autosyncLabels[pendingAutosyncMode]);
+      const auto width = renderer.getTextWidth(UI_10_FONT_ID, value);
+      renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, value, !isSelected);
     }
   }
 

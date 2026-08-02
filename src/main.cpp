@@ -17,6 +17,8 @@
 #include <SPI.h>
 #include <WiFi.h>
 #include <builtinFonts/all.h>
+#include <esp_log.h>
+#include <esp_task_wdt.h>
 
 #include <cstring>
 
@@ -39,6 +41,11 @@
 #include "util/HeapReport.h"
 #include "util/ScreenshotUtil.h"
 #include "util/WifiTimeSync.h"
+
+// Loop-task watchdog budget. Must exceed the longest legitimate single pass of
+// loop(): worst-case renders (~30s), a big chapter's section build (~1-2 min).
+// Chunked long-runners (HTTP downloads, firmware flashing) feed mid-pass.
+constexpr uint32_t LOOP_WDT_TIMEOUT_MS = 300000;  // 5 minutes
 
 MappedInputManager mappedInputManager(gpio);
 GfxRenderer renderer(display);
@@ -261,6 +268,16 @@ static bool loadSleepFrameBuffer() {
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+
+  // IDF/NimBLE logging routes through log_printfv -> newlib vfprintf, a ~2KB
+  // transient stack frame. The sleep sequence already runs loopTask near its 8KB
+  // limit (activity teardown -> progress/stats JSON -> SdFat SPI); an IDF log
+  // firing at that depth overflowed it by 4 bytes (stack protection fault,
+  // 2026-07-29 — only reachable with BLE up, which is the only source of IDF
+  // logs in this path). We're powering off: drop IDF logs for the remainder.
+  // Runtime-only; logging is back on the wake reboot.
+  esp_log_level_set("*", ESP_LOG_NONE);
+
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
 
   // BLE cannot survive deep sleep; shut the stack down cleanly so the remote
@@ -338,6 +355,26 @@ void setupDisplayAndFonts(bool seamless = false) {
 void setup() {
   t1 = millis();
 
+  // Watch the loop task: a wedged main loop (observed with the BLE controller
+  // starved at low CPU frequency) otherwise leaves the device in limbo forever —
+  // buttons are software-polled and deep sleep is software-entered, so neither
+  // works, and the battery drains until a manual reset. With the watchdog, a
+  // wedge panics (capturing a trace) and reboots into working firmware, where
+  // the normal inactivity timeout then puts the device to sleep properly.
+  // 5 minutes tolerates every legitimate long block of the loop task (renders,
+  // section builds, syncs); the truly long runners (downloads, firmware
+  // flashing) additionally feed the watchdog per chunk.
+  {
+    esp_task_wdt_config_t wdtConfig = {};
+    wdtConfig.timeout_ms = LOOP_WDT_TIMEOUT_MS;
+    wdtConfig.idle_core_mask = 0;
+    wdtConfig.trigger_panic = true;
+    if (esp_task_wdt_reconfigure(&wdtConfig) != ESP_OK) {
+      esp_task_wdt_init(&wdtConfig);  // TWDT not pre-initialized in this build
+    }
+    enableLoopWDT();  // subscribes loopTask; the core feeds it every loop() pass
+  }
+
   HalSystem::begin();
 
   // Read-and-clear so a panic later in setup() doesn't loop into silent reboot.
@@ -395,18 +432,24 @@ void setup() {
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
-  // Bluetooth HID page-turner remotes: any button on the remote is injected as a
-  // virtual press of the physical page-forward button, so activities see it as
-  // normal input. The stack itself is only initialised when the user enables
-  // Bluetooth.
+  // Bluetooth HID page-turner remotes: a remote press is injected as a virtual
+  // press of a physical side button, so activities see it as normal input. With
+  // no learned mapping every press pages forward; a press matching the mapped
+  // back-button signature pages back. The stack itself is only initialised when
+  // the user enables Bluetooth.
   auto& btMgr = BluetoothHIDManager::getInstance();
   btMgr.setButtonInjector([](uint8_t buttonIndex, bool pressed) { gpio.setVirtualButtonState(buttonIndex, pressed); });
   btMgr.setReaderContextCallback([]() { return gBluetoothReaderContext; });
-  // Page-forward lives on a side button that the user can swap, so resolve it
-  // through the same mapping the reader uses rather than hardcoding BTN_DOWN.
-  btMgr.setPageTurnButtonProvider(
-      []() { return mappedInputManager.getPhysicalButtonIndex(MappedInputManager::Button::PageForward); });
-  btMgr.setBondedDevice(SETTINGS.bleBondedDeviceAddr, SETTINGS.bleBondedDeviceName);
+  // The page buttons live on side buttons that the user can swap, so resolve
+  // them through the same mapping the reader uses rather than hardcoding.
+  btMgr.setPageTurnButtonProvider([](bool pageForward) {
+    return mappedInputManager.getPhysicalButtonIndex(pageForward ? MappedInputManager::Button::PageForward
+                                                                 : MappedInputManager::Button::PageBack);
+  });
+  btMgr.setBondedDevice(SETTINGS.bleBondedDeviceAddr, SETTINGS.bleBondedDeviceName,
+                        SETTINGS.bleBondedDeviceAddrType);
+  btMgr.setButtonMapping(SETTINGS.bleBackSigIndex, SETTINGS.bleBackSigValue, SETTINGS.bleFwdSigIndex,
+                         SETTINGS.bleFwdSigValue);
 
   const auto wakeupReason = gpio.getWakeupReason();
   switch (wakeupReason) {
@@ -451,8 +494,6 @@ void setup() {
 
   setupDisplayAndFonts(/*seamless=*/!APP_STATE.showBootScreen);
 
-  // First paint after silent reboot is HALF_REFRESH (SDK forces it after begin()'s
-  // panel reset); subsequent paints FAST.
   if (!isSilentReboot) {
     if (APP_STATE.showBootScreen) {
       activityManager.goToBoot();
@@ -469,6 +510,13 @@ void setup() {
       APP_STATE.saveToFile();
       activityManager.goToBoot();
     }
+  } else {
+    // The panel physically kept the pre-restart screen (e.g. the web server page)
+    // through ESP.restart(), and the driver's implicit cold-start clean is only the
+    // stock single-pass HALF — high-contrast content ghosts through it. Wipe with
+    // the multi-flash FULL waveform so the destination paints on a clean panel.
+    renderer.clearScreen();
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   }
 
   READING_STATS.loadFromFile();
@@ -528,19 +576,11 @@ void loop() {
   const bool physicalInputDetected = gpio.wasAnyPressed() || gpio.wasAnyReleased();
   // Bluetooth only runs where it's used: the reader and the Bluetooth settings
   // screen. Everywhere else the stack is shut down so its heap (and the
-  // fragmentation it causes) goes back to the rest of the firmware.
-  // Autosync additionally locks Bluetooth out everywhere: the BLE stack wants
-  // ~56KB (with a >=30KB contiguous block) that a background sync's WiFi+TLS
-  // needs, the two share one radio, and bringing the BT controller up right
-  // after esp_wifi_stop() hard-freezes the device — which is exactly what a
-  // mid-reading autosync teardown would set up.
-  const bool bleAllowedHere = activityManager.keepsBluetoothActive() && SETTINGS.bluetoothAllowed();
-  // Autosync is mutually exclusive with the remote (shared radio + heap), so its
-  // being on means the user cannot want Bluetooth — clear the flag so nothing
-  // tries to restore the stack underneath a background sync.
-  if (!SETTINGS.bluetoothAllowed()) {
-    btMgr.setBluetoothWanted(false);
-  }
+  // fragmentation it causes) goes back to the rest of the firmware. Autosync now
+  // coexists with the remote: when a background push fires the reader tears the
+  // BLE stack down for the WiFi session and auto-restores it afterwards (see
+  // EpubReaderActivity::runAutosyncNow), so nothing needs to be locked out here.
+  const bool bleAllowedHere = activityManager.keepsBluetoothActive();
   // The stack goes down for many reasons (leaving the reader, a section-build
   // memory pause, a WiFi sync, deep sleep). When it does, the "Bluetooth wanted"
   // session flag survives so the stack can be brought back without a manual
@@ -552,8 +592,7 @@ void loop() {
     // Leaving the reader/BT settings: power the stack down immediately so its
     // ~56KB is back in the heap before whatever comes next (home browsing, and
     // especially a book open with its spine/section cache builds).
-    LOG_INF("MAIN", "Disabling Bluetooth (%s)",
-            SETTINGS.bluetoothAllowed() ? "outside reader/settings" : "autosync enabled");
+    LOG_INF("MAIN", "Disabling Bluetooth (outside reader/settings)");
     btMgr.disable();
   }
   btMgr.updateActivity();

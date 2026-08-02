@@ -22,6 +22,7 @@ struct MenuResult {
   uint8_t orientation = 0;
   uint8_t pageTurnOption = 0;
   uint8_t buttonHints = 0;
+  uint8_t autosyncMode = 0;
 };
 
 struct ChapterResult {

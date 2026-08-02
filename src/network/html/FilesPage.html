@@ -1835,6 +1835,25 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)).toLocaleString() + ' ' + sizes[i];
   }
 
+  // Fetches a directory listing page by page (/api/files is paginated so the
+  // device never scans or streams a huge directory in one request). The page
+  // cap guards against a corrupt directory that reports endless entries.
+  async function fetchFileList(path) {
+    const MAX_PAGES = 50;
+    const files = [];
+    let offset = 0;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const data = await fetchFilePage(path, offset);
+      files.push(...data.items);
+      if (data.nextOffset === undefined || data.nextOffset === null) {
+        return files;
+      }
+      offset = data.nextOffset;
+    }
+    console.warn('File listing truncated after ' + MAX_PAGES + ' pages for ' + path);
+    return files;
+  }
+
   async function hydrate() {
     // Fetch CrossPoint version
     fetchVersion();
@@ -1871,18 +1890,50 @@
     }
     breadcrumbs.innerHTML = breadcrumbContent;
 
-    let files = [];
+    loadedFiles = [];
+    fileListNextOffset = 0;
+    await loadMoreFiles();
+  }
+
+  // Incremental file listing: entries loaded so far and the next server offset
+  // (null once the final page has been fetched). The table renders after each
+  // page so a huge directory shows its first entries immediately.
+  let loadedFiles = [];
+  let fileListNextOffset = 0;
+
+  async function fetchFilePage(path, offset) {
+    const response = await fetch('/api/files?path=' + encodeURIComponent(path) + '&offset=' + offset + '&_=' + Date.now());
+    if (!response.ok) {
+      throw new Error('Failed to load files: ' + response.status + ' ' + response.statusText);
+    }
+    return await response.json();
+  }
+
+  async function loadMoreFiles() {
+    const fileTable = document.getElementById('file-table');
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    if (loadMoreBtn) {
+      loadMoreBtn.disabled = true;
+      loadMoreBtn.textContent = 'Loading…';
+    }
     try {
-      const response = await fetch('/api/files?path=' + encodeURIComponent(currentPath) + '&_=' + Date.now());
-      if (!response.ok) {
-        throw new Error('Failed to load files: ' + response.status + ' ' + response.statusText);
-      }
-      files = await response.json();
+      const data = await fetchFilePage(currentPath, fileListNextOffset);
+      loadedFiles.push(...data.items);
+      fileListNextOffset = (data.nextOffset === undefined || data.nextOffset === null) ? null : data.nextOffset;
     } catch (e) {
       console.error(e);
-      fileTable.innerHTML = '<div class="no-files">An error occurred while loading the files</div>';
-      return;
+      if (loadedFiles.length === 0) {
+        fileTable.innerHTML = '<div class="no-files">An error occurred while loading the files</div>';
+        return;
+      }
+      // Keep what already loaded; re-render restores the button for a retry.
     }
+    renderFileTable();
+  }
+
+  function renderFileTable() {
+    const fileTable = document.getElementById('file-table');
+    const files = loadedFiles;
 
     let folderCount = 0;
     let totalSize = 0;
@@ -1894,7 +1945,9 @@
     const fileCount = files.length - folderCount;
     const folderLabel = folderCount === 1 ? 'folder' : 'folders';
     const fileLabel = fileCount === 1 ? 'file' : 'files';
-    document.getElementById('folder-summary').innerHTML = `${folderCount} ${folderLabel}, ${fileCount} ${fileLabel}, ${formatFileSize(totalSize)}`;
+    let summary = `${folderCount} ${folderLabel}, ${fileCount} ${fileLabel}, ${formatFileSize(totalSize)}`;
+    if (fileListNextOffset !== null) summary += ' (more not yet loaded)';
+    document.getElementById('folder-summary').innerHTML = summary;
 
     if (files.length === 0) {
       fileTable.innerHTML = '<div class="no-files">This folder is empty</div>';
@@ -1952,6 +2005,11 @@
       });
 
       fileTableContent += '</table>';
+      if (fileListNextOffset !== null) {
+        fileTableContent += '<div style="text-align:center;padding:12px">';
+        fileTableContent += '<button id="loadMoreBtn" onclick="loadMoreFiles()">Load more files</button>';
+        fileTableContent += '</div>';
+      }
       fileTable.innerHTML = fileTableContent;
     }
   }
@@ -5265,9 +5323,7 @@ function retryAllFailedUploads() {
 
     async function fetchFolders(path) {
       try {
-        const response = await fetch('/api/files?path=' + encodeURIComponent(path));
-        if (!response.ok) return [];
-        return await response.json();
+        return await fetchFileList(path);
       } catch (e) {
         return [];
       }

@@ -1,5 +1,6 @@
 #include "BaseTheme.h"
 
+#include <BluetoothHIDManager.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
@@ -13,6 +14,10 @@
 #include "I18n.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
+#include "components/icons/bookmark.h"
+#include "components/icons/bluetooth.h"
+#include "components/icons/bluetoothoff.h"
+#include "components/icons/remotecontrol.h"
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
 
@@ -21,6 +26,24 @@ namespace {
 constexpr int homeMenuMargin = 20;
 constexpr int homeMarginTop = 30;
 constexpr int subtitleY = 738;
+constexpr int bookmarkStatusIconWidth = 16;
+constexpr int bookmarkStatusIconHeight = 14;
+constexpr int bookmarkStatusIconTopCrop = 2;
+// Bluetooth status glyphs (Tabler bluetooth-off / bluetooth / remote-control),
+// 16x16 1bpp with convert_icon.py polarity (0 = ink), drawn via renderer.drawIcon.
+constexpr int btStatusIconSize = 16;
+
+// Blits the 16x16 bookmark glyph (top rows cropped) as 1bpp pixels at (x, y).
+void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int y) {
+  constexpr int bytesPerRow = bookmarkStatusIconWidth / 8;
+  for (int row = 0; row < bookmarkStatusIconHeight; ++row) {
+    for (int col = 0; col < bookmarkStatusIconWidth; ++col) {
+      const uint8_t byte = BookmarkStatusIcon[(row + bookmarkStatusIconTopCrop) * bytesPerRow + col / 8];
+      const uint8_t mask = 1U << (7 - (col % 8));
+      renderer.drawPixel(x + col, y + row, (byte & mask) != 0);
+    }
+  }
+}
 
 // Helper: draw battery icon at given position
 void drawBatteryIcon(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight, uint16_t percentage) {
@@ -830,66 +853,37 @@ static std::string formatTimeLeft(uint32_t totalSeconds) {
 }
 
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
-                              const int pageCount, std::string title, const int paddingBottom, const int textYOffset,
-                              const uint32_t timeLeftSeconds) const {
+                              const int pageCount, const std::string& bookTitle, const std::string& chapterTitle,
+                              const uint32_t chapterTimeLeftSeconds, const uint32_t bookTimeLeftSeconds,
+                              const bool isPageBookmarked, const int paddingBottom, const int textYOffset,
+                              const std::string& centerOverride) const {
+  using CPS = CrossPointSettings;
   auto metrics = UITheme::getInstance().getMetrics();
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                    &orientedMarginLeft);
 
-  // Draw Progress Text
-  const auto screenHeight = renderer.getScreenHeight();
-  // getStatusBarHeight() now includes statusBarContentGap to reserve breathing room above the
-  // bar in the body layout; add it back here so the bar text stays anchored to the bottom.
-  auto textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom - 4 +
-               metrics.statusBarContentGap;
-  int progressTextWidth = 0;
+  const int screenWidth = renderer.getScreenWidth();
+  const int screenHeight = renderer.getScreenHeight();
+  // getStatusBarHeight() now includes statusBarContentGap plus the user's extra top margin to
+  // reserve breathing room above the bar in the body layout; add both back here so the bar text
+  // stays anchored to the bottom and the reserved space stays empty.
+  const uint8_t topMargin = SETTINGS.statusBarTopMargin > CPS::STATUS_BAR_TOP_MARGIN_MAX
+                                ? CPS::STATUS_BAR_TOP_MARGIN_MAX
+                                : SETTINGS.statusBarTopMargin;
+  const int textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom -
+                    4 + metrics.statusBarContentGap + topMargin;
+  const int contentY = textY - textYOffset;
 
-  const std::string timeLeftStr =
-      (timeLeftSeconds > 0 && SETTINGS.statusBarTimeLeft != CrossPointSettings::TIME_LEFT_HIDE)
-          ? formatTimeLeft(timeLeftSeconds)
-          : std::string();
-
-  if (SETTINGS.statusBarBookProgressPercentage || SETTINGS.statusBarChapterPageCount || !timeLeftStr.empty()) {
-    // Right aligned text for progress counter
-    char progressStr[40];
-
-    if (SETTINGS.statusBarBookProgressPercentage && SETTINGS.statusBarChapterPageCount) {
-      snprintf(progressStr, sizeof(progressStr), "%d/%d  %.0f%%", currentPage, pageCount, bookProgress);
-    } else if (SETTINGS.statusBarBookProgressPercentage) {
-      snprintf(progressStr, sizeof(progressStr), "%.0f%%", bookProgress);
-    } else if (SETTINGS.statusBarChapterPageCount) {
-      snprintf(progressStr, sizeof(progressStr), "%d/%d", currentPage, pageCount);
-    } else {
-      progressStr[0] = '\0';
-    }
-
-    if (!timeLeftStr.empty()) {
-      const size_t len = strlen(progressStr);
-      if (len > 0) {
-        snprintf(progressStr + len, sizeof(progressStr) - len, "  %s", timeLeftStr.c_str());
-      } else {
-        snprintf(progressStr, sizeof(progressStr), "%s", timeLeftStr.c_str());
-      }
-    }
-
-    progressTextWidth = renderer.getTextWidth(SMALL_FONT_ID, progressStr);
-    renderer.drawText(
-        SMALL_FONT_ID,
-        renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight - progressTextWidth, textY,
-        progressStr);
-  }
-
-  // Draw Progress Bar
-  if (SETTINGS.statusBarProgressBar != CrossPointSettings::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS) {
-    const int progressBarMaxWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
-    const int progressBarY = renderer.getScreenHeight() - orientedMarginBottom -
-                             ((SETTINGS.statusBarProgressBarThickness + 1) * 2) - paddingBottom;
+  // --- Progress fill bar (full width, independent of the positioned text elements) ---
+  if (SETTINGS.statusBarProgressBar != CPS::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS) {
+    const int progressBarMaxWidth = screenWidth - orientedMarginLeft - orientedMarginRight;
+    const int progressBarY =
+        screenHeight - orientedMarginBottom - ((SETTINGS.statusBarProgressBarThickness + 1) * 2) - paddingBottom;
     size_t progress;
-    if (SETTINGS.statusBarProgressBar == CrossPointSettings::STATUS_BAR_PROGRESS_BAR::BOOK_PROGRESS) {
+    if (SETTINGS.statusBarProgressBar == CPS::STATUS_BAR_PROGRESS_BAR::BOOK_PROGRESS) {
       progress = static_cast<size_t>(bookProgress);
     } else {
-      // Chapter progress
       progress = (pageCount > 0) ? (static_cast<float>(currentPage) / pageCount) * 100 : 0;
     }
     const int barWidth = progressBarMaxWidth * progress / 100;
@@ -897,63 +891,147 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
                       true);
   }
 
-  // Draw Battery
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage == CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER;
-  if (SETTINGS.statusBarBattery) {
-    GUI.drawBatteryLeft(renderer,
-                        Rect{metrics.statusBarHorizontalMargin + orientedMarginLeft + 1, textY, metrics.batteryWidth,
-                             metrics.batteryHeight},
-                        showBatteryPercentage);
-  }
+  const bool showBatteryPercentage = SETTINGS.hideBatteryPercentage == CPS::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER;
+  constexpr int elementGap = 10;
 
-  // Draw Clock (X3 only — DS3231 RTC)
-  int clockTextWidth = 0;
-  if (SETTINGS.statusBarClock && halClock.isAvailable()) {
+  // --- Build the ordered element list, each with its Hide/Left/Middle/Right position ---
+  // kind: 0 = text, 1 = battery icon, 2 = bookmark icon, 3 = bluetooth icon.
+  struct SbItem {
+    uint8_t pos;
+    uint8_t kind;
+    std::string text;
+    int width;
+    const uint8_t* icon = nullptr;  // kind 3 only
+  };
+  std::vector<SbItem> items;
+  items.reserve(11);
+
+  auto validPos = [](const uint8_t p) { return p != CPS::SB_POS_HIDE && p < CPS::STATUS_BAR_POS_COUNT; };
+  auto addText = [&](const uint8_t pos, std::string s) {
+    if (!validPos(pos) || s.empty()) return;
+    const int w = renderer.getTextWidth(SMALL_FONT_ID, s.c_str());
+    if (w <= 0) return;
+    items.push_back(SbItem{pos, 0, std::move(s), w});
+  };
+
+  // Battery (icon + optional percentage)
+  if (validPos(SETTINGS.statusBarBatteryPos)) {
+    int w = metrics.batteryWidth;
+    if (showBatteryPercentage) {
+      char pctBuf[8];
+      snprintf(pctBuf, sizeof(pctBuf), "%u%%", powerManager.getBatteryPercentage());
+      w += batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, pctBuf);
+    }
+    items.push_back(SbItem{SETTINGS.statusBarBatteryPos, 1, std::string(), w});
+  }
+  // Bookmark indicator (only on a bookmarked page)
+  if (isPageBookmarked && validPos(SETTINGS.statusBarBookmarkPos)) {
+    items.push_back(SbItem{SETTINGS.statusBarBookmarkPos, 2, std::string(), bookmarkStatusIconWidth});
+  }
+  // Titles — suppressed while an override banner (auto page-turn) owns the centre.
+  if (centerOverride.empty()) {
+    addText(SETTINGS.statusBarBookTitlePos, bookTitle);
+    addText(SETTINGS.statusBarChapterTitlePos, chapterTitle);
+  }
+  // Chapter page count (current / total) then book percentage — this order keeps
+  // the classic right-cluster reading of "12/32  45%" when both are placed together.
+  {
+    char b[24];
+    snprintf(b, sizeof(b), "%d/%d", currentPage, pageCount);
+    addText(SETTINGS.statusBarChapterPagePos, b);
+  }
+  {
+    char b[16];
+    snprintf(b, sizeof(b), "%.0f%%", bookProgress);
+    addText(SETTINGS.statusBarBookPercentPos, b);
+  }
+  // Time-left (book and chapter are independent elements)
+  if (bookTimeLeftSeconds > 0) addText(SETTINGS.statusBarBookTimeLeftPos, formatTimeLeft(bookTimeLeftSeconds));
+  if (chapterTimeLeftSeconds > 0) addText(SETTINGS.statusBarChapterTimeLeftPos, formatTimeLeft(chapterTimeLeftSeconds));
+  // Clock (X3 only — DS3231 RTC)
+  if (validPos(SETTINGS.statusBarClockPos) && halClock.isAvailable()) {
     char timeBuf[9];
     if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
-      clockTextWidth = renderer.getTextWidth(SMALL_FONT_ID, timeBuf);
-      // Position to the left of the progress text (with a small gap)
-      const int clockX = renderer.getScreenWidth() - metrics.statusBarHorizontalMargin - orientedMarginRight -
-                         progressTextWidth - (progressTextWidth > 0 ? 10 : 0) - clockTextWidth;
-      renderer.drawText(SMALL_FONT_ID, clockX, textY, timeBuf);
+      addText(SETTINGS.statusBarClockPos, timeBuf);
     }
   }
+  // Bluetooth remote state, shown as an icon:
+  //   off (stack down) -> bluetooth-off, on but no remote -> bluetooth, connected -> remote-control.
+  if (validPos(SETTINGS.statusBarBluetoothPos)) {
+    const auto& btMgr = BluetoothHIDManager::getInstance();
+    const uint8_t* btIcon = !btMgr.isEnabled()          ? BluetoothoffIcon
+                            : btMgr.hasConnectedDevice() ? RemotecontrolIcon
+                                                         : BluetoothIcon;
+    items.push_back(SbItem{SETTINGS.statusBarBluetoothPos, 3, std::string(), btStatusIconSize, btIcon});
+  }
+  // Auto page-turn banner takes the middle cluster.
+  if (!centerOverride.empty()) addText(CPS::SB_POS_MIDDLE, centerOverride);
 
-  // Draw Title
-  if (!title.empty()) {
-    textY -= textYOffset;
-    // Centered chapter title text
-    // Page width minus existing content with 30px padding on each side
-    const int rendererableScreenWidth =
-        renderer.getScreenWidth() - (metrics.statusBarHorizontalMargin * 2) - orientedMarginLeft - orientedMarginRight;
+  // --- Cluster layout: left grows rightward, right grows leftward, middle centres ---
+  auto zoneWidth = [&items](const uint8_t zone) {
+    int total = 0;
+    int count = 0;
+    for (const auto& it : items)
+      if (it.pos == zone) {
+        total += it.width;
+        count++;
+      }
+    if (count > 1) total += elementGap * (count - 1);
+    return total;
+  };
 
-    const int batterySize = SETTINGS.statusBarBattery ? (showBatteryPercentage ? 50 : 20) : 0;
-    const int titleMarginLeft = batterySize + 30;
-    const int clockReserve = clockTextWidth > 0 ? (clockTextWidth + 10) : 0;
-    const int titleMarginRight = progressTextWidth + clockReserve + 30;
+  const int leftEdge = metrics.statusBarHorizontalMargin + orientedMarginLeft + 1;
+  const int rightEdge = screenWidth - metrics.statusBarHorizontalMargin - orientedMarginRight;
+  const int innerWidth = rightEdge - leftEdge;
 
-    // Attempt to center title on the screen, but if title is too wide then later we will center it within the
-    // available space.
-    int titleMarginLeftAdjusted = std::max(titleMarginLeft, titleMarginRight);
-    int availableTitleSpace = rendererableScreenWidth - 2 * titleMarginLeftAdjusted;
-
-    int titleWidth;
-    titleWidth = renderer.getTextWidth(SMALL_FONT_ID, title.c_str());
-    if (titleWidth > availableTitleSpace) {
-      // Not enough space to center on the screen, center it within the remaining space instead
-      availableTitleSpace = rendererableScreenWidth - titleMarginLeft - titleMarginRight;
-      titleMarginLeftAdjusted = titleMarginLeft;
+  // Over-wide clusters (long titles) get their widest text element truncated to fit.
+  auto fitZone = [&](const uint8_t zone, const int available) {
+    for (int guard = 0; guard < 4 && zoneWidth(zone) > available; guard++) {
+      const int over = zoneWidth(zone) - available;
+      SbItem* widest = nullptr;
+      for (auto& it : items)
+        if (it.pos == zone && it.kind == 0 && (!widest || it.width > widest->width)) widest = &it;
+      if (!widest || widest->width <= 8) break;
+      const int newW = std::max(8, widest->width - over);
+      widest->text = renderer.truncatedText(SMALL_FONT_ID, widest->text.c_str(), newW);
+      widest->width = renderer.getTextWidth(SMALL_FONT_ID, widest->text.c_str());
     }
-    if (titleWidth > availableTitleSpace) {
-      title = renderer.truncatedText(SMALL_FONT_ID, title.c_str(), availableTitleSpace);
-      titleWidth = renderer.getTextWidth(SMALL_FONT_ID, title.c_str());
-    }
+  };
 
-    renderer.drawText(SMALL_FONT_ID,
-                      titleMarginLeftAdjusted + metrics.statusBarHorizontalMargin + orientedMarginLeft +
-                          (availableTitleSpace - titleWidth) / 2,
-                      textY, title.c_str());
+  fitZone(CPS::SB_POS_LEFT, (innerWidth * 45) / 100);
+  fitZone(CPS::SB_POS_RIGHT, (innerWidth * 45) / 100);
+
+  const int leftW = zoneWidth(CPS::SB_POS_LEFT);
+  const int rightW = zoneWidth(CPS::SB_POS_RIGHT);
+  const int leftEnd = leftEdge + leftW;
+  const int rightStart = rightEdge - rightW;
+
+  // Middle is centred on the screen but never overlaps a side cluster; if the
+  // clusters leave no room it simply uses whatever gap remains.
+  const int middleAvail = (leftW == 0 && rightW == 0) ? innerWidth : std::max(8, rightStart - leftEnd - 2 * elementGap);
+  fitZone(CPS::SB_POS_MIDDLE, middleAvail);
+  const int middleW = zoneWidth(CPS::SB_POS_MIDDLE);
+  int middleX = (screenWidth - middleW) / 2;
+  middleX = std::max(middleX, leftEnd + (leftW > 0 ? elementGap : 0));
+  middleX = std::min(middleX, rightStart - (rightW > 0 ? elementGap : 0) - middleW);
+  if (middleX < leftEnd) middleX = leftEnd;
+
+  // Running cursor per cluster (indexed by SB_POS_* value; HIDE slot unused).
+  int cursor[CPS::STATUS_BAR_POS_COUNT] = {0, leftEdge, middleX, rightStart};
+  for (const auto& it : items) {
+    if (it.pos == CPS::SB_POS_HIDE || it.pos >= CPS::STATUS_BAR_POS_COUNT) continue;
+    const int x = cursor[it.pos];
+    cursor[it.pos] += it.width + elementGap;
+    if (it.kind == 1) {
+      GUI.drawBatteryLeft(renderer, Rect{x, contentY, metrics.batteryWidth, metrics.batteryHeight},
+                          showBatteryPercentage);
+    } else if (it.kind == 2) {
+      drawBookmarkStatusIcon(renderer, x, contentY + 5);
+    } else if (it.kind == 3) {
+      renderer.drawIcon(it.icon, x, contentY, btStatusIconSize, btStatusIconSize);
+    } else {
+      renderer.drawText(SMALL_FONT_ID, x, contentY, it.text.c_str());
+    }
   }
 }
 

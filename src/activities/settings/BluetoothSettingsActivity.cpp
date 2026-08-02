@@ -77,6 +77,9 @@ void BluetoothSettingsActivity::onExit() {
   // aid for this screen only, not something to leave running behind us.
   if (btMgr) {
     btMgr->setDebugCaptureEnabled(false);
+    // Belt-and-braces: the mapping wizard turns this on, and leaving it set
+    // would silently disable the remote everywhere.
+    btMgr->setInjectionSuppressed(false);
   }
   Activity::onExit();
 }
@@ -112,6 +115,11 @@ void BluetoothSettingsActivity::loop() {
     case ViewMode::CONNECT_FAILED:
       handleResultInput();
       break;
+    case ViewMode::MAP_BACK:
+    case ViewMode::MAP_FORWARD:
+      handleMappingInput();
+      pollMappingPress();
+      break;
     case ViewMode::CONNECTING:
       // Transient: connectToDevice() blocks, so this state is only ever on
       // screen while that call runs and there is no input to service.
@@ -131,9 +139,13 @@ void BluetoothSettingsActivity::beginScan() {
 }
 
 void BluetoothSettingsActivity::handleMainMenuInput() {
-  constexpr int kMainMenuItemCount = 2;
   constexpr int kToggleBluetoothIndex = 0;
   constexpr int kRemoteIndex = 1;
+  constexpr int kMapButtonsIndex = 2;
+  // The mapping row only exists once there is a remote to map, mirroring the
+  // list built in renderMainMenu().
+  const bool bonded = SETTINGS.bleBondedDeviceAddr[0] != '\0';
+  const int kMainMenuItemCount = bonded ? 3 : 2;
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     finish();
@@ -207,13 +219,21 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
         SETTINGS.bleBondedDeviceAddr[0] = '\0';
         SETTINGS.bleBondedDeviceName[0] = '\0';
         SETTINGS.bleBondedDeviceAddrType = 0;
+        // The learned button mapping belongs to the forgotten remote.
+        SETTINGS.bleBackSigIndex = 0xFF;
+        SETTINGS.bleBackSigValue = 0;
+        SETTINGS.bleFwdSigIndex = 0xFF;
+        SETTINGS.bleFwdSigValue = 0;
         SETTINGS.saveToFile();
         btMgr->setBondedDevice("", "");
+        btMgr->setButtonMapping(0xFF, 0, 0xFF, 0);
         lastError = tr(STR_BT_REMOTE_FORGOTTEN);
         requestUpdate();
       } else {
         beginScan();
       }
+    } else if (selectedIndex == kMapButtonsIndex) {
+      beginButtonMapping();
     }
   }
 }
@@ -319,9 +339,11 @@ void BluetoothSettingsActivity::connectToSelected() {
     SETTINGS.bleBondedDeviceAddr[sizeof(SETTINGS.bleBondedDeviceAddr) - 1] = '\0';
     strncpy(SETTINGS.bleBondedDeviceName, device.name.c_str(), sizeof(SETTINGS.bleBondedDeviceName) - 1);
     SETTINGS.bleBondedDeviceName[sizeof(SETTINGS.bleBondedDeviceName) - 1] = '\0';
-    SETTINGS.bleBondedDeviceAddrType = 0;
+    // Persist the address TYPE from the advertisement: random-address remotes
+    // (e.g. ff:..) ignore reconnects that target them as BLE_ADDR_PUBLIC.
+    SETTINGS.bleBondedDeviceAddrType = device.addrType;
     SETTINGS.saveToFile();
-    btMgr->setBondedDevice(device.address, device.name);
+    btMgr->setBondedDevice(device.address, device.name, device.addrType);
 
     viewMode = ViewMode::CONNECTED;
     lastError = tr(STR_BT_ENABLED);
@@ -343,6 +365,117 @@ void BluetoothSettingsActivity::disconnectAll() {
     btMgr->disconnectFromDevice(addr);
   }
   lastError = tr(STR_BT_DISCONNECTED);
+  requestUpdate();
+}
+
+void BluetoothSettingsActivity::beginButtonMapping() {
+  if (!btMgr->isEnabled()) {
+    lastError = tr(STR_BT_TURN_ON_FIRST);
+    requestUpdate();
+    return;
+  }
+  if (!btMgr->isConnected(SETTINGS.bleBondedDeviceAddr)) {
+    lastError = tr(STR_BT_MAP_NEED_CONNECTED);
+    requestUpdate();
+    return;
+  }
+  // Captured presses must not double as navigation while the wizard runs.
+  btMgr->setInjectionSuppressed(true);
+  lastSeenMapPressMs = btMgr->lastRemoteInputMs();
+  mapStepPresses = 0;
+  lastError = "";
+  viewMode = ViewMode::MAP_BACK;
+  requestUpdate();
+}
+
+void BluetoothSettingsActivity::handleMappingInput() {
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    endButtonMapping(MappingOutcome::CANCELLED);
+  }
+}
+
+void BluetoothSettingsActivity::pollMappingPress() {
+  const unsigned long stamp = btMgr->lastRemoteInputMs();
+  if (stamp == 0 || stamp == lastSeenMapPressMs) {
+    return;
+  }
+  lastSeenMapPressMs = stamp;
+
+  uint8_t sigIndex = 0xFF;
+  uint8_t sigValue = 0;
+  btMgr->lastPressSignature(sigIndex, sigValue);
+  if (sigIndex == 0xFF) {
+    return;  // A report arrived but no signature was captured yet — ignore.
+  }
+
+  if (mapStepPresses == 0) {
+    // First press of this step: remember it and ask for the confirming press.
+    mapStepSigIndex = sigIndex;
+    mapStepSigValue = sigValue;
+    mapStepPresses = 1;
+    requestUpdate();
+    return;
+  }
+
+  // Second press of the step. A mismatch means the button's code changes per
+  // press (a one-button toggle remote) — its presses can never be told apart,
+  // so drop any mapping and fall back to everything-pages-forward.
+  if (sigIndex != mapStepSigIndex || sigValue != mapStepSigValue) {
+    endButtonMapping(MappingOutcome::CLEARED);
+    return;
+  }
+
+  if (viewMode == ViewMode::MAP_BACK) {
+    mapBackSigIndex = mapStepSigIndex;
+    mapBackSigValue = mapStepSigValue;
+    mapStepPresses = 0;
+    viewMode = ViewMode::MAP_FORWARD;
+    requestUpdate();
+    return;
+  }
+
+  // Forward step confirmed. If it matches the back button, the remote (or the
+  // user) isn't distinguishing two buttons — same fallback as the toggle case.
+  if (mapStepSigIndex == mapBackSigIndex && mapStepSigValue == mapBackSigValue) {
+    endButtonMapping(MappingOutcome::CLEARED);
+    return;
+  }
+
+  SETTINGS.bleBackSigIndex = mapBackSigIndex;
+  SETTINGS.bleBackSigValue = mapBackSigValue;
+  SETTINGS.bleFwdSigIndex = mapStepSigIndex;
+  SETTINGS.bleFwdSigValue = mapStepSigValue;
+  endButtonMapping(MappingOutcome::SAVED);
+}
+
+void BluetoothSettingsActivity::endButtonMapping(const MappingOutcome outcome) {
+  if (outcome == MappingOutcome::CLEARED) {
+    SETTINGS.bleBackSigIndex = 0xFF;
+    SETTINGS.bleBackSigValue = 0;
+    SETTINGS.bleFwdSigIndex = 0xFF;
+    SETTINGS.bleFwdSigValue = 0;
+  }
+  if (outcome != MappingOutcome::CANCELLED) {
+    SETTINGS.saveToFile();
+    btMgr->setButtonMapping(SETTINGS.bleBackSigIndex, SETTINGS.bleBackSigValue, SETTINGS.bleFwdSigIndex,
+                            SETTINGS.bleFwdSigValue);
+  }
+  btMgr->setInjectionSuppressed(false);
+  // Keep the main menu's test box from counting the wizard's presses as one of
+  // its own the moment we return.
+  lastSeenRemoteInputMs = btMgr->lastRemoteInputMs();
+  switch (outcome) {
+    case MappingOutcome::SAVED:
+      lastError = tr(STR_BT_MAP_SAVED);
+      break;
+    case MappingOutcome::CLEARED:
+      lastError = tr(STR_BT_MAP_CANT_TELL_APART);
+      break;
+    case MappingOutcome::CANCELLED:
+      lastError = "";
+      break;
+  }
+  viewMode = ViewMode::MAIN_MENU;
   requestUpdate();
 }
 
@@ -401,6 +534,8 @@ void BluetoothSettingsActivity::render(RenderLock&&) {
 
   if (viewMode == ViewMode::MAIN_MENU) {
     renderMainMenu();
+  } else if (viewMode == ViewMode::MAP_BACK || viewMode == ViewMode::MAP_FORWARD) {
+    renderMapping();
   } else {
     drawScanHeader();
     switch (viewMode) {
@@ -420,6 +555,8 @@ void BluetoothSettingsActivity::render(RenderLock&&) {
         renderConnectFailed();
         break;
       case ViewMode::MAIN_MENU:
+      case ViewMode::MAP_BACK:
+      case ViewMode::MAP_FORWARD:
         break;
     }
   }
@@ -470,6 +607,10 @@ void BluetoothSettingsActivity::renderMainMenu() {
         UI_10_FONT_ID, (std::string(tr(STR_BT_REMOTE)) + ": " + SETTINGS.bleBondedDeviceName).c_str(),
         pageWidth - metrics.contentSidePadding * 6));
     itemValues.push_back(tr(STR_BT_FORGET));
+    // Button mapping row — must stay index-aligned with kMapButtonsIndex in
+    // handleMainMenuInput().
+    itemLabels.push_back(tr(STR_BT_MAP_BUTTONS));
+    itemValues.push_back(SETTINGS.bleBackSigIndex != 0xFF ? tr(STR_BT_MAP_TWO_BUTTON) : tr(STR_BT_MAP_ONE_BUTTON));
   } else {
     itemLabels.push_back(tr(STR_BT_NO_REMOTE_CONNECT));
     itemValues.push_back("");
@@ -638,6 +779,33 @@ void BluetoothSettingsActivity::renderConnectFailed() const {
   }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
+void BluetoothSettingsActivity::renderMapping() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
+  const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
+
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_BT_PAGE_TURNER));
+  GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
+                    tr(STR_BT_MAP_BUTTONS));
+
+  const char* stepTitle = viewMode == ViewMode::MAP_BACK ? tr(STR_BT_MAP_PRESS_BACK) : tr(STR_BT_MAP_PRESS_FORWARD);
+  const auto titleLines = renderer.wrappedText(UI_12_FONT_ID, stepTitle, pageWidth - metrics.contentSidePadding * 4, 3);
+  const int titleLineH = renderer.getLineHeight(UI_12_FONT_ID);
+  const int top = (pageHeight - static_cast<int>(titleLines.size()) * titleLineH) / 2 - lineH;
+  for (int i = 0; i < static_cast<int>(titleLines.size()); i++) {
+    renderer.drawCenteredText(UI_12_FONT_ID, top + i * titleLineH, titleLines[i].c_str(), true, EpdFontFamily::BOLD);
+  }
+
+  // Two matching presses lock each button in, so the sub-line tracks whether we
+  // are waiting for the first press or the confirming one.
+  const char* prompt = mapStepPresses == 0 ? tr(STR_BT_MAP_PRESS_TWICE) : tr(STR_BT_MAP_PRESS_AGAIN);
+  renderer.drawCenteredText(UI_10_FONT_ID, top + static_cast<int>(titleLines.size()) * titleLineH + lineH, prompt);
+
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 

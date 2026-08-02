@@ -24,11 +24,23 @@ static const char* HID_PROTOCOL_MODE_UUID = "2A4E";
 
 namespace {
 // BLE intervals are in 1.25ms units and timeout is in 10ms units.
-// Keep latency at 0 for low input lag while allowing a longer supervision timeout
-// to reduce disconnects at marginal range.
 constexpr uint16_t BLE_CONN_MIN_INTERVAL = 12;  // 15ms
 constexpr uint16_t BLE_CONN_MAX_INTERVAL = 24;  // 30ms
-constexpr uint16_t BLE_CONN_LATENCY = 0;
+// Two latency regimes:
+// - SETUP (0): connect + GATT discovery need a round trip per exchange, and any
+//   slave latency multiplies each one — latency 33 during setup stretched a
+//   reconnect into a ~24s blocked loop pass ("New max loop duration: 24429 ms")
+//   and let the first attempt die mid-discovery. Setup runs snappy at 0.
+// - IDLE (after subscribe): latency lets the clicker skip events and doze WITHIN
+//   the link instead of deep-sleeping out of it. Forcing 0 here made the remote
+//   give up ~2-3s after connect (silent -> 6s supervision -> reason 520 -> a
+//   spent wake-press per reconnect). The AB Shutter3 clone itself requests
+//   itvl 48-64 / latency 9 / timeout 500, and peer requests are accepted
+//   (onConnParamsUpdateRequest) — this push covers remotes that never ask.
+//   A pending press still transmits at the next event; input latency unchanged.
+// Spec bound: timeout > 2 x (1+latency) x maxInterval = 2s < 6s. OK.
+constexpr uint16_t BLE_CONN_SETUP_LATENCY = 0;
+constexpr uint16_t BLE_CONN_IDLE_LATENCY = 33;
 constexpr uint16_t BLE_CONN_TIMEOUT = 600;  // 6s
 constexpr uint16_t BLE_CONN_SCAN_INTERVAL = 60;
 constexpr uint16_t BLE_CONN_SCAN_WINDOW = 30;
@@ -47,8 +59,8 @@ constexpr uint32_t BLE_CONNECT_TIMEOUT_MS = 10000;
 // evidence rather than assumed.
 constexpr uint32_t BLE_CONTROLLER_MIN_BLOCK = 20 * 1024;
 // --- Press detector tuning ---
-// Every button on every remote means "next page", so nothing here decodes
-// keycodes. The detector only has to answer "did a button just go down?".
+// Nothing here decodes keycodes. The detector answers "did a button just go
+// down?" structurally; which button it was is a separate signature match.
 constexpr unsigned long BASELINE_LEARN_MS = 1000;     // Post-connect window to learn the idle report
 constexpr uint8_t VOLATILE_CHANGE_THRESHOLD = 3;      // Byte changes in a window => free-running, mask it
 constexpr unsigned long MIN_PRESS_INTERVAL_MS = 120;  // Floor between injected page turns
@@ -95,6 +107,14 @@ class ClientCallbacks : public NimBLEClientCallbacks {
 
   void onDisconnect(NimBLEClient* pClient, int reason) override {
     LOG_ERR("BT", "Client disconnected: %s (reason: %d)", pClient->getPeerAddress().toString().c_str(), reason);
+  }
+
+  // Accept (default) the remote's own preferred parameters, but log them: what a
+  // clicker asks for here is the ground truth for tuning BLE_CONN_* above.
+  bool onConnParamsUpdateRequest(NimBLEClient* pClient, const ble_gap_upd_params* params) override {
+    LOG_INF("BT", "Peer param request: itvl %u-%u (x1.25ms) latency %u timeout %u (x10ms)", params->itvl_min,
+            params->itvl_max, params->latency, params->supervision_timeout);
+    return true;
   }
 };
 
@@ -345,7 +365,11 @@ void BluetoothHIDManager::onScanResult(NimBLEAdvertisedDevice* advertisedDevice)
   // remote waking up (it advertises after one of its buttons is pressed).
   if (_backgroundScanActive) {
     if (!_bondedDeviceAddress.empty() && address == _bondedDeviceAddress) {
-      LOG_INF("BT", "Bonded remote is advertising, scheduling reconnect");
+      // The advertisement carries the authoritative address TYPE — refresh it so
+      // the reconnect targets the peer correctly even for bonds saved before the
+      // type was persisted (a random-address remote ignores PUBLIC-typed connects).
+      _bondedAddrType = advertisedDevice->getAddress().getType();
+      LOG_INF("BT", "Bonded remote is advertising (addr type %u), scheduling reconnect", _bondedAddrType);
       NimBLEScan* pScan = NimBLEDevice::getScan();
       if (pScan) {
         pScan->stop();
@@ -391,6 +415,7 @@ void BluetoothHIDManager::onScanResult(NimBLEAdvertisedDevice* advertisedDevice)
   device.name = name.empty() ? "Unknown" : name;
   device.rssi = rssi;
   device.isHID = isHID;
+  device.addrType = advertisedDevice->getAddress().getType();
 
   _discoveredDevices.push_back(device);
 
@@ -412,9 +437,31 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   }
 
   LOG_INF("BT", "Connecting to device %s", address.c_str());
+
+  // Connect + GATT discovery is the most timing-sensitive BLE procedure and can
+  // run from the idle main loop with the CPU clocked down; force full speed for
+  // its duration (same rationale as the disconnect path below).
+  HalPowerManager::Lock powerLock;
   stopBackgroundScan();
 
-  NimBLEAddress bleAddress(address, BLE_ADDR_PUBLIC);
+  // Resolve the peer's address TYPE: a CONNECT_IND targeting a random static
+  // address (top two bits set, e.g. ff:.. clickers) as BLE_ADDR_PUBLIC is
+  // ignored by the peer — it keeps advertising and every connect times out.
+  // Prefer the type captured from this session's advertisements (discovered
+  // list), then the bonded record (settings at boot / background-scan refresh).
+  uint8_t addrType = BLE_ADDR_PUBLIC;
+  bool typeKnown = false;
+  for (const auto& dev : _discoveredDevices) {
+    if (dev.address == address) {
+      addrType = dev.addrType;
+      typeKnown = true;
+      break;
+    }
+  }
+  if (!typeKnown && address == _bondedDeviceAddress) {
+    addrType = _bondedAddrType;
+  }
+  NimBLEAddress bleAddress(address, addrType);
 
   // Reuse existing disconnected client objects to avoid NimBLE deleteClient() on this target.
   NimBLEClient* pClient = NimBLEDevice::getClientByPeerAddress(bleAddress);
@@ -439,7 +486,7 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   // Keep client lifetime under manager control so disconnect callbacks do not free it in NimBLE context.
   pClient->setSelfDelete(false, false);
   pClient->setConnectTimeout(BLE_CONNECT_TIMEOUT_MS);
-  pClient->setConnectionParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_LATENCY, BLE_CONN_TIMEOUT,
+  pClient->setConnectionParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_SETUP_LATENCY, BLE_CONN_TIMEOUT,
                                BLE_CONN_SCAN_INTERVAL, BLE_CONN_SCAN_WINDOW);
 
   if (!pClient->isConnected()) {
@@ -459,7 +506,7 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
         pClient = freshClient;
         pClient->setSelfDelete(false, false);
         pClient->setConnectTimeout(BLE_CONNECT_TIMEOUT_MS);
-        pClient->setConnectionParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_LATENCY, BLE_CONN_TIMEOUT,
+        pClient->setConnectionParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_SETUP_LATENCY, BLE_CONN_TIMEOUT,
                                      BLE_CONN_SCAN_INTERVAL, BLE_CONN_SCAN_WINDOW);
         pClient->setClientCallbacks(&clientCallbacks, false);
       }
@@ -473,8 +520,8 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
     }
   }
 
-  const bool connParamsUpdated =
-      pClient->updateConnParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_LATENCY, BLE_CONN_TIMEOUT);
+  const bool connParamsUpdated = pClient->updateConnParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL,
+                                                           BLE_CONN_SETUP_LATENCY, BLE_CONN_TIMEOUT);
   LOG_INF("BT", "Connection params update request: %d", connParamsUpdated);
 
   const bool dataLenUpdated = pClient->setDataLen(251);
@@ -572,6 +619,14 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
 
   LOG_INF("BT", "Subscribed to %u/%u HID Report characteristics", static_cast<unsigned>(successfulSubscriptions),
           static_cast<unsigned>(reportChars.size()));
+
+  // Setup is done — relax into the doze-friendly idle regime so the clicker can
+  // skip connection events instead of deep-sleeping out of the link. If the
+  // remote later requests its own parameters, that request wins (accepted in
+  // onConnParamsUpdateRequest).
+  const bool idleParamsUpdated =
+      pClient->updateConnParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_IDLE_LATENCY, BLE_CONN_TIMEOUT);
+  LOG_INF("BT", "Idle conn params request (latency %u): %d", BLE_CONN_IDLE_LATENCY, idleParamsUpdated);
 
   // Save connection with activity timestamp
   ConnectedDevice connDev;
@@ -763,6 +818,12 @@ bool BluetoothHIDManager::beginAutoRestoreAttempt() {
   if (_lastRestoreAttemptMs != 0 && now - _lastRestoreAttemptMs < BLE_RESTORE_RETRY_MS) {
     return false;
   }
+  // Explicit hold-off (set by the reader's degraded-heap render guard): without
+  // it, guard-pause -> ~5s retry -> enable -> guard-pause ping-pongs forever,
+  // reloading the epub and re-rendering every cycle.
+  if (_restoreDeferForMs != 0 && now - _restoreDeferStampMs < _restoreDeferForMs) {
+    return false;
+  }
   // WiFi settle: refuse to bring the BT controller up until the chip has had
   // quiet time since the last WiFi teardown (see BLE_WIFI_SETTLE_MS).
   if (_lastWifiActivityMs != 0 && now - _lastWifiActivityMs < BLE_WIFI_SETTLE_MS) {
@@ -784,20 +845,47 @@ void BluetoothHIDManager::setReaderContextCallback(std::function<bool()> callbac
   LOG_DBG("BT", "Reader context callback registered");
 }
 
-void BluetoothHIDManager::setBondedDevice(const std::string& address, const std::string& name) {
+void BluetoothHIDManager::deferAutoRestore(unsigned long forMs) {
+  _restoreDeferStampMs = millis();
+  _restoreDeferForMs = forMs;
+  LOG_INF("BT", "Auto-restore deferred for %lums", forMs);
+}
+
+void BluetoothHIDManager::setBondedDevice(const std::string& address, const std::string& name, uint8_t addrType) {
   _bondedDeviceAddress = address;
+  _bondedAddrType = addrType;
   _bondedDeviceName = name;
   LOG_INF("BT", "Bonded device set: %s (%s)", _bondedDeviceAddress.c_str(), _bondedDeviceName.c_str());
 }
 
+void BluetoothHIDManager::setButtonMapping(const uint8_t backIndex, const uint8_t backValue, const uint8_t fwdIndex,
+                                           const uint8_t fwdValue) {
+  _backSigIndex = backIndex;
+  _backSigValue = backValue;
+  _fwdSigIndex = fwdIndex;
+  _fwdSigValue = fwdValue;
+  if (backIndex != 0xFF) {
+    LOG_INF("BT", "Button mapping: back sig %u=0x%02X, fwd sig %u=0x%02X", static_cast<unsigned>(backIndex),
+            static_cast<unsigned>(backValue), static_cast<unsigned>(fwdIndex), static_cast<unsigned>(fwdValue));
+  } else {
+    LOG_INF("BT", "Button mapping cleared: every press pages forward");
+  }
+}
+
 bool BluetoothHIDManager::hasRecentActivity() const {
-  // Check if any connected device has had activity in the last 4 minutes
-  // This prevents power sleep while using BLE controller
+  // A remote press in the last 2 minutes holds off auto-sleep, so the device
+  // stays awake between the widely-spaced page turns of remote-driven reading.
+  //
+  // Deliberately keyed on lastRemoteInputMs (actual detected presses), NOT
+  // lastActivityTime: the latter is seeded at connect time, and a constantly-
+  // advertising remote re-connects right after every 5-minute inactivity
+  // disconnect — counting the connection itself as activity made that cycle
+  // reset the sleep timer forever, and the device never slept.
   unsigned long now = millis();
   for (const auto& device : _connectedDevices) {
-    if (device.lastActivityTime > 0) {
-      unsigned long timeSinceActivity = now - device.lastActivityTime;
-      if (timeSinceActivity < 240000) {  // 4 minute (240 second) threshold to keep BLE alive
+    if (device.lastRemoteInputMs > 0) {
+      unsigned long timeSinceInput = now - device.lastRemoteInputMs;
+      if (timeSinceInput < 120000) {  // 2 minute threshold
         return true;
       }
     }
@@ -828,9 +916,10 @@ unsigned long BluetoothHIDManager::lastRemoteInputMs() const {
 // --- Direction-agnostic press detection ---
 //
 // Page turners agree on nothing: keycodes, report layout, and even whether a
-// button has a distinct code at all vary per model. Since every button now means
-// "next page", none of that has to be decoded. The detector only needs the moment
-// a button goes down, which it finds structurally rather than semantically:
+// button has a distinct code at all vary per model. So nothing is decoded
+// semantically. The detector finds the moment a button goes down structurally,
+// and identifies WHICH button only by its signature — the (byte, value) that
+// left idle — matched against what the mapping wizard learned:
 //
 //  1. For BASELINE_LEARN_MS after connect, record the report and count how often
 //     each byte changes. Bytes that change VOLATILE_CHANGE_THRESHOLD times or
@@ -961,11 +1050,23 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
     return false;
   }
 
-  // Rising edge: a button just went down.
+  // Rising edge: a button just went down. Its signature — which unmasked byte
+  // left idle, and to what value — is what tells a two-button remote's buttons
+  // apart, so record it alongside the edge.
   device->active = true;
   device->activeSinceMs = nowMs;
   device->churnMask = 0;
   device->activeChangeCount = 0;
+  for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
+    if ((device->volatileMask & static_cast<uint8_t>(1u << i)) != 0) {
+      continue;
+    }
+    if (frame[i] != device->idleFrame[i]) {
+      device->lastPressSigIndex = static_cast<uint8_t>(i);
+      device->lastPressSigValue = frame[i];
+      break;
+    }
+  }
   memcpy(device->prevFrame, frame, HID_FRAME_BYTES);
 
   // Remotes commonly expose the same press on several report characteristics,
@@ -1008,16 +1109,37 @@ void BluetoothHIDManager::onHIDNotify(NimBLERemoteCharacteristic* pChar, uint8_t
     return;
   }
 
+  // Publish the press signature BEFORE the input stamp: the mapping wizard in
+  // the loop task watches lastRemoteInputMs() for a change and then reads the
+  // signature, so this order guarantees it never pairs a new stamp with a stale
+  // signature.
+  g_instance->_lastPressSigIndex = device->lastPressSigIndex;
+  g_instance->_lastPressSigValue = device->lastPressSigValue;
   device->lastRemoteInputMs = nowMs;
+
+  // The mapping wizard captures presses without letting them drive the menu it
+  // is running in.
+  if (g_instance->_injectionSuppressed) {
+    LOG_INF("BT", "Remote press captured (sig %u=0x%02X), injection suppressed",
+            static_cast<unsigned>(device->lastPressSigIndex), static_cast<unsigned>(device->lastPressSigValue));
+    return;
+  }
 
   if (!g_instance->_buttonInjector) {
     return;
   }
 
-  // Which physical button counts as "page forward" depends on the user's side
-  // button layout, which this layer cannot see; the app supplies the resolver.
-  const uint8_t button =
-      g_instance->_pageTurnButtonProvider ? g_instance->_pageTurnButtonProvider() : HalGPIO::BTN_DOWN;
+  // A press matching the learned back signature pages back; everything else —
+  // unmapped remotes, unlearned extra buttons — pages forward, the behaviour a
+  // fresh remote gets with no setup.
+  const bool pageForward =
+      !(g_instance->_backSigIndex != 0xFF && device->lastPressSigIndex == g_instance->_backSigIndex &&
+        device->lastPressSigValue == g_instance->_backSigValue);
+
+  // Which physical button counts as page forward/back depends on the user's
+  // side button layout, which this layer cannot see; the app supplies the resolver.
+  const uint8_t button = g_instance->_pageTurnButtonProvider ? g_instance->_pageTurnButtonProvider(pageForward)
+                                                             : (pageForward ? HalGPIO::BTN_DOWN : HalGPIO::BTN_UP);
 
   // Injected as a pulse rather than a hold: clickers send press and release a
   // millisecond apart, so hold duration carries no usable information. HalGPIO
@@ -1025,7 +1147,8 @@ void BluetoothHIDManager::onHIDNotify(NimBLERemoteCharacteristic* pChar, uint8_t
   // and a pulse can never leave a virtual button stuck down.
   g_instance->_buttonInjector(button, true);
   g_instance->_buttonInjector(button, false);
-  LOG_INF("BT", ">>> REMOTE PRESS -> page forward (button %u) <<<", static_cast<unsigned>(button));
+  LOG_INF("BT", ">>> REMOTE PRESS -> page %s (button %u) <<<", pageForward ? "forward" : "back",
+          static_cast<unsigned>(button));
 }
 
 void BluetoothHIDManager::updateActivity() {

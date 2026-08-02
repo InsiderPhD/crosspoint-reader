@@ -17,6 +17,7 @@ extern HalPowerManager powerManager;  // Singleton
 class HalPowerManager {
   int normalFreq = 0;  // MHz
   bool isLowPower = false;
+  int appliedLowFreq = 0;  // MHz actually set while isLowPower (10 vs 80 with BLE up)
 
   // I2C fuel gauge configuration for X3 battery monitoring
   bool _batteryUseI2C = false;                   // True if using I2C fuel gauge (X3), false for ADC (X4)
@@ -28,7 +29,11 @@ class HalPowerManager {
   SemaphoreHandle_t modeMutex = nullptr;  // Protect access to currentLockMode
 
  public:
-  static constexpr int LOW_POWER_FREQ = 10;                    // MHz
+  static constexpr int LOW_POWER_FREQ = 10;  // MHz
+  // Espressif's DFS floor when the BT controller is up: below 80MHz the
+  // controller misses advertisement reports and connection events, and scan
+  // start/stop at 10MHz can hard-freeze the device with no panic output.
+  static constexpr int BLE_LOW_POWER_FREQ = 80;                // MHz
   static constexpr unsigned long IDLE_POWER_SAVING_MS = 3000;  // ms
   static constexpr unsigned long BATTERY_POLL_MS = 1500;       // ms
 

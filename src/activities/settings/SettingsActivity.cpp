@@ -291,15 +291,6 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false), resultHandler);
         break;
       case SettingAction::Bluetooth:
-        // Bluetooth and autosync can't share the radio or the heap — say why
-        // rather than opening a screen whose toggle would refuse to work.
-        if (!SETTINGS.bluetoothAllowed()) {
-          GUI.drawPopup(renderer, tr(STR_BT_OFF_AUTOSYNC));
-          renderer.displayBuffer();
-          delay(1500);
-          requestUpdate();
-          break;
-        }
         startActivityForResult(std::make_unique<BluetoothSettingsActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::ClearCache:

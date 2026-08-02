@@ -33,7 +33,8 @@ class XtcReaderActivity final : public Activity {
   struct StatusBarInfo {
     int currentPage;
     int pageCount;
-    std::string title;
+    std::string bookTitle;
+    std::string chapterTitle;
   };
 
   void renderPage();

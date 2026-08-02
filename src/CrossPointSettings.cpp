@@ -120,6 +120,29 @@ void CrossPointSettings::migrateReaderActions(CrossPointSettings& settings) {
   }
 }
 
+void CrossPointSettings::migrateStatusBarPositions(CrossPointSettings& settings) {
+  // Battery: on -> left, off -> hidden (its classic cluster).
+  settings.statusBarBatteryPos = settings.statusBarBattery ? SB_POS_LEFT : SB_POS_HIDE;
+
+  // Title was one-of Book/Chapter/Hide; split into two independent centred elements.
+  settings.statusBarBookTitlePos = (settings.statusBarTitle == BOOK_TITLE) ? SB_POS_MIDDLE : SB_POS_HIDE;
+  settings.statusBarChapterTitlePos = (settings.statusBarTitle == CHAPTER_TITLE) ? SB_POS_MIDDLE : SB_POS_HIDE;
+
+  // Progress text lived on the right; each half keeps that position when it was on.
+  settings.statusBarBookPercentPos = settings.statusBarBookProgressPercentage ? SB_POS_RIGHT : SB_POS_HIDE;
+  settings.statusBarChapterPagePos = settings.statusBarChapterPageCount ? SB_POS_RIGHT : SB_POS_HIDE;
+
+  // Time-left was one-of Book/Chapter/Hide; split into two independent right elements.
+  settings.statusBarBookTimeLeftPos = (settings.statusBarTimeLeft == TIME_LEFT_BOOK) ? SB_POS_RIGHT : SB_POS_HIDE;
+  settings.statusBarChapterTimeLeftPos = (settings.statusBarTimeLeft == TIME_LEFT_CHAPTER) ? SB_POS_RIGHT : SB_POS_HIDE;
+
+  // Clock sat to the left of the progress text on the right.
+  settings.statusBarClockPos = settings.statusBarClock ? SB_POS_RIGHT : SB_POS_HIDE;
+
+  // Bookmark indicator is new; default it into the left cluster.
+  settings.statusBarBookmarkPos = SB_POS_LEFT;
+}
+
 void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings) {
   const uint8_t mapping[] = {settings.frontButtonBack, settings.frontButtonConfirm, settings.frontButtonLeft,
                              settings.frontButtonRight};

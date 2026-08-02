@@ -36,6 +36,7 @@ struct BluetoothDevice {
   std::string name;
   int rssi;
   bool isHID = false;
+  uint8_t addrType = 0;  // BLE_ADDR_PUBLIC/BLE_ADDR_RANDOM, captured from the advertisement
 };
 
 // Number of leading HID report bytes the press detector considers. Every clicker
@@ -53,17 +54,20 @@ struct ConnectedDevice {
   unsigned long lastActivityTime = 0;  // Timestamp of last HID report received
   bool wasConnected = false;           // Track if this device was previously connected for auto-reconnect
 
-  // --- Direction-agnostic press detector state ---
-  // Any button on any remote turns one page forward, so we never decode keycodes.
-  // Instead we learn what this remote's idle report looks like, mask off the bytes
-  // that free-run (rolling counters, joystick axes), and treat every idle -> active
-  // transition of the remaining bytes as one press.
+  // --- Structural press detector state ---
+  // We never decode HID keycodes. Instead we learn what this remote's idle report
+  // looks like, mask off the bytes that free-run (rolling counters, joystick
+  // axes), and treat every idle -> active transition of the remaining bytes as
+  // one press. Which button was pressed is identified purely by its signature —
+  // the (byte index, value) of the first unmasked byte that left idle — matched
+  // against the mapping the user taught us in Bluetooth settings. An unmatched
+  // or unmapped signature pages forward, so a fresh remote works with no setup.
   uint8_t idleFrame[HID_FRAME_BYTES] = {0};  // Reference "nothing pressed" report
   uint8_t prevFrame[HID_FRAME_BYTES] = {0};  // Previous report, for churn detection
   uint8_t volatileMask = 0;                  // Bit i set => byte i free-runs, ignore it
   uint8_t byteChangeCount[HID_FRAME_BYTES] = {0};
-  uint8_t byteSeenZero = 0;                  // Bit i set => byte i was 0x00 at least once while learning
-                                             // (=> it rests at 0, it's the keycode, never mask it)
+  uint8_t byteSeenZero = 0;           // Bit i set => byte i was 0x00 at least once while learning
+                                      // (=> it rests at 0, it's the keycode, never mask it)
   unsigned long baselineStartMs = 0;  // Start of the post-connect learning window
   uint16_t baselineFrames = 0;        // Frames seen during the learning window
   bool baselineReady = false;
@@ -73,6 +77,10 @@ struct ConnectedDevice {
   uint8_t activeChangeCount = 0;    // How many frames changed during the current active run
   unsigned long lastPressMs = 0;    // Last injected page turn (repeat suppression)
   unsigned long lastRemoteInputMs = 0;
+  // Signature of the most recent accepted press: the first unmasked byte that
+  // differed from idle, and its value. 0xFF index = no press seen yet.
+  uint8_t lastPressSigIndex = 0xFF;
+  uint8_t lastPressSigValue = 0;
 };
 
 class BluetoothHIDManager {
@@ -95,20 +103,38 @@ class BluetoothHIDManager {
   bool connectToDevice(const std::string& address);
   bool disconnectFromDevice(const std::string& address);
   bool isConnected(const std::string& address) const;
+  // Cheap "is any remote connected" check (no allocation) — safe to call from
+  // the render hot path, unlike getConnectedDevices().
+  bool hasConnectedDevice() const { return !_connectedDevices.empty(); }
   std::vector<std::string> getConnectedDevices() const;
 
   // Input handling
   void processInputEvents();
   void setButtonInjector(std::function<void(uint8_t buttonIndex, bool pressed)> injector);
   void setReaderContextCallback(std::function<bool()> callback);
-  // Resolves the physical button index a remote press should be injected as.
-  // Supplied by the app because the reader's page-forward side button depends on
-  // SETTINGS.sideButtonLayout, which lives above this layer. A plain function
-  // pointer, not std::function: this is called from the NimBLE task on every press.
-  void setPageTurnButtonProvider(uint8_t (*provider)()) { _pageTurnButtonProvider = provider; }
+  // Resolves the physical button index a remote press should be injected as,
+  // for either page direction. Supplied by the app because the reader's page
+  // side buttons depend on SETTINGS.sideButtonLayout, which lives above this
+  // layer. A plain function pointer, not std::function: this is called from the
+  // NimBLE task on every press.
+  void setPageTurnButtonProvider(uint8_t (*provider)(bool pageForward)) { _pageTurnButtonProvider = provider; }
+  // Learned two-button mapping, pushed down from SETTINGS (this layer must not
+  // depend on CrossPointSettings). backIndex 0xFF = unmapped: every press pages
+  // forward. Only the back signature affects decoding — anything that doesn't
+  // match it pages forward — but both are kept so the UI can display the state.
+  void setButtonMapping(uint8_t backIndex, uint8_t backValue, uint8_t fwdIndex, uint8_t fwdValue);
+  // The mapping wizard turns this on so the presses it captures don't also
+  // navigate the menu it is running in. Always turned back off on wizard exit.
+  void setInjectionSuppressed(bool suppressed) { _injectionSuppressed = suppressed; }
+  // Signature of the most recent press across all remotes, for the mapping
+  // wizard. Pair with lastRemoteInputMs() to detect that a fresh press arrived.
+  void lastPressSignature(uint8_t& byteIndex, uint8_t& value) const {
+    byteIndex = _lastPressSigIndex;
+    value = _lastPressSigValue;
+  }
   void setDebugCaptureEnabled(bool enabled) { _debugCaptureEnabled = enabled; }
   bool isDebugCaptureEnabled() const { return _debugCaptureEnabled; }
-  void setBondedDevice(const std::string& address, const std::string& name = "");
+  void setBondedDevice(const std::string& address, const std::string& name = "", uint8_t addrType = 0);
   void updateActivity();  // Call periodically to check inactivity timeout
   // Reconnect the bonded device when disconnected. Two triggers: a physical
   // button press on the device, or the remote itself advertising (it does so
@@ -151,6 +177,9 @@ class BluetoothHIDManager {
   // heap-tight X3 the only way to get a >=30KB contiguous block with a book open
   // is to release the resident section first, which only the reader can do.
   bool beginAutoRestoreAttempt();
+  // Hold auto-restore off for a while. Set by the reader's degraded-heap render
+  // guard after it pauses the stack, so restore doesn't ping-pong against it.
+  void deferAutoRestore(unsigned long forMs);
 
   // Check if BLE has had activity recently (within last 4 minutes)
   // Used by power manager to prevent sleep during BLE use
@@ -197,7 +226,18 @@ class BluetoothHIDManager {
   std::vector<ConnectedDevice> _connectedDevices;
   std::function<void(uint8_t, bool)> _buttonInjector;
   std::function<bool()> _readerContextCallback;
-  uint8_t (*_pageTurnButtonProvider)() = nullptr;
+  uint8_t (*_pageTurnButtonProvider)(bool pageForward) = nullptr;
+  // Learned back-button signature (0xFF index = unmapped). Forward is kept only
+  // for state display: decoding is "matches back => back, anything else => forward".
+  uint8_t _backSigIndex = 0xFF;
+  uint8_t _backSigValue = 0;
+  uint8_t _fwdSigIndex = 0xFF;
+  uint8_t _fwdSigValue = 0;
+  // Written from the NimBLE task, read from the loop task. Single-byte/word
+  // fields, same cross-task pattern as ConnectedDevice::lastRemoteInputMs.
+  volatile uint8_t _lastPressSigIndex = 0xFF;
+  volatile uint8_t _lastPressSigValue = 0;
+  volatile bool _injectionSuppressed = false;
   bool _debugCaptureEnabled = false;
   bool _memoryPaused = false;
   volatile bool _maintenanceSuspended = false;  // render task asks loop-task maintenance to stand down
@@ -205,7 +245,14 @@ class BluetoothHIDManager {
   bool _bluetoothWanted = false;                // user asked for the remote; survives system teardowns
   unsigned long _lastWifiActivityMs = 0;        // millis() of the last WiFi power-down; gates re-init
   unsigned long _lastRestoreAttemptMs = 0;      // rate-limits maybeAutoRestore()
+  unsigned long _restoreDeferStampMs = 0;       // deferAutoRestore() stamp...
+  unsigned long _restoreDeferForMs = 0;         // ...and hold-off duration (0 = none)
   std::string _bondedDeviceAddress;
+  // BLE_ADDR_PUBLIC/BLE_ADDR_RANDOM. A CONNECT_IND targeting a random static
+  // address (e.g. ff:.. clickers) as PUBLIC is ignored by the peer, so the type
+  // must survive alongside the address. Loaded from settings at boot and
+  // refreshed from the live advertisement by the background reconnect scan.
+  uint8_t _bondedAddrType = 0;
   std::string _bondedDeviceName;
 
   // Inactivity timeout (milliseconds)

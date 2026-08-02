@@ -157,6 +157,10 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["bleBondedDeviceAddr"] = s.bleBondedDeviceAddr;
   doc["bleBondedDeviceName"] = s.bleBondedDeviceName;
   doc["bleBondedDeviceAddrType"] = s.bleBondedDeviceAddrType;
+  doc["bleBackSigIndex"] = s.bleBackSigIndex;
+  doc["bleBackSigValue"] = s.bleBackSigValue;
+  doc["bleFwdSigIndex"] = s.bleFwdSigIndex;
+  doc["bleFwdSigValue"] = s.bleFwdSigValue;
 
   // longPressAction and shortPwrBtn live in CrossPointSettings but appear in the
   // SettingsList as DynamicEnum (the UI display order doesn't match the storage
@@ -275,6 +279,10 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     s.bleBondedDeviceName[sizeof(s.bleBondedDeviceName) - 1] = '\0';
   }
   s.bleBondedDeviceAddrType = doc["bleBondedDeviceAddrType"] | s.bleBondedDeviceAddrType;
+  s.bleBackSigIndex = doc["bleBackSigIndex"] | s.bleBackSigIndex;
+  s.bleBackSigValue = doc["bleBackSigValue"] | s.bleBackSigValue;
+  s.bleFwdSigIndex = doc["bleFwdSigIndex"] | s.bleFwdSigIndex;
+  s.bleFwdSigValue = doc["bleFwdSigValue"] | s.bleFwdSigValue;
 
   // Counterpart to the explicit save above: pull longPressAction / shortPwrBtn
   // directly because their SettingInfo entries are DynamicEnum (no valuePtr,
@@ -317,6 +325,21 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.readerShortPressPower =
       clampAction(doc["readerShortPressPower"] | (uint8_t)S::READER_ACTION_PAGE_FORWARD, S::READER_ACTION_PAGE_FORWARD);
   s.readerActionsMigrated = doc["readerActionsMigrated"] | (uint8_t)0;
+
+  // Status-bar position migration: a settings file that predates the per-element
+  // position fields won't carry them. Derive each statusBar*Pos from the legacy
+  // toggle/enum values — read straight from the doc, since those keys are no
+  // longer in the settings list — then flag a resave to persist the new fields.
+  if (doc["statusBarBatteryPos"].isNull()) {
+    s.statusBarBattery = doc["statusBarBattery"] | s.statusBarBattery;
+    s.statusBarTitle = doc["statusBarTitle"] | s.statusBarTitle;
+    s.statusBarChapterPageCount = doc["statusBarChapterPageCount"] | s.statusBarChapterPageCount;
+    s.statusBarBookProgressPercentage = doc["statusBarBookProgressPercentage"] | s.statusBarBookProgressPercentage;
+    s.statusBarTimeLeft = doc["statusBarTimeLeft"] | s.statusBarTimeLeft;
+    s.statusBarClock = doc["statusBarClock"] | s.statusBarClock;
+    CrossPointSettings::migrateStatusBarPositions(s);
+    if (needsResave) *needsResave = true;
+  }
 
   LOG_DBG("CPS", "Settings loaded from file");
 

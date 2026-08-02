@@ -83,8 +83,12 @@ class CrossPointWebServer {
   static void wsEventCallback(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
   void abortWsUpload(const char* tag);
 
-  // File scanning
-  void scanFiles(const char* path, const std::function<void(FileInfo)>& callback) const;
+  // File scanning. Walks `path` and invokes the callback for visible (non-hidden)
+  // entries with index in [offset, offset+limit). Returns true if at least one
+  // more visible entry exists past that window (i.e. the client should request
+  // another page). Bounds the raw directory walk so a corrupt FAT chain can't
+  // spin the main loop forever.
+  bool scanFiles(const char* path, uint32_t offset, uint32_t limit, const std::function<void(FileInfo)>& callback) const;
   String formatFileSize(size_t bytes) const;
   bool isEpubFile(const String& filename) const;
 

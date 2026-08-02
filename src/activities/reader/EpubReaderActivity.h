@@ -4,7 +4,9 @@
 #include <Epub/Section.h>
 
 #include <optional>
+#include <vector>
 
+#include "BookmarkEntry.h"
 #include "CrossPointSettings.h"
 #include "EpubReaderMenuActivity.h"
 #include "activities/Activity.h"
@@ -46,6 +48,13 @@ class EpubReaderActivity final : public Activity {
   bool showBookmarkMessage = false;
   bool bookmarkMessageWasRemoval = false;
   unsigned long bookmarkMessageTime = 0UL;
+
+  // In-memory copy of this book's bookmarks so the status-bar indicator can be
+  // computed per render without touching the SD card. Reloaded on entry and
+  // whenever a toggle or the bookmark list may have changed the file.
+  std::vector<BookmarkEntry> cachedBookmarks;
+  void reloadBookmarkCache();
+  bool isCurrentPageBookmarked() const;
 
   enum class BookmarkToggleResult { None, Added, Removed };
 
@@ -100,10 +109,15 @@ class EpubReaderActivity final : public Activity {
   void toggleBluetoothFromReader();
   // Called from the idle loop: if Bluetooth is wanted but the stack is down (e.g.
   // a section build tore it out), and the page has settled, free the chapter
-  // layout + glyph cache and re-enable the stack — the same heap-freeing the
-  // manual toggle does, which is the only way to get the controller's contiguous
-  // block back with a book open on X3. Silent; the page reloads from cache.
+  // layout + Epub + glyph cache and re-enable the stack — the same heap-freeing
+  // the manual toggle does, which is the only way to get the controller's
+  // contiguous block back with a book open on X3. Silent; the page reloads from
+  // cache.
   void maybeAutoRestoreBluetooth();
+  // Reload the Epub released before a Bluetooth enable(). Failing here leaves
+  // the reader with no book, so it bails to Home; returns false in that case
+  // and the caller must return immediately.
+  bool reloadEpubAfterBluetooth(const std::string& epubPath);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   void applyOrientation(uint8_t orientation);
   // Drops the cached section so the current chapter re-paginates on the next render,

@@ -106,13 +106,26 @@ UIIcon UITheme::getFileIcon(const std::string& filename) {
 int UITheme::getStatusBarHeight() {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
 
-  // Add status bar margin
-  const bool showStatusBar = SETTINGS.statusBarChapterPageCount || SETTINGS.statusBarBookProgressPercentage ||
-                             SETTINGS.statusBarTitle != CrossPointSettings::STATUS_BAR_TITLE::HIDE_TITLE ||
-                             SETTINGS.statusBarBattery;
+  // Add status bar margin. The text lane is reserved when any positionable
+  // element is placed (not Hidden); the fill bar reserves its own strip below.
+  const bool showStatusBar = SETTINGS.statusBarBatteryPos != CrossPointSettings::SB_POS_HIDE ||
+                             SETTINGS.statusBarBookTitlePos != CrossPointSettings::SB_POS_HIDE ||
+                             SETTINGS.statusBarChapterTitlePos != CrossPointSettings::SB_POS_HIDE ||
+                             SETTINGS.statusBarBookPercentPos != CrossPointSettings::SB_POS_HIDE ||
+                             SETTINGS.statusBarChapterPagePos != CrossPointSettings::SB_POS_HIDE ||
+                             SETTINGS.statusBarBookTimeLeftPos != CrossPointSettings::SB_POS_HIDE ||
+                             SETTINGS.statusBarChapterTimeLeftPos != CrossPointSettings::SB_POS_HIDE ||
+                             SETTINGS.statusBarClockPos != CrossPointSettings::SB_POS_HIDE ||
+                             SETTINGS.statusBarBookmarkPos != CrossPointSettings::SB_POS_HIDE ||
+                             SETTINGS.statusBarBluetoothPos != CrossPointSettings::SB_POS_HIDE;
   const bool showProgressBar =
       SETTINGS.statusBarProgressBar != CrossPointSettings::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS;
-  return (showStatusBar ? (metrics.statusBarVerticalMargin + metrics.statusBarContentGap) : 0) +
+  // User-adjustable extra gap above the bar; reserved only when something is shown.
+  const uint8_t topMarginSetting = SETTINGS.statusBarTopMargin > CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX
+                                       ? CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX
+                                       : SETTINGS.statusBarTopMargin;
+  const int topMargin = (showStatusBar || showProgressBar) ? topMarginSetting : 0;
+  return topMargin + (showStatusBar ? (metrics.statusBarVerticalMargin + metrics.statusBarContentGap) : 0) +
          (showProgressBar ? (((SETTINGS.statusBarProgressBarThickness + 1) * 2) + metrics.progressBarMarginTop) : 0);
 }
 

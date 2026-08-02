@@ -2,8 +2,6 @@
 
 #include <InflateReader.h>
 
-#include <vector>
-
 #include "EpdFontData.h"
 
 class FontDecompressor {
@@ -67,13 +65,25 @@ class FontDecompressor {
 
   // Hot group: last decompressed group (byte-aligned) for non-prewarmed fallback path.
   // Kept in byte-aligned format; individual glyphs are compacted on demand into hotGlyphBuf.
+  // malloc'd, NOT std::vector: resize() failure throws bad_alloc, which is an
+  // instant abort() under -fno-exceptions — and this path runs exactly when the
+  // heap is at its tightest (a glyph the prewarm couldn't fit). Allocation
+  // failure here must degrade to a missing glyph, not a reboot.
   const EpdFontData* hotGroupFont = nullptr;
   uint16_t hotGroupIndex = UINT16_MAX;
-  std::vector<uint8_t> hotGroup;
+  uint8_t* hotGroup = nullptr;
+  uint32_t hotGroupCap = 0;  // bytes allocated at hotGroup
 
   // Scratch buffer for compacting a single glyph from the hot group.
   // Valid until the next getBitmap() call.
-  std::vector<uint8_t> hotGlyphBuf;
+  uint8_t* hotGlyphBuf = nullptr;
+  uint32_t hotGlyphCap = 0;  // bytes allocated at hotGlyphBuf
+
+  // Log throttle: at heap exhaustion the hot-group path runs (and fails) for
+  // EVERY glyph on the page — thousands of unguarded LOG_ERR lines per render.
+  // Log only when the failing group changes; reset on success or clearCache().
+  const EpdFontData* lastAllocFailFont = nullptr;
+  uint16_t lastAllocFailGroup = UINT16_MAX;
 
   void freePageBuffer();
   void freeHotGroup();
