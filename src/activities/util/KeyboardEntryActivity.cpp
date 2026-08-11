@@ -176,6 +176,161 @@ bool KeyboardEntryActivity::handleKeyPress() {
   return insertChar(getSelectedChar());
 }
 
+KeyboardEntryActivity::KeyGrid KeyboardEntryActivity::computeKeyGrid(const int flowStartY) const {
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+
+  KeyGrid g{};
+  g.keyHeight = metrics.keyboardKeyHeight;
+  g.keySpacing = metrics.keyboardKeySpacing;
+  g.bottomKeyHeight = metrics.keyboardBottomKeyHeight;
+  g.bottomKeySpacing = metrics.keyboardBottomKeySpacing;
+  g.contentRows = getContentRowCount();
+  g.contentCols = getContentColCount();
+
+  const int keyboardWidth = pageWidth * metrics.keyboardWidthPercent / 100;
+  g.keyWidth = (keyboardWidth - (g.contentCols - 1) * g.keySpacing) / g.contentCols;
+  const int leftMargin = (pageWidth - (g.contentCols * g.keyWidth + (g.contentCols - 1) * g.keySpacing)) / 2;
+
+  // The bottom row is always sized against the full 10-column ABC grid so it
+  // keeps its width when the content grid narrows in URL mode.
+  const int abcKeyWidth = (keyboardWidth - (COLS - 1) * g.keySpacing) / COLS;
+  const int contentTotalWidth = COLS * abcKeyWidth + (COLS - 1) * g.keySpacing;
+  g.bottomKeyWidth = (contentTotalWidth - (BOTTOM_KEY_COUNT - 1) * g.bottomKeySpacing) / BOTTOM_KEY_COUNT;
+  g.bottomLeftMargin =
+      (pageWidth - (BOTTOM_KEY_COUNT * g.bottomKeyWidth + (BOTTOM_KEY_COUNT - 1) * g.bottomKeySpacing)) / 2;
+
+  // URL snippet grid is centred over the Space key it replaces.
+  if (urlMode) {
+    const int urlTotalWidth = 3 * g.keyWidth + 2 * g.keySpacing;
+    const int urlCenterX = g.bottomLeftMargin +
+                           static_cast<int>(SpecialKeyType::Space) * (g.bottomKeyWidth + g.bottomKeySpacing) +
+                           g.bottomKeyWidth / 2;
+    g.contentLeftMargin = urlCenterX - urlTotalWidth / 2;
+  } else {
+    g.contentLeftMargin = leftMargin;
+  }
+
+  // Bottom-aligned (every current theme) derives the origin from the screen and
+  // the live row count, so it stays consistent with contentRows above when the
+  // mode switches. The flow-positioned fallback depends on the wrapped input
+  // field height, which only render() measures, so it is passed in.
+  const int bottomRowGap = metrics.keyboardBottomKeySpacing > 0 ? 4 : 0;
+  g.startY = metrics.keyboardBottomAligned ? pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing -
+                                                 (g.keyHeight + g.keySpacing) * g.contentRows - g.bottomKeyHeight -
+                                                 bottomRowGap + metrics.keyboardVerticalOffset
+                                           : flowStartY;
+  g.bottomRowY = g.startY + g.contentRows * (g.keyHeight + g.keySpacing) + bottomRowGap;
+  return g;
+}
+
+#if FREEINK_DEVICE_X4PRO
+bool KeyboardEntryActivity::hitTestKey(const int lx, const int ly, int& row, int& col) const {
+  const KeyGrid g = computeKeyGrid(renderedKeyboardStartY);
+
+  // Index by pitch (key + spacing) rather than testing the key rect alone, so
+  // the inter-key gutters route to the nearer key instead of swallowing a tap.
+  // The pitch cell is still bounded by the grid, so a miss stays a miss.
+  const int contentPitch = g.keyWidth + g.keySpacing;
+  const int bottomPitch = g.bottomKeyWidth + g.bottomKeySpacing;
+
+  if (ly >= g.startY && ly < g.startY + g.contentRows * (g.keyHeight + g.keySpacing)) {
+    const int r = (ly - g.startY) / (g.keyHeight + g.keySpacing);
+    if (lx < g.contentLeftMargin || contentPitch <= 0) {
+      return false;
+    }
+    const int c = (lx - g.contentLeftMargin) / contentPitch;
+    if (r < 0 || r >= g.contentRows || c < 0 || c >= g.contentCols) {
+      return false;
+    }
+    // URL mode draws only URL_SNIPPET_COUNT cells; the trailing ones are empty.
+    if (urlMode && c + r * 3 >= URL_SNIPPET_COUNT) {
+      return false;
+    }
+    row = r;
+    col = c;
+    return true;
+  }
+
+  if (ly >= g.bottomRowY && ly < g.bottomRowY + g.bottomKeyHeight) {
+    if (lx < g.bottomLeftMargin || bottomPitch <= 0) {
+      return false;
+    }
+    const int c = (lx - g.bottomLeftMargin) / bottomPitch;
+    if (c < 0 || c >= BOTTOM_KEY_COUNT) {
+      return false;
+    }
+    row = g.contentRows;  // the bottom row index
+    col = c;
+    return true;
+  }
+
+  return false;
+}
+
+bool KeyboardEntryActivity::handleTouchInput() {
+  int lx = 0;
+  int ly = 0;
+  int row = 0;
+  int col = 0;
+
+  // Long press first: it fires while the finger is still down. Mirrors the held
+  // Confirm shortcuts — alternative character on a content key, clear-all on
+  // Del. Only a long press that actually did something suppresses the rest of
+  // the contact; otherwise the lift falls through to a normal tap, exactly as a
+  // held Confirm on a key with no alternative still types on release.
+  if (mappedInput.wasTouchLongPressPoint(lx, ly) && hitTestKey(lx, ly, row, col)) {
+    if (!isBottomRow(row)) {
+      const int prevRow = selectedRow;
+      const int prevCol = selectedCol;
+      selectedRow = row;
+      selectedCol = col;
+      const char alt = getAlternativeChar();
+      if (alt != '\0') {
+        insertChar(alt);
+        delPressCount = 0;
+        hintVisible = false;
+        mappedInput.suppressTouchContact();
+        requestUpdate();
+        return true;
+      }
+      selectedRow = prevRow;
+      selectedCol = prevCol;
+    } else if (static_cast<SpecialKeyType>(col) == SpecialKeyType::Del && !text.empty()) {
+      text.clear();
+      cursorPos = 0;
+      delPressCount = 0;
+      hintVisible = false;
+      mappedInput.suppressTouchContact();
+      requestUpdate();
+      return true;
+    }
+  }
+
+  if (!mappedInput.wasTapPoint(lx, ly) || !hitTestKey(lx, ly, row, col)) {
+    return true;
+  }
+
+  // A tap is a direct pointer action, so it leaves the button-driven cursor
+  // mode rather than being interpreted inside it.
+  if (cursorMode) {
+    cursorMode = false;
+    togglePos = false;
+    passwordVisible = false;
+    hintVisible = false;
+  }
+
+  selectedRow = row;
+  selectedCol = col;
+  if (handleKeyPress()) {
+    requestUpdate();
+    return true;
+  }
+  return false;  // Ok pressed: the activity has finished.
+}
+#endif
+
 void KeyboardEntryActivity::mapColContentBottom(int& col, bool goingUp) const {
   if (urlMode) {
     col = goingUp ? col - 1 : col + 1;
@@ -188,6 +343,14 @@ void KeyboardEntryActivity::mapColContentBottom(int& col, bool goingUp) const {
 
 void KeyboardEntryActivity::loop() {
   const int totalRows = getTotalRowCount();
+
+#if FREEINK_DEVICE_X4PRO
+  // Direct tap-to-type. Handled before the button paths: a consumed tap already
+  // pressed a key, and Ok may have finished the activity.
+  if (!handleTouchInput()) {
+    return;
+  }
+#endif
 
   if (!cursorMode && mappedInput.wasPressed(MappedInputManager::Button::Up)) {
     upHeld = true;
@@ -551,16 +714,17 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   const int bottomKeyHeight = metrics.keyboardBottomKeyHeight;
   const int keySpacing = metrics.keyboardKeySpacing;
   const int contentCols = getContentColCount();
-  const int keyboardWidth = pageWidth * metrics.keyboardWidthPercent / 100;
-  const int keyWidth = (keyboardWidth - (contentCols - 1) * keySpacing) / contentCols;
-  const int leftMargin = (pageWidth - (contentCols * keyWidth + (contentCols - 1) * keySpacing)) / 2;
 
-  const int bottomRowGap = metrics.keyboardBottomKeySpacing > 0 ? 4 : 0;
-  const int keyboardStartY = metrics.keyboardBottomAligned
-                                 ? pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing -
-                                       (keyHeight + keySpacing) * getContentRowCount() - bottomKeyHeight -
-                                       bottomRowGap + metrics.keyboardVerticalOffset
-                                 : inputStartY + inputHeight + lineHeight + metrics.verticalSpacing;
+  // Flow-positioned origin, used only by a non bottom-aligned theme; the grid
+  // derives the bottom-aligned origin itself.
+  const KeyGrid grid = computeKeyGrid(inputStartY + inputHeight + lineHeight + metrics.verticalSpacing);
+  const int keyboardStartY = grid.startY;
+  const int keyWidth = grid.keyWidth;
+#if FREEINK_DEVICE_X4PRO
+  // Publish the drawn origin so touch hit-testing can reproduce this layout
+  // even under a theme whose origin depends on the measured input height.
+  renderedKeyboardStartY = keyboardStartY;
+#endif
 
   const int tipsLh = renderer.getLineHeight(SMALL_FONT_ID);
   const int underlineBottom = inputStartY + inputHeight + lineHeight + metrics.verticalSpacing + 4;
@@ -614,27 +778,16 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     }
   }
 
-  const int bkSpacing = metrics.keyboardBottomKeySpacing;
-  const int abcKeyWidth = (keyboardWidth - (COLS - 1) * keySpacing) / COLS;
-  const int contentTotalWidth = COLS * abcKeyWidth + (COLS - 1) * keySpacing;
-  const int bottomKeyWidth = (contentTotalWidth - (BOTTOM_KEY_COUNT - 1) * bkSpacing) / BOTTOM_KEY_COUNT;
-  const int bottomLeftMargin =
-      (pageWidth - (BOTTOM_KEY_COUNT * bottomKeyWidth + (BOTTOM_KEY_COUNT - 1) * bkSpacing)) / 2;
-
-  int urlLeftMargin = leftMargin;
-  if (urlMode) {
-    const int urlTotalWidth = 3 * keyWidth + 2 * keySpacing;
-    const int urlCenterX =
-        bottomLeftMargin + static_cast<int>(SpecialKeyType::Space) * (bottomKeyWidth + bkSpacing) + bottomKeyWidth / 2;
-    urlLeftMargin = urlCenterX - urlTotalWidth / 2;
-  }
+  const int bkSpacing = grid.bottomKeySpacing;
+  const int bottomKeyWidth = grid.bottomKeyWidth;
+  const int bottomLeftMargin = grid.bottomLeftMargin;
 
   const KeyDef(*layout)[COLS] = symMode ? symLayout : (inputType == InputType::Url ? urlLayout : abcLayout);
-  const int contentRows = getContentRowCount();
+  const int contentRows = grid.contentRows;
 
   for (int row = 0; row < contentRows; row++) {
     const int rowY = keyboardStartY + row * (keyHeight + keySpacing);
-    const int rowLeftMargin = urlMode ? urlLeftMargin : leftMargin;
+    const int rowLeftMargin = grid.contentLeftMargin;
 
     for (int col = 0; col < contentCols; col++) {
       const int keyX = rowLeftMargin + col * (keyWidth + keySpacing);
@@ -667,7 +820,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     }
   }
 
-  const int bottomRowY = keyboardStartY + contentRows * (keyHeight + keySpacing) + bottomRowGap;
+  const int bottomRowY = grid.bottomRowY;
   const bool bottomSelected = isBottomRow(selectedRow);
 
   struct BottomKeyInfo {
@@ -701,8 +854,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
       selKeyW = bottomKeyWidth;
       selKeyH = bottomKeyHeight;
     } else {
-      const int rowLM = urlMode ? urlLeftMargin : leftMargin;
-      selKeyX = rowLM + selectedCol * (keyWidth + keySpacing);
+      selKeyX = grid.contentLeftMargin + selectedCol * (keyWidth + keySpacing);
       selKeyY = keyboardStartY + selectedRow * (keyHeight + keySpacing);
       selKeyW = keyWidth;
       selKeyH = keyHeight;

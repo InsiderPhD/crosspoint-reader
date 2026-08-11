@@ -14,9 +14,9 @@
 #include "I18n.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
-#include "components/icons/bookmark.h"
 #include "components/icons/bluetooth.h"
 #include "components/icons/bluetoothoff.h"
+#include "components/icons/bookmark.h"
 #include "components/icons/remotecontrol.h"
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
@@ -31,6 +31,7 @@ constexpr int bookmarkStatusIconHeight = 14;
 constexpr int bookmarkStatusIconTopCrop = 2;
 // Bluetooth status glyphs (Tabler bluetooth-off / bluetooth / remote-control),
 // 16x16 1bpp with convert_icon.py polarity (0 = ink), drawn via renderer.drawIcon.
+// Sized to match the bookmark glyph so the status bar reads as one row.
 constexpr int btStatusIconSize = 16;
 
 // Blits the 16x16 bookmark glyph (top rows cropped) as 1bpp pixels at (x, y).
@@ -316,6 +317,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
                          const std::function<bool(int index)>& rowDimmed) const {
+
   int rowHeight =
       (rowSubtitle != nullptr) ? BaseMetrics::values.listWithSubtitleRowHeight : BaseMetrics::values.listRowHeight;
   int pageItems = rect.height / rowHeight;
@@ -481,6 +483,10 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
   const int startX = rect.x + pad;
   const int viewRight = rect.x + rect.width - pad;
 
+  // Small filled dot drawn to the right of a tab label when hasBadge is set.
+  constexpr int BADGE_SIZE = 5;   // diameter of the filled square dot
+  constexpr int BADGE_GAP = 3;    // gap between text right edge and dot left edge
+
   // Pass 1: measure the natural (unscrolled) layout and the selected tab's
   // bounds so we can horizontally scroll the ribbon when the tabs don't all
   // fit — this keeps the selected tab's full label readable.
@@ -488,8 +494,9 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
   int selLeft = startX;
   int selRight = startX;
   for (const auto& tab : tabs) {
-    const int w =
+    int w =
         renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    if (tab.hasBadge) w += BADGE_GAP + BADGE_SIZE;
     if (tab.selected) {
       selLeft = naturalX;
       selRight = naturalX + w;
@@ -516,8 +523,9 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
   for (const auto& tab : tabs) {
     const int textWidth =
         renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+    const int totalWidth = textWidth + (tab.hasBadge ? BADGE_GAP + BADGE_SIZE : 0);
 
-    if (currentX + textWidth >= startX && currentX <= viewRight) {
+    if (currentX + totalWidth >= startX && currentX <= viewRight) {
       if (tab.selected) {
         if (selected) {
           renderer.fillRect(currentX - 3, rect.y, textWidth + 6, lineHeight + underlineGap);
@@ -527,9 +535,14 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
       }
       renderer.drawText(UI_12_FONT_ID, currentX, rect.y, tab.label, !(tab.selected && selected),
                         tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+      if (tab.hasBadge) {
+        const int dotX = currentX + textWidth + BADGE_GAP;
+        const int dotY = rect.y + (lineHeight - BADGE_SIZE) / 2;
+        renderer.fillRect(dotX, dotY, BADGE_SIZE, BADGE_SIZE, !(tab.selected && selected));
+      }
     }
 
-    currentX += textWidth + spacing;
+    currentX += totalWidth + spacing;
   }
 }
 
@@ -959,7 +972,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   //   off (stack down) -> bluetooth-off, on but no remote -> bluetooth, connected -> remote-control.
   if (validPos(SETTINGS.statusBarBluetoothPos)) {
     const auto& btMgr = BluetoothHIDManager::getInstance();
-    const uint8_t* btIcon = !btMgr.isEnabled()          ? BluetoothoffIcon
+    const uint8_t* btIcon = !btMgr.isEnabled()           ? BluetoothoffIcon
                             : btMgr.hasConnectedDevice() ? RemotecontrolIcon
                                                          : BluetoothIcon;
     items.push_back(SbItem{SETTINGS.statusBarBluetoothPos, 3, std::string(), btStatusIconSize, btIcon});
@@ -1028,7 +1041,7 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     } else if (it.kind == 2) {
       drawBookmarkStatusIcon(renderer, x, contentY + 5);
     } else if (it.kind == 3) {
-      renderer.drawIcon(it.icon, x, contentY, btStatusIconSize, btStatusIconSize);
+      renderer.drawIcon(it.icon, x, contentY + 4, btStatusIconSize, btStatusIconSize);
     } else {
       renderer.drawText(SMALL_FONT_ID, x, contentY, it.text.c_str());
     }

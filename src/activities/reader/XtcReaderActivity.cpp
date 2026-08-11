@@ -225,6 +225,19 @@ void XtcReaderActivity::loop() {
     if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressBack))) return;
   }
 
+#if FREEINK_DEVICE_X4PRO
+  // X4 Pro: Left/Right action slots belong to the swipe-up/swipe-down gestures
+  // (logical Up/Down); the side keys are handled by the Side Up/Down blocks.
+  // See EpubReaderActivity for the identical gating.
+  constexpr auto kLeftActionButton = MappedInputManager::Button::Up;
+  constexpr auto kRightActionButton = MappedInputManager::Button::Down;
+  const auto shortPressLeft = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressLeft);
+  const auto longPressLeft = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressLeft);
+  const auto shortPressRight = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressRight);
+  const auto longPressRight = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressRight);
+#else
+  constexpr auto kLeftActionButton = MappedInputManager::Button::Left;
+  constexpr auto kRightActionButton = MappedInputManager::Button::Right;
   // Resolve Left/Right with optional orientation swap.
   const bool swapFront =
       SETTINGS.frontButtonFollowOrientation && (SETTINGS.orientation == CrossPointSettings::INVERTED ||
@@ -237,41 +250,40 @@ void XtcReaderActivity::loop() {
       swapFront ? SETTINGS.readerShortPressLeft : SETTINGS.readerShortPressRight);
   const auto longPressRight = static_cast<CrossPointSettings::READER_ACTION>(swapFront ? SETTINGS.readerLongPressLeft
                                                                                        : SETTINGS.readerLongPressRight);
+#endif
 
-  // ── Left ─────────────────────────────────────────────────────────────────
+  // ── Left (X4 Pro: swipe up) ──────────────────────────────────────────────
   if (longPressLeft != CrossPointSettings::READER_ACTION_NONE) {
-    if (mappedInput.isPressed(MappedInputManager::Button::Left) &&
-        mappedInput.getHeldTime(MappedInputManager::Button::Left) >= skipPageMs && !longPressLeftFired) {
+    if (mappedInput.isPressed(kLeftActionButton) && mappedInput.getHeldTime(kLeftActionButton) >= skipPageMs &&
+        !longPressLeftFired) {
       longPressLeftFired = true;
       executeReaderAction(longPressLeft);
       return;
     }
-    if (!mappedInput.isPressed(MappedInputManager::Button::Left)) longPressLeftFired = false;
-    if (mappedInput.wasReleased(MappedInputManager::Button::Left) &&
-        mappedInput.getHeldTime(MappedInputManager::Button::Left) < skipPageMs) {
+    if (!mappedInput.isPressed(kLeftActionButton)) longPressLeftFired = false;
+    if (mappedInput.wasReleased(kLeftActionButton) && mappedInput.getHeldTime(kLeftActionButton) < skipPageMs) {
       if (executeReaderAction(shortPressLeft)) return;
     }
   } else {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+    if (mappedInput.wasPressed(kLeftActionButton)) {
       if (executeReaderAction(shortPressLeft)) return;
     }
   }
 
-  // ── Right ────────────────────────────────────────────────────────────────
+  // ── Right (X4 Pro: swipe down) ───────────────────────────────────────────
   if (longPressRight != CrossPointSettings::READER_ACTION_NONE) {
-    if (mappedInput.isPressed(MappedInputManager::Button::Right) &&
-        mappedInput.getHeldTime(MappedInputManager::Button::Right) >= skipPageMs && !longPressRightFired) {
+    if (mappedInput.isPressed(kRightActionButton) && mappedInput.getHeldTime(kRightActionButton) >= skipPageMs &&
+        !longPressRightFired) {
       longPressRightFired = true;
       executeReaderAction(longPressRight);
       return;
     }
-    if (!mappedInput.isPressed(MappedInputManager::Button::Right)) longPressRightFired = false;
-    if (mappedInput.wasReleased(MappedInputManager::Button::Right) &&
-        mappedInput.getHeldTime(MappedInputManager::Button::Right) < skipPageMs) {
+    if (!mappedInput.isPressed(kRightActionButton)) longPressRightFired = false;
+    if (mappedInput.wasReleased(kRightActionButton) && mappedInput.getHeldTime(kRightActionButton) < skipPageMs) {
       if (executeReaderAction(shortPressRight)) return;
     }
   } else {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    if (mappedInput.wasPressed(kRightActionButton)) {
       if (executeReaderAction(shortPressRight)) return;
     }
   }
@@ -322,6 +334,28 @@ void XtcReaderActivity::loop() {
       }
     }
   }
+
+#if FREEINK_DEVICE_X4PRO
+  // ── Screen tap zones and the home key (configurable reader actions) ───────
+  switch (mappedInput.wasTapZone()) {
+    case MappedInputManager::TapZone::Left:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapLeft))) return;
+      break;
+    case MappedInputManager::TapZone::Middle:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapMiddle))) return;
+      break;
+    case MappedInputManager::TapZone::Right:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapRight))) return;
+      break;
+    case MappedInputManager::TapZone::None:
+      break;
+  }
+  if (mappedInput.wasHomeKeyLongPressed()) {
+    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressHome))) return;
+  } else if (mappedInput.wasHomeKeyTapped()) {
+    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressHome))) return;
+  }
+#endif
 
   // ── Tilt sensor: always page forward/back ────────────────────────────────
   if (SETTINGS.tiltPageTurn) {

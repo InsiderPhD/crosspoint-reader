@@ -174,6 +174,12 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
     Storage.mkdir(sectionsDir.c_str());
   }
 
+  // A build can run for many seconds with the render lock held, so the main
+  // loop's idle rail collapse cannot fire. If the last refresh left the panel
+  // powered, it would sit with VCOM/VGH/VGL applied for the whole build — the
+  // classic left-powered drift. Drop the rails now; the next paint pays a PON.
+  renderer.powerOffScreen();
+
   // Lend the inflate its 32KB dictionary out of the framebuffer for the duration
   // of the unzip, instead of asking the heap for a contiguous block it may no
   // longer be able to produce. See InflateScratchLease for the measurements.

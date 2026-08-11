@@ -2,6 +2,8 @@
 
 #include <HalGPIO.h>
 
+class GfxRenderer;
+
 class MappedInputManager {
  public:
   enum class Button { Back, Confirm, Left, Right, Up, Down, Power, PageBack, PageForward };
@@ -15,7 +17,56 @@ class MappedInputManager {
 
   explicit MappedInputManager(HalGPIO& gpio) : gpio(gpio) {}
 
-  void update() const { gpio.update(); }
+#if FREEINK_DEVICE_X4PRO
+  // Screen tap zones: logical-frame thirds of the screen width.
+  enum class TapZone : uint8_t { None, Left, Middle, Right };
+
+  // Orientation source for swipe direction classification. Set once in setup();
+  // a setter (not a constructor arg) because the global MappedInputManager is
+  // constructed before the renderer's orientation is meaningful.
+  void setRenderer(const GfxRenderer* r) { renderer = r; }
+
+  // When true (everywhere except the readers), a home-key tap injects Confirm.
+  // The readers disable this and dispatch their own configurable actions.
+  void setHomeKeyActsAsConfirm(bool enabled) { homeKeyActsAsConfirm = enabled; }
+
+  // When true, a completed screen tap anywhere injects Confirm. The main loop
+  // disables this for activities that consume touch themselves (readers'
+  // tap zones, keyboard hit-testing) via Activity::consumesTouchInput().
+  void setTapActsAsConfirm(bool enabled) { tapActsAsConfirm = enabled; }
+
+  // Completed screen tap this frame, classified into left/middle/right thirds
+  // of the logical screen. None while a home-key event fires (a bar contact
+  // also reports as an edge tap and must not double-dispatch).
+  TapZone wasTapZone() const;
+
+  // Completed screen tap this frame in logical screen coordinates for the
+  // active orientation, i.e. the same frame the activity draws in. For
+  // consumers that hit-test real UI geometry (the keyboard); wasTapZone() is
+  // the coarse thirds classification the readers use. Same home-key exclusion.
+  bool wasTapPoint(int& lx, int& ly) const;
+
+  // Finger down and stationary past the SDK long-press threshold, in the same
+  // coordinate space as wasTapPoint(). Fires once per contact, while the finger
+  // is still down — the lift afterwards still reports as a tap, so a consumer
+  // that acts on this MUST call suppressTouchContact() or the same key
+  // double-dispatches.
+  bool wasTouchLongPressPoint(int& lx, int& ly) const;
+
+  // Drop the remainder of the current contact after consuming a gesture.
+  void suppressTouchContact() const { gpio.suppressTouchContact(); }
+
+  // Home-key events, for the readers' configurable actions.
+  bool wasHomeKeyTapped() const { return gpio.wasHomeKeyTapped(); }
+  bool wasHomeKeyLongPressed() const { return gpio.wasHomeKeyLongPressed(); }
+#endif
+
+  void update() const {
+    gpio.update();
+#if FREEINK_DEVICE_X4PRO
+    processTouchInput();
+#endif
+  }
   bool wasPressed(Button button) const;
   bool wasReleased(Button button) const;
   bool isPressed(Button button) const;
@@ -31,6 +82,28 @@ class MappedInputManager {
 
  private:
   HalGPIO& gpio;
+
+#if FREEINK_DEVICE_X4PRO
+  const GfxRenderer* renderer = nullptr;
+  bool homeKeyActsAsConfirm = true;
+  bool tapActsAsConfirm = true;
+
+  // A touch point mapped into the logical frame, carried with the logical
+  // screen size so callers can classify against it without re-deriving it.
+  struct LogicalTouchPoint {
+    int x;
+    int y;
+    int width;
+    int height;
+  };
+
+  // Normalised GT911 point (native panel frame) -> logical screen point.
+  LogicalTouchPoint toLogicalPoint(float nx, float ny) const;
+
+  // Polls the SDK swipe/home-key detectors and injects the matching synthesized
+  // button presses (see the X4 Pro mapping table in MappedInputManager.cpp).
+  void processTouchInput() const;
+#endif
 
   bool mapButton(Button button, bool (HalGPIO::*fn)(uint8_t) const) const;
 };

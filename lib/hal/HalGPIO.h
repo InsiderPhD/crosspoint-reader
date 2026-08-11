@@ -111,6 +111,51 @@ class HalGPIO {
 
   WakeupReason getWakeupReason() const;
 
+  // --- Capacitive touch (X4 Pro) ---------------------------------------------
+  // Thin forwarders onto the SDK's InputManager, so nothing above the HAL talks
+  // to an SDK class directly. Every one of these is inert on X3/X4: the board
+  // profile has no touch controller, so the SDK short-circuits them to false.
+  //
+  // Coordinates are normalised 0..1 in the panel's NATIVE frame. Nothing consumes
+  // them yet — there is no touch UI layer in this build. A future consumer must
+  // map them into logical screen space for the current orientation before using
+  // them as screen coordinates; the reader rotates at runtime, so the transform is
+  // not fixed. The board profile's swapXY/flipX/flipY are already applied by the SDK.
+
+  // True when the board profile carries a touch controller at all.
+  bool hasTouch() const;
+
+  // True when the board has the GT911 capacitive home pad.
+  bool hasHomeKey() const;
+
+  // A completed tap: finger down and back up inside the tap slop.
+  bool wasTouchTap(float& nx, float& ny) const;
+
+  // A completed swipe. Start and end are both reported so the caller can decide
+  // direction and whether it began in an edge region.
+  bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;
+
+  // Finger currently down and stationary past the long-press threshold.
+  bool wasTouchLongPress(float& nx, float& ny) const;
+
+  // Home pad: tap fires on release of a short press; long-press fires while the
+  // finger is still down and suppresses the tap.
+  bool wasHomeKeyTapped() const;
+  bool wasHomeKeyLongPressed() const;
+
+  // Live contact position while a finger is down (no tap-slop gate). Used for
+  // gesture calibration and any future drag consumer.
+  bool isTouchHeldAt(float& nx, float& ny) const;
+
+  // Any touch contact this frame. Needed by the sleep timer: a touch-only
+  // session produces no button press or release, so without this the device
+  // would sleep under the user's finger.
+  bool wasTouchActivity() const;
+
+  // Drop the remainder of the current contact. Call after consuming a gesture so
+  // the finger lift cannot also register as a tap on whatever the gesture opened.
+  void suppressTouchContact();
+
   // Button indices
   static constexpr uint8_t BTN_BACK = 0;
   static constexpr uint8_t BTN_CONFIRM = 1;

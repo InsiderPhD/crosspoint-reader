@@ -19,8 +19,14 @@ class ReaderControlsActivity final : public Activity {
   static const char* actionName(CrossPointSettings::READER_ACTION action);
 
  private:
+#if FREEINK_DEVICE_X4PRO
+  // Rows 14-18 are the X4 Pro touch extras: tap left/middle/right, home key
+  // short and long press.
+  static constexpr uint8_t kTotalRows = 19;
+#else
   static constexpr uint8_t kConfigurableRows = 13;  // 13 user-configurable + 1 fixed
   static constexpr uint8_t kTotalRows = 14;
+#endif
 
   uint8_t selectedRow = 0;
   bool isDirty = false;

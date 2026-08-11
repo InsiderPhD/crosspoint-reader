@@ -1,6 +1,7 @@
 #include "SettingsActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalFrontlight.h>
 #include <Logging.h>
 
 #include <cstring>
@@ -90,8 +91,12 @@ void SettingsActivity::onEnter() {
   }
 
   // Append device-only ACTION items — button remap goes first in System
+#if !FREEINK_DEVICE_X4PRO
+  // X4 Pro has no front buttons; the remap wizard would wait forever for
+  // presses that cannot happen.
   systemSettings.insert(systemSettings.begin(),
                         SettingInfo::Action(StrId::STR_REMAP_FRONT_BUTTONS, SettingAction::RemapFrontButtons));
+#endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BT_PAGE_TURNER, SettingAction::Bluetooth));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
@@ -264,6 +269,12 @@ void SettingsActivity::toggleCurrentSetting() {
       SETTINGS.*(setting.valuePtr) = setting.valueRange.min;
     } else {
       SETTINGS.*(setting.valuePtr) = currentValue + setting.valueRange.step;
+    }
+    // Frontlight changes take effect immediately so the user can judge the
+    // level while cycling through values.
+    if (setting.valuePtr == &CrossPointSettings::frontlightBrightness ||
+        setting.valuePtr == &CrossPointSettings::frontlightWarmth) {
+      halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
     }
   } else if (setting.type == SettingType::ACTION) {
     auto resultHandler = [this](const ActivityResult&) { SETTINGS.saveToFile(); };

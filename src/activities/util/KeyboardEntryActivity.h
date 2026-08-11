@@ -33,6 +33,9 @@ class KeyboardEntryActivity : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // The keyboard hit-tests taps itself; a tap on a key must not also inject
+  // Confirm (X4 Pro tap-anywhere-is-Confirm).
+  bool consumesTouchInput() const override { return true; }
 
  private:
   std::string title;
@@ -212,6 +215,40 @@ class KeyboardEntryActivity : public Activity {
   };
 
   static const char* const shiftString[2];
+
+  // Geometry of the drawn key grid. Factored out of render() so touch
+  // hit-testing resolves against exactly the rectangles that were drawn rather
+  // than a second copy of the layout arithmetic.
+  struct KeyGrid {
+    int startY;
+    int keyWidth;
+    int keyHeight;
+    int keySpacing;
+    int contentLeftMargin;
+    int contentRows;
+    int contentCols;
+    int bottomRowY;
+    int bottomLeftMargin;
+    int bottomKeyWidth;
+    int bottomKeyHeight;
+    int bottomKeySpacing;
+  };
+  KeyGrid computeKeyGrid(int keyboardStartY) const;
+
+#if FREEINK_DEVICE_X4PRO
+  // Top of the key grid as last drawn. Cached rather than recomputed because in
+  // a non bottom-aligned theme it depends on the wrapped input field height,
+  // which only render() measures. One aligned int: written by the render task,
+  // read by the input task, so it cannot tear.
+  int renderedKeyboardStartY = 0;
+
+  // Logical-frame tap point -> key cell. False when the point misses the grid.
+  bool hitTestKey(int lx, int ly, int& row, int& col) const;
+
+  // Dispatches screen taps and long presses onto keys. Returns false when the
+  // activity finished (Ok pressed) and loop() must not touch state again.
+  bool handleTouchInput();
+#endif
 
   int getContentRowCount() const;
   int getContentColCount() const;

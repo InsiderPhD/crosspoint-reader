@@ -236,6 +236,11 @@ class GfxRenderer {
 
   // Low level functions
   uint8_t* getFrameBuffer() const;
+
+  // Collapse the panel's analog rails now (no-op if already off). For code
+  // that holds the render lock through a long non-drawing stretch (section
+  // builds), where the main loop's idle rail collapse cannot run.
+  void powerOffScreen() const;
   size_t getBufferSize() const;
   uint16_t getDisplayWidth() const { return panelWidth; }
   uint16_t getDisplayHeight() const { return panelHeight; }

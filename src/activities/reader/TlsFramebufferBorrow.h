@@ -38,6 +38,11 @@ class GfxRenderer;
 // borrow too, provided the UI is a pre-painted static frame — the e-ink holds
 // it with no RAM — and any transient SecureHttpClient is destroyed (freeing
 // its arena memory) before the borrow ends.
+//
+// PSRAM boards (X4 Pro): the arena is compiled out — active() is always false
+// and the framebuffer is left untouched, because there the borrow only costs
+// image integrity. Keeping the guard in the call sites is still correct: it
+// holds the render lock and closes the connection. See DevicePolicy.h.
 class TlsFramebufferBorrow {
  public:
   explicit TlsFramebufferBorrow(GfxRenderer& renderer);

@@ -1,5 +1,6 @@
 #include "InflateReader.h"
 
+#include <DevicePolicy.h>
 #include <Logging.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
@@ -124,6 +125,13 @@ InflateStatus InflateReader::readAtMost(uint8_t* dest, size_t maxLen, size_t* pr
 }
 
 InflateScratchLease::InflateScratchLease(uint8_t* buffer, const size_t length) {
+#if !CROSSPOINT_FB_SCRATCH_BORROW
+  // PSRAM-equipped board: a 32KB contiguous malloc is never in doubt, so don't
+  // clobber the framebuffer for it. See DevicePolicy.h.
+  (void)buffer;
+  (void)length;
+  return;
+#else
   if (!buffer || length < INFLATE_DICT_SIZE || g_scratchBuffer != nullptr) {
     // Too small, or a lease is already outstanding — readers keep using malloc.
     return;
@@ -132,6 +140,7 @@ InflateScratchLease::InflateScratchLease(uint8_t* buffer, const size_t length) {
   g_scratchLength = length;
   g_scratchInUse = false;
   registered = true;
+#endif
 }
 
 InflateScratchLease::~InflateScratchLease() {

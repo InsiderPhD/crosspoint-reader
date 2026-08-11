@@ -1,12 +1,14 @@
 #include <Arduino.h>
 #include <BluetoothHIDManager.h>
 #include <BoardConfig.h>
+#include <DevicePolicy.h>
 #include <Epub.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalDisplay.h>
+#include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
@@ -16,6 +18,7 @@
 #include <Logging.h>
 #include <SPI.h>
 #include <WiFi.h>
+#include <XteinkDetect.h>  // applyXteinkDisplayController(): per-batch panel controller
 #include <builtinFonts/all.h>
 #include <esp_log.h>
 #include <esp_task_wdt.h>
@@ -301,6 +304,7 @@ void enterDeepSleep(bool fromTimeout = false) {
     saveSleepFrameBuffer();
   }
 
+  halFrontlight.off();
   halTiltSensor.deepSleep();
   display.deepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
@@ -309,6 +313,28 @@ void enterDeepSleep(bool fromTimeout = false) {
 }
 
 void setupDisplayAndFonts(bool seamless = false) {
+#if !FREEINK_MCU_C3
+  // Resolve the panel controller before display.begin() picks a driver. Xteink
+  // ships two silicon variants behind one pinout — original units an SSD1677,
+  // newer batches an UltraChip UC81xx — and the board profile names SSD1677. Drive
+  // a UC81xx unit with SSD1677 commands and the panel simply never answers: BUSY
+  // stays low, every wait returns 0 ms, and nothing appears even though the app
+  // renders normally.
+  //
+  // GUARD RATIONALE (mirrors upstream): on the C3 X3/X4, HalGPIO::begin() probes
+  // before its own SPI.begin(), and probing again here — after SPI owns the pins —
+  // re-resets the panel mid-teardown and freezes the X3. On the S3 X4 Pro that
+  // C3-only block is skipped entirely and SPI.begin() happens inside
+  // display.begin(), so this is the only place the probe can run in time.
+  static bool controllerResolved = false;
+  if (!controllerResolved) {
+    controllerResolved = true;
+    if (freeink::applyXteinkDisplayController()) {
+      LOG_DBG("MAIN", "Panel controller: UltraChip UC81xx variant detected");
+    }
+  }
+#endif
+
   display.begin(seamless);
   renderer.begin();
   activityManager.begin();
@@ -354,6 +380,39 @@ void setupDisplayAndFonts(bool seamless = false) {
 
 void setup() {
   t1 = millis();
+
+#if FREEINK_DEVICE_X4PRO
+  // FIRST statement in setup(), before serial, before gpio.begin(), before any
+  // delay: on the X4 Pro the master peripheral rail is a latch on GPIO1
+  // (XTEINK_X4_PRO's power.latch0), and until firmware drives it HIGH the board
+  // stays up only while the power button is physically bridging the rail. On USB
+  // that goes unnoticed because VBUS holds everything up; on battery the device
+  // dies the moment the button is released, which reads as "won't boot".
+  // Anything that delays this — the 200 ms serial settle below included — is
+  // that much longer the user has to keep holding the button.
+  //
+  // holdPowerRails() normally rides in on BoardConfig::selectDevice(), but that
+  // is only called for the X3 (see below); the X4 Pro is DEFAULT_DEVICE and so
+  // never passes through it. Calling it directly is idempotent with that path.
+  //
+  // X3/X4 are deliberately excluded: their latch is GPIO13 (the battery MOSFET
+  // on X4, the SD rail on X3), those units self-latch through the button pull,
+  // and asserting it early would change boot on shipping hardware to fix a bug
+  // they do not have.
+  BoardConfig::holdPowerRails();
+#endif
+
+#ifdef ENABLE_SERIAL_LOG
+  // Bring serial up FIRST, before any hardware init. The regular Serial.begin()
+  // below sits after gpio/power/tilt/clock init, so a hang in any of those
+  // produces an enumerated USB CDC port that never prints a byte — silence that
+  // is indistinguishable from a dead device. Starting here means early bring-up
+  // failures are visible. Costs a few ms and one duplicate begin(), which is
+  // harmless. (Ordering matters on the X4 Pro, where all of that init is new.)
+  Serial.begin(115200);
+  delay(200);  // let the host re-open the CDC endpoint before the first write
+  LOG_INF("BOOT", "=== setup() entry: serial up before hardware init ===");
+#endif
 
   // Watch the loop task: a wedged main loop (observed with the BLE controller
   // starved at low CPU frequency) otherwise leaves the device in limbo forever —
@@ -430,7 +489,14 @@ void setup() {
   I18N.loadSettings();
   KOREADER_STORE.loadFromFile();
   UITheme::getInstance().reload();
+  // Frontlight (X4 Pro): restore the saved brightness/warmth now that settings
+  // are loaded. No-op on boards without one.
+  halFrontlight.begin();
+  halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
   ButtonNavigator::setMappedInputManager(mappedInputManager);
+#if FREEINK_DEVICE_X4PRO
+  mappedInputManager.setRenderer(&renderer);
+#endif
 
   // Bluetooth HID page-turner remotes: a remote press is injected as a virtual
   // press of a physical side button, so activities see it as normal input. With
@@ -446,17 +512,39 @@ void setup() {
     return mappedInputManager.getPhysicalButtonIndex(pageForward ? MappedInputManager::Button::PageForward
                                                                  : MappedInputManager::Button::PageBack);
   });
-  btMgr.setBondedDevice(SETTINGS.bleBondedDeviceAddr, SETTINGS.bleBondedDeviceName,
-                        SETTINGS.bleBondedDeviceAddrType);
+  btMgr.setBondedDevice(SETTINGS.bleBondedDeviceAddr, SETTINGS.bleBondedDeviceName, SETTINGS.bleBondedDeviceAddrType);
   btMgr.setButtonMapping(SETTINGS.bleBackSigIndex, SETTINGS.bleBackSigValue, SETTINGS.bleFwdSigIndex,
                          SETTINGS.bleFwdSigValue);
 
   const auto wakeupReason = gpio.getWakeupReason();
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:
+#if FREEINK_DEVICE_X4PRO
+      // NOT verified on the X4 Pro: the check would deep-sleep the device on
+      // every battery boot, and it could never get back out.
+      //
+      // verifyPowerButtonWakeup() sleeps the device unless the power button is
+      // STILL held when it runs — ~700ms into boot, plus up to 1s of polling.
+      // On X3/X4 that holds by construction: deep sleep drives GPIO13 low to
+      // disconnect the battery through the protection MOSFET, so the rail is up
+      // only while the button is pressed and firmware cannot reach this line
+      // otherwise. The X4 Pro has no such latch (GPIO13 is the display CS —
+      // see HalPowerManager::startDeepSleep), so a normal short press is long
+      // released by now and reads as a spurious wake.
+      //
+      // The failure is self-sustaining: with no battery cut, the sleep it
+      // triggers is answered by another cold POWERON, which lands here again.
+      // Symptom is a device that boots on USB and is dead on battery.
+      //
+      // Cold power-on is therefore taken at face value here. The anti-pocket-wake
+      // guard this gives up needs a hold gate that survives to the check —
+      // latching the press in HalGPIO at boot, not re-reading the pin later.
+      LOG_DBG("MAIN", "Cold boot on battery: power button press taken as intentional");
+#else
       LOG_DBG("MAIN", "Verifying power button press duration");
       gpio.verifyPowerButtonWakeup(SETTINGS.getPowerButtonDuration(),
                                    SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
+#endif
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
       // If USB power caused a cold boot, go back to sleep
@@ -566,14 +654,27 @@ void loop() {
   const unsigned long loopStartTime = millis();
   static unsigned long lastMemPrint = 0;
 
-  gpio.update();
+#if FREEINK_DEVICE_X4PRO
+  // Activities that own touch input (the readers' tap zones and home-key
+  // actions, the keyboard's tap hit-testing) opt out of the global
+  // tap-anywhere-is-Confirm and home-key-is-Confirm conveniences; every other
+  // screen — including the reader's own menus — gets both.
+  const bool activityOwnsTouch = activityManager.consumesTouchInput();
+  mappedInputManager.setHomeKeyActsAsConfirm(!activityOwnsTouch);
+  mappedInputManager.setTapActsAsConfirm(!activityOwnsTouch);
+#endif
+  // Latches buttons (gpio.update()) and, on X4 Pro, classifies touch swipes
+  // into synthesized button presses.
+  mappedInputManager.update();
+
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
 
   // Bluetooth HID maintenance: inactivity timeout and bonded-remote reconnect.
   // Cheap no-ops while Bluetooth is disabled.
   gBluetoothReaderContext = activityManager.isReaderActivity();
   auto& btMgr = BluetoothHIDManager::getInstance();
-  const bool physicalInputDetected = gpio.wasAnyPressed() || gpio.wasAnyReleased();
+  // wasTouchActivity() is compiled to false on boards without a touch panel.
+  const bool physicalInputDetected = gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity();
   // Bluetooth only runs where it's used: the reader and the Bluetooth settings
   // screen. Everywhere else the stack is shut down so its heap (and the
   // fragmentation it causes) goes back to the rest of the firmware. Autosync now
@@ -610,7 +711,14 @@ void loop() {
   // always finds a clean contiguous block. Suppression is render-time only (layout
   // reserved the space at build time), so it neither invalidates the section cache
   // nor changes the page — the image area is simply left blank.
+#if CROSSPOINT_BLE_EXCLUSIVE
   renderer.setImagesSuppressed(btMgr.isEnabled() || btMgr.isBluetoothWanted());
+#else
+  // Roomy board: the JPEG decoder's ~36KB is not in competition with the BLE
+  // stack here, and there is no controller-init cliff to keep the heap
+  // defragmented for, so book images render with a remote connected.
+  renderer.setImagesSuppressed(false);
+#endif
 
   if (Serial && millis() - lastMemPrint >= 10000) {
     LOG_INF("MEM", "Free: %d bytes, Total: %d bytes, Min Free: %d bytes, MaxAlloc: %d bytes", ESP.getFreeHeap(),
@@ -635,7 +743,9 @@ void loop() {
     }
   }
 
-  const bool userInputDetected = gpio.wasAnyPressed() || gpio.wasAnyReleased();
+  // Touch counts as activity: without it a touch-only session would hit the
+  // sleep timer under the user's finger (sub-threshold drags inject no press).
+  const bool userInputDetected = gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity();
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
@@ -710,8 +820,12 @@ void loop() {
     return;
   }
 
-  if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) &&
-      gpio.getHeldTime() > SETTINGS.getPowerButtonDuration()) {
+  // Sleep requires a 500ms hold so that a short press can be used by UI elements
+  // (e.g. the sort menu) without accidentally putting the device to sleep.
+  // getPowerButtonDuration() (10ms) is intentionally kept short for wake-from-sleep
+  // verification only; the sleep trigger needs its own, longer threshold.
+  static constexpr unsigned long SLEEP_HOLD_MS = 500;
+  if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getHeldTime() > SLEEP_HOLD_MS) {
     // If a POWER chord is potentially being pressed (screenshot / RAM
     // investigator), don't sleep.
     if (gpio.isPressed(HalGPIO::BTN_DOWN) || mappedInputManager.isPressed(MappedInputManager::Button::Confirm)) {
@@ -727,6 +841,26 @@ void loop() {
   if (gpio.wasUsbStateChanged()) {
     activityManager.requestUpdate();
   }
+
+#if FREEINK_DEVICE_X4PRO
+  // Collapse the panel's analog rails once no refresh has happened for a few
+  // seconds. Between refreshes the UC8179 otherwise sits powered (PON with no
+  // matching POF), holding VCOM/VGH/VGL applied for as long as a static screen
+  // is up — which shows up as the classic left-powered image drift/artifacts.
+  // Keyed to msSinceLastRefresh(), NOT the activity/sleep timer: activities
+  // with preventAutoSleep() (downloads, web server, WiFi flows) reset the
+  // activity timer every pass and would otherwise never let the rails drop
+  // under their long static screens. Controller RAM survives POF, so the next
+  // paint only pays a PON and still diffs against its retained OLD plane.
+  //
+  // Skipped rather than queued while the render task holds the lock: blocking
+  // the loop task behind a ~1 s page render for an opportunistic power-off is
+  // a bad trade. The next pass retries.
+  if (display.msSinceLastRefresh() > 3000 && !RenderLock::peek()) {
+    RenderLock lock;
+    display.powerOffIdle();
+  }
+#endif
 
   // Long-press Back from any activity returns to the home screen. Fires once per hold
   // cycle (resets on release) so a continued hold doesn't keep retriggering, and

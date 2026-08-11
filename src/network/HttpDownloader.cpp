@@ -1,6 +1,8 @@
 #include "HttpDownloader.h"
 
+#include <DevicePolicy.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <SecureHttpClient.h>
 #include <StreamString.h>
 #include <WiFi.h>
@@ -134,8 +136,38 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   bool fileError = false;
   size_t downloaded = 0;
 
+#if CROSSPOINT_DOWNLOAD_WRITE_BUFFER > 0
+  // Write coalescing (roomy boards only — see CROSSPOINT_DOWNLOAD_WRITE_BUFFER).
+  // The transport hands us the body in 2KB pieces, and each file.write() carries
+  // the HalStorage mutex, SdFat's bookkeeping and (on SDMMC boards) a DMA-bounce
+  // malloc+memcpy per transfer. Batching them into 32KB writes turns ~16 short
+  // SDMMC transactions into one multi-sector run. One allocation for the whole
+  // transfer, freed on return; on a PSRAM board it lands in PSRAM (>=4KB), so it
+  // costs no internal DRAM. A failed allocation is not an error — the per-chunk
+  // path below still runs. The whole block is compiled out on the C3, whose
+  // heap has nothing to spare for it.
+  std::unique_ptr<uint8_t[]> writeBuffer = makeUniqueNoThrow<uint8_t[]>(CROSSPOINT_DOWNLOAD_WRITE_BUFFER);
+  size_t buffered = 0;
+  if (!writeBuffer) {
+    LOG_DBG("HTTP", "No %u-byte write buffer; writing chunks straight through",
+            (unsigned)CROSSPOINT_DOWNLOAD_WRITE_BUFFER);
+  }
+
+  // Flushes whatever is buffered. Returns false on a short write (caller turns
+  // that into FILE_ERROR); resets the fill either way so a failure can't be
+  // re-flushed against a half-written file.
+  const auto flushBuffer = [&]() {
+    if (buffered == 0) return true;
+    const size_t pending = buffered;
+    buffered = 0;
+    return file.write(writeBuffer.get(), pending) == pending;
+  };
+
+  const unsigned long startMs = millis();
+#endif
+
   const int httpCode = http.GET([&](const uint8_t* data, size_t len) {
-    esp_task_wdt_reset();  // download length is network-bound; feed the loop WDT per chunk
+    esp_task_wdt_reset();                      // download length is network-bound; feed the loop WDT per chunk
     if (http.getStatus() != 200) return true;  // drain error body
     if (!fileOpen) {
       if (Storage.exists(destPath.c_str())) {
@@ -148,6 +180,28 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
       }
       fileOpen = true;
     }
+#if CROSSPOINT_DOWNLOAD_WRITE_BUFFER > 0
+    if (writeBuffer) {
+      // Fill, flushing whenever the buffer is full. A chunk larger than the
+      // buffer (never happens with a 2KB transport chunk, but the sink contract
+      // doesn't promise a size) is handled by the loop, not assumed away.
+      size_t offset = 0;
+      while (offset < len) {
+        const size_t space = CROSSPOINT_DOWNLOAD_WRITE_BUFFER - buffered;
+        const size_t take = (len - offset) < space ? (len - offset) : space;
+        memcpy(writeBuffer.get() + buffered, data + offset, take);
+        buffered += take;
+        offset += take;
+        if (buffered == CROSSPOINT_DOWNLOAD_WRITE_BUFFER && !flushBuffer()) {
+          fileError = true;
+          return false;
+        }
+      }
+      downloaded += len;
+      delay(0);  // yield to other tasks / feed the watchdog
+      return true;
+    }
+#endif
     const size_t wrote = file.write(data, len);
     downloaded += wrote;
     if (wrote != len) {
@@ -158,9 +212,26 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     return true;
   });
 
+#if CROSSPOINT_DOWNLOAD_WRITE_BUFFER > 0
+  // Tail flush before the file closes and before any of the size checks below,
+  // which compare against `downloaded` (bytes accepted, not yet all on disk).
+  if (!fileError && !flushBuffer()) {
+    LOG_ERR("HTTP", "Final write flush failed");
+    fileError = true;
+  }
+#endif
+
   if (fileOpen) {
     file.close();
   }
+
+#if CROSSPOINT_DOWNLOAD_WRITE_BUFFER > 0
+  const unsigned long elapsedMs = millis() - startMs;
+  if (elapsedMs > 0 && downloaded > 0) {
+    LOG_INF("HTTP", "Transfer: %u KB in %lu ms (%lu KB/s)", (unsigned)(downloaded >> 10), elapsedMs,
+            (unsigned long)((downloaded >> 10) * 1000UL / elapsedMs));
+  }
+#endif
 
   if (fileError) {
     LOG_ERR("HTTP", "Write failed during download");

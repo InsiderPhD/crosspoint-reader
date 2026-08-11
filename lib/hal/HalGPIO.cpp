@@ -1,3 +1,4 @@
+#include <BoardConfig.h>  // hasHomeKey(): board-profile capability, not a runtime probe
 #include <HalGPIO.h>
 #include <Logging.h>
 #include <Preferences.h>
@@ -5,12 +6,24 @@
 #include <Wire.h>
 #include <esp_sleep.h>
 
+#if FREEINK_DEVICE_X4PRO
+// USB host detection via the USB Serial JTAG start-of-frame counter (no VBUS pin).
+#include <soc/soc.h>
+#include <soc/usb_serial_jtag_reg.h>
+#endif
+
 // Global HalGPIO instance
 HalGPIO gpio;
 
 namespace {
 constexpr unsigned long VIRTUAL_BUTTON_REPRESS_DEBOUNCE_MS = 250;
 }
+
+// The X3 fingerprint probe and its BQ27220 helpers are ESP32-C3 ONLY. They drive
+// I2C on SDA=20/SCL=0, which is the Xteink C3 pinout; on the ESP32-S3 (X4 Pro)
+// GPIO19/20 are the native USB D-/D+ lines carrying the CDC console and GPIO0 is
+// a boot strap, so probing there takes USB down with it.
+#if FREEINK_DEVICE_X3 || FREEINK_DEVICE_X4
 
 namespace X3GPIO {
 
@@ -194,8 +207,23 @@ HalGPIO::DeviceType detectDeviceTypeWithFingerprint() {
 
 }  // namespace
 
+#endif  // FREEINK_DEVICE_X3 || FREEINK_DEVICE_X4
+
 void HalGPIO::begin() {
+  // inputMgr.begin() brings up the board's own peripherals, including (on the
+  // X4 Pro) the GT911 touch controller and its I2C bus on SDA=39/SCL=38.
   inputMgr.begin();
+
+#if FREEINK_DEVICE_X3 || FREEINK_DEVICE_X4
+  // C3-only hardware bring-up. Every line below names a pin that means something
+  // different on the S3, so none of it may run on the X4 Pro:
+  //  - SPI.begin() claims the X3/X4 panel pins. The X4 Pro's panel is on other
+  //    GPIOs and the SDK's EpdBus already opens the bus from the board profile
+  //    (EpdBus.cpp:89), so this call is redundant there as well as wrong.
+  //  - the fingerprint probe drives I2C on SDA=20/SCL=0 (see the block above),
+  //    which on the S3 tears down USB CDC and clobbers the touch bus that
+  //    inputMgr.begin() has just configured.
+  //  - BAT_GPIO0 (0) and UART0_RXD (20) are the S3's strap and USB D+ pins.
   SPI.begin(EPD_SCLK, SPI_MISO, EPD_MOSI, EPD_CS);
 
   _deviceType = detectDeviceTypeWithFingerprint();
@@ -204,6 +232,7 @@ void HalGPIO::begin() {
     pinMode(BAT_GPIO0, INPUT);
     pinMode(UART0_RXD, INPUT);
   }
+#endif
 }
 
 void HalGPIO::update() {
@@ -221,6 +250,32 @@ void HalGPIO::update() {
 }
 
 bool HalGPIO::wasUsbStateChanged() const { return usbStateChanged; }
+
+// --- Capacitive touch passthrough --------------------------------------------
+// One-line forwarders. On X3/X4 the board profile has no touch controller, so
+// the SDK compiles/short-circuits these to false and the whole layer is inert.
+
+bool HalGPIO::hasTouch() const { return inputMgr.hasTouch(); }
+
+bool HalGPIO::hasHomeKey() const { return BoardConfig::hasHomeKey(); }
+
+bool HalGPIO::wasTouchTap(float& nx, float& ny) const { return inputMgr.wasTouchTap(nx, ny); }
+
+bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const {
+  return inputMgr.wasSwipe(nxStart, nyStart, nxEnd, nyEnd);
+}
+
+bool HalGPIO::wasTouchLongPress(float& nx, float& ny) const { return inputMgr.wasTouchLongPress(nx, ny); }
+
+bool HalGPIO::wasHomeKeyTapped() const { return inputMgr.wasHomeKeyTapped(); }
+
+bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
+
+bool HalGPIO::isTouchHeldAt(float& nx, float& ny) const { return inputMgr.isTouchHeldAt(nx, ny); }
+
+bool HalGPIO::wasTouchActivity() const { return inputMgr.wasTouchActivity(); }
+
+void HalGPIO::suppressTouchContact() { inputMgr.suppressTouchContact(); }
 
 bool HalGPIO::isPressed(uint8_t buttonIndex) const {
   return inputMgr.isPressed(buttonIndex) || (virtualButtonState & (1 << buttonIndex));
@@ -345,8 +400,15 @@ void HalGPIO::startDeepSleep() {
     delay(50);
     inputMgr.update();
   }
-  // Arm the wakeup trigger *after* the button is released
+  // Arm the wakeup trigger *after* the button is released.
+  // RISC-V parts (C3) have a dedicated GPIO deep-sleep wakeup; the Xtensa S3 does
+  // not and must use the RTC ext1 path. The X4 Pro's power button (GPIO3) is
+  // RTC-capable, which ext1 requires.
+#if CONFIG_IDF_TARGET_ESP32S3
+  esp_sleep_enable_ext1_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_EXT1_WAKEUP_ANY_LOW);
+#else
   esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
+#endif
   // Enter Deep Sleep
   esp_deep_sleep_start();
 }
@@ -384,6 +446,20 @@ void HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPre
 }
 
 bool HalGPIO::isUsbConnected() const {
+#if FREEINK_DEVICE_X4PRO
+  // The X4 Pro has no VBUS sense line, and UART0_RXD/GPIO20 (the X4's detect pin)
+  // is the S3's native USB D+, so reading it as a GPIO is meaningless. Infer host
+  // presence the way upstream does: a connected USB host emits a start-of-frame
+  // packet every 1 ms, so a start-of-frame counter that advances means a live host.
+  //
+  // This must not simply return false: callers gate real behaviour on it, and
+  // main.cpp only starts serial logging when it reports true — a hardcoded false
+  // makes the device boot completely silently, which is indistinguishable from a
+  // hang and cost a long debugging session to find.
+  const uint32_t first = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG);
+  delayMicroseconds(1500);  // one SOF interval plus margin
+  return REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) != first;
+#else
   if (deviceIsX3()) {
     // X3: infer USB/charging via BQ27220 Current() register (0x0C, signed mA).
     // Positive current means charging.
@@ -398,6 +474,7 @@ bool HalGPIO::isUsbConnected() const {
   }
   // U0RXD/GPIO20 reads HIGH when USB is connected
   return digitalRead(UART0_RXD) == HIGH;
+#endif
 }
 
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {

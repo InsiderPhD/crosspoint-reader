@@ -1013,10 +1013,11 @@ void ReadingStatsActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS),
                  nullptr);
 
+  const bool hasUndatedSessions = !collectUndatedSessionIndices().empty();
   std::vector<TabInfo> tabs;
   tabs.reserve(TOTAL_STATS_PAGES);
   for (int i = 0; i < TOTAL_STATS_PAGES; ++i) {
-    tabs.push_back({I18N.get(TAB_NAMES[i]), currentPage == i});
+    tabs.push_back({I18N.get(TAB_NAMES[i]), currentPage == i, i == PAGE_SESSIONS && hasUndatedSessions});
   }
   GUI.drawTabBar(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight}, tabs,
                  selectedItemIndex == 0);

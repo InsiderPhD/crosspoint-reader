@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <Epub.h>
 #include <FsHelpers.h>
+#include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -472,8 +473,8 @@ bool CrossPointWebServer::scanFiles(const char* path, uint32_t offset, uint32_t 
     // TEMP diagnostic (web scan hang triage): progress lines make a slow or
     // looping directory walk visible on serial.
     if (rawCount % 25 == 0) {
-      LOG_DBG("WEB", "Scan progress: %u entries in %s, last='%s', heap=%u", static_cast<unsigned>(rawCount), path,
-              name, static_cast<unsigned>(ESP.getFreeHeap()));
+      LOG_DBG("WEB", "Scan progress: %u entries in %s, last='%s', heap=%u", static_cast<unsigned>(rawCount), path, name,
+              static_cast<unsigned>(ESP.getFreeHeap()));
     }
     yield();               // Yield to allow WiFi and other tasks to process during long scans
     esp_task_wdt_reset();  // Reset watchdog to prevent timeout on large directories
@@ -529,35 +530,36 @@ void CrossPointWebServer::handleFileListData() const {
   bool seenFirst = false;
   JsonDocument doc;
 
-  const bool hasMore = scanFiles(currentPath.c_str(), offset, limit, [this, &output, &doc, seenFirst](const FileInfo& info) mutable {
-    doc.clear();
-    doc["name"] = info.name;
-    doc["size"] = info.size;
-    doc["isDirectory"] = info.isDirectory;
-    doc["isEpub"] = info.isEpub;
+  const bool hasMore =
+      scanFiles(currentPath.c_str(), offset, limit, [this, &output, &doc, seenFirst](const FileInfo& info) mutable {
+        doc.clear();
+        doc["name"] = info.name;
+        doc["size"] = info.size;
+        doc["isDirectory"] = info.isDirectory;
+        doc["isEpub"] = info.isEpub;
 
-    const size_t written = serializeJson(doc, output, outputSize);
-    if (written >= outputSize) {
-      // JSON output truncated; skip this entry to avoid sending malformed JSON
-      LOG_DBG("WEB", "Skipping file entry with oversized JSON for name: %s", info.name.c_str());
-      return;
-    }
+        const size_t written = serializeJson(doc, output, outputSize);
+        if (written >= outputSize) {
+          // JSON output truncated; skip this entry to avoid sending malformed JSON
+          LOG_DBG("WEB", "Skipping file entry with oversized JSON for name: %s", info.name.c_str());
+          return;
+        }
 
-    // TEMP diagnostic (web scan hang triage): under heap starvation lwIP can
-    // stall each chunk send for seconds, which looks like a hard hang.
-    const uint32_t sendStart = millis();
-    if (seenFirst) {
-      server->sendContent(",");
-    } else {
-      seenFirst = true;
-    }
-    server->sendContent(output);
-    const uint32_t sendMs = millis() - sendStart;
-    if (sendMs > 500) {
-      LOG_DBG("WEB", "Slow sendContent: %ums for '%s', heap=%u", static_cast<unsigned>(sendMs), info.name.c_str(),
-              static_cast<unsigned>(ESP.getFreeHeap()));
-    }
-  });
+        // TEMP diagnostic (web scan hang triage): under heap starvation lwIP can
+        // stall each chunk send for seconds, which looks like a hard hang.
+        const uint32_t sendStart = millis();
+        if (seenFirst) {
+          server->sendContent(",");
+        } else {
+          seenFirst = true;
+        }
+        server->sendContent(output);
+        const uint32_t sendMs = millis() - sendStart;
+        if (sendMs > 500) {
+          LOG_DBG("WEB", "Slow sendContent: %ums for '%s', heap=%u", static_cast<unsigned>(sendMs), info.name.c_str(),
+                  static_cast<unsigned>(ESP.getFreeHeap()));
+        }
+      });
   if (hasMore) {
     char tail[48];
     snprintf(tail, sizeof(tail), "],\"nextOffset\":%u}", static_cast<unsigned>(offset + limit));
@@ -1341,6 +1343,9 @@ void CrossPointWebServer::handlePostSettings() {
   }
 
   SETTINGS.saveToFile();
+
+  // Reflect a web-side frontlight change on the hardware immediately.
+  halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
 
   LOG_DBG("WEB", "Applied %d setting(s)", applied);
   server->send(200, "text/plain", String("Applied ") + String(applied) + " setting(s)");

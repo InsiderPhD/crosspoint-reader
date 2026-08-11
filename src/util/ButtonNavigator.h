@@ -14,7 +14,7 @@ class ButtonNavigator final {
   uint32_t lastContinuousNavTime = 0;
   static const MappedInputManager* mappedInput;
 
-  [[nodiscard]] bool shouldNavigateContinuously() const;
+  [[nodiscard]] bool shouldNavigateContinuously(MappedInputManager::Button button) const;
 
  public:
   explicit ButtonNavigator(const uint16_t continuousIntervalMs = 500, const uint16_t continuousStartMs = 500)

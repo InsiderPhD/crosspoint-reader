@@ -105,21 +105,39 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   const bool usePress = !allowLongPressChapterSkip();
   const bool tiltNext = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedForward();
   const bool tiltPrev = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedBack();
+#if FREEINK_DEVICE_X4PRO
+  // X4 Pro: logical Left/Right are the side keys — the same physical keys as
+  // PageBack/PageForward — so counting them here would double-match one press.
+  // Swipe up/down (logical Up/Down) act as prev/next instead, matching the
+  // Left/Right action-slot defaults in the EPUB reader. No orientation swap:
+  // the swipe direction transform already tracks the screen.
+  const auto prevButton = MappedInputManager::Button::Up;
+  const auto nextButton = MappedInputManager::Button::Down;
+  // Screen taps page too (TXT has no per-action dispatcher, so the zone
+  // mapping is fixed here: left = prev, right = next, middle unused).
+  const auto tapZone = input.wasTapZone();
+  const bool tapPrev = tapZone == MappedInputManager::TapZone::Left;
+  const bool tapNext = tapZone == MappedInputManager::TapZone::Right;
+#else
+  const bool tapPrev = false;
+  const bool tapNext = false;
   const bool swapFront =
       SETTINGS.frontButtonFollowOrientation && (SETTINGS.orientation == CrossPointSettings::INVERTED ||
                                                 SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
   const auto prevButton = swapFront ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
   const auto nextButton = swapFront ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
+#endif
   const bool prev =
-      tiltPrev ||
+      tiltPrev || tapPrev ||
       (usePress ? (input.wasPressed(MappedInputManager::Button::PageBack) || input.wasPressed(prevButton))
                 : (input.wasReleased(MappedInputManager::Button::PageBack) || input.wasReleased(prevButton)));
   const bool powerTurn = SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::PAGE_TURN &&
                          input.wasReleased(MappedInputManager::Button::Power);
-  const bool next = tiltNext || (usePress ? (input.wasPressed(MappedInputManager::Button::PageForward) || powerTurn ||
-                                             input.wasPressed(nextButton))
-                                          : (input.wasReleased(MappedInputManager::Button::PageForward) || powerTurn ||
-                                             input.wasReleased(nextButton)));
+  const bool next = tiltNext || tapNext ||
+                    (usePress ? (input.wasPressed(MappedInputManager::Button::PageForward) || powerTurn ||
+                                 input.wasPressed(nextButton))
+                              : (input.wasReleased(MappedInputManager::Button::PageForward) || powerTurn ||
+                                 input.wasReleased(nextButton)));
   return {prev, next, tiltPrev || tiltNext};
 }
 

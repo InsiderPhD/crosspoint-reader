@@ -1466,7 +1466,25 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   }
 }
 
-uint8_t* GfxRenderer::getFrameBuffer() const { return frameBuffer; }
+uint8_t* GfxRenderer::getFrameBuffer() const {
+  // Every external taker of this pointer either scribbles on the buffer
+  // (TLS/inflate/JPEG scratch leases) or reads it as a settled frame
+  // (screenshots, pixel post-processing). On panels with a split
+  // displayStart/displayFinish (UC8179: the post-waveform DTM1 sync re-reads
+  // the frame ~600ms after the refresh fires) a deferred refresh is still
+  // READING these bytes — hand the pointer out mid-flight and the controller's
+  // OLD plane gets synced from scratch garbage, after which every partial
+  // refresh shows persistent bands/inversion until a full flash. Drain first;
+  // no-op when nothing is pending. (Same guard lendBuildStorage() has in the
+  // SDK — this covers the callers that take the raw pointer instead.)
+  display.waitRefreshComplete();
+  return frameBuffer;
+}
+
+void GfxRenderer::powerOffScreen() const {
+  display.waitRefreshComplete();
+  display.powerOffIdle();
+}
 
 size_t GfxRenderer::getBufferSize() const { return frameBufferSize; }
 

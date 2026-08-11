@@ -1,5 +1,6 @@
 #include "TlsFramebufferBorrow.h"
 
+#include <DevicePolicy.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <multi_heap.h>
@@ -11,6 +12,8 @@
 #include <cstring>
 
 #include "BookFusionSyncClient.h"
+
+#if CROSSPOINT_FB_SCRATCH_BORROW
 
 namespace {
 
@@ -79,6 +82,8 @@ void* tlsRealloc(void* p, size_t size) {
 
 }  // namespace
 
+#endif  // CROSSPOINT_FB_SCRATCH_BORROW
+
 TlsFramebufferBorrow::TlsFramebufferBorrow(GfxRenderer& renderer) {
   // Initialize wolfSSL's process-wide state BEFORE any arena exists, so its
   // long-lived globals (RNG state etc.) are allocated on the normal heap for
@@ -92,6 +97,18 @@ TlsFramebufferBorrow::TlsFramebufferBorrow(GfxRenderer& renderer) {
     wolfSslInitDone = true;
   }
 
+#if !CROSSPOINT_FB_SCRATCH_BORROW
+  // PSRAM-equipped board (X4 Pro): wolfSSL's session and record buffers fit the
+  // normal heap with room to spare, so leave the framebuffer alone — borrowing
+  // it fills the visible image with TLS garbage, which shows up as artefacts on
+  // any path that repaints partially. installed_ stays false, so the request
+  // runs on plain malloc/free and the dtor skips the arena teardown. The render
+  // lock is still held for the borrow's scope: callers pre-paint a static status
+  // frame and expect nothing to draw over it mid-request. See
+  // DevicePolicy.h.
+  (void)renderer;
+  return;
+#else
   // lock_ (render lock) is already held by the time we reach here (member init),
   // so the render task cannot draw into the framebuffer while we repurpose it.
   uint8_t* fb = renderer.getFrameBuffer();
@@ -142,6 +159,7 @@ TlsFramebufferBorrow::TlsFramebufferBorrow(GfxRenderer& renderer) {
 
   installed_ = true;
   LOG_DBG("BFB", "wolfSSL large allocs routed to %u-byte framebuffer arena", (unsigned)alignedSize);
+#endif
 }
 
 TlsFramebufferBorrow::~TlsFramebufferBorrow() {
@@ -149,6 +167,7 @@ TlsFramebufferBorrow::~TlsFramebufferBorrow() {
   // while the arena range is still valid. An arena pointer freed after the
   // range is cleared would hit free() and corrupt the heap.
   BookFusionSyncClient::closeConnection();
+#if CROSSPOINT_FB_SCRATCH_BORROW
   if (installed_) {
     g_fbHeap = nullptr;
     g_fbStart = nullptr;
@@ -157,4 +176,8 @@ TlsFramebufferBorrow::~TlsFramebufferBorrow() {
   }
   // lock_ is released after this; the framebuffer now holds TLS garbage, so
   // the caller's next paint must be a full redraw.
+#endif
+  // With the borrow compiled out (PSRAM boards) installed_ was never set, the
+  // framebuffer still holds the caller's status frame, and only the connection
+  // close above applies.
 }

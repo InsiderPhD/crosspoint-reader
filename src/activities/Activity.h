@@ -44,6 +44,14 @@ class Activity {
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
   virtual bool isReaderActivity() const { return false; }
+  // True for activities that read raw touch events themselves (tap-zone and
+  // home-key dispatch in the readers, tap hit-testing in the keyboard). The
+  // main loop then disables the global tap-anywhere-is-Confirm and
+  // home-key-is-Confirm injections (X4 Pro) so a consumed touch cannot also
+  // fire Confirm. Deliberately NOT tied to isReaderActivity(): reader
+  // sub-screens (menu, chapter select, footnotes) claim reader status for the
+  // Bluetooth lifecycle but are plain menus that want the Confirm injections.
+  virtual bool consumesTouchInput() const { return false; }
   // Bluetooth (BLE page-turner) is only allowed to stay up in activities that
   // actually use it — the reader and the Bluetooth settings screen. Everywhere
   // else the main loop shuts the stack down to return its heap.

@@ -1,5 +1,6 @@
 #include "BluetoothHIDManager.h"
 
+#include <DevicePolicy.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
 #include <Logging.h>
@@ -178,6 +179,7 @@ bool BluetoothHIDManager::enable() {
   // learned; init()'s return value catches a clean failure.
   LOG_INF("BT", "Enable attempt: heap %u, largest block %u", freeHeap, largestBlock);
 
+#if CROSSPOINT_BLE_EXCLUSIVE
   // CRITICAL: Disable WiFi when enabling Bluetooth
   // ESP32-C3 cannot have both WiFi and BLE enabled simultaneously
   if (WiFi.getMode() != WIFI_OFF) {
@@ -186,6 +188,12 @@ bool BluetoothHIDManager::enable() {
     WiFi.mode(WIFI_OFF);
     delay(100);  // Brief delay to ensure WiFi is fully powered down
   }
+#else
+  // Roomy board with software coexistence compiled in
+  // (CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y): leave WiFi up. The controller has the
+  // heap it needs and the radio is time-shared, so a sync no longer costs the
+  // user their remote connection. See DevicePolicy.h.
+#endif
 
   // Initialize NimBLE stack. The return value matters: without it a failed init
   // was reported as "Bluetooth enabled successfully" and every later call worked
@@ -506,8 +514,8 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
         pClient = freshClient;
         pClient->setSelfDelete(false, false);
         pClient->setConnectTimeout(BLE_CONNECT_TIMEOUT_MS);
-        pClient->setConnectionParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_SETUP_LATENCY, BLE_CONN_TIMEOUT,
-                                     BLE_CONN_SCAN_INTERVAL, BLE_CONN_SCAN_WINDOW);
+        pClient->setConnectionParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_SETUP_LATENCY,
+                                     BLE_CONN_TIMEOUT, BLE_CONN_SCAN_INTERVAL, BLE_CONN_SCAN_WINDOW);
         pClient->setClientCallbacks(&clientCallbacks, false);
       }
     }
@@ -520,8 +528,8 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
     }
   }
 
-  const bool connParamsUpdated = pClient->updateConnParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL,
-                                                           BLE_CONN_SETUP_LATENCY, BLE_CONN_TIMEOUT);
+  const bool connParamsUpdated =
+      pClient->updateConnParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_SETUP_LATENCY, BLE_CONN_TIMEOUT);
   LOG_INF("BT", "Connection params update request: %d", connParamsUpdated);
 
   const bool dataLenUpdated = pClient->setDataLen(251);
@@ -751,6 +759,16 @@ bool BluetoothHIDManager::pauseForMemory() {
     return false;
   }
 
+#if !CROSSPOINT_BLE_EXCLUSIVE
+  // Roomy board: the section build / sync / render that asked for this pause has
+  // the heap it needs with the stack up, so keep the remote connected instead of
+  // making the user press a button to get it back. Returning false leaves
+  // BleMemoryPause's dtor a no-op too. See DevicePolicy.h.
+  LOG_DBG("BT", "Memory pause not needed on this board; BLE stays up (free %u, largest %u)", ESP.getFreeHeap(),
+          ESP.getMaxAllocHeap());
+  return false;
+#endif
+
   // Ask the loop task's maintenance to stand down, then wait for any in-flight
   // pass to finish. If a (blocking) bonded reconnect is running we skip the
   // pause entirely rather than tear NimBLE down underneath it.
@@ -824,11 +842,15 @@ bool BluetoothHIDManager::beginAutoRestoreAttempt() {
   if (_restoreDeferForMs != 0 && now - _restoreDeferStampMs < _restoreDeferForMs) {
     return false;
   }
+#if CROSSPOINT_BLE_EXCLUSIVE
   // WiFi settle: refuse to bring the BT controller up until the chip has had
-  // quiet time since the last WiFi teardown (see BLE_WIFI_SETTLE_MS).
+  // quiet time since the last WiFi teardown (see BLE_WIFI_SETTLE_MS). The
+  // WiFi->BT controller handoff freeze is a C3 hazard; a coexisting board never
+  // takes WiFi down for BLE in the first place, so there is nothing to wait for.
   if (_lastWifiActivityMs != 0 && now - _lastWifiActivityMs < BLE_WIFI_SETTLE_MS) {
     return false;
   }
+#endif
   _lastRestoreAttemptMs = now;
   LOG_INF("BT", "Auto-restore window open (heap %u, largest %u, %lums since WiFi) — reader will free layout + enable",
           ESP.getFreeHeap(), ESP.getMaxAllocHeap(), _lastWifiActivityMs ? now - _lastWifiActivityMs : 0UL);

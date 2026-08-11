@@ -27,6 +27,18 @@ namespace {
 // 13  Power     Long press   → (fixed: Sleep)
 
 constexpr uint8_t kFixedRow = 13;
+
+#if FREEINK_DEVICE_X4PRO
+// X4 Pro: rows 0/2/4/6 configure the four screen swipes (left/right/up/down
+// reuse the Back/Confirm/Left/Right short-press action slots). A swipe cannot
+// be long-pressed, so the corresponding long-press rows are hidden. Rows 14-16
+// are the screen tap zones, 17/18 the home key tap and long press; the side
+// keys and Power keep their short/long pairs.
+constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 14, 15, 16, 17, 18, 8, 9, 10, 11, 12, 13};
+#else
+constexpr uint8_t kRowIds[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+#endif
+constexpr uint8_t kVisibleRows = sizeof(kRowIds);
 }  // namespace
 
 void ReaderControlsActivity::onEnter() {
@@ -48,19 +60,19 @@ void ReaderControlsActivity::loop() {
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    cycleActionForRow(selectedRow);
+    cycleActionForRow(kRowIds[selectedRow]);
     isDirty = true;
     requestUpdate();
     return;
   }
 
   buttonNavigator.onNextRelease([this] {
-    selectedRow = static_cast<uint8_t>(ButtonNavigator::nextIndex(selectedRow, kTotalRows));
+    selectedRow = static_cast<uint8_t>(ButtonNavigator::nextIndex(selectedRow, kVisibleRows));
     requestUpdate();
   });
 
   buttonNavigator.onPreviousRelease([this] {
-    selectedRow = static_cast<uint8_t>(ButtonNavigator::previousIndex(selectedRow, kTotalRows));
+    selectedRow = static_cast<uint8_t>(ButtonNavigator::previousIndex(selectedRow, kVisibleRows));
     requestUpdate();
   });
 }
@@ -78,9 +90,9 @@ void ReaderControlsActivity::render(RenderLock&&) {
   const int contentHeight = pageHeight - topOffset - metrics.buttonHintsHeight - metrics.verticalSpacing;
 
   GUI.drawList(
-      renderer, Rect{0, topOffset, pageWidth, contentHeight}, kTotalRows, selectedRow,
-      [this](int index) -> std::string { return getRowTitle(static_cast<uint8_t>(index)); }, nullptr, nullptr,
-      [this](int index) -> std::string { return getRowActionName(static_cast<uint8_t>(index)); }, true, nullptr);
+      renderer, Rect{0, topOffset, pageWidth, contentHeight}, kVisibleRows, selectedRow,
+      [this](int index) -> std::string { return getRowTitle(kRowIds[index]); }, nullptr, nullptr,
+      [this](int index) -> std::string { return getRowActionName(kRowIds[index]); }, true, nullptr);
 
   const auto hints = mappedInput.mapLabels(tr(STR_SAVE_AND_BACK), tr(STR_CHANGE), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, hints.btn1, hints.btn2, hints.btn3, hints.btn4);
@@ -92,8 +104,42 @@ void ReaderControlsActivity::render(RenderLock&&) {
 const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
   static char buf[48];
   if (row >= kTotalRows) return "";
+#if FREEINK_DEVICE_X4PRO
+  switch (row) {
+    case 14:
+      return tr(STR_TAP_LEFT);
+    case 15:
+      return tr(STR_TAP_MIDDLE);
+    case 16:
+      return tr(STR_TAP_RIGHT);
+    case 17:
+      snprintf(buf, sizeof(buf), "%s %s", tr(STR_HOME_BUTTON), tr(STR_SHORT_PRESS));
+      return buf;
+    case 18:
+      snprintf(buf, sizeof(buf), "%s %s", tr(STR_HOME_BUTTON), tr(STR_LONG_PRESS));
+      return buf;
+    default:
+      break;
+  }
+#endif
   const char* btn;
   switch (row / 2) {
+#if FREEINK_DEVICE_X4PRO
+    // Gestures, not buttons: swipes reuse the Back/Confirm/Left/Right action
+    // slots (see MappedInputManager's X4 Pro mapping table).
+    case 0:
+      btn = tr(STR_SWIPE_LEFT);
+      break;
+    case 1:
+      btn = tr(STR_SWIPE_RIGHT);
+      break;
+    case 2:
+      btn = tr(STR_SWIPE_UP);
+      break;
+    case 3:
+      btn = tr(STR_SWIPE_DOWN);
+      break;
+#else
     case 0:
       btn = tr(STR_BACK);
       break;
@@ -106,17 +152,34 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
     case 3:
       btn = tr(STR_DIR_RIGHT);
       break;
+#endif
     case 4:
+#if FREEINK_DEVICE_X4PRO
+      // X4 Pro side keys sit left/right of the screen, like the X3's.
+      btn = tr(STR_DIR_SIDE_L);
+#else
       // X3 side buttons sit left/right, not up/down — label them accordingly.
       btn = gpio.deviceIsX3() ? tr(STR_DIR_SIDE_L) : tr(STR_DIR_UP);
+#endif
       break;
     case 5:
+#if FREEINK_DEVICE_X4PRO
+      btn = tr(STR_DIR_SIDE_R);
+#else
       btn = gpio.deviceIsX3() ? tr(STR_DIR_SIDE_R) : tr(STR_DIR_DOWN);
+#endif
       break;
     default:
       btn = "Power";
       break;
   }
+#if FREEINK_DEVICE_X4PRO
+  // Swipe rows are gestures — no press-type suffix.
+  if (row < 8) {
+    snprintf(buf, sizeof(buf), "%s", btn);
+    return buf;
+  }
+#endif
   const char* press = (row % 2 == 0) ? tr(STR_SHORT_PRESS) : tr(STR_LONG_PRESS);
   snprintf(buf, sizeof(buf), "%s %s", btn, press);
   return buf;
@@ -215,6 +278,16 @@ CrossPointSettings::READER_ACTION ReaderControlsActivity::getActionForRow(const 
       return static_cast<A>(SETTINGS.readerShortPressPower);
     case 13:
       return CrossPointSettings::READER_ACTION_SLEEP;
+    case 14:
+      return static_cast<A>(SETTINGS.readerTapLeft);
+    case 15:
+      return static_cast<A>(SETTINGS.readerTapMiddle);
+    case 16:
+      return static_cast<A>(SETTINGS.readerTapRight);
+    case 17:
+      return static_cast<A>(SETTINGS.readerShortPressHome);
+    case 18:
+      return static_cast<A>(SETTINGS.readerLongPressHome);
     default:
       return CrossPointSettings::READER_ACTION_NONE;
   }
@@ -269,6 +342,21 @@ void ReaderControlsActivity::cycleActionForRow(const uint8_t row) {
       break;
     case 12:
       advance(SETTINGS.readerShortPressPower);
+      break;
+    case 14:
+      advance(SETTINGS.readerTapLeft);
+      break;
+    case 15:
+      advance(SETTINGS.readerTapMiddle);
+      break;
+    case 16:
+      advance(SETTINGS.readerTapRight);
+      break;
+    case 17:
+      advance(SETTINGS.readerShortPressHome);
+      break;
+    case 18:
+      advance(SETTINGS.readerLongPressHome);
       break;
     default:
       break;

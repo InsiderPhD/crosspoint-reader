@@ -1,5 +1,6 @@
 #include "JpegToBmpConverter.h"
 
+#include <DevicePolicy.h>
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <JPEGDEC.h>
@@ -442,6 +443,13 @@ void freeJpegDec(JPEGDEC* jpeg, const bool fromScratch) {
 }  // namespace
 
 JpegScratchLease::JpegScratchLease(uint8_t* buffer, size_t length) {
+#if !CROSSPOINT_FB_SCRATCH_BORROW
+  // PSRAM-equipped board: the decoder's allocations fit the normal heap, so
+  // don't clobber the framebuffer for them. See DevicePolicy.h.
+  (void)buffer;
+  (void)length;
+  return;
+#else
   if (g_scratch != nullptr || buffer == nullptr) return;
   g_scratch = buffer;
   g_scratchLen = length;
@@ -451,6 +459,7 @@ JpegScratchLease::JpegScratchLease(uint8_t* buffer, size_t length) {
     return;
   }
   registered = true;
+#endif
 }
 
 JpegScratchLease::~JpegScratchLease() {

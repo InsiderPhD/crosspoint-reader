@@ -57,6 +57,10 @@ inline constexpr size_t INFLATE_DICT_BYTES = 32768;
 //
 // CALLER CONTRACT: nothing may render for the lifetime of the lease. The lease
 // destroys the framebuffer's contents, so the caller must clear/repaint after.
+//
+// On PSRAM boards the lease is compiled out (active() always false, buffer left
+// untouched) — the contiguity problem it works around does not exist there. See
+// DevicePolicy.h.
 class InflateScratchLease {
  public:
   InflateScratchLease(uint8_t* buffer, size_t length);

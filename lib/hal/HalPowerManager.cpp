@@ -25,12 +25,21 @@ void HalPowerManager::begin() {
     Wire.begin(X3_I2C_SDA, X3_I2C_SCL, X3_I2C_FREQ);
     Wire.setTimeOut(4);
     _batteryUseI2C = true;
+#if !FREEINK_DEVICE_X4PRO
   } else {
+    // X4: GPIO0 is the battery ADC input.
+    // NOT on the X4 Pro, where GPIO0 is the Left nav button AND the boot strap.
+    // InputManager has already configured it as INPUT_PULLUP; re-declaring it as a
+    // plain INPUT here would drop the pull-up and leave the button floating — and
+    // that button is the strap used to reach the ROM bootloader for recovery.
     pinMode(BAT_GPIO0, INPUT);
+#endif
   }
-  normalFreq = getCpuFrequencyMhz();
+  // Mutex first: setPowerSaving() uses `normalFreq > 0` as its "begin() has run"
+  // gate and takes modeMutex unconditionally after that check.
   modeMutex = xSemaphoreCreateMutex();
   assert(modeMutex != nullptr);
+  normalFreq = getCpuFrequencyMhz();
 }
 
 void HalPowerManager::setPowerSaving(bool enabled) {
@@ -52,29 +61,36 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   const int lowFreq =
       esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE ? LOW_POWER_FREQ : BLE_LOW_POWER_FREQ;
 
-  // Note: We don't use mutex here to avoid too much overhead,
-  // it's not very important if we read a slightly stale value for currentLockMode
+  // Serialised, including the setCpuFrequencyMhz() call itself. This used to run
+  // lock-free ("a slightly stale currentLockMode doesn't matter"), which held on
+  // the single-core C3. It does not hold on the dual-core X4 Pro: a page turn
+  // coming out of idle has the loop task on core 0 (main.cpp, on user input) and
+  // the render task on core 1 (ActivityManager's HalPowerManager::Lock) both call
+  // this within the same millisecond, both read isLowPower == true, and both enter
+  // setCpuFrequencyMhz(). That reconfigures the PLL and walks Arduino's
+  // APB-change callback list, neither of which is cross-core safe.
+  xSemaphoreTake(modeMutex, portMAX_DELAY);
   const LockMode mode = currentLockMode;
 
   if (mode == None && enabled && (!isLowPower || appliedLowFreq != lowFreq)) {
     LOG_DBG("PWR", "Going to low-power mode (%d MHz)", lowFreq);
-    if (!setCpuFrequencyMhz(lowFreq)) {
+    if (setCpuFrequencyMhz(lowFreq)) {
+      isLowPower = true;
+      appliedLowFreq = lowFreq;
+    } else {
       LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", lowFreq);
-      return;
     }
-    isLowPower = true;
-    appliedLowFreq = lowFreq;
 
   } else if ((!enabled || mode != None) && isLowPower) {
     LOG_DBG("PWR", "Restoring normal CPU frequency");
-    if (!setCpuFrequencyMhz(normalFreq)) {
+    if (setCpuFrequencyMhz(normalFreq)) {
+      isLowPower = false;
+    } else {
       LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", normalFreq);
-      return;
     }
-    isLowPower = false;
   }
-
   // Otherwise, no change needed
+  xSemaphoreGive(modeMutex);
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
@@ -84,9 +100,13 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
     gpio.update();
   }
 
+#if !FREEINK_DEVICE_X4PRO
   // Drive GPIO13 (SPIWP) LOW to disconnect the battery via the hardware protection circuit.
   // On battery power this triggers a full MCU shutdown; the power button is a hardware wake trigger.
   // On USB power, the software GPIO wakeup below still applies.
+  // X4 PRO: deliberately skipped. This latch is an X3/X4 board feature, and on the
+  // X4 Pro GPIO13 is the display CS line — driving it low and holding it through
+  // deep sleep would clamp chip select, not disconnect the battery.
   gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
   gpio_set_level(GPIO_SPIWP, 0);
 
@@ -94,10 +114,18 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   esp_sleep_config_gpio_isolate();
   gpio_deep_sleep_hold_en();
   gpio_hold_en(GPIO_SPIWP);
+#endif
   pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
 
-  // Arm the wakeup trigger *after* the button is released (effective on USB power)
+  // Arm the wakeup trigger *after* the button is released (effective on USB power).
+  // The RISC-V parts (C3) expose a dedicated GPIO deep-sleep wakeup; the Xtensa S3
+  // has no such API and must go through the RTC's ext1 path instead. The X4 Pro's
+  // power button (GPIO3) is RTC-capable, which ext1 requires.
+#if CONFIG_IDF_TARGET_ESP32S3
+  esp_sleep_enable_ext1_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_EXT1_WAKEUP_ANY_LOW);
+#else
   esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
+#endif
   // Enter Deep Sleep
   esp_deep_sleep_start();
 }
@@ -129,7 +157,12 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
     _batteryLastPollMs = now;
     return _batteryCachedPercent;
   }
-  static const BatteryMonitor battery = BatteryMonitor(BAT_GPIO0);
+  // Default-construct: BatteryMonitor takes its ADC pin, divider and charge-status
+  // pin from the active board profile. Do NOT pass BAT_GPIO0 here — that is the
+  // C3's battery ADC, but GPIO0 on the X4 Pro is the Left nav button and the boot
+  // strap, so an explicit pin would sample (and fight) the button. The X4 Pro reads
+  // its charge from the CW2017 I2C gauge above and never reaches this path.
+  static const BatteryMonitor battery;
 
   // smooth the battery %.
   if (_batteryCachedPercent == 0) {

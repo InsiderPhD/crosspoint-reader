@@ -19,16 +19,39 @@
 #include "settings/SettingsActivity.h"
 #include "util/FullScreenMessageActivity.h"
 
+namespace {
+// Guards waitingTaskHandle against concurrent access by the render task and the
+// task blocked in requestUpdateAndWait().
+//
+// This MUST be a real spinlock. These sites previously passed nullptr, which the
+// single-core RISC-V port (ESP32-C3) silently accepts — it only disables
+// interrupts and ignores the argument entirely. The dual-core Xtensa port
+// (ESP32-S3, i.e. the X4 Pro) genuinely needs the spinlock to serialise the two
+// cores, and asserts on a null one:
+//     assert failed: spinlock_acquire spinlock.h:84 (lock)
+// which took down the render task on every boot.
+portMUX_TYPE waiterMux = portMUX_INITIALIZER_UNLOCKED;
+}  // namespace
+
 void ActivityManager::begin() {
   // 12 KB stack: SD card font rendering adds depth (file open + read + decode
   // + ring-buffer insert) on top of an already-deep reader render path, which
   // overflowed the previous 8 KB during on-demand glyph loading.
-  xTaskCreate(&renderTaskTrampoline, "ActivityManagerRender",
-              12288,             // Stack size
-              this,              // Parameters
-              1,                 // Priority
-              &renderTaskHandle  // Task handle
-  );
+  // Pin the render task. On a dual-core part (ESP32-S3 / X4 Pro) putting long
+  // renders and cover decodes on CPU 1 keeps them clear of CPU 0's idle watchdog;
+  // on single-core (ESP32-C3 / X3 / X4) core 0 is the only option and this is
+  // equivalent to the previous unpinned xTaskCreate.
+#if defined(configNUM_CORES) && configNUM_CORES > 1
+  constexpr BaseType_t renderTaskCore = 1;
+#else
+  constexpr BaseType_t renderTaskCore = 0;
+#endif
+  xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender",
+                          12288,              // Stack size
+                          this,               // Parameters
+                          1,                  // Priority
+                          &renderTaskHandle,  // Task handle
+                          renderTaskCore);
   assert(renderTaskHandle != nullptr && "Failed to create render task");
 }
 
@@ -49,10 +72,10 @@ void ActivityManager::renderTaskLoop() {
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
     TaskHandle_t waiter = nullptr;
-    taskENTER_CRITICAL(nullptr);
+    taskENTER_CRITICAL(&waiterMux);
     waiter = waitingTaskHandle;
     waitingTaskHandle = nullptr;
-    taskEXIT_CRITICAL(nullptr);
+    taskEXIT_CRITICAL(&waiterMux);
     if (waiter) {
       xTaskNotify(waiter, 1, eIncrement);
     }
@@ -252,6 +275,8 @@ bool ActivityManager::preventAutoSleep() const { return currentActivity && curre
 
 bool ActivityManager::isReaderActivity() const { return currentActivity && currentActivity->isReaderActivity(); }
 
+bool ActivityManager::consumesTouchInput() const { return currentActivity && currentActivity->consumesTouchInput(); }
+
 bool ActivityManager::keepsBluetoothActive() const {
   return currentActivity && currentActivity->keepsBluetoothActive();
 }
@@ -294,7 +319,7 @@ void ActivityManager::requestUpdateAndWait() {
   }
 
   // Atomic section to perform checks
-  taskENTER_CRITICAL(nullptr);
+  taskENTER_CRITICAL(&waiterMux);
   auto currTaskHandler = xTaskGetCurrentTaskHandle();
   auto mutexHolder = xSemaphoreGetMutexHolder(renderingMutex);
   bool isRenderTask = (currTaskHandler == renderTaskHandle);
@@ -303,7 +328,7 @@ void ActivityManager::requestUpdateAndWait() {
   if (!alreadyWaiting && !isRenderTask && !holdingRenderLock) {
     waitingTaskHandle = currTaskHandler;
   }
-  taskEXIT_CRITICAL(nullptr);
+  taskEXIT_CRITICAL(&waiterMux);
 
   // Render task cannot call requestUpdateAndWait() or it will cause a deadlock
   assert(!isRenderTask && "Render task cannot call requestUpdateAndWait()");

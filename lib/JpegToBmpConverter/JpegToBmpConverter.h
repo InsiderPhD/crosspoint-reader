@@ -18,6 +18,10 @@ class ZipFile;
 //
 // CALLER CONTRACT: nothing may render for the lifetime of the lease. The lease
 // destroys the buffer's contents, so the caller must clear/repaint after.
+//
+// On PSRAM boards the lease is compiled out (active() always false, buffer left
+// untouched); the converter's allocations fit the normal heap there. See
+// DevicePolicy.h.
 class JpegScratchLease {
  public:
   JpegScratchLease(uint8_t* buffer, size_t length);

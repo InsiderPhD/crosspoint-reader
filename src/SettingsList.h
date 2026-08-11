@@ -1,6 +1,7 @@
 #pragma once
 
 #include <HalClock.h>
+#include <HalFrontlight.h>
 #include <HalTiltSensor.h>
 #include <I18n.h>
 
@@ -103,6 +104,17 @@ inline void setShortPowerActionIndex(const uint8_t index) {
 
 // --- Display ---
 inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
+#if FREEINK_CAP_FRONTLIGHT
+  // Frontlight boards only (compiled out elsewhere, so the JSON keys don't
+  // round-trip on hardware that can never drive them). Warmth additionally
+  // needs the second (warm) PWM channel.
+  v.push_back(SettingInfo::Value(StrId::STR_FRONTLIGHT_BRIGHTNESS, &CrossPointSettings::frontlightBrightness,
+                                 {0, 100, 10}, "frontlightBrightness", StrId::STR_CAT_DISPLAY));
+#if FREEINK_CAP_WARMLIGHT
+  v.push_back(SettingInfo::Value(StrId::STR_FRONTLIGHT_WARMTH, &CrossPointSettings::frontlightWarmth, {0, 100, 10},
+                                 "frontlightWarmth", StrId::STR_CAT_DISPLAY));
+#endif
+#endif
   v.insert(v.end(),
            {
                SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
@@ -161,6 +173,8 @@ inline void appendReaderTypographySettings(std::vector<SettingInfo>& v) {
                              StrId::STR_BOOK_S_STYLE},
                             "paragraphAlignment", StrId::STR_CAT_READER),
           SettingInfo::Toggle(StrId::STR_EMBEDDED_STYLE, &CrossPointSettings::embeddedStyle, "embeddedStyle",
+                              StrId::STR_CAT_READER),
+          SettingInfo::Toggle(StrId::STR_HYPHENATION, &CrossPointSettings::hyphenationEnabled, "hyphenationEnabled",
                               StrId::STR_CAT_READER),
           SettingInfo::Enum(
               StrId::STR_ORIENTATION, &CrossPointSettings::orientation,
@@ -264,8 +278,15 @@ inline void appendControlSettings(std::vector<SettingInfo>& v) {
   v.insert(v.end(),
            {
                SettingInfo::Toggle(StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION,
-                                   &CrossPointSettings::frontButtonFollowOrientation, "frontButtonFollowOrientation",
-                                   StrId::STR_CAT_SYSTEM),
+                                   &CrossPointSettings::frontButtonFollowOrientation,
+                                   "frontButtonFollowOrientation"
+#if !FREEINK_DEVICE_X4PRO
+                                   // No front buttons on X4 Pro: keep the JSON key round-tripping
+                                   // but hide the toggle (no category = hidden from UI).
+                                   ,
+                                   StrId::STR_CAT_SYSTEM
+#endif
+                                   ),
                // Legacy settings: kept for JSON round-trip / migration only (no category = hidden from UI).
                SettingInfo::Enum(StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,
                                  {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV}, "sideButtonLayout"),
@@ -411,10 +432,10 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                    {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM, StrId::STR_PROGRESS_BAR_THICK},
                    "statusBarProgressBarThickness", StrId::STR_CUSTOMISE_STATUS_BAR),
                // Extra empty pixels reserved between the body text and the status bar.
-               SettingInfo::Value(StrId::STR_STATUS_BAR_TOP_MARGIN, &CrossPointSettings::statusBarTopMargin,
-                                  {0, CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX,
-                                   CrossPointSettings::STATUS_BAR_TOP_MARGIN_STEP},
-                                  "statusBarTopMargin", StrId::STR_CUSTOMISE_STATUS_BAR),
+               SettingInfo::Value(
+                   StrId::STR_STATUS_BAR_TOP_MARGIN, &CrossPointSettings::statusBarTopMargin,
+                   {0, CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX, CrossPointSettings::STATUS_BAR_TOP_MARGIN_STEP},
+                   "statusBarTopMargin", StrId::STR_CUSTOMISE_STATUS_BAR),
                // Clock entries (web settings only; device UI uses ClockOffsetActivity for the offset).
                // Range 0..104 = quarter-hour steps from UTC-12:00 to UTC+14:00, biased by 48.
                SettingInfo::Enum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClockPos,
@@ -437,7 +458,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 inline const std::vector<SettingInfo>& getSettingsList() {
   static const std::vector<SettingInfo> list = [] {
     std::vector<SettingInfo> v;
-    v.reserve(65);
+    v.reserve(67);
     SettingsListDetail::appendDisplaySettings(v);
     SettingsListDetail::appendReaderTypographySettings(v);
     SettingsListDetail::appendReaderBehaviourSettings(v);

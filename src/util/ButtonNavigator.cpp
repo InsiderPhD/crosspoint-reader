@@ -55,7 +55,7 @@ void ButtonNavigator::onRelease(const Buttons& buttons, const Callback& callback
 
 void ButtonNavigator::onContinuous(const Buttons& buttons, const Callback& callback) {
   const bool isPressed = std::any_of(buttons.begin(), buttons.end(), [this](const MappedInputManager::Button button) {
-    return mappedInput != nullptr && mappedInput->isPressed(button) && shouldNavigateContinuously();
+    return mappedInput != nullptr && mappedInput->isPressed(button) && shouldNavigateContinuously(button);
   });
 
   if (isPressed) {
@@ -64,10 +64,15 @@ void ButtonNavigator::onContinuous(const Buttons& buttons, const Callback& callb
   }
 }
 
-bool ButtonNavigator::shouldNavigateContinuously() const {
+bool ButtonNavigator::shouldNavigateContinuously(const MappedInputManager::Button button) const {
   if (!mappedInput) return false;
 
-  const bool buttonHeldLongEnough = mappedInput->getHeldTime() > continuousStartMs;
+  // Held time of THIS button only. The no-arg getHeldTime() is the max across
+  // all buttons and reports the duration of the last COMPLETED press when
+  // nothing is held — so a one-frame injected press (touch swipe, BLE remote)
+  // arriving after any earlier long hold (the power-on press qualifies) would
+  // satisfy the threshold instantly and step twice per press.
+  const bool buttonHeldLongEnough = mappedInput->getHeldTime(button) > continuousStartMs;
   const bool navigationIntervalElapsed = (millis() - lastContinuousNavTime) > continuousIntervalMs;
 
   return buttonHeldLongEnough && navigationIntervalElapsed;

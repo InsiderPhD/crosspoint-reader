@@ -172,6 +172,15 @@ void HomeActivity::onExit() {
 }
 
 bool HomeActivity::storeCoverBuffer() {
+  // TEMPORARY DIAGNOSTIC — build with -DDISABLE_COVER_BUFFER=1 to skip the cover
+  // snapshot entirely. The restore writes back byte-widened bounds (up to 7px
+  // either side of the tile, holding whatever was adjacent at snapshot time), so
+  // it is the prime suspect for a stray band that only appears on Home and only
+  // clears on reboot. Returning false here makes Home redraw the cover normally:
+  // slower, but with no direct framebuffer write at all.
+#if DISABLE_COVER_BUFFER
+  return false;
+#endif
   // render() must have already set the cover rect; without it we'd be back to
   // cloning the whole framebuffer.
   if (coverRectW <= 0 || coverRectH <= 0) return false;

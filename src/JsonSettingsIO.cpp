@@ -185,6 +185,11 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["readerShortPressSideDown"] = s.readerShortPressSideDown;
   doc["readerLongPressSideDown"] = s.readerLongPressSideDown;
   doc["readerShortPressPower"] = s.readerShortPressPower;
+  doc["readerTapLeft"] = s.readerTapLeft;
+  doc["readerTapMiddle"] = s.readerTapMiddle;
+  doc["readerTapRight"] = s.readerTapRight;
+  doc["readerShortPressHome"] = s.readerShortPressHome;
+  doc["readerLongPressHome"] = s.readerLongPressHome;
   doc["readerActionsMigrated"] = s.readerActionsMigrated;
 
   String json;
@@ -324,6 +329,15 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
                   S::READER_ACTION_SKIP_CHAPTER_FORWARD);
   s.readerShortPressPower =
       clampAction(doc["readerShortPressPower"] | (uint8_t)S::READER_ACTION_PAGE_FORWARD, S::READER_ACTION_PAGE_FORWARD);
+  s.readerTapLeft = clampAction(doc["readerTapLeft"] | (uint8_t)S::READER_ACTION_PAGE_BACK, S::READER_ACTION_PAGE_BACK);
+  s.readerTapMiddle =
+      clampAction(doc["readerTapMiddle"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
+  s.readerTapRight =
+      clampAction(doc["readerTapRight"] | (uint8_t)S::READER_ACTION_PAGE_FORWARD, S::READER_ACTION_PAGE_FORWARD);
+  s.readerShortPressHome =
+      clampAction(doc["readerShortPressHome"] | (uint8_t)S::READER_ACTION_GO_HOME, S::READER_ACTION_GO_HOME);
+  s.readerLongPressHome =
+      clampAction(doc["readerLongPressHome"] | (uint8_t)S::READER_ACTION_SLEEP, S::READER_ACTION_SLEEP);
   s.readerActionsMigrated = doc["readerActionsMigrated"] | (uint8_t)0;
 
   // Status-bar position migration: a settings file that predates the per-element

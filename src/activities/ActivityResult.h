@@ -23,6 +23,10 @@ struct MenuResult {
   uint8_t pageTurnOption = 0;
   uint8_t buttonHints = 0;
   uint8_t autosyncMode = 0;
+  // Frontlight levels as cycled in the menu (already driven live on the
+  // hardware); the reader persists them on menu exit when they changed.
+  uint8_t frontlightBrightness = 0;
+  uint8_t frontlightWarmth = 50;
 };
 
 struct ChapterResult {

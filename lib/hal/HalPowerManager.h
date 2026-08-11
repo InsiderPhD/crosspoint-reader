@@ -29,7 +29,20 @@ class HalPowerManager {
   SemaphoreHandle_t modeMutex = nullptr;  // Protect access to currentLockMode
 
  public:
+#if FREEINK_DEVICE_X4PRO
+  // X4 PRO (ESP32-S3): 80 MHz is the floor, not 10.
+  // Below 80 MHz the CPU leaves the PLL and APB follows the CPU clock, so the
+  // USB-OTG CDC console and every APB-clocked peripheral are reclocked by a
+  // factor of 8 on the way down and back up. The transition *up* — the one a
+  // page turn triggers coming out of idle — reset the device every time with
+  // rst:0x8 (TG1WDT_SYS_RST), the interrupt watchdog, with no log output
+  // between "Going to low-power mode (10 MHz)" and the ROM banner.
+  // This part is dual-core with CONFIG_ESP_INT_WDT_CHECK_CPU1=y, so one core
+  // stalled for 300 ms in the clock switch resets the whole system.
+  static constexpr int LOW_POWER_FREQ = 80;  // MHz
+#else
   static constexpr int LOW_POWER_FREQ = 10;  // MHz
+#endif
   // Espressif's DFS floor when the BT controller is up: below 80MHz the
   // controller misses advertisement reports and connection events, and scan
   // start/stop at 10MHz can hard-freeze the device with no panic output.

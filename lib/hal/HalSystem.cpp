@@ -42,8 +42,14 @@ void IRAM_ATTR __wrap_panic_print_backtrace(const void* frame, int core) {
     panicStack[i].sp = 0;
   }
 
-  // Copied from components/esp_system/port/arch/riscv/panic_arch.c
+  // Copied from components/esp_system/port/arch/riscv/panic_arch.c.
+  // The exception frame layout is architecture-specific: RISC-V (C3) names the
+  // stack pointer `sp`, Xtensa (S3) passes it in register a1.
+#if CONFIG_IDF_TARGET_ESP32S3
+  uint32_t sp = (uint32_t)((XtExcFrame*)frame)->a1;
+#else
   uint32_t sp = (uint32_t)((RvExcFrame*)frame)->sp;
+#endif
   const int per_line = 8;
   int depth = 0;
   for (int x = 0; x < 1024; x += per_line * sizeof(uint32_t)) {

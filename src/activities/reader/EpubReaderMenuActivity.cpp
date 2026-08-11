@@ -3,6 +3,7 @@
 #include <BluetoothHIDManager.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
+#include <HalFrontlight.h>
 #include <I18n.h>
 
 #include "CrossPointSettings.h"
@@ -24,6 +25,8 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
       pendingOrientation(currentOrientation),
       pendingButtonHints(SETTINGS.showButtonHints),
       pendingAutosyncMode(SETTINGS.autosyncMode),
+      pendingFrontlightBrightness(SETTINGS.frontlightBrightness),
+      pendingFrontlightWarmth(SETTINGS.frontlightWarmth),
       currentPage(currentPage),
       totalPages(totalPages),
       bookProgressPercent(bookProgressPercent),
@@ -32,13 +35,22 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
 
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes) {
   std::vector<MenuItem> items;
-  items.reserve(19);  // 9 fixed + footnotes + bookmarks/clippings/autosync+sync + 2 dev-mode items
+  items.reserve(21);  // 9 fixed + footnotes + frontlight + bookmarks/clippings/autosync+sync + 2 dev-mode items
   items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
   if (hasFootnotes) {
     items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
   }
   items.push_back({MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION});
   items.push_back({MenuAction::BUTTON_HINTS, StrId::STR_SHOW_BUTTON_HINTS});
+#if FREEINK_CAP_FRONTLIGHT
+  // Frontlight rows (X4 Pro): cycle in place and light the panel immediately.
+  if (halFrontlight.present()) {
+    items.push_back({MenuAction::FRONTLIGHT_BRIGHTNESS, StrId::STR_FRONTLIGHT_BRIGHTNESS});
+    if (halFrontlight.hasWarmth()) {
+      items.push_back({MenuAction::FRONTLIGHT_WARMTH, StrId::STR_FRONTLIGHT_WARMTH});
+    }
+  }
+#endif
   items.push_back({MenuAction::FONT_LAYOUT, StrId::STR_FONT_LAYOUT_PREVIEW});
   items.push_back({MenuAction::READER_CONTROLS, StrId::STR_READER_CONTROLS});
   items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});
@@ -129,14 +141,34 @@ void EpubReaderMenuActivity::loop() {
       return;
     }
 
+    if (selectedAction == MenuAction::FRONTLIGHT_BRIGHTNESS || selectedAction == MenuAction::FRONTLIGHT_WARMTH) {
+      // Cycle in 10% steps and drive the light immediately so the user can see
+      // the level; the reader persists the values once, on menu exit.
+      uint8_t& pending =
+          (selectedAction == MenuAction::FRONTLIGHT_BRIGHTNESS) ? pendingFrontlightBrightness : pendingFrontlightWarmth;
+      // Values are multiples of 10 from the UI, but the web API accepts any
+      // 0-100 — cap the step at 100 before wrapping so odd values still cycle.
+      pending = (pending >= 100) ? 0 : (pending + 10 > 100 ? 100 : pending + 10);
+      halFrontlight.apply(pendingFrontlightBrightness, pendingFrontlightWarmth);
+      requestUpdate();
+      return;
+    }
+
     setResult(MenuResult{static_cast<int>(selectedAction), pendingOrientation, selectedPageTurnOption,
-                         pendingButtonHints, pendingAutosyncMode});
+                         pendingButtonHints, pendingAutosyncMode, pendingFrontlightBrightness,
+                         pendingFrontlightWarmth});
     finish();
     return;
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     ActivityResult result;
     result.isCancelled = true;
-    result.data = MenuResult{-1, pendingOrientation, selectedPageTurnOption, pendingButtonHints, pendingAutosyncMode};
+    result.data = MenuResult{-1,
+                             pendingOrientation,
+                             selectedPageTurnOption,
+                             pendingButtonHints,
+                             pendingAutosyncMode,
+                             pendingFrontlightBrightness,
+                             pendingFrontlightWarmth};
     setResult(std::move(result));
     finish();
     return;
@@ -294,6 +326,20 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
       const char* value = I18N.get(autosyncLabels[pendingAutosyncMode]);
       const auto width = renderer.getTextWidth(UI_10_FONT_ID, value);
       renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, value, !isSelected);
+    }
+
+    if (menuItems[i].action == MenuAction::FRONTLIGHT_BRIGHTNESS ||
+        menuItems[i].action == MenuAction::FRONTLIGHT_WARMTH) {
+      const uint8_t pct = (menuItems[i].action == MenuAction::FRONTLIGHT_BRIGHTNESS) ? pendingFrontlightBrightness
+                                                                                     : pendingFrontlightWarmth;
+      char valueBuf[16];  // fits "100%" and translated "Off" (UTF-8)
+      if (menuItems[i].action == MenuAction::FRONTLIGHT_BRIGHTNESS && pct == 0) {
+        snprintf(valueBuf, sizeof(valueBuf), "%s", tr(STR_STATE_OFF));
+      } else {
+        snprintf(valueBuf, sizeof(valueBuf), "%u%%", pct);
+      }
+      const auto width = renderer.getTextWidth(UI_10_FONT_ID, valueBuf);
+      renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, valueBuf, !isSelected);
     }
   }
 

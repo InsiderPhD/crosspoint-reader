@@ -38,9 +38,25 @@ class HalDisplay {
 
   // Power management
   void deepSleep();
+  // Drop the panel's analog rails while the UI is idle, keeping the controller's
+  // partial-refresh baseline. No-op if they are already down. Must be called with
+  // the render lock held — it drives the same SPI bus as the render task.
+  void powerOffIdle();
 
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;
+
+  // Drain any deferred refresh (async fire / split displayStart+displayFinish)
+  // so the panel pipeline is no longer reading the framebuffer. No-op when
+  // nothing is pending.
+  void waitRefreshComplete();
+
+  // Milliseconds since the last refresh op (displayBuffer / refreshDisplay /
+  // displayGrayBuffer). Drives the idle rail collapse: a panel left powered
+  // under a static screen develops image drift, so the main loop powers it
+  // off once no refresh has happened for a few seconds — independent of the
+  // activity/sleep timers, which preventAutoSleep() activities suppress.
+  unsigned long msSinceLastRefresh() const { return millis() - _lastRefreshMs; }
 
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
   void copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer);
@@ -63,6 +79,7 @@ class HalDisplay {
 
  private:
   EInkDisplay einkDisplay;
+  unsigned long _lastRefreshMs = 0;
 };
 
 extern HalDisplay display;

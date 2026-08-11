@@ -307,6 +307,12 @@ class CrossPointSettings {
     return m == BUTTON_HINTS_FRONT_SHORT || m == BUTTON_HINTS_FRONT_LONG;
   }
 
+  // Frontlight (X4 Pro warm/cool PWM pair; single-channel on other frontlight
+  // boards). Brightness 0-100% of total light output, 0 = off. Warmth 0-100%
+  // splits that total between the cool and warm LED strings (0 = fully cool,
+  // 100 = fully warm); ignored on single-channel boards.
+  uint8_t frontlightBrightness = 0;
+  uint8_t frontlightWarmth = 50;
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
   // Sleep screen cover mode settings
@@ -496,6 +502,14 @@ class CrossPointSettings {
   uint8_t readerShortPressSideDown = READER_ACTION_PAGE_FORWARD;
   uint8_t readerLongPressSideDown = READER_ACTION_SKIP_CHAPTER_FORWARD;
   uint8_t readerShortPressPower = READER_ACTION_PAGE_FORWARD;
+  // X4 Pro touch: screen tap zones (left/middle/right thirds) and the
+  // capacitive home key. Fields exist on every build for settings.json
+  // round-trip; only the X4 Pro reader dispatches them.
+  uint8_t readerTapLeft = READER_ACTION_PAGE_BACK;
+  uint8_t readerTapMiddle = READER_ACTION_OPEN_MENU;
+  uint8_t readerTapRight = READER_ACTION_PAGE_FORWARD;
+  uint8_t readerShortPressHome = READER_ACTION_GO_HOME;
+  uint8_t readerLongPressHome = READER_ACTION_SLEEP;
   // Migration flag: 0 = old settings not yet applied to new per-button fields.
   uint8_t readerActionsMigrated = 0;
 

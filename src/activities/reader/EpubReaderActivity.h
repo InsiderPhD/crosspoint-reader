@@ -164,5 +164,7 @@ class EpubReaderActivity final : public Activity {
   void loop() override;
   void render(RenderLock&& lock) override;
   bool isReaderActivity() const override { return true; }
+  // Dispatches tap zones and home-key actions itself (X4 Pro).
+  bool consumesTouchInput() const override { return true; }
   ScreenshotInfo getScreenshotInfo() const override;
 };

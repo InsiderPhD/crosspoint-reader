@@ -21,6 +21,7 @@ struct Rect {
 struct TabInfo {
   const char* label;
   bool selected;
+  bool hasBadge = false;  // Draws a small dot after the label (e.g. "needs attention")
 };
 
 struct ThemeMetrics {

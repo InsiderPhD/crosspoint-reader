@@ -416,8 +416,14 @@ void EpubReaderActivity::onEnter() {
   // button held to wake from sleep doesn't fire a spurious long-press action.
   longPressFeedbackShown = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   longPressBackFired = mappedInput.isPressed(MappedInputManager::Button::Back);
+#if FREEINK_DEVICE_X4PRO
+  // The Left/Right action slots dispatch on logical Up/Down (swipes) here.
+  longPressLeftFired = mappedInput.isPressed(MappedInputManager::Button::Up);
+  longPressRightFired = mappedInput.isPressed(MappedInputManager::Button::Down);
+#else
   longPressLeftFired = mappedInput.isPressed(MappedInputManager::Button::Left);
   longPressRightFired = mappedInput.isPressed(MappedInputManager::Button::Right);
+#endif
   longPressPageBackFired = mappedInput.isPressed(MappedInputManager::Button::PageBack);
   longPressPageForwardFired = mappedInput.isPressed(MappedInputManager::Button::PageForward);
 
@@ -568,6 +574,21 @@ void EpubReaderActivity::loop() {
     if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressBack))) return;
   }
 
+#if FREEINK_DEVICE_X4PRO
+  // X4 Pro: the Left/Right action slots belong to the swipe-up/swipe-down
+  // gestures (logical Up/Down — the swipe injections). The side keys resolve to
+  // logical Left/Right and are handled solely by the Side Up/Down blocks below,
+  // so nothing double-fires. Swipes carry no orientation swap: the direction
+  // transform in MappedInputManager already tracks the screen.
+  constexpr auto kLeftActionButton = MappedInputManager::Button::Up;
+  constexpr auto kRightActionButton = MappedInputManager::Button::Down;
+  const auto shortPressLeft = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressLeft);
+  const auto longPressLeft = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressLeft);
+  const auto shortPressRight = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressRight);
+  const auto longPressRight = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressRight);
+#else
+  constexpr auto kLeftActionButton = MappedInputManager::Button::Left;
+  constexpr auto kRightActionButton = MappedInputManager::Button::Right;
   // Resolve Left/Right actions, swapping when frontButtonFollowOrientation is active.
   const bool swapFront =
       SETTINGS.frontButtonFollowOrientation && (SETTINGS.orientation == CrossPointSettings::INVERTED ||
@@ -580,45 +601,44 @@ void EpubReaderActivity::loop() {
       swapFront ? SETTINGS.readerShortPressLeft : SETTINGS.readerShortPressRight);
   const auto longPressRight = static_cast<CrossPointSettings::READER_ACTION>(swapFront ? SETTINGS.readerLongPressLeft
                                                                                        : SETTINGS.readerLongPressRight);
+#endif
 
-  // ── Left: long press / short press ───────────────────────────────────────
+  // ── Left (X4 Pro: swipe up): long press / short press ────────────────────
   if (longPressLeft != CrossPointSettings::READER_ACTION_NONE) {
-    if (mappedInput.isPressed(MappedInputManager::Button::Left) &&
-        mappedInput.getHeldTime(MappedInputManager::Button::Left) >= skipChapterMs && !longPressLeftFired) {
+    if (mappedInput.isPressed(kLeftActionButton) && mappedInput.getHeldTime(kLeftActionButton) >= skipChapterMs &&
+        !longPressLeftFired) {
       longPressLeftFired = true;
       executeReaderAction(longPressLeft);
       return;
     }
-    if (!mappedInput.isPressed(MappedInputManager::Button::Left)) {
+    if (!mappedInput.isPressed(kLeftActionButton)) {
       longPressLeftFired = false;
     }
-    if (mappedInput.wasReleased(MappedInputManager::Button::Left) &&
-        mappedInput.getHeldTime(MappedInputManager::Button::Left) < skipChapterMs) {
+    if (mappedInput.wasReleased(kLeftActionButton) && mappedInput.getHeldTime(kLeftActionButton) < skipChapterMs) {
       if (executeReaderAction(shortPressLeft)) return;
     }
   } else {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
+    if (mappedInput.wasPressed(kLeftActionButton)) {
       if (executeReaderAction(shortPressLeft)) return;
     }
   }
 
-  // ── Right: long press / short press ──────────────────────────────────────
+  // ── Right (X4 Pro: swipe down): long press / short press ─────────────────
   if (longPressRight != CrossPointSettings::READER_ACTION_NONE) {
-    if (mappedInput.isPressed(MappedInputManager::Button::Right) &&
-        mappedInput.getHeldTime(MappedInputManager::Button::Right) >= skipChapterMs && !longPressRightFired) {
+    if (mappedInput.isPressed(kRightActionButton) && mappedInput.getHeldTime(kRightActionButton) >= skipChapterMs &&
+        !longPressRightFired) {
       longPressRightFired = true;
       executeReaderAction(longPressRight);
       return;
     }
-    if (!mappedInput.isPressed(MappedInputManager::Button::Right)) {
+    if (!mappedInput.isPressed(kRightActionButton)) {
       longPressRightFired = false;
     }
-    if (mappedInput.wasReleased(MappedInputManager::Button::Right) &&
-        mappedInput.getHeldTime(MappedInputManager::Button::Right) < skipChapterMs) {
+    if (mappedInput.wasReleased(kRightActionButton) && mappedInput.getHeldTime(kRightActionButton) < skipChapterMs) {
       if (executeReaderAction(shortPressRight)) return;
     }
   } else {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
+    if (mappedInput.wasPressed(kRightActionButton)) {
       if (executeReaderAction(shortPressRight)) return;
     }
   }
@@ -673,6 +693,28 @@ void EpubReaderActivity::loop() {
       }
     }
   }
+
+#if FREEINK_DEVICE_X4PRO
+  // ── Screen tap zones and the home key (configurable reader actions) ───────
+  switch (mappedInput.wasTapZone()) {
+    case MappedInputManager::TapZone::Left:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapLeft))) return;
+      break;
+    case MappedInputManager::TapZone::Middle:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapMiddle))) return;
+      break;
+    case MappedInputManager::TapZone::Right:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapRight))) return;
+      break;
+    case MappedInputManager::TapZone::None:
+      break;
+  }
+  if (mappedInput.wasHomeKeyLongPressed()) {
+    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressHome))) return;
+  } else if (mappedInput.wasHomeKeyTapped()) {
+    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressHome))) return;
+  }
+#endif
 
   // ── Tilt sensor: always page forward/back regardless of button mapping ───
   if (SETTINGS.tiltPageTurn) {
@@ -2578,6 +2620,14 @@ void EpubReaderActivity::openReaderMenu() {
                            // pure setting change — no cache invalidation or reflow needed.
                            if (menu.autosyncMode != SETTINGS.autosyncMode) {
                              SETTINGS.autosyncMode = menu.autosyncMode;
+                             SETTINGS.saveToFile();
+                           }
+                           // Frontlight was already driven live while cycling; persist the final
+                           // levels once here so the menu doesn't hit SPIFFS on every step.
+                           if (menu.frontlightBrightness != SETTINGS.frontlightBrightness ||
+                               menu.frontlightWarmth != SETTINGS.frontlightWarmth) {
+                             SETTINGS.frontlightBrightness = menu.frontlightBrightness;
+                             SETTINGS.frontlightWarmth = menu.frontlightWarmth;
                              SETTINGS.saveToFile();
                            }
                            if (!result.isCancelled) {

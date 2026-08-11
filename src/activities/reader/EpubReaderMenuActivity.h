@@ -18,6 +18,8 @@ class EpubReaderMenuActivity final : public Activity {
     AUTO_PAGE_TURN,
     ROTATE_SCREEN,
     BUTTON_HINTS,
+    FRONTLIGHT_BRIGHTNESS,
+    FRONTLIGHT_WARMTH,
     FONT_LAYOUT,
     READER_CONTROLS,
     BOOKMARKS,
@@ -64,6 +66,10 @@ class EpubReaderMenuActivity final : public Activity {
   uint8_t selectedPageTurnOption = 0;
   uint8_t pendingButtonHints = 0;
   uint8_t pendingAutosyncMode = 0;
+  // Frontlight rows cycle these and drive the hardware live so the user sees
+  // the level change; the reader persists them on menu exit.
+  uint8_t pendingFrontlightBrightness = 0;
+  uint8_t pendingFrontlightWarmth = 50;
   const std::vector<StrId> orientationLabels = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
                                                 StrId::STR_LANDSCAPE_CCW};
   const std::vector<StrId> buttonHintsLabels = {StrId::STR_NONE_OPT, StrId::STR_SHORT_PRESS, StrId::STR_LONG_PRESS,

@@ -54,12 +54,34 @@ bool BookContextMenu::checkLongPress(const MappedInputManager& input, std::strin
                                      std::string author, int progressPercent, uint32_t holdMs) {
   if (showing_) return false;
   if (triggered_) return false;
-  if (!input.isPressed(MappedInputManager::Button::Confirm)) return false;
-  if (input.getHeldTime() < holdMs) return false;
+
+  bool opened = false;
+  bool viaTouch = false;
+#if FREEINK_DEVICE_X4PRO
+  // Holding a finger on the screen opens the menu for the selected book. The
+  // rest of the contact is consumed so the lift cannot also register as a tap
+  // (which would immediately Confirm the first menu option).
+  int lx, ly;
+  if (input.wasTouchLongPressPoint(lx, ly)) {
+    input.suppressTouchContact();
+    opened = true;
+    viaTouch = true;
+  }
+#endif
+  if (!opened) {
+    if (!input.isPressed(MappedInputManager::Button::Confirm)) return false;
+    if (input.getHeldTime() < holdMs) return false;
+    opened = true;
+  }
 
   triggered_ = true;
   showing_ = true;
-  awaitingRelease_ = true;
+#if FREEINK_DEVICE_X4PRO
+  popupRectValid_ = false;  // set by the first render() of this open cycle
+#endif
+  // A touch hold has no Confirm button to wait out — the menu is interactive
+  // immediately; the button path still waits for the Confirm release.
+  awaitingRelease_ = !viaTouch;
   selectedIndex_ = 0;
   path_ = std::move(path);
   title_ = std::move(title);
@@ -87,6 +109,27 @@ bool BookContextMenu::handleInput(ButtonNavigator& nav, const MappedInputManager
     }
     return false;
   }
+
+#if FREEINK_DEVICE_X4PRO
+  // A tap outside the popup dismisses the menu. A tap inside is not handled
+  // here: the main loop's tap-to-Confirm injection turns it into the Confirm
+  // release below, selecting the highlighted option. The outside-tap path must
+  // still set the suppression flag — the same tap has already injected a
+  // Confirm press whose release would otherwise reach the host's short-press
+  // handler after we close.
+  int tapX, tapY;
+  if (popupRectValid_ && input.wasTapPoint(tapX, tapY)) {
+    const bool insidePopup =
+        tapX >= popupX_ && tapX < popupX_ + popupW_ && tapY >= popupY_ && tapY < popupY_ + popupH_;
+    if (!insidePopup) {
+      if (outCancelled) *outCancelled = true;
+      longPressFlagSet_ = true;
+      showing_ = false;
+      triggered_ = false;
+      return true;
+    }
+  }
+#endif
 
   if (input.wasReleased(MappedInputManager::Button::Confirm)) {
     if (outAction) *outAction = actions[selectedIndex_];
@@ -158,6 +201,14 @@ void BookContextMenu::render(GfxRenderer& renderer) const {
   const int px = (pageWidth - POPUP_W) / 2;
   const int py = (pageHeight - POPUP_H) / 2;
 
+#if FREEINK_DEVICE_X4PRO
+  popupX_ = px;
+  popupY_ = py;
+  popupW_ = POPUP_W;
+  popupH_ = POPUP_H;
+  popupRectValid_ = true;
+#endif
+
   renderer.fillRect(px, py, POPUP_W, POPUP_H, false);
   renderer.drawRect(px, py, POPUP_W, POPUP_H, BORDER, true);
 
@@ -188,6 +239,9 @@ void BookContextMenu::close() {
   triggered_ = false;
   awaitingRelease_ = false;
   selectedIndex_ = 0;
+#if FREEINK_DEVICE_X4PRO
+  popupRectValid_ = false;
+#endif
 }
 
 bool BookContextMenu::consumeLongPressFlag() {
