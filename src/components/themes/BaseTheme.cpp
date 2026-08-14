@@ -201,8 +201,9 @@ void BaseTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
   constexpr int buttonHeight = 80;                                       // Height on screen (width when rotated)
   constexpr int buttonMargin = 4;
 
-  if (gpio.deviceIsX3()) {
-    // X3 layout: Up on left side, Down on right side, positioned higher
+  if (gpio.sideKeysAreLeftRight()) {
+    // X3/X4 Pro layout: one key each side of the screen — top label on the left
+    // edge, bottom label on the right edge, positioned higher
     constexpr int x3ButtonY = 155;
 
     if (topBtn != nullptr && topBtn[0] != '\0') {
@@ -298,11 +299,19 @@ void BaseTheme::drawPowerButtonHint(GfxRenderer& renderer, const char* label) co
     return;
   }
 
-  // X4: Power button is on the right, above the Up/Down side hints (drawSideButtonHints
-  // stacks those starting at topButtonY = 345). Vertical box, label rotated 90° CW.
+  // X4: Power button is on the right, above the Up/Down side hints. Vertical box,
+  // label rotated 90° CW.
   const int x = screenWidth - buttonMargin - buttonWidth;
+#if FREEINK_DEVICE_X4PRO
+  // X4 Pro: the side hints use the X3 placement (right-edge box at y=155), so anchor
+  // just above that box — the X4's 345/140 anchor would land the power box on top of it.
+  constexpr int sideHintsTopY = 155;
+  constexpr int gap = 20;
+#else
+  // drawSideButtonHints stacks the X4's boxes starting at topButtonY = 345.
   constexpr int sideHintsTopY = 345;
   constexpr int gap = 140;
+#endif
   const int y = sideHintsTopY - gap - buttonHeight;
   renderer.fillRect(x, y, buttonWidth, buttonHeight, false);
   renderer.drawRect(x, y, buttonWidth, buttonHeight);

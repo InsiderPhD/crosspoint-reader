@@ -44,6 +44,35 @@ struct BluetoothDevice {
 // size keeps ConnectedDevice free of heap allocations.
 inline constexpr size_t HID_FRAME_BYTES = 8;
 
+// Distinct report SHAPES (by report length) the detector tracks per device.
+// Multi-function remotes emit several: the Insta360 GPS remote sends a 3-byte
+// button report AND a 6-byte analog/dial report. Sharing one idle/mask between
+// them is what broke it: interleaved shapes make each other's constant bytes
+// look churny, the churn re-masker then masks the real signal byte, and the
+// detector goes blind. Fixed pool, ~34 bytes per slot — no heap.
+inline constexpr size_t MAX_REPORT_SHAPES = 3;
+
+// Per-report-shape press detector state. We never decode HID keycodes. Instead
+// we learn what this shape's idle report looks like, mask off the bytes that
+// free-run (rolling counters, joystick axes), and treat every idle -> active
+// transition of the remaining bytes as one press.
+struct PressDetectorState {
+  uint8_t reportLen = 0;                     // Report length this slot tracks; 0 = slot free
+  uint8_t idleFrame[HID_FRAME_BYTES] = {0};  // Reference "nothing pressed" report
+  uint8_t prevFrame[HID_FRAME_BYTES] = {0};  // Previous report, for churn detection
+  uint8_t volatileMask = 0;                  // Bit i set => byte i free-runs, ignore it
+  uint8_t byteChangeCount[HID_FRAME_BYTES] = {0};
+  uint8_t byteSeenZero = 0;           // Bit i set => byte i was 0x00 at least once while learning
+                                      // (=> it rests at 0, it's the keycode, never mask it)
+  unsigned long baselineStartMs = 0;  // Start of the learning window for this shape
+  uint16_t baselineFrames = 0;        // Frames seen during the learning window
+  bool baselineReady = false;
+  bool active = false;              // Current frame differs from idle on unmasked bytes
+  unsigned long activeSinceMs = 0;  // When the current active run began
+  uint8_t churnMask = 0;            // Bytes that changed during the current active run
+  uint8_t activeChangeCount = 0;    // How many frames changed during the current active run
+};
+
 struct ConnectedDevice {
   std::string address;
   std::string name;
@@ -54,28 +83,17 @@ struct ConnectedDevice {
   unsigned long lastActivityTime = 0;  // Timestamp of last HID report received
   bool wasConnected = false;           // Track if this device was previously connected for auto-reconnect
 
-  // --- Structural press detector state ---
-  // We never decode HID keycodes. Instead we learn what this remote's idle report
-  // looks like, mask off the bytes that free-run (rolling counters, joystick
-  // axes), and treat every idle -> active transition of the remaining bytes as
-  // one press. Which button was pressed is identified purely by its signature —
-  // the (byte index, value) of the first unmasked byte that left idle — matched
-  // against the mapping the user taught us in Bluetooth settings. An unmatched
-  // or unmapped signature pages forward, so a fresh remote works with no setup.
-  uint8_t idleFrame[HID_FRAME_BYTES] = {0};  // Reference "nothing pressed" report
-  uint8_t prevFrame[HID_FRAME_BYTES] = {0};  // Previous report, for churn detection
-  uint8_t volatileMask = 0;                  // Bit i set => byte i free-runs, ignore it
-  uint8_t byteChangeCount[HID_FRAME_BYTES] = {0};
-  uint8_t byteSeenZero = 0;           // Bit i set => byte i was 0x00 at least once while learning
-                                      // (=> it rests at 0, it's the keycode, never mask it)
-  unsigned long baselineStartMs = 0;  // Start of the post-connect learning window
-  uint16_t baselineFrames = 0;        // Frames seen during the learning window
-  bool baselineReady = false;
-  bool active = false;              // Current frame differs from idle on unmasked bytes
-  unsigned long activeSinceMs = 0;  // When the current active run began
-  uint8_t churnMask = 0;            // Bytes that changed during the current active run
-  uint8_t activeChangeCount = 0;    // How many frames changed during the current active run
-  unsigned long lastPressMs = 0;    // Last injected page turn (repeat suppression)
+  // --- Structural press detector ---
+  // One learning state per report shape (see PressDetectorState). Which button
+  // was pressed is identified purely by its signature — the (byte index, value)
+  // of the first unmasked byte that left idle — matched against the mapping the
+  // user taught us in Bluetooth settings. An unmatched or unmapped signature
+  // pages forward, so a fresh remote works with no setup. Press dedupe and the
+  // signature stay device-level: the same physical press often mirrors onto
+  // several report characteristics (even with different shapes) within a few
+  // ms, and must collapse into one turn.
+  PressDetectorState detectors[MAX_REPORT_SHAPES];
+  unsigned long lastPressMs = 0;  // Last injected page turn (repeat suppression)
   unsigned long lastRemoteInputMs = 0;
   // Signature of the most recent accepted press: the first unmasked byte that
   // differed from idle, and its value. 0xFF index = no press seen yet.
@@ -217,6 +235,8 @@ class BluetoothHIDManager {
   // Feeds one HID report to the device's press detector. Returns true when the
   // frame represents a fresh button press that should turn a page.
   static bool detectPress(ConnectedDevice* device, const uint8_t* data, size_t length, unsigned long nowMs);
+  // Detector slot for the given report length; allocate=false only looks up.
+  static PressDetectorState* detectorFor(ConnectedDevice* device, size_t length, bool allocate);
 
   bool _enabled = false;
   bool _scanning = false;

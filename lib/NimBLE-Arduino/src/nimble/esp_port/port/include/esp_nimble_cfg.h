@@ -1948,12 +1948,17 @@
 #endif
 #endif
 
+/* CrossPoint (vendored patch): the framework sdkconfig enables host-level
+   connection reattempts (CONFIG_BT_NIMBLE_ENABLE_CONN_REATTEMPT=1, max 3).
+   Each reattempt is a full connect procedure the HOST TASK starts on its own
+   after a failed/aborted connect, racing the firmware's loop-task connects:
+   user-initiated connects then fail instantly with BLE_HS_EALREADY, or a
+   reattempt lands a background connection the app's bookkeeping doesn't know
+   about (observed on X4 Pro with an Insta360 GPS remote — hours of phantom
+   rc=2 failures). The firmware has its own reconnect logic (background scan +
+   explicit reconnects), so host reattempts are pure interference. Forced off. */
 #ifndef MYNEWT_VAL_BLE_ENABLE_CONN_REATTEMPT
-#ifdef CONFIG_BT_NIMBLE_ENABLE_CONN_REATTEMPT
-#define MYNEWT_VAL_BLE_ENABLE_CONN_REATTEMPT CONFIG_BT_NIMBLE_ENABLE_CONN_REATTEMPT
-#else
 #define MYNEWT_VAL_BLE_ENABLE_CONN_REATTEMPT (0)
-#endif
 #endif
 
 #ifndef MYNEWT_VAL_BLE_AOA_AOD

@@ -36,6 +36,10 @@ class BluetoothSettingsActivity : public Activity {
   // Device being connected to, for the connecting/connected/failed screens.
   std::string selectedDeviceName;
   std::string connectionError;
+  // True while the connecting/connected/failed screens belong to a bonded-remote
+  // reconnect from the main menu (no scan ran): the header skips the device
+  // count and a failed result retries the bond instead of showing the list.
+  bool connectingBonded = false;
 
   // Live remote test box on the main menu. The manager timestamps every report
   // it receives; we watch that value for changes so each press is counted once.
@@ -87,6 +91,8 @@ class BluetoothSettingsActivity : public Activity {
 
   void beginScan();
   void connectToSelected();
+  // Main-menu Reconnect row: connect to the bonded remote without a scan.
+  void reconnectBonded();
   void disconnectAll();
 
   // Button-mapping wizard (MAP_BACK / MAP_FORWARD view modes).

@@ -302,7 +302,13 @@ bool HalGPIO::wasAnyReleased() const {
 }
 
 unsigned long HalGPIO::getHeldTime() const {
-  unsigned long heldTime = inputMgr.getHeldTime();
+  // With no physical button pressed or edge visible this frame,
+  // InputMgr::getHeldTime() reports the duration of the last COMPLETED press.
+  // The per-button loop below already surfaces the physical timer whenever a
+  // press is live or its release edge is latched, so seeding from it here
+  // would only ever add that stale duration — which a virtual press (touch
+  // tap, swipe, BLE remote) then inherits as its own held time.
+  unsigned long heldTime = 0;
 
   for (uint8_t buttonIndex = 0; buttonIndex <= BTN_POWER; ++buttonIndex) {
     const unsigned long virtualHeldTime = getHeldTime(buttonIndex);

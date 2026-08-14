@@ -412,8 +412,9 @@ void BluetoothHIDManager::onScanResult(NimBLEAdvertisedDevice* advertisedDevice)
   // earbuds that flood the list as "Unknown" and can't be a page turner we could
   // use. Nameless HID devices stay visible (some clickers advertise no name), and
   // if the name shows up in a later scan response the back-fill above catches it.
+  // Not logged: busy RF means dozens of these per scan; the scanning screen is
+  // the user-visible feedback that the scan is running.
   if (name.empty() && !isHID) {
-    LOG_DBG("BT", "Skipping unnamed non-HID device %s RSSI:%d", address.c_str(), rssi);
     return;
   }
 
@@ -452,6 +453,21 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   HalPowerManager::Lock powerLock;
   stopBackgroundScan();
 
+  // A stray connect procedure can still be in flight here — NimBLE's
+  // CONN_REATTEMPT re-initiates a failed connection internally, and a
+  // timed-out attempt's cancel can lag. ble_gap_connect() then rejects our
+  // user-initiated connect with BLE_HS_EALREADY (rc=2) in ~0.5s. Nothing else
+  // connects from this task, so anything active now is orphaned: cancel it.
+  if (ble_gap_conn_active()) {
+    LOG_INF("BT", "Cancelling stale in-flight connect attempt");
+    ble_gap_conn_cancel();
+    // The cancel lands via a GAP event a few ms later; wait it out (bounded)
+    // so the fresh connect below doesn't bounce off the same EALREADY.
+    for (int i = 0; i < 50 && ble_gap_conn_active(); i++) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+  }
+
   // Resolve the peer's address TYPE: a CONNECT_IND targeting a random static
   // address (top two bits set, e.g. ff:.. clickers) as BLE_ADDR_PUBLIC is
   // ignored by the peer — it keeps advertising and every connect times out.
@@ -471,8 +487,47 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   }
   NimBLEAddress bleAddress(address, addrType);
 
+  // First: adopt any client that already holds a LIVE link to this peer,
+  // matching by address BYTES only. The remote chooses its advertised address
+  // TYPE per session (both learned clickers lie about TxAdd), and the type is
+  // part of NimBLE's lookup key — a type-mismatched lookup misses the owning
+  // client, NimBLE's early "connection already exists" guard then fails every
+  // connect instantly WITHOUT setting a new error code, and the stale rc from
+  // the client's previous failure makes the log look like EALREADY forever.
+  const auto liveClientForPeer = [&bleAddress]() -> NimBLEClient* {
+    for (NimBLEClient* connected : NimBLEDevice::getConnectedClients()) {
+      if (memcmp(connected->getPeerAddress().getBase()->val, bleAddress.getBase()->val, 6) == 0) {
+        return connected;
+      }
+    }
+    return nullptr;
+  };
+
+  NimBLEClient* pClient = liveClientForPeer();
+  const bool adoptedLive = (pClient != nullptr);
+
+  // A GAP link with NO live client (half-torn-down state) would hit the same
+  // early guard with nothing to adopt — terminate it so the connect can run.
+  if (!pClient) {
+    for (uint8_t type = 0; type <= 1; type++) {
+      ble_addr_t probe = *bleAddress.getBase();
+      probe.type = type;
+      ble_gap_conn_desc desc;
+      if (ble_gap_conn_find_by_addr(&probe, &desc) == 0) {
+        LOG_INF("BT", "Terminating orphaned link to %s (handle %u)", address.c_str(), desc.conn_handle);
+        ble_gap_terminate(desc.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+        for (int i = 0; i < 50 && ble_gap_conn_find_by_addr(&probe, &desc) == 0; i++) {
+          vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        break;
+      }
+    }
+  }
+
   // Reuse existing disconnected client objects to avoid NimBLE deleteClient() on this target.
-  NimBLEClient* pClient = NimBLEDevice::getClientByPeerAddress(bleAddress);
+  if (!pClient) {
+    pClient = NimBLEDevice::getClientByPeerAddress(bleAddress);
+  }
   const bool hadExistingClient = (pClient != nullptr);
   if (!pClient) {
     pClient = NimBLEDevice::getDisconnectedClient();
@@ -505,25 +560,79 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   static ClientCallbacks clientCallbacks;
   pClient->setClientCallbacks(&clientCallbacks, false);
 
-  // Connect to device
-  if (!pClient->connect(bleAddress)) {
-    if (hadExistingClient) {
-      LOG_INF("BT", "Reconnect with existing client failed for %s, retrying with fresh client", address.c_str());
-      NimBLEClient* freshClient = NimBLEDevice::createClient(bleAddress);
-      if (freshClient) {
-        pClient = freshClient;
-        pClient->setSelfDelete(false, false);
-        pClient->setConnectTimeout(BLE_CONNECT_TIMEOUT_MS);
-        pClient->setConnectionParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_SETUP_LATENCY,
-                                     BLE_CONN_TIMEOUT, BLE_CONN_SCAN_INTERVAL, BLE_CONN_SCAN_WINDOW);
-        pClient->setClientCallbacks(&clientCallbacks, false);
-      }
+  // connect() with one in-place recovery: BLE_HS_EALREADY (rc=2) means a
+  // connect procedure is in flight even though the entry guard above saw none
+  // — a timed-out attempt's ble_gap_conn_cancel() completes asynchronously and
+  // can land between that check and this call. Cancel it and retry once.
+  const auto attemptConnect = [](NimBLEClient* client, const NimBLEAddress& addr) {
+    if (client->connect(addr)) return true;
+    if (client->getLastError() != BLE_HS_EALREADY) return false;
+    LOG_INF("BT", "Connect blocked by an in-flight procedure, cancelling it and retrying");
+    ble_gap_conn_cancel();
+    for (int i = 0; i < 50 && ble_gap_conn_active(); i++) {
+      vTaskDelay(pdMS_TO_TICKS(10));
     }
+    return client->connect(addr);
+  };
 
-    if (!pClient->connect(bleAddress)) {
+  // Connect to device — unless a live link already exists. A stray connect
+  // procedure can complete in the background (observed with the Insta360
+  // remote), leaving a GAP connection the manager's bookkeeping doesn't know
+  // about; NimBLE then refuses any second connect to that peer (instant
+  // failure, rc=0 from the early "connection already exists" guard). Adopt
+  // the link and continue to service discovery instead.
+  // A blocked procedure can COMPLETE INTO A CONNECTION in the ~ms between our
+  // cancel and the retry (observed live: retry fails instantly on NimBLE's
+  // "connection already exists" guard, which never sets an error code). The
+  // link is up and usable — find whichever client owns it and take it.
+  const auto adoptRacedLink = [&](NimBLEClient*& client) {
+    NimBLEClient* survivor = liveClientForPeer();
+    if (!survivor) {
+      return false;
+    }
+    LOG_INF("BT", "Connect attempt lost a race but the link is up — adopting it");
+    client = survivor;
+    client->setSelfDelete(false, false);
+    client->setClientCallbacks(&clientCallbacks, false);
+    return true;
+  };
+
+  if (pClient->isConnected()) {
+    LOG_INF("BT", "Adopting existing live connection to %s", address.c_str());
+  } else if (!attemptConnect(pClient, bleAddress) && !adoptRacedLink(pClient)) {
+    // A reused client can carry stale state, so it gets one retry with a fresh
+    // client. A client that was already fresh gets no second attempt: connect()
+    // blocks the loop task for BLE_CONNECT_TIMEOUT_MS per call, so retrying the
+    // same client only doubles the freeze for the same outcome.
+    if (!hadExistingClient) {
       lastError = "Connection failed";
       lastStatus = BtStatus::ConnectFailed;
-      LOG_ERR("BT", "Failed to connect to %s", address.c_str());
+      // The host error code tells an instant rejection (peer dropped us: bond or
+      // whitelist mismatch) apart from a timeout (peer not advertising/in range).
+      // Caveat: after an INSTANT failure the rc can be stale — NimBLE's early
+      // guards return false without refreshing it.
+      LOG_ERR("BT", "Failed to connect to %s (rc=%d)", address.c_str(), pClient->getLastError());
+      return false;
+    }
+    LOG_INF("BT", "Reconnect with existing client failed for %s, retrying with fresh client", address.c_str());
+    NimBLEClient* freshClient = NimBLEDevice::createClient(bleAddress);
+    if (!freshClient) {
+      lastError = "Failed to create BLE client";
+      lastStatus = BtStatus::ClientFailed;
+      LOG_ERR("BT", "Failed to create fresh BLE client for %s", address.c_str());
+      return false;
+    }
+    pClient = freshClient;
+    pClient->setSelfDelete(false, false);
+    pClient->setConnectTimeout(BLE_CONNECT_TIMEOUT_MS);
+    pClient->setConnectionParams(BLE_CONN_MIN_INTERVAL, BLE_CONN_MAX_INTERVAL, BLE_CONN_SETUP_LATENCY, BLE_CONN_TIMEOUT,
+                                 BLE_CONN_SCAN_INTERVAL, BLE_CONN_SCAN_WINDOW);
+    pClient->setClientCallbacks(&clientCallbacks, false);
+
+    if (!attemptConnect(pClient, bleAddress) && !adoptRacedLink(pClient)) {
+      lastError = "Connection failed";
+      lastStatus = BtStatus::ConnectFailed;
+      LOG_ERR("BT", "Failed to connect to %s (rc=%d)", address.c_str(), pClient->getLastError());
       return false;
     }
   }
@@ -954,37 +1063,66 @@ unsigned long BluetoothHIDManager::lastRemoteInputMs() const {
 // Remotes that transmit only on press send too few frames to characterise, so the
 // all-zero report is assumed idle for them — which is what a plain HID keyboard
 // clicker reports anyway.
+PressDetectorState* BluetoothHIDManager::detectorFor(ConnectedDevice* device, const size_t length,
+                                                     const bool allocate) {
+  // Shapes are keyed by report length: mixing shapes in one learning state lets
+  // them mask each other's signal bytes (see PressDetectorState in the header).
+  const uint8_t lenKey = static_cast<uint8_t>(length > 0xFF ? 0xFF : length);
+  for (auto& det : device->detectors) {
+    if (det.reportLen == lenKey) {
+      return &det;
+    }
+  }
+  if (!allocate) {
+    return nullptr;
+  }
+  for (auto& det : device->detectors) {
+    if (det.reportLen == 0) {
+      det.reportLen = lenKey;
+      return &det;
+    }
+  }
+  // More shapes than slots: ignore the extras rather than corrupting a learned
+  // one. Raise MAX_REPORT_SHAPES if a real remote ever hits this.
+  return nullptr;
+}
+
 bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* data, const size_t length,
                                       const unsigned long nowMs) {
+  PressDetectorState* det = detectorFor(device, length, true);
+  if (!det) {
+    return false;
+  }
+
   const size_t n = length < HID_FRAME_BYTES ? length : HID_FRAME_BYTES;
   uint8_t frame[HID_FRAME_BYTES] = {0};
   memcpy(frame, data, n);
 
-  // Phase 1: learn this remote's idle report and its free-running bytes.
-  if (!device->baselineReady) {
-    if (device->baselineFrames == 0) {
-      // First frame ever seen: it opens the window and seeds the reference.
-      device->baselineStartMs = nowMs;
-      device->baselineFrames = 1;
-      memcpy(device->idleFrame, frame, HID_FRAME_BYTES);
+  // Phase 1: learn this shape's idle report and its free-running bytes.
+  if (!det->baselineReady) {
+    if (det->baselineFrames == 0) {
+      // First frame of this shape: it opens the window and seeds the reference.
+      det->baselineStartMs = nowMs;
+      det->baselineFrames = 1;
+      memcpy(det->idleFrame, frame, HID_FRAME_BYTES);
       for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
-        if (frame[i] == 0) device->byteSeenZero |= static_cast<uint8_t>(1u << i);
+        if (frame[i] == 0) det->byteSeenZero |= static_cast<uint8_t>(1u << i);
       }
       return false;
     }
 
-    if ((nowMs - device->baselineStartMs) < BASELINE_LEARN_MS) {
+    if ((nowMs - det->baselineStartMs) < BASELINE_LEARN_MS) {
       for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
-        if (frame[i] != device->idleFrame[i] && device->byteChangeCount[i] < 0xFF) {
-          device->byteChangeCount[i]++;
+        if (frame[i] != det->idleFrame[i] && det->byteChangeCount[i] < 0xFF) {
+          det->byteChangeCount[i]++;
         }
         // A byte that visits 0x00 is resting between presses (a keycode), not a
         // free-running counter — remember that so we never mask it below.
-        if (frame[i] == 0) device->byteSeenZero |= static_cast<uint8_t>(1u << i);
+        if (frame[i] == 0) det->byteSeenZero |= static_cast<uint8_t>(1u << i);
       }
-      memcpy(device->idleFrame, frame, HID_FRAME_BYTES);
-      if (device->baselineFrames < 0xFFFF) {
-        device->baselineFrames++;
+      memcpy(det->idleFrame, frame, HID_FRAME_BYTES);
+      if (det->baselineFrames < 0xFFFF) {
+        det->baselineFrames++;
       }
       return false;
     }
@@ -992,30 +1130,30 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
     // Window closed. Note this frame is deliberately NOT folded into the
     // reference: on a remote that only transmits on press, it IS the press, and
     // adopting it as "idle" would invert the detector for the whole session.
-    if (device->baselineFrames < 2) {
-      // Silent remote: no idle traffic to characterise, so assume all-zero idle.
-      memset(device->idleFrame, 0, HID_FRAME_BYTES);
+    if (det->baselineFrames < 2) {
+      // Silent shape: no idle traffic to characterise, so assume all-zero idle.
+      memset(det->idleFrame, 0, HID_FRAME_BYTES);
     } else {
       for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
-        if (device->byteSeenZero & static_cast<uint8_t>(1u << i)) {
-          // This byte returned to 0x00 during the window, so it is the remote's
+        if (det->byteSeenZero & static_cast<uint8_t>(1u << i)) {
+          // This byte returned to 0x00 during the window, so it is the shape's
           // signal byte (a keycode that rests at 0 between presses), NOT a
           // free-running counter. Its true idle is 0 — even if the window
           // happened to close on a press frame — and it must never be masked or
           // the detector goes blind. This is what keeps a press-only clicker
           // (AB Shutter3: byte0 = E9 pressed / 00 released) working even when
           // the user presses during the learn window.
-          device->idleFrame[i] = 0;
-        } else if (device->byteChangeCount[i] >= VOLATILE_CHANGE_THRESHOLD) {
+          det->idleFrame[i] = 0;
+        } else if (det->byteChangeCount[i] >= VOLATILE_CHANGE_THRESHOLD) {
           // Stayed non-zero on every frame AND churned: a real rolling counter.
-          device->volatileMask |= static_cast<uint8_t>(1u << i);
+          det->volatileMask |= static_cast<uint8_t>(1u << i);
         }
       }
     }
-    memcpy(device->prevFrame, device->idleFrame, HID_FRAME_BYTES);
-    device->baselineReady = true;
-    LOG_INF("BT", "Idle report learned for %s: frames=%u volatileMask=0x%02X", device->address.c_str(),
-            static_cast<unsigned>(device->baselineFrames), device->volatileMask);
+    memcpy(det->prevFrame, det->idleFrame, HID_FRAME_BYTES);
+    det->baselineReady = true;
+    LOG_INF("BT", "Idle report learned for %s len=%u: frames=%u volatileMask=0x%02X", device->address.c_str(),
+            static_cast<unsigned>(det->reportLen), static_cast<unsigned>(det->baselineFrames), det->volatileMask);
     // Fall through: evaluate this frame normally so a press that arrives right
     // as the window closes still turns a page.
   }
@@ -1023,51 +1161,51 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
   // Phase 2: does this frame differ from idle on any byte we still trust?
   bool active = false;
   for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
-    if ((device->volatileMask & static_cast<uint8_t>(1u << i)) != 0) {
+    if ((det->volatileMask & static_cast<uint8_t>(1u << i)) != 0) {
       continue;
     }
-    if (frame[i] != device->idleFrame[i]) {
+    if (frame[i] != det->idleFrame[i]) {
       active = true;
       break;
     }
   }
 
   if (!active) {
-    device->active = false;
-    device->activeSinceMs = 0;
-    device->churnMask = 0;
-    device->activeChangeCount = 0;
-    memcpy(device->prevFrame, frame, HID_FRAME_BYTES);
+    det->active = false;
+    det->activeSinceMs = 0;
+    det->churnMask = 0;
+    det->activeChangeCount = 0;
+    memcpy(det->prevFrame, frame, HID_FRAME_BYTES);
     return false;
   }
 
-  if (device->active) {
+  if (det->active) {
     // Already down. Either a real hold, or a counter byte we failed to mask
     // during learning. They are told apart by whether the bytes keep changing:
     // a held button's report is constant, a counter's is not.
     for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
-      if (frame[i] != device->prevFrame[i]) {
-        device->churnMask |= static_cast<uint8_t>(1u << i);
-        if (device->activeChangeCount < 0xFF) {
-          device->activeChangeCount++;
+      if (frame[i] != det->prevFrame[i]) {
+        det->churnMask |= static_cast<uint8_t>(1u << i);
+        if (det->activeChangeCount < 0xFF) {
+          det->activeChangeCount++;
         }
         break;
       }
     }
-    memcpy(device->prevFrame, frame, HID_FRAME_BYTES);
+    memcpy(det->prevFrame, frame, HID_FRAME_BYTES);
 
-    // A remote stuck "pressed" by an unmasked counter would never turn another
+    // A shape stuck "pressed" by an unmasked counter would never turn another
     // page, so mask the churning bytes and re-baseline instead of staying wedged.
-    if (device->activeSinceMs != 0 && (nowMs - device->activeSinceMs) > STUCK_ACTIVE_MS &&
-        device->activeChangeCount >= VOLATILE_CHANGE_THRESHOLD) {
-      device->volatileMask |= device->churnMask;
-      memcpy(device->idleFrame, frame, HID_FRAME_BYTES);
-      device->active = false;
-      device->activeSinceMs = 0;
-      device->churnMask = 0;
-      device->activeChangeCount = 0;
-      LOG_INF("BT", "%s active >%lu ms with churn, re-masked (volatileMask=0x%02X)", device->address.c_str(),
-              STUCK_ACTIVE_MS, device->volatileMask);
+    if (det->activeSinceMs != 0 && (nowMs - det->activeSinceMs) > STUCK_ACTIVE_MS &&
+        det->activeChangeCount >= VOLATILE_CHANGE_THRESHOLD) {
+      det->volatileMask |= det->churnMask;
+      memcpy(det->idleFrame, frame, HID_FRAME_BYTES);
+      det->active = false;
+      det->activeSinceMs = 0;
+      det->churnMask = 0;
+      det->activeChangeCount = 0;
+      LOG_INF("BT", "%s len=%u active >%lu ms with churn, re-masked (volatileMask=0x%02X)", device->address.c_str(),
+              static_cast<unsigned>(det->reportLen), STUCK_ACTIVE_MS, det->volatileMask);
     }
     return false;
   }
@@ -1075,24 +1213,25 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
   // Rising edge: a button just went down. Its signature — which unmasked byte
   // left idle, and to what value — is what tells a two-button remote's buttons
   // apart, so record it alongside the edge.
-  device->active = true;
-  device->activeSinceMs = nowMs;
-  device->churnMask = 0;
-  device->activeChangeCount = 0;
+  det->active = true;
+  det->activeSinceMs = nowMs;
+  det->churnMask = 0;
+  det->activeChangeCount = 0;
   for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
-    if ((device->volatileMask & static_cast<uint8_t>(1u << i)) != 0) {
+    if ((det->volatileMask & static_cast<uint8_t>(1u << i)) != 0) {
       continue;
     }
-    if (frame[i] != device->idleFrame[i]) {
+    if (frame[i] != det->idleFrame[i]) {
       device->lastPressSigIndex = static_cast<uint8_t>(i);
       device->lastPressSigValue = frame[i];
       break;
     }
   }
-  memcpy(device->prevFrame, frame, HID_FRAME_BYTES);
+  memcpy(det->prevFrame, frame, HID_FRAME_BYTES);
 
   // Remotes commonly expose the same press on several report characteristics,
-  // which arrive within a few ms of each other. Collapse them into one turn.
+  // which arrive within a few ms of each other — even with different shapes.
+  // Collapse them into one turn (device-level on purpose).
   if (device->lastPressMs != 0 && (nowMs - device->lastPressMs) < MIN_PRESS_INTERVAL_MS) {
     return false;
   }
@@ -1123,8 +1262,9 @@ void BluetoothHIDManager::onHIDNotify(NimBLERemoteCharacteristic* pChar, uint8_t
     for (size_t i = 0; i < dumpLen && offset + 4 < sizeof(rawBuf); i++) {
       offset += snprintf(rawBuf + offset, sizeof(rawBuf) - offset, "%02X ", static_cast<unsigned>(pData[i]));
     }
+    const PressDetectorState* det = detectorFor(device, length, false);
     LOG_INF("BTDBG", "addr=%s len=%u raw=%s mask=0x%02X", device->address.c_str(), static_cast<unsigned>(length),
-            rawBuf, device->volatileMask);
+            rawBuf, det ? det->volatileMask : 0);
   }
 
   if (!detectPress(device, pData, length, nowMs)) {
@@ -1264,8 +1404,14 @@ void BluetoothHIDManager::checkAutoReconnect(bool userInputDetected) {
   }
 
   // Fast path: a physical button press on the device also tries a reconnect
-  // (covers remotes that stay connectable without advertising).
-  if (userInputDetected && now - lastReconnectAttempt >= 2000) {
+  // (covers remotes that stay connectable without advertising). Reader only:
+  // connectToDevice() blocks the loop task for the full connect timeout, and in
+  // the Bluetooth settings screen every press is the user navigating — a
+  // blocking reconnect to the old bonded remote freezes the pairing UI. There
+  // the background scan (below) still reconnects a remote that wakes up, and
+  // the device list connects explicitly.
+  const bool inReader = _readerContextCallback && _readerContextCallback();
+  if (userInputDetected && inReader && now - lastReconnectAttempt >= 2000) {
     lastReconnectAttempt = now;
     LOG_INF("BT", "Button activity detected while disconnected, reconnecting to bonded device %s",
             _bondedDeviceAddress.c_str());

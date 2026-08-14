@@ -442,8 +442,9 @@ void LyraTheme::drawSideButtonHints(const GfxRenderer& renderer, const char* top
   constexpr int buttonHeight = 78;                                       // Height on screen (width when rotated)
   constexpr int buttonMargin = 0;
 
-  if (gpio.deviceIsX3()) {
-    // X3 layout: Up on left side, Down on right side, positioned higher
+  if (gpio.sideKeysAreLeftRight()) {
+    // X3/X4 Pro layout: one key each side of the screen — top label on the left
+    // edge, bottom label on the right edge, positioned higher
     constexpr int x3ButtonY = 155;
 
     if (topBtn != nullptr && topBtn[0] != '\0') {
@@ -525,8 +526,14 @@ void LyraTheme::drawPowerButtonHint(GfxRenderer& renderer, const char* label) co
 
   // X4: vertical box on the right edge, above the Up/Down side hints, tracking the Power button.
   const int x = screenWidth - buttonWidth;
+#if FREEINK_DEVICE_X4PRO
+  // X4 Pro: the side hints use the X3 placement (right-edge box at y=155), so anchor
+  // just above that box — the X4's 140px gap under topHintButtonY would overlap it.
+  const int y = 155 - 20 - buttonHeight;
+#else
   constexpr int gap = 140;
   const int y = topHintButtonY - gap - buttonHeight;
+#endif
   // Fill the box white first so list/book content underneath doesn't bleed through (the hint
   // sits over content here, unlike the edge-hugging side hints). Matches drawButtonHints.
   renderer.fillRoundedRect(x, y, buttonWidth, buttonHeight, cornerRadius, Color::White);

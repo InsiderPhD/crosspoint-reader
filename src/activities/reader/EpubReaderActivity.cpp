@@ -1529,38 +1529,40 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
     const int sideReserve = metrics.sideButtonHintsWidth + 6;  // side/power box strip
     // Front-only modes draw just the front-button bar, so only it needs reserved space.
     const bool sideHints = !CrossPointSettings::buttonHintsFrontOnly(SETTINGS.showButtonHints);
+    // X3 and X4 Pro draw a side box on BOTH portrait edges (one key per side);
+    // the X4 stacks both boxes on the portrait-right edge only.
+    const bool splitSide = gpio.sideKeysAreLeftRight();
     const bool x3 = gpio.deviceIsX3();
     switch (SETTINGS.orientation) {
       case CrossPointSettings::PORTRAIT:
         orientedMarginBottom += frontReserve;
         if (sideHints) {
           orientedMarginRight += sideReserve;
-          if (x3) orientedMarginLeft += sideReserve;
+          if (splitSide) orientedMarginLeft += sideReserve;
         }
         break;
       case CrossPointSettings::INVERTED:
         orientedMarginTop += frontReserve;
         if (sideHints) {
           orientedMarginLeft += sideReserve;
-          if (x3) orientedMarginRight += sideReserve;
+          if (splitSide) orientedMarginRight += sideReserve;
         }
         break;
       case CrossPointSettings::LANDSCAPE_CW:
         orientedMarginLeft += frontReserve;
         if (sideHints) {
           orientedMarginBottom += sideReserve;
-          if (x3) orientedMarginTop += sideReserve;
+          if (splitSide) orientedMarginTop += sideReserve;
         }
         break;
       case CrossPointSettings::LANDSCAPE_CCW:
         orientedMarginRight += frontReserve - 10;  // trimmed: front bar sits flush to the right bezel
         if (sideHints) {
           orientedMarginTop += sideReserve;
-          if (x3) {
-            orientedMarginBottom += sideReserve - 12;  // trimmed: X3 Up-box reserve
-            // X3's Power-button hint maps to the left edge in landscape CCW.
-            orientedMarginLeft += sideReserve;
-          }
+          if (splitSide) orientedMarginBottom += sideReserve - 12;  // trimmed: left-edge box reserve
+          // X3's Power-button hint maps to the left edge in landscape CCW. The X4 Pro's
+          // power hint stays on the portrait-right edge, covered by the base reserve.
+          if (x3) orientedMarginLeft += sideReserve;
         }
         break;
     }

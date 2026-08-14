@@ -141,11 +141,12 @@ void BluetoothSettingsActivity::beginScan() {
 void BluetoothSettingsActivity::handleMainMenuInput() {
   constexpr int kToggleBluetoothIndex = 0;
   constexpr int kRemoteIndex = 1;
-  constexpr int kMapButtonsIndex = 2;
-  // The mapping row only exists once there is a remote to map, mirroring the
-  // list built in renderMainMenu().
+  constexpr int kReconnectIndex = 2;
+  constexpr int kMapButtonsIndex = 3;
+  // The reconnect and mapping rows only exist once there is a remote, mirroring
+  // the list built in renderMainMenu().
   const bool bonded = SETTINGS.bleBondedDeviceAddr[0] != '\0';
-  const int kMainMenuItemCount = bonded ? 3 : 2;
+  const int kMainMenuItemCount = bonded ? 4 : 2;
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     finish();
@@ -232,6 +233,8 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
       } else {
         beginScan();
       }
+    } else if (selectedIndex == kReconnectIndex) {
+      reconnectBonded();
     } else if (selectedIndex == kMapButtonsIndex) {
       beginButtonMapping();
     }
@@ -311,6 +314,17 @@ void BluetoothSettingsActivity::handleResultInput() {
   if (viewMode == ViewMode::CONNECTED) {
     // Done: the remote is paired and remembered, so there is nothing left to do
     // on the picker — return to the screen that shows its status.
+    connectingBonded = false;
+    viewMode = ViewMode::MAIN_MENU;
+    selectedIndex = 0;
+  } else if (connectingBonded) {
+    // Failed bonded reconnect: there is no scanned device list to fall back
+    // to, so Retry re-attempts the same remote and Back returns to the menu.
+    if (confirm) {
+      reconnectBonded();
+      return;
+    }
+    connectingBonded = false;
     viewMode = ViewMode::MAIN_MENU;
     selectedIndex = 0;
   } else {
@@ -321,6 +335,9 @@ void BluetoothSettingsActivity::handleResultInput() {
 }
 
 void BluetoothSettingsActivity::connectToSelected() {
+  // This is the scan flow: a failed result must fall back to the device list,
+  // not inherit the bonded-reconnect retry behaviour.
+  connectingBonded = false;
   const auto& devices = btMgr->getDiscoveredDevices();
   if (selectedIndex < 0 || selectedIndex >= static_cast<int>(devices.size())) {
     return;
@@ -352,6 +369,50 @@ void BluetoothSettingsActivity::connectToSelected() {
     connectionError = btStatusText(btMgr->lastStatus);
     viewMode = ViewMode::CONNECT_FAILED;
     LOG_ERR("BT", "Failed to connect: %s", connectionError.c_str());
+  }
+  requestUpdate();
+}
+
+void BluetoothSettingsActivity::reconnectBonded() {
+  // The early returns land on the main menu (where lastError renders): this can
+  // be invoked from the failed-result screen's Retry, not just from the menu.
+  if (!btMgr->isEnabled()) {
+    lastError = tr(STR_BT_TURN_ON_FIRST);
+    connectingBonded = false;
+    viewMode = ViewMode::MAIN_MENU;
+    requestUpdate();
+    return;
+  }
+  const std::string addr = SETTINGS.bleBondedDeviceAddr;
+  if (btMgr->isConnected(addr)) {
+    // Already connected (the background scan may have beaten us to it) — no
+    // point flashing the connecting screen.
+    lastError = tr(STR_CONNECTED);
+    connectingBonded = false;
+    viewMode = ViewMode::MAIN_MENU;
+    requestUpdate();
+    return;
+  }
+
+  connectingBonded = true;
+  connectionError.clear();
+  lastError = "";
+  selectedDeviceName = SETTINGS.bleBondedDeviceName[0] ? SETTINGS.bleBondedDeviceName : tr(STR_BT_A_REMOTE);
+
+  LOG_INF("BT", "Reconnecting to bonded remote %s", addr.c_str());
+  // connectToDevice() blocks for several seconds, so paint the connecting
+  // screen and wait for it to land before starting.
+  viewMode = ViewMode::CONNECTING;
+  requestUpdateAndWait();
+
+  // The bond (address, name, type) is already persisted — nothing to save here.
+  if (btMgr->connectToDevice(addr)) {
+    viewMode = ViewMode::CONNECTED;
+    LOG_INF("BT", "Reconnected to bonded remote %s", addr.c_str());
+  } else {
+    connectionError = btStatusText(btMgr->lastStatus);
+    viewMode = ViewMode::CONNECT_FAILED;
+    LOG_ERR("BT", "Bonded reconnect failed: %s", connectionError.c_str());
   }
   requestUpdate();
 }
@@ -607,8 +668,13 @@ void BluetoothSettingsActivity::renderMainMenu() {
         UI_10_FONT_ID, (std::string(tr(STR_BT_REMOTE)) + ": " + SETTINGS.bleBondedDeviceName).c_str(),
         pageWidth - metrics.contentSidePadding * 6));
     itemValues.push_back(tr(STR_BT_FORGET));
-    // Button mapping row — must stay index-aligned with kMapButtonsIndex in
-    // handleMainMenuInput().
+    // Reconnect + mapping rows — must stay index-aligned with kReconnectIndex /
+    // kMapButtonsIndex in handleMainMenuInput(). The reconnect row is always
+    // present while bonded: connection state changes asynchronously (the
+    // background scan can reconnect mid-screen), and a row that comes and goes
+    // with it would shift the indices between paint and press.
+    itemLabels.push_back(tr(STR_BT_RECONNECT));
+    itemValues.push_back(btMgr && btMgr->isConnected(SETTINGS.bleBondedDeviceAddr) ? tr(STR_CONNECTED) : "");
     itemLabels.push_back(tr(STR_BT_MAP_BUTTONS));
     itemValues.push_back(SETTINGS.bleBackSigIndex != 0xFF ? tr(STR_BT_MAP_TWO_BUTTON) : tr(STR_BT_MAP_ONE_BUTTON));
   } else {
@@ -661,6 +727,22 @@ void BluetoothSettingsActivity::renderMainMenu() {
 void BluetoothSettingsActivity::drawScanHeader() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
+
+  // A bonded reconnect never ran a scan, so the discovered-device count (and
+  // "No devices found") would be misleading over its connecting/result screens.
+  if (connectingBonded) {
+    const char* subheader = tr(STR_CONNECTING);
+    if (viewMode == ViewMode::CONNECTED) {
+      subheader = tr(STR_CONNECTED);
+    } else if (viewMode == ViewMode::CONNECT_FAILED) {
+      subheader = tr(STR_BT_ERR_CONNECT);
+    }
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_BT_PAGE_TURNER));
+    GUI.drawSubHeader(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
+                      subheader);
+    return;
+  }
+
   const size_t deviceCount = btMgr ? btMgr->getDiscoveredDevices().size() : 0;
 
   char countStr[32];

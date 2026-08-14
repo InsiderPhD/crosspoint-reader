@@ -43,6 +43,13 @@ class HalDisplay {
   // the render lock held — it drives the same SPI bus as the render task.
   void powerOffIdle();
 
+  // Arm a full DC-balanced (GC) flash for the next refresh regardless of the
+  // mode the caller requests. Used to scrub accumulated partial-refresh
+  // residue: pair with a normal activity repaint so overlays (AA text,
+  // grayscale images) re-render through their usual path instead of being
+  // flattened to the B/W framebuffer.
+  void requestResync(uint8_t settlePasses = 1) { einkDisplay.requestResync(settlePasses); }
+
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;
 

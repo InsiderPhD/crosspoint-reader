@@ -860,6 +860,28 @@ void loop() {
     RenderLock lock;
     display.powerOffIdle();
   }
+
+  // Static-screen maintenance: fast/partial waveforms (and the AA gray overlay
+  // even more so) are not DC-balanced, and the residual charge they leave
+  // relaxes into random speckle over minutes on a static screen — with the
+  // rails already collapsed, so this is bistability decay, not a powered
+  // panel. Page turns and menu paints scrub it; a screen nobody touches never
+  // gets scrubbed. Arm a full GC flash and repaint the current activity
+  // through its normal render path (NOT a raw framebuffer redisplay, which
+  // would flatten AA text and grayscale covers to B/W). Costs one full-refresh
+  // flash per interval; the sleep timer is untouched, so a forgotten device
+  // still auto-sleeps on schedule.
+  {
+    static constexpr unsigned long STATIC_SCREEN_MAINT_MS = 5UL * 60UL * 1000UL;
+    static unsigned long lastMaintRequestMs = 0;
+    if (display.msSinceLastRefresh() > STATIC_SCREEN_MAINT_MS &&
+        millis() - lastMaintRequestMs > STATIC_SCREEN_MAINT_MS && !RenderLock::peek()) {
+      lastMaintRequestMs = millis();
+      LOG_DBG("SLP", "Static-screen maintenance: full-refresh repaint");
+      display.requestResync(1);
+      activityManager.requestUpdate();
+    }
+  }
 #endif
 
   // Long-press Back from any activity returns to the home screen. Fires once per hold
