@@ -15,6 +15,7 @@
 #include "util/HeaderDateUtils.h"
 #include "util/ReadingStatsAnalytics.h"
 #include "util/TimeUtils.h"
+#include "util/TouchListNav.h"
 
 namespace {
 constexpr int FIELD_COUNT = 3;
@@ -183,18 +184,64 @@ bool BookReadingAdjustmentActivity::applyAdjustment() {
   return true;
 }
 
+void BookReadingAdjustmentActivity::activateSelectedField() {
+  if (selectedField == 1) {
+    openDateSelection();
+    return;
+  }
+  applyAdjustment();
+}
+
+void BookReadingAdjustmentActivity::touchActivateSelectedField() {
+  // Touch equivalent of activateSelectedField: the date row still opens the
+  // picker, but the two value rows step instead of applying — applying is the
+  // Confirm button's job, so a second tap can change the value rather than
+  // committing it.
+  if (selectedField == 1) {
+    openDateSelection();
+    return;
+  }
+  adjustSelectedValue(1);  // clears lastApplyFailed and redraws
+}
+
 void BookReadingAdjustmentActivity::loop() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     finish();
     return;
   }
 
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    if (selectedField == 1) {
-      openDateSelection();
-      return;
+#if FREEINK_DEVICE_X4PRO
+  // The on-screen Confirm button applies. Checked before the rows so a tap that
+  // lands on it never falls through to the field hit-test.
+  if (SETTINGS.fullTouchUi) {
+    int lx, ly;
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      const Rect confirm = UITheme::getConfirmButtonRect(renderer);
+      if (lx >= confirm.x && lx < confirm.x + confirm.width && ly >= confirm.y && ly < confirm.y + confirm.height) {
+        applyAdjustment();
+        return;
+      }
     }
-    applyAdjustment();
+  }
+#endif
+
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), FIELD_COUNT, selectedField,
+                               /*hasSubtitle=*/true, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedField = tappedIndex;
+      lastApplyFailed = false;  // matches the Up/Down field-change path
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      touchActivateSelectedField();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
+  }
+
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    activateSelectedField();
     return;
   }
 
@@ -214,21 +261,28 @@ void BookReadingAdjustmentActivity::loop() {
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] { adjustSelectedValue(1); });
 }
 
+// The three adjustment-field rows. Shared by render() and the loop()'s tap
+// hit-testing so the two can never disagree.
+Rect BookReadingAdjustmentActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  return Rect{0, contentTop, renderer.getScreenWidth(), metrics.listWithSubtitleRowHeight * FIELD_COUNT};
+}
+
 void BookReadingAdjustmentActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
   const int sidePadding = metrics.contentSidePadding;
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listHeight = metrics.listWithSubtitleRowHeight * FIELD_COUNT;
+  const Rect fieldsRect = listRect();
   const std::string subtitle =
       renderer.truncatedText(UI_10_FONT_ID, bookTitle.c_str(), pageWidth - metrics.contentSidePadding * 2);
 
   HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_ADJUST_READING_TIME), subtitle.c_str());
 
   GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, listHeight}, FIELD_COUNT, selectedField,
+      renderer, fieldsRect, FIELD_COUNT, selectedField,
       [](int index) {
         if (index == 0) return std::string(tr(STR_ACTION));
         if (index == 1) return std::string(tr(STR_DATE));
@@ -241,7 +295,7 @@ void BookReadingAdjustmentActivity::render(RenderLock&&) {
       },
       [](int index) { return index == 0 ? UIIcon::Settings : UIIcon::Recent; }, nullptr, false);
 
-  const int infoTop = contentTop + listHeight + metrics.verticalSpacing;
+  const int infoTop = fieldsRect.y + fieldsRect.height + metrics.verticalSpacing;
   const int infoWidth = pageWidth - sidePadding * 2;
   std::string info = getAdjustmentPreviewInfo();
   std::string hint = selectedField == 1 ? tr(STR_SELECT_OPENS_DATE_PICKER) : tr(STR_SELECT_APPLIES_CORRECTION);
@@ -257,6 +311,8 @@ void BookReadingAdjustmentActivity::render(RenderLock&&) {
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), selectedField == 1 ? tr(STR_SELECT) : tr(STR_CONFIRM),
                                             tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+  UITheme::drawConfirmButton(renderer, tr(STR_CONFIRM));
+
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

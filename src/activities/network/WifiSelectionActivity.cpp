@@ -14,6 +14,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 #include "util/WifiTimeSync.h"
 
 void WifiSelectionActivity::onEnter() {
@@ -418,6 +419,20 @@ void WifiSelectionActivity::loop() {
       return;
     }
 
+    int tappedIndex;
+    switch (TouchListNav::tapRow(mappedInput, listRect(), static_cast<int>(networks.size()),
+                                 static_cast<int>(selectedNetworkIndex), /*hasSubtitle=*/false, tappedIndex)) {
+      case TouchListNav::TapResult::SelectionMoved:
+        selectedNetworkIndex = static_cast<size_t>(tappedIndex);
+        requestUpdate();
+        return;
+      case TouchListNav::TapResult::Activated:
+        selectNetwork(selectedNetworkIndex);
+        return;
+      case TouchListNav::TapResult::None:
+        break;
+    }
+
     // Check for Confirm button to select network or rescan
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       if (!networks.empty()) {
@@ -524,6 +539,17 @@ void WifiSelectionActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
+// List body of the NETWORK_LIST state, between the sub-header and the legend /
+// button hints. Shared by renderNetworkList() and the loop()'s tap hit-testing
+// so the two can never disagree.
+Rect WifiSelectionActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
 void WifiSelectionActivity::renderNetworkList() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
@@ -536,11 +562,9 @@ void WifiSelectionActivity::renderNetworkList() const {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NO_NETWORKS));
     renderer.drawCenteredText(SMALL_FONT_ID, top + height + 10, tr(STR_PRESS_OK_SCAN));
   } else {
-    int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
-    int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
     GUI.drawList(
-        renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(networks.size()),
-        selectedNetworkIndex, [this](int index) { return networks[index].ssid; }, nullptr, nullptr,
+        renderer, listRect(), static_cast<int>(networks.size()), selectedNetworkIndex,
+        [this](int index) { return networks[index].ssid; }, nullptr, nullptr,
         [this](int index) {
           auto network = networks[index];
           return std::string(network.hasSavedPassword ? "+ " : "") + (network.isEncrypted ? "* " : "") +

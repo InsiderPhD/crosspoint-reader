@@ -2,10 +2,14 @@
 
 #include <GfxRenderer.h>
 
+#include <vector>
+
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
 
 struct ReadingBookStats;
+struct Rect;
+struct TabInfo;
 
 class ReadingStatsActivity final : public Activity {
   ButtonNavigator buttonNavigator;
@@ -40,6 +44,12 @@ class ReadingStatsActivity final : public Activity {
   void changePage(int delta);
   void changeViewedMonth(int delta);
   void guardBackReturn();
+  // Tab strip and (Books/Sessions) list geometry plus the live TabInfo vector,
+  // shared by render() and the Full Touch tap hit-testing so the two can
+  // never disagree (mirrors SettingsActivity).
+  Rect tabBarRect() const;
+  Rect listRect() const;
+  void buildTabs(std::vector<TabInfo>& tabs) const;
 
  public:
   explicit ReadingStatsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -49,4 +59,5 @@ class ReadingStatsActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 };

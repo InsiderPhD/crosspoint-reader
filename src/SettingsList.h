@@ -287,6 +287,15 @@ inline void appendControlSettings(std::vector<SettingInfo>& v) {
                                    StrId::STR_CAT_SYSTEM
 #endif
                                    ),
+               SettingInfo::Toggle(StrId::STR_FULL_TOUCH_UI, &CrossPointSettings::fullTouchUi,
+                                   "fullTouchUi"
+#if FREEINK_DEVICE_X4PRO
+                                   // Touch panel exists only on the X4 Pro: show the toggle there,
+                                   // round-trip the JSON key everywhere else (no category = hidden).
+                                   ,
+                                   StrId::STR_CAT_SYSTEM
+#endif
+                                   ),
                // Legacy settings: kept for JSON round-trip / migration only (no category = hidden from UI).
                SettingInfo::Enum(StrId::STR_SIDE_BTN_LAYOUT, &CrossPointSettings::sideButtonLayout,
                                  {StrId::STR_PREV_NEXT, StrId::STR_NEXT_PREV}, "sideButtonLayout"),

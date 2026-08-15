@@ -14,8 +14,6 @@
 #include <cstring>
 #include <vector>
 
-#include "SilentRestart.h"
-
 #include "../util/ConfirmationActivity.h"
 #include "BookDetailsActivity.h"
 #include "BookFusionBookIdStore.h"
@@ -23,6 +21,7 @@
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
+#include "SilentRestart.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -345,6 +344,21 @@ void HomeActivity::loop() {
     return;
   }
 
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: a touch hold targets the tile under the finger — move the
+  // selector there first so checkLongPress below (which reads the same touch
+  // event and suppresses the contact) opens the menu for that book.
+  if (SETTINGS.fullTouchUi) {
+    int lx, ly;
+    if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
+      const int tile = tileIndexAt(lx, ly);
+      if (tile >= 0 && tile < static_cast<int>(recentBooks.size())) {
+        selectorIndex = tile;
+      }
+    }
+  }
+#endif
+
   // Long-press Confirm on a recent-book tile opens the book options modal.
   if (selectorIndex < static_cast<int>(recentBooks.size())) {
     const auto& book = recentBooks[selectorIndex];
@@ -362,6 +376,26 @@ void HomeActivity::loop() {
     }
   }
 
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: first tap on a tile moves the selector, a second tap opens it.
+  if (SETTINGS.fullTouchUi) {
+    int lx, ly;
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      const int tile = tileIndexAt(lx, ly);
+      if (tile >= 0) {
+        if (tile != selectorIndex) {
+          selectorIndex = tile;
+          requestUpdate();
+        } else {
+          activateSelectedTile();
+        }
+        return;
+      }
+      // Dead space (header, gaps): no action.
+    }
+  }
+#endif
+
   buttonNavigator.onNext([this, menuCount] {
     selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
     requestUpdate();
@@ -376,7 +410,36 @@ void HomeActivity::loop() {
     // If this release was the menu's confirmation/dismissal, the helper has
     // already handled it — skip short-press handling.
     if (contextMenu.consumeLongPressFlag()) return;
+    activateSelectedTile();
+  }
+}
 
+Rect HomeActivity::coverStripRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return Rect{0, metrics.homeTopPadding, renderer.getScreenWidth(), metrics.homeCoverTileHeight};
+}
+
+Rect HomeActivity::menuRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return Rect{
+      0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing, renderer.getScreenWidth(),
+      renderer.getScreenHeight() -
+          (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing * 2 + metrics.buttonHintsHeight)};
+}
+
+int HomeActivity::tileIndexAt(const int lx, const int ly) const {
+  const int coverSlotsUsed = getCoverSlotsUsed();
+  const int coverSlot = GUI.hitTestRecentBookCover(coverStripRect(), coverSlotsUsed, lx, ly);
+  if (coverSlot >= 0) {
+    return coverSlot;
+  }
+  const int menuCount = getMenuItemCount() - coverSlotsUsed;
+  const int menuSlot = GUI.hitTestButtonMenu(menuRect(), menuCount, lx, ly);
+  return menuSlot >= 0 ? coverSlotsUsed + menuSlot : -1;
+}
+
+void HomeActivity::activateSelectedTile() {
+  {
     // Library slot is checked first so a theme-provided library tile beats
     // both the recent-book lookup and the menu fallthrough.
     const int librarySlotIdx = UITheme::getInstance().getTheme().getLibrarySlotIndex();
@@ -430,9 +493,8 @@ void HomeActivity::render(RenderLock&&) {
   coverRectW = pageWidth;
   coverRectH = metrics.homeCoverTileHeight;
 
-  GUI.drawRecentBookCover(renderer, Rect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight},
-                          recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
-                          std::bind(&HomeActivity::storeCoverBuffer, this));
+  GUI.drawRecentBookCover(renderer, coverStripRect(), recentBooks, selectorIndex, coverRendered, coverBufferStored,
+                          bufferRestored, std::bind(&HomeActivity::storeCoverBuffer, this));
 
   // Build menu items dynamically
   std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_FILE_TRANSFER), tr(STR_READING_STATS),
@@ -447,11 +509,7 @@ void HomeActivity::render(RenderLock&&) {
 
   const int menuOffset = getCoverSlotsUsed();
   GUI.drawButtonMenu(
-      renderer,
-      Rect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing, pageWidth,
-           pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing * 2 +
-                         metrics.buttonHintsHeight)},
-      static_cast<int>(menuItems.size()), selectorIndex - menuOffset,
+      renderer, menuRect(), static_cast<int>(menuItems.size()), selectorIndex - menuOffset,
       [&menuItems](int index) { return std::string(menuItems[index]); },
       [&menuIcons](int index) { return menuIcons[index]; });
 

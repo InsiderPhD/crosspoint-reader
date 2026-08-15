@@ -290,27 +290,7 @@ void FileBrowserActivity::loop() {
         entry.back() != '/' && (FsHelpers::hasEpubExtension(entry) || FsHelpers::hasXtcExtension(entry));
     if (isBook && mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= 700UL) {
       longPressBookTriggered = true;
-      showingBookOptions = true;
-      awaitingBookOptionsRelease = true;
-      bookOptionsIndex = 0;
-      std::string cleanBase = basepath;
-      if (cleanBase.back() != '/') cleanBase += '/';
-      bookOptionsPath = cleanBase + entry;
-      const auto dotPos = entry.rfind('.');
-      bookOptionsTitle = (dotPos != std::string::npos) ? entry.substr(0, dotPos) : std::string(entry);
-      const auto& recentList = RECENT_BOOKS.getBooks();
-      auto it = std::find_if(recentList.begin(), recentList.end(),
-                             [this](const RecentBook& rb) { return rb.path == bookOptionsPath; });
-      if (it != recentList.end()) {
-        bookOptionsAuthor = it->author;
-        bookOptionsProgress = it->progressPercent;
-      } else {
-        bookOptionsAuthor.clear();
-        bookOptionsProgress = -1;
-      }
-      bookOptionsHasClippings =
-          FsHelpers::hasEpubExtension(bookOptionsPath) && ClippingStore::hasForFilePath(bookOptionsPath, "epub");
-      requestUpdate();
+      openBookOptions(/*awaitRelease=*/true);
       return;
     }
   }
@@ -327,6 +307,46 @@ void FileBrowserActivity::loop() {
       bookOptionsIndex = (bookOptionsIndex - 1 + optionCount) % optionCount;
       requestUpdate();
     });
+
+#if FREEINK_DEVICE_X4PRO
+    // Full Touch: hit-test taps against the popup drawn by render(). Every
+    // consumed path must swallow the Confirm this tap injected (its release
+    // lands next frame): the close path via lockNextConfirmRelease is not
+    // needed — closing returns to the list whose handler checks it — so the
+    // outside tap reuses that flag; row-moves and dead-area taps reuse
+    // awaitingBookOptionsRelease, which eats input until the release passes.
+    if (SETTINGS.fullTouchUi && bookOptionsLayoutValid) {
+      int lx, ly;
+      if (mappedInput.wasTapPoint(lx, ly)) {
+        const bool insidePopup = lx >= bookOptionsPopupX && lx < bookOptionsPopupX + bookOptionsPopupW &&
+                                 ly >= bookOptionsPopupY && ly < bookOptionsPopupY + bookOptionsPopupH;
+        if (!insidePopup) {
+          // Outside tap: close without action.
+          showingBookOptions = false;
+          longPressBookTriggered = false;
+          lockNextConfirmRelease = true;
+          requestUpdate();
+          return;
+        }
+        const int row = (ly - bookOptionsOptionsTop) / bookOptionsRowH;
+        const bool onRow = ly >= bookOptionsOptionsTop && row >= 0 && row < optionCount;
+        if (onRow && row != bookOptionsIndex) {
+          // First tap on an unselected option: move the highlight only.
+          bookOptionsIndex = row;
+          awaitingBookOptionsRelease = true;
+          requestUpdate();
+          return;
+        }
+        if (!onRow) {
+          // Title/info area: no action.
+          awaitingBookOptionsRelease = true;
+          return;
+        }
+        // Tap on the highlighted option: fall through — the injected Confirm
+        // release below activates it.
+      }
+    }
+#endif
 
     if (awaitingBookOptionsRelease) {
       if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) awaitingBookOptionsRelease = false;
@@ -416,6 +436,52 @@ void FileBrowserActivity::loop() {
     return;  // Block main input while modal is open
   }
 
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: only reached with no modal open (the sort menu and book
+  // options blocks above return first).
+  if (SETTINGS.fullTouchUi && !files.empty()) {
+    int lx, ly;
+    // Long-press on a book row opens its context menu. Fires while the finger
+    // is still down, so the contact must be suppressed or the lift would also
+    // dispatch as a tap and immediately activate the highlighted option.
+    if (mappedInput.wasTouchLongPressPoint(lx, ly) && mode == Mode::Books) {
+      const int index =
+          GUI.hitTestList(listRect(), static_cast<int>(files.size()), static_cast<int>(selectorIndex), false, lx, ly);
+      if (index >= 0) {
+        const std::string& entry = files[index];
+        const bool isBook =
+            entry.back() != '/' && (FsHelpers::hasEpubExtension(entry) || FsHelpers::hasXtcExtension(entry));
+        selectorIndex = static_cast<size_t>(index);
+        mappedInput.suppressTouchContact();
+        if (isBook) {
+          // Books: context menu (delete lives inside it).
+          openBookOptions(/*awaitRelease=*/false);
+        } else {
+          // Folders and non-book files: the hold-Confirm delete flow.
+          confirmDeleteSelectedEntry();
+        }
+        return;
+      }
+      // Long-press on dead space: no action, contact NOT suppressed — the
+      // lift still counts as a tap.
+    }
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      const int index =
+          GUI.hitTestList(listRect(), static_cast<int>(files.size()), static_cast<int>(selectorIndex), false, lx, ly);
+      if (index >= 0) {
+        // First tap moves the cursor; a second tap on the selected row opens it.
+        if (static_cast<size_t>(index) != selectorIndex) {
+          selectorIndex = static_cast<size_t>(index);
+          requestUpdate();
+        } else {
+          activateSelectedEntry();
+        }
+        return;
+      }
+    }
+  }
+#endif
+
   const int pathReserved = renderer.getLineHeight(SMALL_FONT_ID) + UITheme::getInstance().getMetrics().verticalSpacing;
   const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false, pathReserved);
 
@@ -429,63 +495,12 @@ void FileBrowserActivity::loop() {
     const std::string& entry = files[selectorIndex];
     bool isDirectory = (entry.back() == '/');
 
-    // Firmware picker: select file -> return path; navigate into directories normally.
-    if (mode == Mode::PickFirmware && !isDirectory) {
-      std::string cleanBasePath = basepath;
-      if (cleanBasePath.back() != '/') cleanBasePath += "/";
-      ActivityResult res{FilePathResult{cleanBasePath + entry}};
-      res.isCancelled = false;
-      setResult(std::move(res));
-      finish();
-      return;
-    }
-
     if (mode == Mode::Books && mappedInput.getHeldTime() >= GO_HOME_MS) {
-      // --- LONG PRESS ACTION: DELETE FILE OR FOLDER ---
-      std::string cleanBasePath = basepath;
-      if (cleanBasePath.back() != '/') cleanBasePath += "/";
-      // For directories, strip the trailing '/' to get the real path
-      const std::string fullPath = cleanBasePath + (isDirectory ? entry.substr(0, entry.length() - 1) : entry);
-
-      auto handler = [this, fullPath, isDirectory](const ActivityResult& res) {
-        if (!res.isCancelled) {
-          LOG_DBG("FileBrowser", "Attempting to delete: %s", fullPath.c_str());
-          bool deleted = isDirectory ? Storage.removeDir(fullPath.c_str()) : Storage.remove(fullPath.c_str());
-          if (!isDirectory) clearFileMetadata(fullPath);
-          if (deleted) {
-            LOG_DBG("FileBrowser", "Deleted successfully");
-            loadFiles();
-            if (files.empty()) {
-              selectorIndex = 0;
-            } else if (selectorIndex >= files.size()) {
-              selectorIndex = files.size() - 1;
-            }
-            requestUpdate(true);
-          } else {
-            LOG_ERR("FileBrowser", "Failed to delete: %s", fullPath.c_str());
-          }
-        } else {
-          LOG_DBG("FileBrowser", "Delete cancelled by user");
-        }
-      };
-
-      std::string heading = tr(STR_DELETE) + std::string("? ");
-
-      startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, entry), handler);
+      confirmDeleteSelectedEntry();
       return;
-    } else {
-      // --- SHORT PRESS ACTION: OPEN/NAVIGATE ---
-      if (basepath.back() != '/') basepath += "/";
-
-      if (isDirectory) {
-        basepath += entry.substr(0, entry.length() - 1);
-        loadFiles();
-        selectorIndex = 0;
-        requestUpdate();
-      } else {
-        onSelectBook(basepath + entry);
-      }
     }
+
+    activateSelectedEntry();
     return;
   }
 
@@ -539,6 +554,108 @@ void FileBrowserActivity::loop() {
   });
 }
 
+void FileBrowserActivity::activateSelectedEntry() {
+  if (files.empty()) return;
+
+  const std::string& entry = files[selectorIndex];
+  const bool isDirectory = (entry.back() == '/');
+
+  // Firmware picker: select file -> return path; navigate into directories normally.
+  if (mode == Mode::PickFirmware && !isDirectory) {
+    std::string cleanBasePath = basepath;
+    if (cleanBasePath.back() != '/') cleanBasePath += "/";
+    ActivityResult res{FilePathResult{cleanBasePath + entry}};
+    res.isCancelled = false;
+    setResult(std::move(res));
+    finish();
+    return;
+  }
+
+  if (basepath.back() != '/') basepath += "/";
+
+  if (isDirectory) {
+    basepath += entry.substr(0, entry.length() - 1);
+    loadFiles();
+    selectorIndex = 0;
+    requestUpdate();
+  } else {
+    onSelectBook(basepath + entry);
+  }
+}
+
+void FileBrowserActivity::confirmDeleteSelectedEntry() {
+  if (files.empty()) return;
+
+  // --- LONG PRESS ACTION: DELETE FILE OR FOLDER ---
+  const std::string& entry = files[selectorIndex];
+  const bool isDirectory = (entry.back() == '/');
+  std::string cleanBasePath = basepath;
+  if (cleanBasePath.back() != '/') cleanBasePath += "/";
+  // For directories, strip the trailing '/' to get the real path
+  const std::string fullPath = cleanBasePath + (isDirectory ? entry.substr(0, entry.length() - 1) : entry);
+
+  auto handler = [this, fullPath, isDirectory](const ActivityResult& res) {
+    if (!res.isCancelled) {
+      LOG_DBG("FileBrowser", "Attempting to delete: %s", fullPath.c_str());
+      bool deleted = isDirectory ? Storage.removeDir(fullPath.c_str()) : Storage.remove(fullPath.c_str());
+      if (!isDirectory) clearFileMetadata(fullPath);
+      if (deleted) {
+        LOG_DBG("FileBrowser", "Deleted successfully");
+        loadFiles();
+        if (files.empty()) {
+          selectorIndex = 0;
+        } else if (selectorIndex >= files.size()) {
+          selectorIndex = files.size() - 1;
+        }
+        requestUpdate(true);
+      } else {
+        LOG_ERR("FileBrowser", "Failed to delete: %s", fullPath.c_str());
+      }
+    } else {
+      LOG_DBG("FileBrowser", "Delete cancelled by user");
+    }
+  };
+
+  std::string heading = tr(STR_DELETE) + std::string("? ");
+
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, entry), handler);
+}
+
+Rect FileBrowserActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int pathReserved = renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing;
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing - pathReserved;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
+void FileBrowserActivity::openBookOptions(const bool awaitRelease) {
+  const std::string& entry = files[selectorIndex];
+  showingBookOptions = true;
+  awaitingBookOptionsRelease = awaitRelease;
+  bookOptionsIndex = 0;
+  bookOptionsLayoutValid = false;  // stale until render() draws this popup
+  std::string cleanBase = basepath;
+  if (cleanBase.back() != '/') cleanBase += '/';
+  bookOptionsPath = cleanBase + entry;
+  const auto dotPos = entry.rfind('.');
+  bookOptionsTitle = (dotPos != std::string::npos) ? entry.substr(0, dotPos) : std::string(entry);
+  const auto& recentList = RECENT_BOOKS.getBooks();
+  auto it = std::find_if(recentList.begin(), recentList.end(),
+                         [this](const RecentBook& rb) { return rb.path == bookOptionsPath; });
+  if (it != recentList.end()) {
+    bookOptionsAuthor = it->author;
+    bookOptionsProgress = it->progressPercent;
+  } else {
+    bookOptionsAuthor.clear();
+    bookOptionsProgress = -1;
+  }
+  bookOptionsHasClippings =
+      FsHelpers::hasEpubExtension(bookOptionsPath) && ClippingStore::hasForFilePath(bookOptionsPath, "epub");
+  requestUpdate();
+}
+
 std::string getFileName(std::string filename) {
   if (filename.back() == '/') {
     filename.pop_back();
@@ -587,17 +704,14 @@ void FileBrowserActivity::render(RenderLock&&) {
                  showingBookOptions ? nullptr : tr(STR_SORT));
 
   const int pathLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  const int pathReserved = pathLineHeight + metrics.verticalSpacing;
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight =
-      pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing - pathReserved;
+  const Rect contentRect = listRect();
   if (files.empty()) {
     const char* emptyMsg = (mode == Mode::PickFirmware) ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, emptyMsg);
+    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentRect.y + 20, emptyMsg);
   } else {
     GUI.drawList(
-        renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), selectorIndex,
-        [this](int index) { return getFileName(files[index]); }, nullptr,
+        renderer, contentRect, files.size(), selectorIndex, [this](int index) { return getFileName(files[index]); },
+        nullptr,
         [this](int index) {
           // BookFusion-linked books display the BF mark in the row's icon slot
           // instead of the file-type icon. Sidecar existence is cached at
@@ -666,8 +780,16 @@ void FileBrowserActivity::render(RenderLock&&) {
     const auto lastSlash = bookOptionsPath.rfind('/');
     const std::string folder =
         (lastSlash != std::string::npos) ? bookOptionsPath.substr(0, lastSlash) : bookOptionsPath;
-    UITheme::drawBookOptionsPopup(renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(), folder.c_str(),
-                                  bookOptionsProgress, bookOptionsIndex, bookOptionsHasClippings);
+    const auto layout =
+        UITheme::drawBookOptionsPopup(renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(), folder.c_str(),
+                                      bookOptionsProgress, bookOptionsIndex, bookOptionsHasClippings);
+    bookOptionsPopupX = layout.popup.x;
+    bookOptionsPopupY = layout.popup.y;
+    bookOptionsPopupW = layout.popup.width;
+    bookOptionsPopupH = layout.popup.height;
+    bookOptionsOptionsTop = layout.optionsTopY;
+    bookOptionsRowH = layout.optionRowH;
+    bookOptionsLayoutValid = true;
   }
 
   sortMenu.render(renderer);

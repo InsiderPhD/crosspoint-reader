@@ -10,6 +10,8 @@
 #include "sorting/SortMode.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 // Whole-library "grouped folders" browse mode, reached via SETTINGS.folderView
 // (FOLDER_VIEW_TAGS, FOLDER_VIEW_AUTHORS or FOLDER_VIEW_SERIES). Presents a two-level view:
 //   Level 0 — one "folder" per group key (plus an ungrouped catch-all folder).
@@ -43,6 +45,9 @@ class GroupBrowserActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // While a modal is open, hand taps back to the global tap-is-Confirm
+  // injection so a tap activates the highlighted option.
+  bool handlesDirectTouch() const override { return !contextMenu.isOpen() && !sortMenu.isOpen(); }
 
  private:
   const GroupMode mode;
@@ -106,6 +111,13 @@ class GroupBrowserActivity final : public Activity {
   void sortBookIndices(std::vector<uint16_t>& idx) const;
   // Apply a context-menu action to `path`, then refresh the current list.
   void dispatchBookAction(BookContextMenu::Action action, const std::string& path, const std::string& title);
+  // List body between the header and the button hints, shared by both browse
+  // levels. Shared by render() and the Full Touch tap hit-testing so the two
+  // can never disagree.
+  Rect listRect() const;
+  // Open the folder or book at selectorIndex — the Confirm short-press body,
+  // also fired by a Full Touch tap on the selected row.
+  void activateSelectedRow();
 
   const char* headerLabel() const;
 

@@ -36,29 +36,29 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
     case CrossPointSettings::UI_THEME::CLASSIC:
       LOG_DBG("UI", "Using Classic theme");
       currentTheme = std::make_unique<BaseTheme>();
-      currentMetrics = &BaseMetrics::values;
       break;
     case CrossPointSettings::UI_THEME::LYRA:
       LOG_DBG("UI", "Using Lyra theme");
       currentTheme = std::make_unique<LyraTheme>();
-      currentMetrics = &LyraMetrics::values;
       break;
     case CrossPointSettings::UI_THEME::LYRA_3_COVERS:
       LOG_DBG("UI", "Using Lyra 3 Covers theme");
       currentTheme = std::make_unique<Lyra3CoversTheme>();
-      currentMetrics = &Lyra3CoversMetrics::values;
       break;
     case CrossPointSettings::UI_THEME::LYRA_LIBRARY:
       LOG_DBG("UI", "Using Lyra Library theme");
       currentTheme = std::make_unique<LyraLibraryTheme>();
-      currentMetrics = &Lyra3CoversMetrics::values;  // Identical layout metrics.
       break;
     default:
       LOG_DBG("UI", "Unknown theme %d, falling back to Lyra", static_cast<int>(type));
       currentTheme = std::make_unique<LyraTheme>();
-      currentMetrics = &LyraMetrics::values;
       break;
   }
+  // Single source of truth: the metrics activities read (getMetrics) are the
+  // ones the theme itself draws and hit-tests with. A second hardcoded mapping
+  // here silently disagreed with BaseTheme::themeMetrics() for the 3-cover
+  // themes, which broke home-screen tap targets.
+  currentMetrics = &currentTheme->themeMetrics();
 }
 
 int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
@@ -157,18 +157,20 @@ int UITheme::getVisibleBookOptions(int* ids, int maxIds, const bool includeDelet
   const auto add = [&](int id) {
     if (n < maxIds) ids[n++] = id;
   };
+  add(BOOK_OPT_BOOK_INFO);  // First: the most common, least destructive action
   add(BOOK_OPT_MARK_READ);
   add(BOOK_OPT_RESET_PROGRESS);
   add(BOOK_OPT_SHELVE);
   add(BOOK_OPT_DELETE);
   if (includeDeleteClippings) add(BOOK_OPT_DELETE_CLIPPINGS);
   if (SETTINGS.devMode) add(BOOK_OPT_REINDEX);  // "Delete Book Cache" — testing only
-  add(BOOK_OPT_BOOK_INFO);
   return n;
 }
 
-void UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author, const char* folderPath,
-                                   int progressPercent, int selectedOptionIndex, const bool includeDeleteClippings) {
+UITheme::BookOptionsPopupLayout UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title,
+                                                              const char* author, const char* folderPath,
+                                                              int progressPercent, int selectedOptionIndex,
+                                                              const bool includeDeleteClippings) {
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   constexpr int POPUP_W = 420;
@@ -222,6 +224,33 @@ void UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title, con
     renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - lineH) / 2, bookOptionLabel(ids[i]),
                       i != selectedOptionIndex);
   }
+
+  return {Rect{px, py, POPUP_W, popupH}, py + titleBlockH + INFO_COUNT * INFO_H, OPTION_H};
+}
+
+namespace {
+constexpr int CONFIRM_BTN_W = 200;
+constexpr int CONFIRM_BTN_H = 46;
+constexpr int CONFIRM_BTN_BOTTOM_GAP = 24;
+}  // namespace
+
+Rect UITheme::getConfirmButtonRect(const GfxRenderer& renderer) {
+  const auto& metrics = getInstance().getMetrics();
+  const int y = renderer.getScreenHeight() - metrics.buttonHintsHeight - CONFIRM_BTN_BOTTOM_GAP - CONFIRM_BTN_H;
+  return Rect{(renderer.getScreenWidth() - CONFIRM_BTN_W) / 2, y, CONFIRM_BTN_W, CONFIRM_BTN_H};
+}
+
+void UITheme::drawConfirmButton(GfxRenderer& renderer, const char* label) {
+#if !FREEINK_DEVICE_X4PRO
+  // Other devices label this action in the bottom hint bar already.
+  return;
+#endif
+  const Rect r = getConfirmButtonRect(renderer);
+  renderer.fillRect(r.x, r.y, r.width, r.height, false);
+  renderer.drawRect(r.x, r.y, r.width, r.height, 2, true);
+  const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, label, EpdFontFamily::BOLD);
+  const int textY = r.y + (r.height - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+  renderer.drawText(UI_10_FONT_ID, r.x + (r.width - textWidth) / 2, textY, label, true, EpdFontFamily::BOLD);
 }
 
 void UITheme::drawSyncProgressPopup(GfxRenderer& renderer, const char* title, const char* statusMessage) {

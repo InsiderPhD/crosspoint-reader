@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "activities/ActivityManager.h"
 #include "activities/ActivityResult.h"
@@ -153,6 +154,15 @@ int EpubReaderClippingListActivity::getPageItems() const {
   return std::max(1, available / ROW_HEIGHT);
 }
 
+// Top edge of the first row band. Mirrors render()'s
+// rowY = LIST_START_Y + contentY + i * ROW_HEIGHT (the selection fillRect uses
+// the same origin). Keep in sync with render() or taps land on the wrong row.
+int EpubReaderClippingListActivity::listTopY() const {
+  const bool isPortraitInverted = renderer.getOrientation() == GfxRenderer::Orientation::PortraitInverted;
+  const int hintGutterHeight = isPortraitInverted ? 50 : 0;
+  return LIST_START_Y + hintGutterHeight;
+}
+
 void EpubReaderClippingListActivity::onEnter() {
   Activity::onEnter();
   selectedIndex = 0;
@@ -226,10 +236,15 @@ void EpubReaderClippingListActivity::rebuildDetailLayoutIfNeeded() {
   detailPage = std::min(detailPage, getDetailPageCount() - 1);
 }
 
-void EpubReaderClippingListActivity::deleteSelectedClipping() {
-  if (clippings.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(clippings.size())) return;
+bool EpubReaderClippingListActivity::deleteSelectedClipping() {
+  if (clippings.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(clippings.size())) return false;
 
-  if (!CLIPPINGS.removeClippingAt(static_cast<size_t>(selectedIndex))) return;
+  if (activityManager.isOnRenderTask()) {
+    LOG_ERR("CLIP", "Clipping delete requested on render task; ignoring");
+    return false;
+  }
+
+  if (!CLIPPINGS.removeClippingAt(static_cast<size_t>(selectedIndex))) return false;
 
   detailMode = false;
   detailText.clear();
@@ -243,6 +258,7 @@ void EpubReaderClippingListActivity::deleteSelectedClipping() {
     selectedIndex = static_cast<int>(clippings.size()) - 1;
   }
   requestUpdate();
+  return true;
 }
 
 void EpubReaderClippingListActivity::loop() {
@@ -263,18 +279,63 @@ void EpubReaderClippingListActivity::loop() {
   if (!detailMode && mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
       mappedInput.getHeldTime() >= CLIPPING_DELETE_HOLD_MS && !deleteHoldTriggered && !clippings.empty() &&
       selectedIndex >= 0 && selectedIndex < static_cast<int>(clippings.size())) {
-    if (activityManager.isOnRenderTask()) {
-      LOG_ERR("CLIP", "Clipping delete requested on render task; ignoring");
-      return;
+    if (deleteSelectedClipping()) {
+      deleteHoldTriggered = true;
     }
-    deleteHoldTriggered = true;
-    deleteSelectedClipping();
     return;
   }
 
   if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
     deleteHoldTriggered = false;
   }
+
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: a long tap on a list row is the hold-Confirm delete for that
+  // row. Suppress the contact only when the delete actually ran, so a no-op
+  // hold still falls through to the tap handling below.
+  if (SETTINGS.fullTouchUi && !detailMode && !clippings.empty()) {
+    int lx, ly;
+    if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
+      const int pageItems = getPageItems();
+      const int top = listTopY();
+      const int row = (ly - top) / ROW_HEIGHT;
+      if (ly >= top && row >= 0 && row < pageItems) {
+        const int itemIndex = (selectedIndex / pageItems) * pageItems + row;
+        if (itemIndex < static_cast<int>(clippings.size())) {
+          selectedIndex = itemIndex;
+          if (deleteSelectedClipping()) {
+            mappedInput.suppressTouchContact();
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  // Full Touch: first tap on a row moves the cursor there; a second tap on the
+  // already-selected row opens its detail view.
+  if (SETTINGS.fullTouchUi && !detailMode && !clippings.empty()) {
+    int lx, ly;
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      const int pageItems = getPageItems();
+      const int top = listTopY();
+      const int row = (ly - top) / ROW_HEIGHT;
+      if (ly >= top && row >= 0 && row < pageItems) {
+        const int itemIndex = (selectedIndex / pageItems) * pageItems + row;
+        if (itemIndex < static_cast<int>(clippings.size())) {
+          if (itemIndex != selectedIndex) {
+            selectedIndex = itemIndex;
+            requestUpdate();
+          } else {
+            openSelectedDetail();
+          }
+          return;
+        }
+      }
+      // Dead space (title bar, below the last row): no action.
+    }
+  }
+#endif
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (deleteHoldTriggered) {
@@ -439,7 +500,8 @@ void EpubReaderClippingListActivity::render(RenderLock&&) {
     const int itemIndex = pageStartIndex + i;
     if (itemIndex >= total) break;
 
-    const int rowY = LIST_START_Y + contentY + i * ROW_HEIGHT;
+    // listTopY() mirrors this origin and is shared with the tap hit-testing.
+    const int rowY = listTopY() + i * ROW_HEIGHT;
     const bool isSelected = itemIndex == selectedIndex;
     if (isSelected) {
       renderer.fillRect(contentX, rowY, contentWidth - 1, ROW_HEIGHT, true);

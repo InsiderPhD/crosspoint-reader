@@ -140,7 +140,9 @@ class EpubReaderActivity final : public Activity {
   // opens the selection overlay; on confirm it persists the clipping and exports it. handleClippingJump
   // navigates to a saved clipping picked from the list. computeOrientedMargins returns the reading
   // viewport margins (shared with render() so the selection overlay uses the same text origin).
-  void startClipSelection();
+  // anchorX/anchorY (logical frame, -1 = unset): the Kindle-style tap-and-hold entry
+  // point — the overlay opens with the word under that point selected and anchored.
+  void startClipSelection(int anchorX = -1, int anchorY = -1);
   void handleClippingJump(const ClippingJumpResult& jump);
   void computeOrientedMargins(int& orientedMarginTop, int& orientedMarginRight, int& orientedMarginBottom,
                               int& orientedMarginLeft) const;

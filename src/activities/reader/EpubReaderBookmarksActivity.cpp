@@ -12,6 +12,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
+#include "util/TouchListNav.h"
 
 namespace {
 constexpr int ENTER_DELETE_MODE_MS = 700;
@@ -44,7 +45,7 @@ void EpubReaderBookmarksActivity::onEnter() {
       JsonSettingsIO::loadBookmarks(bookmarks, json.c_str());
       for (auto& bookmark : bookmarks) {
         const CrossPointPosition pos = ProgressMapper::toCrossPoint(epub, {bookmark.xpath, bookmark.percentage},
-                                                                     currentSpineIndex, currentSpinePageCount);
+                                                                    currentSpineIndex, currentSpinePageCount);
         bookmark.computedSpineIndex = static_cast<uint16_t>(std::max(0, pos.spineIndex));
         bookmark.computedChapterPageCount = static_cast<uint16_t>(std::max(0, pos.totalPages));
         bookmark.computedChapterProgress = static_cast<uint16_t>(std::max(0, pos.pageNumber));
@@ -60,40 +61,64 @@ void EpubReaderBookmarksActivity::onEnter() {
 
 void EpubReaderBookmarksActivity::onExit() { Activity::onExit(); }
 
-int EpubReaderBookmarksActivity::getGutterBottom(const GfxRenderer& renderer) {
+int EpubReaderBookmarksActivity::getGutterBottom(const GfxRenderer& renderer) const {
   const auto orientation = renderer.getOrientation();
   const bool isPortrait = orientation == GfxRenderer::Orientation::Portrait;
   return isPortrait ? 75 : 40;
 }
 
-int EpubReaderBookmarksActivity::getListHeight(const GfxRenderer& renderer) {
+int EpubReaderBookmarksActivity::getListHeight(const GfxRenderer& renderer) const {
   return renderer.getScreenHeight() - getGutterBottom(renderer) - LINE_HEIGHT;
+}
+
+// List body between the title row and the bottom help text. Shared by render()
+// and the loop()'s tap hit-testing so the two can never disagree.
+Rect EpubReaderBookmarksActivity::listRect() const {
+  const auto orientation = renderer.getOrientation();
+  const bool isLandscapeCw = orientation == GfxRenderer::Orientation::LandscapeClockwise;
+  const bool isLandscapeCcw = orientation == GfxRenderer::Orientation::LandscapeCounterClockwise;
+  const bool isPortraitInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
+
+  const int hintGutterWidth = (isLandscapeCw || isLandscapeCcw) ? 40 : 0;
+  const int contentX = isLandscapeCw ? hintGutterWidth : 0;
+  const int contentWidth = renderer.getScreenWidth() - hintGutterWidth;
+  const int contentY = isPortraitInverted ? 50 : 0;
+  return Rect{contentX, contentY + LINE_HEIGHT, contentWidth, getListHeight(renderer)};
+}
+
+bool EpubReaderBookmarksActivity::deleteSelectedBookmark() {
+  if (bookmarks.empty()) {
+    return false;
+  }
+  if (activityManager.isOnRenderTask()) {
+    LOG_ERR("EPB", "Bookmark delete requested on render task; ignoring");
+    return false;
+  }
+
+  {
+    RenderLock lock(*this);
+    bookmarks.erase(bookmarks.begin() + selectorIndex);
+    const std::string path = BookmarkUtil::getBookmarkPath(epubPath);
+    Storage.mkdir(BookmarkUtil::getBookmarksDir().c_str());
+    if (!JsonSettingsIO::saveBookmarks(bookmarks, path.c_str())) {
+      LOG_ERR("EPB", "Failed to save bookmarks after delete");
+    }
+
+    if (selectorIndex >= static_cast<int>(bookmarks.size()) && selectorIndex > 0) {
+      selectorIndex--;
+    }
+  }
+
+  requestUpdate();
+  return true;
 }
 
 void EpubReaderBookmarksActivity::loop() {
   if (mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() > ENTER_DELETE_MODE_MS &&
       !deleteHoldTriggered && !bookmarks.empty()) {
-    if (activityManager.isOnRenderTask()) {
-      LOG_ERR("EPB", "Bookmark delete requested on render task; ignoring");
-      return;
+    if (deleteSelectedBookmark()) {
+      deleteHoldTriggered = true;
     }
-
-    {
-      RenderLock lock(*this);
-      bookmarks.erase(bookmarks.begin() + selectorIndex);
-      const std::string path = BookmarkUtil::getBookmarkPath(epubPath);
-      Storage.mkdir(BookmarkUtil::getBookmarksDir().c_str());
-      if (!JsonSettingsIO::saveBookmarks(bookmarks, path.c_str())) {
-        LOG_ERR("EPB", "Failed to save bookmarks after delete");
-      }
-
-      if (selectorIndex >= static_cast<int>(bookmarks.size()) && selectorIndex > 0) {
-        selectorIndex--;
-      }
-    }
-
-    deleteHoldTriggered = true;
-    requestUpdate();
     return;
   }
 
@@ -101,16 +126,42 @@ void EpubReaderBookmarksActivity::loop() {
     deleteHoldTriggered = false;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (bookmarks.empty()) {
-      return;
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: a long tap on a bookmark row is the hold-Confirm delete for
+  // that row. Suppress the contact only when the delete actually ran, so a
+  // no-op hold still falls through to the tap.
+  if (SETTINGS.fullTouchUi && !bookmarks.empty()) {
+    int lx, ly;
+    if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
+      const int index =
+          GUI.hitTestList(listRect(), static_cast<int>(bookmarks.size()), selectorIndex, /*hasSubtitle=*/true, lx, ly);
+      if (index >= 0) {
+        selectorIndex = index;
+        if (deleteSelectedBookmark()) {
+          mappedInput.suppressTouchContact();
+          return;
+        }
+      }
     }
+  }
+#endif
 
-    const auto bookmark = bookmarks.at(selectorIndex);
-    const CrossPointPosition pos = ProgressMapper::toCrossPoint(epub, {bookmark.xpath, bookmark.percentage},
-                                                                 currentSpineIndex, currentSpinePageCount);
-    setResult(SyncResult{pos.spineIndex, pos.pageNumber, -1.0f});
-    finish();
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), static_cast<int>(bookmarks.size()), selectorIndex,
+                               /*hasSubtitle=*/true, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectorIndex = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      openSelectedBookmark();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    openSelectedBookmark();
     return;
   }
 
@@ -134,17 +185,28 @@ void EpubReaderBookmarksActivity::loop() {
 
   buttonNavigator.onNextContinuous([this] {
     const int pageItems = getPageItemsForBookmarkList(renderer, getListHeight(renderer));
-    selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, static_cast<int>(bookmarks.size()),
-                                                    pageItems);
+    selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, static_cast<int>(bookmarks.size()), pageItems);
     requestUpdate();
   });
 
   buttonNavigator.onPreviousContinuous([this] {
     const int pageItems = getPageItemsForBookmarkList(renderer, getListHeight(renderer));
-    selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, static_cast<int>(bookmarks.size()),
-                                                        pageItems);
+    selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, static_cast<int>(bookmarks.size()), pageItems);
     requestUpdate();
   });
+}
+
+// The Confirm short-press body, also fired by a Full Touch tap on the selected row.
+void EpubReaderBookmarksActivity::openSelectedBookmark() {
+  if (bookmarks.empty()) {
+    return;
+  }
+
+  const auto bookmark = bookmarks.at(selectorIndex);
+  const CrossPointPosition pos = ProgressMapper::toCrossPoint(epub, {bookmark.xpath, bookmark.percentage},
+                                                              currentSpineIndex, currentSpinePageCount);
+  setResult(SyncResult{pos.spineIndex, pos.pageNumber, -1.0f});
+  finish();
 }
 
 void EpubReaderBookmarksActivity::render(RenderLock&&) {
@@ -163,8 +225,6 @@ void EpubReaderBookmarksActivity::render(RenderLock&&) {
   const int contentWidth = pageWidth - hintGutterWidth;
   const int contentY = isPortraitInverted ? 50 : 0;
   const int hintGutterBottom = getGutterBottom(renderer);
-  const int listY = contentY + LINE_HEIGHT;
-  const int listHeight = getListHeight(renderer);
 
   const int titleX =
       contentX + (contentWidth - renderer.getTextWidth(UI_12_FONT_ID, tr(STR_BOOKMARKS), EpdFontFamily::BOLD)) / 2;
@@ -184,13 +244,14 @@ void EpubReaderBookmarksActivity::render(RenderLock&&) {
   const auto getBookmarkIcon = [](int) { return UIIcon::None; };
 
   if (!bookmarks.empty()) {
-    GUI.drawList(renderer, Rect{contentX, listY, contentWidth, listHeight}, static_cast<int>(bookmarks.size()),
-                 selectorIndex, getBookmarkTitle, getBookmarkSubtitle, getBookmarkIcon);
+    GUI.drawList(renderer, listRect(), static_cast<int>(bookmarks.size()), selectorIndex, getBookmarkTitle,
+                 getBookmarkSubtitle, getBookmarkIcon);
 
     GUI.drawHelpText(renderer, Rect{contentX, pageHeight - hintGutterBottom, contentWidth, LINE_HEIGHT},
                      tr(STR_HOLD_CONFIRM_TO_DELETE));
   } else {
-    GUI.drawHelpText(renderer, Rect{contentX, LINE_HEIGHT * 2, contentWidth, LINE_HEIGHT}, tr(STR_BOOKMARK_INSTRUCTIONS));
+    GUI.drawHelpText(renderer, Rect{contentX, LINE_HEIGHT * 2, contentWidth, LINE_HEIGHT},
+                     tr(STR_BOOKMARK_INSTRUCTIONS));
   }
 
   const char* backLabel = tr(STR_BACK);

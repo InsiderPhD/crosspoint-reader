@@ -9,6 +9,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 // Structure to hold WiFi network information
 struct WifiNetworkInfo {
   std::string ssid;
@@ -79,6 +81,10 @@ class WifiSelectionActivity final : public Activity {
   static constexpr unsigned long CONNECTION_TIMEOUT_MS = 15000;
   unsigned long connectionStartTime = 0;
 
+  // List body of the NETWORK_LIST state. Shared by renderNetworkList() and the
+  // loop()'s tap hit-testing so the two can never disagree.
+  Rect listRect() const;
+
   void renderNetworkList() const;
   void renderPasswordEntry() const;
   void renderConnecting() const;
@@ -103,4 +109,8 @@ class WifiSelectionActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // Full Touch tap dispatch only covers the AP list. Every other state (empty
+  // list, prompts, results) keeps the global tap-is-Confirm injection, e.g. so
+  // a tap on the empty list still triggers the rescan.
+  bool handlesDirectTouch() const override { return state == WifiSelectionState::NETWORK_LIST && !networks.empty(); }
 };

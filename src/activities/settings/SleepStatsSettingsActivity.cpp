@@ -10,6 +10,7 @@
 #include "activities/boot_sleep/SleepStatsCard.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 namespace {
 // The three sleep-stat picker slots, in list order.
@@ -73,6 +74,21 @@ void SleepStatsSettingsActivity::loop() {
     return;
   }
 
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), SLOT_COUNT, selectedIndex,
+                               /*hasSubtitle=*/false, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedIndex = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      handleSelection();
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
+  }
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     handleSelection();
     requestUpdate();
@@ -97,6 +113,24 @@ void SleepStatsSettingsActivity::loop() {
   });
 }
 
+// List body between the header and the preview zone (the live card claims the
+// lower part of the screen). Shared by render() and the loop()'s tap
+// hit-testing so the two can never disagree.
+Rect SleepStatsSettingsActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+
+  // Reserve the lower part of the screen for the live preview card; the short
+  // 3-row list sits above it. The card renders itself centred and bottom-anchored.
+  const int lineH = renderer.getLineHeight(UI_12_FONT_ID);
+  const int previewZoneHeight = lineH * SleepStatsCard::MAX_STAT_LINES + 70;
+  const int cardBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  const int previewZoneTop = cardBottom - previewZoneHeight;
+
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int listHeight = previewZoneTop - contentTop - metrics.verticalSpacing;
+  return Rect{0, contentTop, renderer.getScreenWidth(), listHeight};
+}
+
 void SleepStatsSettingsActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
@@ -106,19 +140,15 @@ void SleepStatsSettingsActivity::render(RenderLock&&) {
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SLEEP_SCREEN_STATS));
 
-  // Reserve the lower part of the screen for the live preview card; the short
-  // 3-row list sits above it. The card renders itself centred and bottom-anchored.
-  const int lineH = renderer.getLineHeight(UI_12_FONT_ID);
-  const int previewZoneHeight = lineH * SleepStatsCard::MAX_STAT_LINES + 70;
+  const Rect list = listRect();
+  // Derived from the list rect so the preview zone tracks it.
+  const int previewZoneTop = list.y + list.height + metrics.verticalSpacing;
   const int cardBottom = pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  const int previewZoneTop = cardBottom - previewZoneHeight;
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listHeight = previewZoneTop - contentTop - metrics.verticalSpacing;
   GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, listHeight}, SLOT_COUNT, selectedIndex,
-      [](int index) { return std::string(I18N.get(slotLabels[index])); }, nullptr, nullptr,
-      [](int index) -> std::string { return std::string(I18N.get(statNames[slotRef(index)])); }, true);
+      renderer, list, SLOT_COUNT, selectedIndex, [](int index) { return std::string(I18N.get(slotLabels[index])); },
+      nullptr, nullptr, [](int index) -> std::string { return std::string(I18N.get(statNames[slotRef(index)])); },
+      true);
 
   // "Preview" label above the card, then the live card using real stats with
   // sample fallbacks so every selected slot demonstrates its format.

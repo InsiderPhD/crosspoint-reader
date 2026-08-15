@@ -16,14 +16,23 @@
 
 ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList,
                                              const int fontId, Section& section, const int startPageInSection,
-                                             const int marginTop, const int marginLeft)
+                                             const int marginTop, const int marginLeft, const int initialCursorIdx,
+                                             const bool preAnchored)
     : Activity("ClipSelection", renderer, mappedInput),
       wordList(std::move(wordList)),
       fontId(fontId),
       section(section),
       startPageInSection(startPageInSection),
       marginTop(marginTop),
-      marginLeft(marginLeft) {}
+      marginLeft(marginLeft) {
+  const int wordCount = static_cast<int>(this->wordList.words.size());
+  if (initialCursorIdx > 0 && initialCursorIdx < wordCount) {
+    cursorIdx = initialCursorIdx;
+  }
+  if (preAnchored) {
+    startMarkIdx = cursorIdx;
+  }
+}
 
 void ClipSelectionActivity::onEnter() {
   Activity::onEnter();
@@ -45,6 +54,23 @@ void ClipSelectionActivity::onEnter() {
 void ClipSelectionActivity::onExit() {
   section.currentPage = savedSectionPage;
   Activity::onExit();
+}
+
+void ClipSelectionActivity::finishSelection() {
+  // A touch finish can land before any anchor was set (tap-to-select without a
+  // prior hold): treat the cursor word as a single-word selection.
+  if (startMarkIdx == -1) {
+    startMarkIdx = cursorIdx;
+  }
+  const int total = static_cast<int>(wordList.words.size());
+  const int from = std::min(startMarkIdx, cursorIdx);
+  const int to = std::max(startMarkIdx, cursorIdx);
+  auto result = ClipTextBuilder::build(wordList, from, to, total, startPageInSection, section.pageCount);
+  if (const auto paragraphIndex = section.getParagraphIndexForPage(result.sectionPage)) {
+    result.paragraphIndex = *paragraphIndex;
+  }
+  setResult(std::move(result));
+  finish();
 }
 
 void ClipSelectionActivity::loop() {
@@ -74,19 +100,43 @@ void ClipSelectionActivity::loop() {
   buttonNavigator.onRelease({Button::Up}, [this, &moveCursor] { moveCursor(lineBackward(cursorIdx)); });
   buttonNavigator.onContinuous({Button::Up}, [this, &moveCursor] { moveCursor(lineBackward(cursorIdx)); });
 
+#if FREEINK_DEVICE_X4PRO
+  // Kindle-style touch selection. A hold picks the word under the finger and
+  // finishes there (so hold-at-start + hold-at-end makes a clipping in two
+  // gestures); a tap extends the selection to that word, and a second tap on
+  // the word already under the cursor finishes.
+  {
+    int lx, ly;
+    if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
+      const int idx = clipword::findWordAt(wordList, wordList.words[cursorIdx].pageIdx, lx, ly);
+      if (idx >= 0) {
+        mappedInput.suppressTouchContact();  // the lift must not also tap
+        cursorIdx = idx;
+        finishSelection();
+        return;
+      }
+    }
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      const int idx = clipword::findWordAt(wordList, wordList.words[cursorIdx].pageIdx, lx, ly);
+      if (idx >= 0) {
+        if (idx != cursorIdx) {
+          cursorIdx = idx;
+          requestUpdate();
+        } else {
+          finishSelection();
+        }
+        return;
+      }
+    }
+  }
+#endif
+
   if (mappedInput.wasReleased(Button::Confirm)) {
     if (startMarkIdx == -1) {
       startMarkIdx = cursorIdx;
       requestUpdate();
     } else {
-      const int from = std::min(startMarkIdx, cursorIdx);
-      const int to = std::max(startMarkIdx, cursorIdx);
-      auto result = ClipTextBuilder::build(wordList, from, to, total, startPageInSection, section.pageCount);
-      if (const auto paragraphIndex = section.getParagraphIndexForPage(result.sectionPage)) {
-        result.paragraphIndex = *paragraphIndex;
-      }
-      setResult(std::move(result));
-      finish();
+      finishSelection();
     }
     return;
   }

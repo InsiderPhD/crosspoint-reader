@@ -3,6 +3,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 /**
  * Settings submenu for BookFusion Sync.
  * Account-only: "Link Account" and "Unlink Account" with linked/not-linked
@@ -17,6 +19,7 @@ class BookFusionSettingsActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 
   static constexpr int MENU_ITEMS = 2;
 
@@ -25,4 +28,5 @@ class BookFusionSettingsActivity final : public Activity {
   size_t selectedIndex = 0;
 
   void handleSelection();
+  Rect listRect() const;
 };

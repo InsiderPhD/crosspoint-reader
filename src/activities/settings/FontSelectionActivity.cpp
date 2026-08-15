@@ -7,6 +7,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 FontSelectionActivity::FontSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                              const SdCardFontRegistry* registry)
@@ -61,6 +62,20 @@ void FontSelectionActivity::loop() {
     return;
   }
 
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), static_cast<int>(fonts_.size()), selectedIndex_,
+                               /*hasSubtitle=*/false, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedIndex_ = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      handleSelection();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
+  }
+
   buttonNavigator_.onNextRelease([this] {
     selectedIndex_ = ButtonNavigator::nextIndex(selectedIndex_, static_cast<int>(fonts_.size()));
     requestUpdate();
@@ -88,17 +103,23 @@ void FontSelectionActivity::handleSelection() {
   finish();
 }
 
+// List body between the header and the button hints. Shared by render() and
+// the loop()'s tap hit-testing so the two can never disagree.
+Rect FontSelectionActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
 void FontSelectionActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_FONT_FAMILY));
-
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
 
   // Determine which font index is currently active (to mark as "Selected")
   int currentFontIndex = 0;
@@ -115,7 +136,7 @@ void FontSelectionActivity::render(RenderLock&&) {
   }
 
   GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(fonts_.size()), selectedIndex_,
+      renderer, listRect(), static_cast<int>(fonts_.size()), selectedIndex_,
       [this](int index) { return fonts_[index].name; }, nullptr, nullptr,
       [this, currentFontIndex](int index) -> std::string { return index == currentFontIndex ? tr(STR_SELECTED) : ""; },
       true);

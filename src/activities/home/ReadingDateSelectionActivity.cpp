@@ -13,6 +13,7 @@
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
 #include "util/TimeUtils.h"
+#include "util/TouchListNav.h"
 
 namespace {
 constexpr int FIELD_COUNT = 3;
@@ -114,6 +115,37 @@ void ReadingDateSelectionActivity::loop() {
     return;
   }
 
+#if FREEINK_DEVICE_X4PRO
+  // The on-screen Confirm button commits. Checked before the rows so a tap that
+  // lands on it never falls through to the field hit-test.
+  if (SETTINGS.fullTouchUi) {
+    int lx, ly;
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      const Rect confirm = UITheme::getConfirmButtonRect(renderer);
+      if (lx >= confirm.x && lx < confirm.x + confirm.width && ly >= confirm.y && ly < confirm.y + confirm.height) {
+        finishWithDate();
+        return;
+      }
+    }
+  }
+#endif
+
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), FIELD_COUNT, selectedField,
+                               /*hasSubtitle=*/true, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedField = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      // Tapping the field already under the cursor steps its value, matching
+      // the Right button; the Confirm button is what commits.
+      adjustSelectedField(1);
+      return;
+    case TouchListNav::TapResult::None:
+      break;
+  }
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     finishWithDate();
     return;
@@ -133,19 +165,26 @@ void ReadingDateSelectionActivity::loop() {
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] { adjustSelectedField(1); });
 }
 
+// The three date-field rows. Shared by render() and the loop()'s tap
+// hit-testing so the two can never disagree.
+Rect ReadingDateSelectionActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  return Rect{0, contentTop, renderer.getScreenWidth(), metrics.listWithSubtitleRowHeight * FIELD_COUNT};
+}
+
 void ReadingDateSelectionActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
   const int sidePadding = metrics.contentSidePadding;
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listHeight = metrics.listWithSubtitleRowHeight * FIELD_COUNT;
+  const Rect fieldsRect = listRect();
 
   HeaderDateUtils::drawHeaderWithDate(renderer, tr(STR_SET_DATE), getSelectedDateLabel().c_str());
 
   GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, listHeight}, FIELD_COUNT, selectedField,
+      renderer, fieldsRect, FIELD_COUNT, selectedField,
       [](int index) {
         if (index == 0) return std::string(tr(STR_DAY));
         if (index == 1) return std::string(tr(STR_MONTH));
@@ -158,10 +197,12 @@ void ReadingDateSelectionActivity::render(RenderLock&&) {
       },
       [](int) { return UIIcon::Recent; }, nullptr, false);
 
-  const int hintTop = contentTop + listHeight + metrics.verticalSpacing;
+  const int hintTop = fieldsRect.y + fieldsRect.height + metrics.verticalSpacing;
   const int hintWidth = pageWidth - sidePadding * 2;
   const std::string hint = renderer.truncatedText(UI_10_FONT_ID, tr(STR_SET_DATE_HINT), hintWidth);
   renderer.drawText(UI_10_FONT_ID, sidePadding, hintTop, hint.c_str());
+
+  UITheme::drawConfirmButton(renderer, tr(STR_CONFIRM));
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

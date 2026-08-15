@@ -9,6 +9,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 class EpubReaderBookmarksActivity final : public Activity {
   std::shared_ptr<Epub> epub;
   std::string epubPath;
@@ -34,8 +36,14 @@ class EpubReaderBookmarksActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 
  private:
-  int getGutterBottom(const GfxRenderer& renderer);
-  int getListHeight(const GfxRenderer& renderer);
+  int getGutterBottom(const GfxRenderer& renderer) const;
+  int getListHeight(const GfxRenderer& renderer) const;
+  Rect listRect() const;
+  void openSelectedBookmark();
+  // The hold-Confirm delete, also fired by a Full Touch long tap on a row.
+  // Returns true when a bookmark was actually removed.
+  bool deleteSelectedBookmark();
 };

@@ -5,6 +5,8 @@
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, BOOKFUSION };
 
 /**
@@ -21,6 +23,11 @@ class NetworkModeSelectionActivity final : public Activity {
 
   int selectedIndex = 0;
 
+  // Confirm the highlighted mode — the Confirm press body, also fired by a
+  // Full Touch tap on the selected row.
+  void handleSelection();
+  Rect listRect() const;
+
  public:
   explicit NetworkModeSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("NetworkModeSelection", renderer, mappedInput) {}
@@ -28,6 +35,7 @@ class NetworkModeSelectionActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 
   void onModeSelected(NetworkMode mode);
   void onCancel();

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "AppMetricCard.h"
+#include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "ReadingDayDetailActivity.h"
 #include "ReadingStatsDetailActivity.h"
@@ -86,6 +87,9 @@ constexpr int CHART_HEIGHT = 170;
 constexpr int CHART_HEADER_HEIGHT = 34;
 constexpr int CHART_TOP_GAP = 8;
 constexpr int SECTION_GAP = 10;
+// Sessions tab: shared between render() and listRect() (the inbox list sits
+// below the three bucket cards).
+constexpr int BUCKET_CARD_HEIGHT = 60;
 constexpr int MONTH_HEADER_HEIGHT = 34;
 constexpr int HEATMAP_GRID_GAP = 6;
 constexpr int LEGEND_HEIGHT = 30;
@@ -250,6 +254,12 @@ int drawGoalWeekRow(GfxRenderer& renderer, int x, int y, int availWidth) {
 
 void drawLyraStyleButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                               const char* btn4) {
+#if FREEINK_DEVICE_X4PRO
+  // No front buttons to label on the X4 Pro. This screen paints its own hint
+  // bar instead of going through the theme, so it needs the same opt-out as
+  // BaseTheme/LyraTheme::drawButtonHints.
+  return;
+#endif
   const GfxRenderer::Orientation originalOrientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
@@ -799,6 +809,57 @@ void ReadingStatsActivity::loop() {
     return;
   }
 
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: a tap on a tab selects that category directly; on the Books
+  // and Sessions tabs a tap on a row selects it, and a second tap on the
+  // selected row opens it. Both hit-tests need the raw point, so this reads
+  // wasTapPoint directly instead of the TouchListNav helper (mirrors
+  // SettingsActivity).
+  if (SETTINGS.fullTouchUi) {
+    int lx, ly;
+    // Long tap on a Books-tab row = the hold-Confirm "remove stats entry" for
+    // that row. Suppress the contact so the lift doesn't also tap.
+    if (currentPage == PAGE_STARTED_BOOKS && mappedInput.wasTouchLongPressPoint(lx, ly)) {
+      const int rowIndex = GUI.hitTestList(listRect(), currentPageItemCount(), selectedItemIndex - 1, true, lx, ly);
+      if (rowIndex >= 0) {
+        selectedItemIndex = rowIndex + 1;
+        mappedInput.suppressTouchContact();
+        confirmRemoveSelectedBook();
+        return;
+      }
+    }
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      std::vector<TabInfo> tabs;
+      buildTabs(tabs);
+      const int tabIndex = GUI.hitTestTabBar(renderer, tabBarRect(), tabs, lx, ly);
+      if (tabIndex >= 0) {
+        currentPage = tabIndex;
+        scrollOffset = 0;       // each tab always opens at the top
+        selectedItemIndex = 0;  // focus moves to the tab bar, as in the button flow
+        requestUpdate();
+        return;
+      }
+      if (currentPage == PAGE_STARTED_BOOKS || currentPage == PAGE_SESSIONS) {
+        // selectedItemIndex - 1 mirrors what render() passes to drawList, so
+        // the hit-test sees the same visible page (-1 = ribbon focused, no
+        // row highlighted).
+        const int rowIndex = GUI.hitTestList(listRect(), currentPageItemCount(), selectedItemIndex - 1, true, lx, ly);
+        if (rowIndex >= 0) {
+          if (rowIndex + 1 != selectedItemIndex) {
+            selectedItemIndex = rowIndex + 1;
+            requestUpdate();
+          } else if (currentPage == PAGE_STARTED_BOOKS) {
+            openSelectedBook();
+          } else {
+            openSelectedSessionEditor();
+          }
+          return;
+        }
+      }
+    }
+  }
+#endif
+
   // Mirrors SettingsActivity's controls so the two tabbed screens behave
   // identically. The "ribbon" is selectedItemIndex == 0 (the tab bar at
   // the top); positions 1..N are the content rows on the current page.
@@ -996,6 +1057,41 @@ void ReadingStatsActivity::confirmRemoveSelectedBook() {
 
 void ReadingStatsActivity::guardBackReturn() { waitForBackRelease = true; }
 
+Rect ReadingStatsActivity::tabBarRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return Rect{0, metrics.topPadding + metrics.headerHeight, renderer.getScreenWidth(), metrics.tabBarHeight};
+}
+
+// List body of the two row-list tabs. Only meaningful on Books/Sessions;
+// mirrors the exact layout math of those tabs' render branches.
+Rect ReadingStatsActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
+  const int contentBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - 4;
+  int listTop;
+  int rowsPerPage;
+  if (currentPage == PAGE_SESSIONS) {
+    const int bucketCardsTop = contentTop + LIST_HEADER_HEIGHT + 4;
+    const int inboxTop = bucketCardsTop + BUCKET_CARD_HEIGHT + SECTION_GAP;
+    listTop = inboxTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
+    rowsPerPage = SESSIONS_PER_PAGE;
+  } else {  // PAGE_STARTED_BOOKS
+    listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
+    rowsPerPage = BOOKS_PER_PAGE;
+  }
+  const int listHeight =
+      std::min(std::max(0, contentBottom - listTop), metrics.listWithSubtitleRowHeight * rowsPerPage);
+  return Rect{0, listTop, renderer.getScreenWidth(), listHeight};
+}
+
+void ReadingStatsActivity::buildTabs(std::vector<TabInfo>& tabs) const {
+  const bool hasUndatedSessions = !collectUndatedSessionIndices().empty();
+  tabs.reserve(TOTAL_STATS_PAGES);
+  for (int i = 0; i < TOTAL_STATS_PAGES; ++i) {
+    tabs.push_back({I18N.get(TAB_NAMES[i]), currentPage == i, i == PAGE_SESSIONS && hasUndatedSessions});
+  }
+}
+
 void ReadingStatsActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
@@ -1013,14 +1109,9 @@ void ReadingStatsActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS),
                  nullptr);
 
-  const bool hasUndatedSessions = !collectUndatedSessionIndices().empty();
   std::vector<TabInfo> tabs;
-  tabs.reserve(TOTAL_STATS_PAGES);
-  for (int i = 0; i < TOTAL_STATS_PAGES; ++i) {
-    tabs.push_back({I18N.get(TAB_NAMES[i]), currentPage == i, i == PAGE_SESSIONS && hasUndatedSessions});
-  }
-  GUI.drawTabBar(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight}, tabs,
-                 selectedItemIndex == 0);
+  buildTabs(tabs);
+  GUI.drawTabBar(renderer, tabBarRect(), tabs, selectedItemIndex == 0);
 
   // Reset each render; scrollable tabs (Overview/Weekly) set it from their
   // measured content height so loop() knows whether Up/Down/Left/Right scroll.
@@ -1035,8 +1126,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
       renderer.fillRect(0, 0, pageWidth, contentTop, false);
       GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS),
                      nullptr);
-      GUI.drawTabBar(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight},
-                     tabs, selectedItemIndex == 0);
+      GUI.drawTabBar(renderer, tabBarRect(), tabs, selectedItemIndex == 0);
     }
     if (maxScroll > 0) {
       const int trackX = pageWidth - 5;
@@ -1119,9 +1209,8 @@ void ReadingStatsActivity::render(RenderLock&&) {
       const uint32_t sessionsToday = READING_STATS.getSessionsToday();
       const size_t daysRead = READING_STATS.getReadingDays().size();
       if (daysRead > 0) {
-        const uint32_t perDayX10 =
-            static_cast<uint32_t>((static_cast<uint64_t>(READING_STATS.getTotalSessionCount()) * 10 + daysRead / 2) /
-                                  daysRead);
+        const uint32_t perDayX10 = static_cast<uint32_t>(
+            (static_cast<uint64_t>(READING_STATS.getTotalSessionCount()) * 10 + daysRead / 2) / daysRead);
         snprintf(sessionsValue, sizeof(sessionsValue), "%u  (%u.%u/day)", sessionsToday, perDayX10 / 10,
                  perDayX10 % 10);
       } else {
@@ -1129,13 +1218,12 @@ void ReadingStatsActivity::render(RenderLock&&) {
       }
     }
 
-    const uint8_t* rowIcons[SUMMARY_ROW_COUNT] = {
-        Streak24Icon,      Confetti24Icon, Checkbox24Icon,    Readingtime24Icon, Check24Icon,
-        Files24Icon,       Readingtime24Icon, Award24Icon,    Receipttotal24Icon};
-    const char* rowLabels[SUMMARY_ROW_COUNT] = {
-        tr(STR_STREAK),       tr(STR_MAX_STREAK),     tr(STR_DAILY_GOAL),  tr(STR_READING_TIME),
-        tr(STR_BOOKS_FINISHED), tr(STR_BOOKS_STARTED), tr(STR_AVG_SESSION), tr(STR_LONGEST_SESSION),
-        tr(STR_SESSIONS_TODAY)};
+    const uint8_t* rowIcons[SUMMARY_ROW_COUNT] = {Streak24Icon,      Confetti24Icon, Checkbox24Icon,
+                                                  Readingtime24Icon, Check24Icon,    Files24Icon,
+                                                  Readingtime24Icon, Award24Icon,    Receipttotal24Icon};
+    const char* rowLabels[SUMMARY_ROW_COUNT] = {tr(STR_STREAK),       tr(STR_MAX_STREAK),      tr(STR_DAILY_GOAL),
+                                                tr(STR_READING_TIME), tr(STR_BOOKS_FINISHED),  tr(STR_BOOKS_STARTED),
+                                                tr(STR_AVG_SESSION),  tr(STR_LONGEST_SESSION), tr(STR_SESSIONS_TODAY)};
     const std::string rowValues[SUMMARY_ROW_COUNT] = {
         std::to_string(READING_STATS.getCurrentStreakDays()),
         std::to_string(READING_STATS.getMaxStreakDays()),
@@ -1187,17 +1275,14 @@ void ReadingStatsActivity::render(RenderLock&&) {
         std::string(tr(STR_BOOKS_STARTED)) + " (" + std::to_string(READING_STATS.getBooksStartedCount()) + ")";
     GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, startedBooksLabel.c_str(), nullptr);
 
-    const int listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
+    const Rect contentRect = listRect();
     if (books.empty()) {
-      renderer.drawText(UI_10_FONT_ID, sidePadding, listTop + 20, tr(STR_NO_READING_STATS));
+      renderer.drawText(UI_10_FONT_ID, sidePadding, contentRect.y + 20, tr(STR_NO_READING_STATS));
     } else {
-      const int maxListHeight = std::max(0, contentBottom - listTop);
-      const int targetListHeight = metrics.listWithSubtitleRowHeight * BOOKS_PER_PAGE;
-      const int listHeight = std::min(maxListHeight, targetListHeight);
       // -1 highlights no row, which is what we want when the ribbon is focused.
       const int highlightedRow = (selectedItemIndex > 0) ? (selectedItemIndex - 1) : -1;
       GUI.drawList(
-          renderer, Rect{0, listTop, pageWidth, listHeight}, bookCount, highlightedRow,
+          renderer, contentRect, bookCount, highlightedRow,
           [&](const int index) { return getBookTitle(*books[index]); },
           [&](const int index) {
             return getBookSubtitle(*books[index]) + " | " +
@@ -1313,7 +1398,6 @@ void ReadingStatsActivity::render(RenderLock&&) {
     GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, tr(STR_SESSION_LENGTHS), nullptr);
     const int bucketCardsTop = contentTop + LIST_HEADER_HEIGHT + 4;
     constexpr int BUCKET_CARD_GAP = 8;
-    constexpr int BUCKET_CARD_HEIGHT = 60;
     const int bucketCardWidth = (contentWidth - BUCKET_CARD_GAP * 2) / 3;
     const StrId bucketLabels[3] = {StrId::STR_SESSIONS_UNDER_10M, StrId::STR_SESSIONS_10M_TO_29M,
                                    StrId::STR_SESSIONS_30M_PLUS};
@@ -1339,14 +1423,10 @@ void ReadingStatsActivity::render(RenderLock&&) {
     const std::string sessionsLabel = std::string(tr(STR_DATE_NOT_SET)) + " (" + std::to_string(totalUndated) + ")";
     GUI.drawSubHeader(renderer, Rect{0, inboxTop, pageWidth, LIST_HEADER_HEIGHT}, sessionsLabel.c_str(), nullptr);
 
-    const int listTop = inboxTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
+    const Rect contentRect = listRect();
     if (sessionCount == 0) {
-      renderer.drawText(UI_10_FONT_ID, sidePadding, listTop + 20, tr(STR_NO_READING_STATS));
+      renderer.drawText(UI_10_FONT_ID, sidePadding, contentRect.y + 20, tr(STR_NO_READING_STATS));
     } else {
-      const int maxListHeight = std::max(0, contentBottom - listTop);
-      const int targetListHeight = metrics.listWithSubtitleRowHeight * SESSIONS_PER_PAGE;
-      const int listHeight = std::min(maxListHeight, targetListHeight);
-
       // Helper closures resolve session metadata via the undated-indices view.
       auto sessionAt = [&fullSessions, &undated](const int displayIndex) -> const ReadingSessionLogEntry& {
         return fullSessions[undated[static_cast<size_t>(displayIndex)]];
@@ -1366,7 +1446,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
       // -1 highlights no row when the ribbon is focused.
       const int highlightedRow = (selectedItemIndex > 0) ? (selectedItemIndex - 1) : -1;
       GUI.drawList(
-          renderer, Rect{0, listTop, pageWidth, listHeight}, sessionCount, highlightedRow,
+          renderer, contentRect, sessionCount, highlightedRow,
           [&](const int index) { return resolveBookTitle(sessionAt(index).bookId); },
           [&](const int /*index*/) { return std::string(tr(STR_DATE_NOT_SET)); }, nullptr,
           [&](const int index) {

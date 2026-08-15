@@ -9,11 +9,22 @@
 #include "fontIds.h"
 #include "util/TimeUtils.h"
 #include "util/TimeZoneRegistry.h"
+#include "util/TouchListNav.h"
 
 void TimeZoneSelectActivity::onEnter() {
   Activity::onEnter();
   selectedIndex = TimeZoneRegistry::clampPresetIndex(SETTINGS.timeZonePreset);
   requestUpdate();
+}
+
+void TimeZoneSelectActivity::handleSelection() {
+  {
+    RenderLock lock(*this);
+    SETTINGS.timeZonePreset = TimeZoneRegistry::clampPresetIndex(static_cast<uint8_t>(selectedIndex));
+    SETTINGS.saveToFile();
+    TimeUtils::configureTimezone();
+  }
+  finish();
 }
 
 void TimeZoneSelectActivity::loop() {
@@ -22,14 +33,22 @@ void TimeZoneSelectActivity::loop() {
     return;
   }
 
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), static_cast<int>(TimeZoneRegistry::getPresetCount()),
+                               selectedIndex, /*hasSubtitle=*/false, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedIndex = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      handleSelection();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
+  }
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    {
-      RenderLock lock(*this);
-      SETTINGS.timeZonePreset = TimeZoneRegistry::clampPresetIndex(static_cast<uint8_t>(selectedIndex));
-      SETTINGS.saveToFile();
-      TimeUtils::configureTimezone();
-    }
-    finish();
+    handleSelection();
     return;
   }
 
@@ -55,22 +74,28 @@ void TimeZoneSelectActivity::loop() {
   });
 }
 
+// List body between the header and the button hints. Shared by render() and
+// the loop()'s tap hit-testing so the two can never disagree.
+Rect TimeZoneSelectActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
 void TimeZoneSelectActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
   const int totalItems = static_cast<int>(TimeZoneRegistry::getPresetCount());
   const int currentIndex = TimeZoneRegistry::clampPresetIndex(SETTINGS.timeZonePreset);
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_TIME_ZONE));
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
-
   GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, totalItems, selectedIndex,
+      renderer, listRect(), totalItems, selectedIndex,
       [](int index) { return std::string(TimeZoneRegistry::getPresetLabel(static_cast<uint8_t>(index))); }, nullptr,
       nullptr,
       [currentIndex](int index) { return index == currentIndex ? std::string(tr(STR_SELECTED)) : std::string(""); },

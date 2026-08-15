@@ -15,6 +15,15 @@ class XtcReaderChapterSelectionActivity final : public Activity {
   int getPageItems() const;
   int findChapterIndexForPage(uint32_t page) const;
 
+  // Row pitch; row i spans [listTopY() + i*ROW_H, + ROW_H). Shared by render()
+  // and the Full Touch tap hit-testing in loop().
+  static constexpr int ROW_H = 30;
+  int listTopY() const;
+
+  // The Confirm action for the selected chapter, also fired by a Full Touch tap
+  // on the already-selected row.
+  void activateSelectedChapter();
+
  public:
   explicit XtcReaderChapterSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                              const std::shared_ptr<Xtc>& xtc, uint32_t currentPage)
@@ -24,4 +33,7 @@ class XtcReaderChapterSelectionActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool isReaderActivity() const override { return true; }
+  // The empty-chapter screen has no rows to hit-test; leave taps as injected
+  // Confirm there.
+  bool handlesDirectTouch() const override { return xtc && !xtc->getChapters().empty(); }
 };

@@ -455,6 +455,11 @@ class CrossPointSettings {
   // Developer mode: surfaces testing-only book actions (Reset Progress, Delete Book
   // Cache, Regenerate Cover) in the book context menus. Off by default.
   uint8_t devMode = 0;
+  // Full Touch mode (X4 Pro): taps hit-test the drawn UI directly (tap a row to
+  // select and activate it) instead of injecting Confirm on the current
+  // selection. Gestures keep working either way. Field exists on every build so
+  // settings.json round-trips; only the X4 Pro main loop and activities read it.
+  uint8_t fullTouchUi = 0;
   // Image rendering mode in EPUB reader
   uint8_t imageRendering = IMAGES_DISPLAY;
   // Footnote display mode (0 = render at bottom of page, 1 = show in popup menu)

@@ -660,8 +660,21 @@ void loop() {
   // tap-anywhere-is-Confirm and home-key-is-Confirm conveniences; every other
   // screen — including the reader's own menus — gets both.
   const bool activityOwnsTouch = activityManager.consumesTouchInput();
+  // Full Touch mode: converted screens hit-test taps against their drawn UI,
+  // so only the tap injection is disabled for them — a home-key tap still
+  // means Confirm there. One-frame lag on modal open/close is safe: the
+  // contact that opens a modal is suppressed by the opener.
+  const bool directTouch = SETTINGS.fullTouchUi && activityManager.handlesDirectTouch();
   mappedInputManager.setHomeKeyActsAsConfirm(!activityOwnsTouch);
-  mappedInputManager.setTapActsAsConfirm(!activityOwnsTouch);
+  mappedInputManager.setTapActsAsConfirm(!activityOwnsTouch && !directTouch);
+  // Full Touch keeps only the Back swipe everywhere except the actual reading
+  // screens, whose swipe/tap actions the user configures explicitly in Reader
+  // Controls. Those are the activities that are BOTH isReaderActivity AND
+  // consumesTouchInput — reader sub-screens (menu, chapters, bookmarks) claim
+  // reader status only for the Bluetooth lifecycle and are plain UI, so the
+  // Back-only rule applies to them like any other screen.
+  const bool onReadingScreen = activityManager.isReaderActivity() && activityOwnsTouch;
+  mappedInputManager.setSwipesBackOnly(SETTINGS.fullTouchUi && !onReadingScreen);
 #endif
   // Latches buttons (gpio.update()) and, on X4 Pro, classifies touch swipes
   // into synthesized button presses.

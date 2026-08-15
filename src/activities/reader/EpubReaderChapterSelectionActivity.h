@@ -20,6 +20,15 @@ class EpubReaderChapterSelectionActivity final : public Activity {
   // Total TOC items count
   int getTotalItems() const;
 
+  // Row pitch; row i spans [listTopY() + i*ROW_H, + ROW_H). Shared by render()
+  // and the Full Touch tap hit-testing in loop().
+  static constexpr int ROW_H = 30;
+  int listTopY() const;
+
+  // The Confirm action for the selected chapter, also fired by a Full Touch tap
+  // on the already-selected row.
+  void activateSelectedChapter();
+
  public:
   explicit EpubReaderChapterSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                               const std::shared_ptr<Epub>& epub, const std::string& epubPath,
@@ -33,4 +42,5 @@ class EpubReaderChapterSelectionActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool isReaderActivity() const override { return true; }
+  bool handlesDirectTouch() const override { return true; }
 };

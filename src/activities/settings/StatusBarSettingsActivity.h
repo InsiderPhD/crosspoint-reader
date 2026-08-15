@@ -6,6 +6,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 // Reader status bar configuration activity
 class StatusBarSettingsActivity final : public Activity {
  public:
@@ -16,6 +18,7 @@ class StatusBarSettingsActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 
  private:
   ButtonNavigator buttonNavigator;
@@ -25,4 +28,5 @@ class StatusBarSettingsActivity final : public Activity {
   int visibleItemCount = 0;
 
   void handleSelection();
+  Rect listRect() const;
 };

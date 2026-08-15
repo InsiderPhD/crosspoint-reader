@@ -8,6 +8,8 @@
 #include "../Activity.h"
 #include "MappedInputManager.h"
 
+struct Rect;
+
 class BluetoothSettingsActivity : public Activity {
  private:
   // The pairing flow mirrors WifiSelectionActivity state-for-state so both
@@ -40,6 +42,10 @@ class BluetoothSettingsActivity : public Activity {
   // reconnect from the main menu (no scan ran): the header skips the device
   // count and a failed result retries the bond instead of showing the list.
   bool connectingBonded = false;
+  // True while the first-time guided setup runs (enable -> scan -> pair -> map
+  // -> test). Chains the Connected result straight into the mapping wizard and
+  // relabels its Back hint as Skip. Cleared on every return to the main menu.
+  bool guidedSetup = false;
 
   // Live remote test box on the main menu. The manager timestamps every report
   // it receives; we watch that value for changes so each press is counted once.
@@ -67,8 +73,21 @@ class BluetoothSettingsActivity : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool keepsBluetoothActive() const override { return true; }
+  // Full Touch tap dispatch only covers the two drawList screens. On an empty
+  // device list (and every other state) taps fall back to the global
+  // tap-is-Confirm injection, e.g. so a tap still triggers the rescan.
+  bool handlesDirectTouch() const override {
+    return viewMode == ViewMode::MAIN_MENU ||
+           (viewMode == ViewMode::DEVICE_LIST && btMgr && !btMgr->getDiscoveredDevices().empty());
+  }
 
  private:
+  // List body of the current view (MAIN_MENU / DEVICE_LIST). Shared by
+  // render() and the loop()'s tap hit-testing so the two can never disagree.
+  Rect listRect() const;
+  // Activate the highlighted main-menu row — the Confirm press body, also
+  // fired by a Full Touch tap on the selected row.
+  void activateMainMenuItem();
   void handleMainMenuInput();
   void handleScanningInput();
   void handleDeviceListInput();
@@ -101,8 +120,10 @@ class BluetoothSettingsActivity : public Activity {
   // Polls the manager for a captured press and advances the wizard.
   void pollMappingPress();
   // Leaves the wizard for the main menu. Saves the learned pair, clears the
-  // mapping (indistinguishable buttons), or keeps the old one (cancel).
-  enum class MappingOutcome { SAVED, CLEARED, CANCELLED };
+  // mapping (indistinguishable buttons), keeps the old one (cancel), or clears
+  // it with a neutral message (guided-setup Skip: a freshly paired remote must
+  // not inherit a previous remote's mapping).
+  enum class MappingOutcome { SAVED, CLEARED, CANCELLED, SKIPPED };
   void endButtonMapping(MappingOutcome outcome);
   void renderMapping() const;
 

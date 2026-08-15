@@ -2,10 +2,11 @@
 
 #include <vector>
 
-#include "util/ButtonNavigator.h"
-
 #include "../Activity.h"
+#include "util/ButtonNavigator.h"
 #include "util/ReadingStatsAnalytics.h"
+
+struct Rect;
 
 class ReadingDayDetailActivity final : public Activity {
   ButtonNavigator buttonNavigator;
@@ -16,6 +17,7 @@ class ReadingDayDetailActivity final : public Activity {
 
   void refreshEntries();
   void openSelectedBook();
+  Rect listRect() const;
 
  public:
   explicit ReadingDayDetailActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, uint32_t dayOrdinal)
@@ -24,4 +26,5 @@ class ReadingDayDetailActivity final : public Activity {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 };

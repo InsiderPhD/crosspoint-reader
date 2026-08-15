@@ -25,7 +25,13 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                  .homeCoverHeight = 226,
                                  .homeCoverTileHeight = 242,
                                  .homeRecentBooksCount = 1,
+#if FREEINK_DEVICE_X4PRO
+                                 // No front buttons on the X4 Pro: the bottom hint bar is never
+                                 // drawn (drawButtonHints no-ops), so screens reclaim its strip.
+                                 .buttonHintsHeight = 0,
+#else
                                  .buttonHintsHeight = 40,
+#endif
                                  .sideButtonHintsWidth = 40,  // match buttonHintsHeight so side/power boxes
                                                               // are the same thickness as the front hint bar
                                  .progressBarHeight = 16,
@@ -44,10 +50,16 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                  .keyboardTextFieldWidthPercent = 85,
                                  .keyboardWidthPercent = 90,
                                  .keyboardKeyCornerRadius = 6};
-}
+}  // namespace LyraMetrics
 
 class LyraTheme : public BaseTheme {
  public:
+  // Lyra draws lists/tabs/menus against its own metrics table; overriding this
+  // keeps the shared geometry helpers (listGeometry, hitTest*) in lockstep
+  // with the Lyra draw code. Lyra3Covers/LyraLibrary inherit it — their metrics
+  // differ only in home-tile fields no list geometry reads.
+  const ThemeMetrics& themeMetrics() const override { return LyraMetrics::values; }
+
   // Component drawing methods
   //   void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total) override;
   void drawBatteryLeft(const GfxRenderer& renderer, Rect rect, bool showPercentage = true) const override;
@@ -77,4 +89,11 @@ class LyraTheme : public BaseTheme {
   Rect drawPopup(const GfxRenderer& renderer, const char* message) const override;
   void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const override;
   bool showsFileIcons() const override { return true; }
+
+ protected:
+  // Lyra tab cells are text + fixed padding (no bold-when-selected, no badge).
+  int tabCellWidth(const GfxRenderer& renderer, const TabInfo& tab) const override;
+  // Lyra's drawButtonMenu starts tiles flush with the rect top (Classic leads
+  // with verticalSpacing).
+  int buttonMenuTopOffset() const override { return 0; }
 };

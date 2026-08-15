@@ -6,6 +6,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 // Day/month/year picker for assigning a date to a sessionLog entry. Mirrors
 // the ManualDateActivity UX but instead of setting the system clock it calls
 // READING_STATS.editSessionDate(sessionIndex, newDayOrdinal). Used from the
@@ -22,6 +24,7 @@ class SessionDateEditActivity final : public Activity {
   void adjustSelectedField(int delta);
   void saveDate();
   std::string getSelectedDateLabel() const;
+  Rect listRect() const;
 
  public:
   SessionDateEditActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, size_t sessionIndex)
@@ -30,4 +33,5 @@ class SessionDateEditActivity final : public Activity {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 };

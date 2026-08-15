@@ -42,10 +42,26 @@ class UITheme {
   // drawBookOptionsPopup (labels) and the host activities (index -> option id).
   static int getVisibleBookOptions(int* ids, int maxIds, bool includeDeleteClippings);
 
-  static void drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author, const char* folderPath,
-                                   int progressPercent, int selectedOptionIndex, bool includeDeleteClippings);
+  // Layout of the popup just drawn, for Full Touch tap hit-testing: option
+  // row i spans y in [optionsTopY + i*optionRowH, optionsTopY + (i+1)*optionRowH).
+  struct BookOptionsPopupLayout {
+    Rect popup;
+    int optionsTopY;
+    int optionRowH;
+  };
+  static BookOptionsPopupLayout drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author,
+                                                     const char* folderPath, int progressPercent,
+                                                     int selectedOptionIndex, bool includeDeleteClippings);
 
   static void drawSyncProgressPopup(GfxRenderer& renderer, const char* title, const char* statusMessage);
+
+  // On-screen commit button for screens whose terminal action has no other
+  // visible affordance — the X4 Pro draws no bottom hint bar, so "press Confirm"
+  // is invisible there. getConfirmButtonRect() is the tap target (callers
+  // hit-test it); drawConfirmButton() is a no-op off the X4 Pro so the button
+  // never appears on devices that still show the hint bar.
+  static Rect getConfirmButtonRect(const GfxRenderer& renderer);
+  static void drawConfirmButton(GfxRenderer& renderer, const char* label);
 
  private:
   const ThemeMetrics* currentMetrics;

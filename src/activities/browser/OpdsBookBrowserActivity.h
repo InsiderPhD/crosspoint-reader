@@ -23,6 +23,9 @@ class OpdsBookBrowserActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // Only the BROWSING entry list has hit-testable rows; every other state (and
+  // the empty feed) keeps the injected-Confirm tap behaviour.
+  bool handlesDirectTouch() const override { return state == BrowserState::BROWSING && !entries.empty(); }
 
  private:
   ButtonNavigator buttonNavigator;
@@ -36,6 +39,15 @@ class OpdsBookBrowserActivity final : public Activity {
   int selectorIndex = 0;
   std::string errorMessage;
   std::string statusMessage;
+
+  // Top edge of the first BROWSING row band; row i spans
+  // [listTopY() + i*ROW_H, + ROW_H). Shared by render() and the Full Touch tap
+  // hit-testing in loop().
+  static constexpr int ROW_H = 30;
+  int listTopY() const;
+  // The BROWSING Confirm action for the selected entry, also fired by a Full
+  // Touch tap on the already-selected row.
+  void activateSelectedEntry();
 
   void checkAndConnectWifi();
   void launchWifiSelection();

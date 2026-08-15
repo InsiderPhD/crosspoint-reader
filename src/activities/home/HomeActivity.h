@@ -46,6 +46,15 @@ class HomeActivity final : public Activity {
   // for themes without a library tile; for LyraLibraryTheme it's at least
   // librarySlot+1 so the library tile is always reachable even with no recents.
   int getCoverSlotsUsed() const;
+  // Layout shared by render() and the Full Touch tap hit-testing in loop().
+  Rect coverStripRect() const;
+  Rect menuRect() const;
+  // selectorIndex-space tile under a logical-frame point (cover slots first,
+  // then the button-menu tiles), or -1 for a miss.
+  int tileIndexAt(int lx, int ly) const;
+  // The Confirm short-press action for the selected tile; also fired by a tap
+  // on the already-selected tile.
+  void activateSelectedTile();
   bool storeCoverBuffer();    // Store frame buffer for cover image
   bool restoreCoverBuffer();  // Restore frame buffer from stored cover
   void freeCoverBuffer();     // Free the stored cover buffer
@@ -59,4 +68,7 @@ class HomeActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // While the book context menu is open, taps belong to it (inside-row
+  // hit-testing + injected Confirm); the tiles resume tap ownership on close.
+  bool handlesDirectTouch() const override { return !contextMenu.isOpen(); }
 };

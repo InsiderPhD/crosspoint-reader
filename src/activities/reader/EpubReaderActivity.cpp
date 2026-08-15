@@ -695,6 +695,18 @@ void EpubReaderActivity::loop() {
   }
 
 #if FREEINK_DEVICE_X4PRO
+  // ── Tap and hold on a word starts a clipping (Kindle-style) ───────────────
+  // Runs before the tap zones: a hold fires while the finger is still down, and
+  // suppressing the contact stops the lift from also firing a tap-zone action.
+  {
+    int holdX, holdY;
+    if (mappedInput.wasTouchLongPressPoint(holdX, holdY)) {
+      mappedInput.suppressTouchContact();
+      startClipSelection(holdX, holdY);
+      return;
+    }
+  }
+
   // ── Screen tap zones and the home key (configurable reader actions) ───────
   switch (mappedInput.wasTapZone()) {
     case MappedInputManager::TapZone::Left:
@@ -1310,7 +1322,7 @@ const char* clipVisibleText(const std::string& s) {
 }
 }  // namespace
 
-void EpubReaderActivity::startClipSelection() {
+void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY) {
   if (!section || !epub) {
     requestUpdate();
     return;
@@ -1452,9 +1464,22 @@ void EpubReaderActivity::startClipSelection() {
     return;
   }
 
+  // Tap-and-hold entry: resolve the touched point to a word on the visible page
+  // (page 0 of the built list) and open with it selected and anchored.
+  int initialCursorIdx = 0;
+  bool preAnchored = false;
+  if (anchorX >= 0 && anchorY >= 0) {
+    const int idx = clipword::findWordAt(clipWords, 0, anchorX, anchorY);
+    if (idx >= 0) {
+      initialCursorIdx = idx;
+      preAnchored = true;
+    }
+  }
+
   startActivityForResult(
       std::make_unique<ClipSelectionActivity>(renderer, mappedInput, std::move(clipWords), readerFontId, *section,
-                                              startPage, orientedMarginTop, orientedMarginLeft),
+                                              startPage, orientedMarginTop, orientedMarginLeft, initialCursorIdx,
+                                              preAnchored),
       [this, bookTitle = std::move(bookTitle), author = std::move(author),
        chapterTitle = std::move(chapterTitle)](const ActivityResult& result) {
         // get_if, not get: a default ActivityResult is NOT cancelled but holds monostate, and

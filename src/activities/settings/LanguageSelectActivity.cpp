@@ -9,6 +9,7 @@
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 void LanguageSelectActivity::onEnter() {
   Activity::onEnter();
@@ -29,6 +30,20 @@ void LanguageSelectActivity::loop() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     onBack();
     return;
+  }
+
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), totalItems, selectedIndex,
+                               /*hasSubtitle=*/false, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedIndex = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      handleSelection();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
@@ -58,21 +73,28 @@ void LanguageSelectActivity::handleSelection() {
   onBack();
 }
 
+// List body between the header and the button hints. Shared by render() and
+// the loop()'s tap hit-testing so the two can never disagree.
+Rect LanguageSelectActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
 void LanguageSelectActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
   auto metrics = UITheme::getInstance().getMetrics();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_LANGUAGE));
 
   // Current language marker
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
   const auto currentLang = static_cast<uint8_t>(I18N.getLanguage());
   GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, totalItems, selectedIndex,
+      renderer, listRect(), totalItems, selectedIndex,
       [this](int index) { return I18N.getLanguageName(static_cast<Language>(SORTED_LANGUAGE_INDICES[index])); },
       nullptr, nullptr,
       [this, currentLang](int index) { return SORTED_LANGUAGE_INDICES[index] == currentLang ? tr(STR_SELECTED) : ""; },

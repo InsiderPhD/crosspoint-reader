@@ -3,6 +3,8 @@
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 class ReadingDateSelectionActivity final : public Activity {
   ButtonNavigator buttonNavigator;
   uint32_t initialDayOrdinal = 0;
@@ -15,6 +17,7 @@ class ReadingDateSelectionActivity final : public Activity {
   uint32_t getSelectedDayOrdinal() const;
   std::string getSelectedDateLabel() const;
   void finishWithDate();
+  Rect listRect() const;
 
  public:
   explicit ReadingDateSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -24,4 +27,5 @@ class ReadingDateSelectionActivity final : public Activity {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 };

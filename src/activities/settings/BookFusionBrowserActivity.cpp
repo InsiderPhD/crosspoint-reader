@@ -29,6 +29,7 @@
 #include "network/BookFusionCoverCache.h"
 #include "network/HttpDownloader.h"
 #include "util/StringUtils.h"
+#include "util/TouchListNav.h"
 
 namespace {
 struct Category {
@@ -51,6 +52,10 @@ constexpr int NUM_CATEGORIES = sizeof(CATEGORIES) / sizeof(CATEGORIES[0]);
 // both loop() (when sizing one visual page for long-press jumps) and render()
 // (when reserving content area for the indicator) — must agree.
 constexpr int categoryPageIndicatorH = 30;
+
+// Same strip height for the BROWSING list's indicator. Shared by render() and
+// listRect() so paint and tap hit-testing agree.
+constexpr int browsePageIndicatorH = 30;
 
 // The device only has an EPUB reader (the file browser allow-list is
 // EPUB/XTC/TXT/MD/BMP — see FileBrowserActivity.cpp). Other BookFusion
@@ -687,23 +692,22 @@ void BookFusionBrowserActivity::loop() {
       return;
     }
 
+    int tappedIndex;
+    switch (TouchListNav::tapRow(mappedInput, listRect(), searchResult.count, selectedIndex,
+                                 /*hasSubtitle=*/true, tappedIndex)) {
+      case TouchListNav::TapResult::SelectionMoved:
+        selectedIndex = tappedIndex;
+        requestUpdate();
+        return;
+      case TouchListNav::TapResult::Activated:
+        activateSelectedBook();
+        return;
+      case TouchListNav::TapResult::None:
+        break;
+    }
+
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      if (selectedIndex < searchResult.count) {
-        // Gate large image-heavy EPUBs behind a confirm screen — the API gives us
-        // download_size up front, so we can ask before spending the transfer. PDFs
-        // and other formats are rejected inside startDownload regardless.
-        const auto& book = searchResult.books[selectedIndex];
-        if (bookFusionFormatIsEpub(book) && bookFusionBookIsLarge(book)) {
-          pendingDownloadIndex = selectedIndex;
-          {
-            RenderLock lock(*this);
-            state = CONFIRM_LARGE_DOWNLOAD;
-          }
-          requestUpdate();
-        } else {
-          startDownload(selectedIndex);
-        }
-      }
+      activateSelectedBook();
       return;
     }
 
@@ -793,6 +797,25 @@ void BookFusionBrowserActivity::loop() {
   }
 }
 
+void BookFusionBrowserActivity::activateSelectedBook() {
+  if (selectedIndex < searchResult.count) {
+    // Gate large image-heavy EPUBs behind a confirm screen — the API gives us
+    // download_size up front, so we can ask before spending the transfer. PDFs
+    // and other formats are rejected inside startDownload regardless.
+    const auto& book = searchResult.books[selectedIndex];
+    if (bookFusionFormatIsEpub(book) && bookFusionBookIsLarge(book)) {
+      pendingDownloadIndex = selectedIndex;
+      {
+        RenderLock lock(*this);
+        state = CONFIRM_LARGE_DOWNLOAD;
+      }
+      requestUpdate();
+    } else {
+      startDownload(selectedIndex);
+    }
+  }
+}
+
 void BookFusionBrowserActivity::drawDownloadDynamic(const int statusY) {
   const int pageWidth = renderer.getScreenWidth();
 
@@ -806,6 +829,16 @@ void BookFusionBrowserActivity::drawDownloadDynamic(const int statusY) {
   // retrying). Falls back to the generic STR_DOWNLOADING if somehow blank.
   const char* status = (downloadStatus[0] != '\0') ? downloadStatus : tr(STR_DOWNLOADING);
   renderer.drawCenteredText(UI_10_FONT_ID, statusY, status, true, EpdFontFamily::BOLD);
+}
+
+// List body of the BROWSING state, between the header and the page-indicator
+// strip. Shared by render() and the loop()'s tap hit-testing so the two can
+// never disagree.
+Rect BookFusionBrowserActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight = renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - browsePageIndicatorH;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
 }
 
 void BookFusionBrowserActivity::render(RenderLock&&) {
@@ -1030,12 +1063,10 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   // BROWSING state — subtitle list with title + author + BookFusion icon (matches
   // RecentBooksActivity), plus a "current / total(+?)" page indicator strip just
   // above the button hints (matches LibraryActivity's pagination footer).
-  constexpr int pageIndicatorHeight = 30;
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - pageIndicatorHeight;
+  const Rect contentRect = listRect();
 
   GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, searchResult.count, selectedIndex,
+      renderer, contentRect, searchResult.count, selectedIndex,
       [this](int index) -> std::string { return std::string(searchResult.books[index].title); },
       [this](int index) -> std::string { return std::string(searchResult.books[index].authors); },
       [this](int index) { return downloadedFlags[index] ? UIIcon::Check : UIIcon::BookFusion; }, nullptr, false);
@@ -1048,7 +1079,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   // overlay drifts and is the only thing to update.
   {
     const int rowHeight = metrics.listWithSubtitleRowHeight;
-    const int pageItems = (rowHeight > 0) ? contentHeight / rowHeight : 0;
+    const int pageItems = (rowHeight > 0) ? contentRect.height / rowHeight : 0;
     if (pageItems > 0) {
       const int pageStartIndex = (selectedIndex / pageItems) * pageItems;
       const int titleStrikeY = 7 + renderer.getLineHeight(UI_10_FONT_ID) / 2;
@@ -1057,7 +1088,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
       const int strikeRight = pageWidth - metrics.contentSidePadding - 8;
       for (int i = pageStartIndex; i < searchResult.count && i < pageStartIndex + pageItems; ++i) {
         if (bookFusionFormatIsEpub(searchResult.books[i])) continue;
-        const int itemY = contentTop + (i % pageItems) * rowHeight;
+        const int itemY = contentRect.y + (i % pageItems) * rowHeight;
         renderer.drawLine(strikeLeft, itemY + titleStrikeY, strikeRight, itemY + titleStrikeY, true);
         renderer.drawLine(strikeLeft, itemY + subtitleStrikeY, strikeRight, itemY + subtitleStrikeY, true);
       }
@@ -1079,8 +1110,8 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
     snprintf(indicator, sizeof(indicator), "%d / %d", currentPage, currentPage);
   }
   const int titleLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  const int indStripTop = pageHeight - metrics.buttonHintsHeight - pageIndicatorHeight;
-  const int indY = indStripTop + (pageIndicatorHeight - titleLineHeight) / 2;
+  const int indStripTop = pageHeight - metrics.buttonHintsHeight - browsePageIndicatorH;
+  const int indY = indStripTop + (browsePageIndicatorH - titleLineHeight) / 2;
   const int indW = renderer.getTextWidth(SMALL_FONT_ID, indicator);
   renderer.drawText(SMALL_FONT_ID, (pageWidth - indW) / 2, indY, indicator, true);
 

@@ -3,6 +3,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 /**
  * Submenu for KOReader Sync settings.
  * Shows username, password, and authenticate options.
@@ -16,6 +18,7 @@ class KOReaderSettingsActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 
  private:
   ButtonNavigator buttonNavigator;
@@ -23,4 +26,5 @@ class KOReaderSettingsActivity final : public Activity {
   size_t selectedIndex = 0;
 
   void handleSelection();
+  Rect listRect() const;
 };

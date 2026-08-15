@@ -862,6 +862,19 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
   }
 }
 
+int LibraryActivity::slotIndexAt(const int lx, const int ly) const {
+  const int total = static_cast<int>(bookPaths.size());
+  const int pageStart = static_cast<int>(currentPage()) * pageSize();
+  for (int slot = 0; slot < pageSize(); slot++) {
+    if (pageStart + slot >= total) break;  // empty trailing slots miss
+    const SlotRect r = slotRect(slot);
+    if (lx >= r.x && lx < r.x + r.width && ly >= r.y && ly < r.y + r.height) {
+      return slot;
+    }
+  }
+  return -1;
+}
+
 void LibraryActivity::loop() {
   if (bookPaths.empty()) return;
 
@@ -911,6 +924,21 @@ void LibraryActivity::loop() {
     return;
   }
 
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: a touch hold targets the cover under the finger — move the
+  // selector there first so checkLongPress below (which reads the same touch
+  // event and suppresses the contact) opens the menu for that cover.
+  if (SETTINGS.fullTouchUi) {
+    int lx, ly;
+    if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
+      const int slot = slotIndexAt(lx, ly);
+      if (slot >= 0) {
+        selectorIndex = currentPage() * pageSize() + static_cast<size_t>(slot);
+      }
+    }
+  }
+#endif
+
   // Long-press Confirm on the selected cover opens the book options modal.
   // Title/author come from currentPageMeta (populated during the page render);
   // progress is looked up in RecentBooksStore — missing means "not started".
@@ -939,6 +967,32 @@ void LibraryActivity::loop() {
       }
     }
   }
+
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: first tap on a cover moves the selector; a second tap on the
+  // selected cover opens it. Selection moves stay within the current page, so
+  // the framebuffer snapshot remains valid.
+  if (SETTINGS.fullTouchUi) {
+    int lx, ly;
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      const int slot = slotIndexAt(lx, ly);
+      if (slot >= 0) {
+        const size_t logical = currentPage() * pageSize() + static_cast<size_t>(slot);
+        if (logical != selectorIndex) {
+          selectorIndex = logical;
+          requestUpdate();
+        } else {
+          const std::string path = currentPath();
+          if (!path.empty()) {
+            onSelectBook(path);
+          }
+        }
+        return;
+      }
+      // Dead space (header, gaps, page indicator): no action.
+    }
+  }
+#endif
 
   // Short-press Confirm = open selected book.
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {

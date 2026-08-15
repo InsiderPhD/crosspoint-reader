@@ -6,6 +6,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 /**
  * Browse and download books from the user's BookFusion library.
  *
@@ -26,6 +28,10 @@ class BookFusionBrowserActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool preventAutoSleep() override { return true; }
+  // Full Touch tap dispatch only covers the BROWSING book list. Every other
+  // state (category menu, confirm/complete screens) keeps the global
+  // tap-is-Confirm injection, which activates the highlighted option.
+  bool handlesDirectTouch() const override { return state == BROWSING; }
 
  private:
   enum State {
@@ -96,6 +102,12 @@ class BookFusionBrowserActivity final : public Activity {
 
   char errorMsg[128] = {};
 
+  // List body of the BROWSING state. Shared by render() and the loop()'s tap
+  // hit-testing so the two can never disagree.
+  Rect listRect() const;
+  // Download the highlighted book (via the large-download confirm gate) — the
+  // Confirm press body, also fired by a Full Touch tap on the selected row.
+  void activateSelectedBook();
   void onWifiSelectionComplete(bool success);
   void handleCategorySelection();
   void loadShelvesAndShowMenu();

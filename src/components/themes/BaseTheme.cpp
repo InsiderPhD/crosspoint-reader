@@ -166,6 +166,11 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
+#if FREEINK_DEVICE_X4PRO
+  // No front buttons to label on the X4 Pro; the strip is reclaimed by
+  // buttonHintsHeight = 0 in the metrics table.
+  return;
+#endif
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
@@ -320,16 +325,156 @@ void BaseTheme::drawPowerButtonHint(GfxRenderer& renderer, const char* label) co
   renderer.drawTextRotated90CW(UI_10_FONT_ID, textX, textY, label);
 }
 
+BaseTheme::ListGeometry BaseTheme::listGeometry(const Rect& rect, int selectedIndex, bool hasSubtitle) const {
+  const ThemeMetrics& m = themeMetrics();
+  const int rowHeight = hasSubtitle ? m.listWithSubtitleRowHeight : m.listRowHeight;
+  int pageItems = rect.height / rowHeight;
+  if (pageItems < 1) pageItems = 1;
+  // selectedIndex may be -1 (list drawn unfocused, e.g. while a tab bar holds
+  // the selection); matches drawList's historical -1/pageItems truncation to
+  // page 0.
+  const int pageStart = selectedIndex <= 0 ? 0 : selectedIndex / pageItems * pageItems;
+  return {rowHeight, pageItems, pageStart};
+}
+
+int BaseTheme::hitTestList(const Rect& rect, int itemCount, int selectedIndex, bool hasSubtitle, int lx, int ly) const {
+  if (itemCount <= 0) {
+    return -1;
+  }
+  if (lx < rect.x || lx >= rect.x + rect.width) {
+    return -1;
+  }
+  const ListGeometry geo = listGeometry(rect, selectedIndex, hasSubtitle);
+  // The dead strip between the last full row and rect's bottom edge is a miss.
+  if (ly < rect.y || ly >= rect.y + geo.pageItems * geo.rowHeight) {
+    return -1;
+  }
+  const int index = geo.pageStart + (ly - rect.y) / geo.rowHeight;
+  return index < itemCount ? index : -1;
+}
+
+int BaseTheme::tabCellWidth(const GfxRenderer& renderer, const TabInfo& tab) const {
+  int w = renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
+  if (tab.hasBadge) {
+    w += TAB_BADGE_GAP + TAB_BADGE_SIZE;
+  }
+  return w;
+}
+
+int BaseTheme::computeTabScrollOffset(const GfxRenderer& renderer, const Rect& rect,
+                                      const std::vector<TabInfo>& tabs) const {
+  const ThemeMetrics& m = themeMetrics();
+  const int startX = rect.x + m.contentSidePadding;
+  const int viewRight = rect.x + rect.width - m.contentSidePadding;
+
+  // Measure the natural (unscrolled) layout and the selected tab's bounds so
+  // the ribbon can scroll horizontally when the tabs overflow, keeping the
+  // selected tab's full label readable.
+  int naturalX = startX;
+  int selLeft = startX;
+  int selRight = startX;
+  for (const auto& tab : tabs) {
+    const int w = tabCellWidth(renderer, tab);
+    if (tab.selected) {
+      selLeft = naturalX;
+      selRight = naturalX + w;
+    }
+    naturalX += w + m.tabSpacing;
+  }
+  const int totalWidth = naturalX - m.tabSpacing - startX;
+  const int viewWidth = viewRight - startX;
+  // Keep a sliver of the neighbouring tab visible so it's obvious more tabs
+  // exist. Clamping still makes the genuine first/last tab sit flush.
+  constexpr int PEEK = 28;
+
+  int offset = 0;
+  if (totalWidth > viewWidth) {
+    if (selRight - offset > viewRight - PEEK) offset = selRight - (viewRight - PEEK);
+    if (selLeft - offset < startX + PEEK) offset = selLeft - (startX + PEEK);
+    const int maxOffset = totalWidth - viewWidth;
+    if (offset < 0) offset = 0;
+    if (offset > maxOffset) offset = maxOffset;
+  }
+  return offset;
+}
+
+int BaseTheme::hitTestTabBar(const GfxRenderer& renderer, const Rect& rect, const std::vector<TabInfo>& tabs, int lx,
+                             int ly) const {
+  if (tabs.empty()) {
+    return -1;
+  }
+  if (ly < rect.y || ly >= rect.y + rect.height) {
+    return -1;
+  }
+  const ThemeMetrics& m = themeMetrics();
+  const int startX = rect.x + m.contentSidePadding;
+  const int viewRight = rect.x + rect.width - m.contentSidePadding;
+  const int offset = computeTabScrollOffset(renderer, rect, tabs);
+  // Widen each cell by half the inter-tab spacing so gutter taps snap to the
+  // nearest tab (same rationale as the keyboard's pitch indexing).
+  const int half = m.tabSpacing / 2;
+  int currentX = startX - offset;
+  for (int i = 0; i < static_cast<int>(tabs.size()); i++) {
+    const int w = tabCellWidth(renderer, tabs[i]);
+    const bool visible = currentX + w >= startX && currentX <= viewRight;
+    if (visible && lx >= currentX - half && lx < currentX + w + half) {
+      return i;
+    }
+    currentX += w + m.tabSpacing;
+  }
+  return -1;
+}
+
+int BaseTheme::hitTestButtonMenu(const Rect& rect, int buttonCount, int lx, int ly) const {
+  const ThemeMetrics& m = themeMetrics();
+  if (lx < rect.x + m.contentSidePadding || lx >= rect.x + rect.width - m.contentSidePadding) {
+    return -1;
+  }
+  const int pitch = m.menuRowHeight + m.menuSpacing;
+  const int rel = ly - rect.y - buttonMenuTopOffset();
+  if (rel < 0) {
+    return -1;
+  }
+  const int index = rel / pitch;
+  // Taps in the spacing gap between tiles are a miss.
+  if (index >= buttonCount || rel % pitch >= m.menuRowHeight) {
+    return -1;
+  }
+  return index;
+}
+
+int BaseTheme::hitTestRecentBookCover(const Rect& rect, const int slotCount, const int lx, const int ly) const {
+  if (slotCount <= 0) {
+    return -1;
+  }
+  if (lx < rect.x || lx >= rect.x + rect.width || ly < rect.y || ly >= rect.y + rect.height) {
+    return -1;
+  }
+  const ThemeMetrics& m = themeMetrics();
+  const int columns = m.homeRecentBooksCount;
+  if (columns <= 1) {
+    return 0;
+  }
+  const int tileWidth = (rect.width - 2 * m.contentSidePadding) / columns;
+  if (tileWidth <= 0) {
+    return 0;
+  }
+  int column = (lx - rect.x - m.contentSidePadding) / tileWidth;
+  if (column < 0) {
+    column = 0;
+  }
+  return column < slotCount ? column : -1;
+}
+
 void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                          const std::function<std::string(int index)>& rowTitle,
                          const std::function<std::string(int index)>& rowSubtitle,
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
                          const std::function<bool(int index)>& rowDimmed) const {
-
-  int rowHeight =
-      (rowSubtitle != nullptr) ? BaseMetrics::values.listWithSubtitleRowHeight : BaseMetrics::values.listRowHeight;
-  int pageItems = rect.height / rowHeight;
+  const ListGeometry geo = listGeometry(rect, selectedIndex, rowSubtitle != nullptr);
+  const int rowHeight = geo.rowHeight;
+  const int pageItems = geo.pageItems;
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
   if (totalPages > 1) {
@@ -363,7 +508,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
     renderer.fillRect(0, rect.y + selectedIndex % pageItems * rowHeight - 2, rect.width, rowHeight);
   }
   // Draw all items
-  const auto pageStartIndex = selectedIndex / pageItems * pageItems;
+  const int pageStartIndex = geo.pageStart;
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
 
@@ -492,49 +637,18 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
   const int startX = rect.x + pad;
   const int viewRight = rect.x + rect.width - pad;
 
-  // Small filled dot drawn to the right of a tab label when hasBadge is set.
-  constexpr int BADGE_SIZE = 5;   // diameter of the filled square dot
-  constexpr int BADGE_GAP = 3;    // gap between text right edge and dot left edge
-
-  // Pass 1: measure the natural (unscrolled) layout and the selected tab's
-  // bounds so we can horizontally scroll the ribbon when the tabs don't all
-  // fit — this keeps the selected tab's full label readable.
-  int naturalX = startX;
-  int selLeft = startX;
-  int selRight = startX;
-  for (const auto& tab : tabs) {
-    int w =
-        renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
-    if (tab.hasBadge) w += BADGE_GAP + BADGE_SIZE;
-    if (tab.selected) {
-      selLeft = naturalX;
-      selRight = naturalX + w;
-    }
-    naturalX += w + spacing;
-  }
-  const int totalWidth = naturalX - spacing - startX;
-  const int viewWidth = viewRight - startX;
-  // Keep a sliver of the neighbouring tab visible so it's obvious more tabs
-  // exist. Clamping still makes the genuine first/last tab sit flush.
-  constexpr int PEEK = 28;
-
-  int offset = 0;
-  if (totalWidth > viewWidth) {
-    if (selRight - offset > viewRight - PEEK) offset = selRight - (viewRight - PEEK);
-    if (selLeft - offset < startX + PEEK) offset = selLeft - (startX + PEEK);
-    const int maxOffset = totalWidth - viewWidth;
-    if (offset < 0) offset = 0;
-    if (offset > maxOffset) offset = maxOffset;
-  }
+  // Pass 1 (measure + scroll) lives in computeTabScrollOffset, shared with
+  // hitTestTabBar so a tap can never land on a different tab than was drawn.
+  const int offset = computeTabScrollOffset(renderer, rect, tabs);
 
   // Pass 2: draw shifted by the scroll offset, skipping tabs fully off-view.
   int currentX = startX - offset;
   for (const auto& tab : tabs) {
     const int textWidth =
         renderer.getTextWidth(UI_12_FONT_ID, tab.label, tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
-    const int totalWidth = textWidth + (tab.hasBadge ? BADGE_GAP + BADGE_SIZE : 0);
+    const int cellWidth = tabCellWidth(renderer, tab);
 
-    if (currentX + totalWidth >= startX && currentX <= viewRight) {
+    if (currentX + cellWidth >= startX && currentX <= viewRight) {
       if (tab.selected) {
         if (selected) {
           renderer.fillRect(currentX - 3, rect.y, textWidth + 6, lineHeight + underlineGap);
@@ -545,13 +659,13 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
       renderer.drawText(UI_12_FONT_ID, currentX, rect.y, tab.label, !(tab.selected && selected),
                         tab.selected ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
       if (tab.hasBadge) {
-        const int dotX = currentX + textWidth + BADGE_GAP;
-        const int dotY = rect.y + (lineHeight - BADGE_SIZE) / 2;
-        renderer.fillRect(dotX, dotY, BADGE_SIZE, BADGE_SIZE, !(tab.selected && selected));
+        const int dotX = currentX + textWidth + TAB_BADGE_GAP;
+        const int dotY = rect.y + (lineHeight - TAB_BADGE_SIZE) / 2;
+        renderer.fillRect(dotX, dotY, TAB_BADGE_SIZE, TAB_BADGE_SIZE, !(tab.selected && selected));
       }
     }
 
-    currentX += totalWidth + spacing;
+    currentX += cellWidth + spacing;
   }
 }
 

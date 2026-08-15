@@ -7,6 +7,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 namespace {
 // The BookFusion entry only appears once the user has linked an account in
@@ -35,17 +36,23 @@ void NetworkModeSelectionActivity::loop() {
     return;
   }
 
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), visibleMenuItemCount(), selectedIndex,
+                               /*hasSubtitle=*/true, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedIndex = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      handleSelection();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
+  }
+
   // Handle confirm button - select current option
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    NetworkMode mode = NetworkMode::JOIN_NETWORK;
-    if (selectedIndex == 1) {
-      mode = NetworkMode::CONNECT_CALIBRE;
-    } else if (selectedIndex == 2) {
-      mode = NetworkMode::CREATE_HOTSPOT;
-    } else if (selectedIndex == 3) {
-      mode = NetworkMode::BOOKFUSION;
-    }
-    onModeSelected(mode);
+    handleSelection();
     return;
   }
 
@@ -62,17 +69,36 @@ void NetworkModeSelectionActivity::loop() {
   });
 }
 
+void NetworkModeSelectionActivity::handleSelection() {
+  NetworkMode mode = NetworkMode::JOIN_NETWORK;
+  if (selectedIndex == 1) {
+    mode = NetworkMode::CONNECT_CALIBRE;
+  } else if (selectedIndex == 2) {
+    mode = NetworkMode::CREATE_HOTSPOT;
+  } else if (selectedIndex == 3) {
+    mode = NetworkMode::BOOKFUSION;
+  }
+  onModeSelected(mode);
+}
+
+// List body between the header and the button hints. Shared by render() and
+// the loop()'s tap hit-testing so the two can never disagree.
+Rect NetworkModeSelectionActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
 void NetworkModeSelectionActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_FILE_TRANSFER));
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
   // Menu items and descriptions. Arrays are sized to MAX_MENU_ITEM_COUNT but
   // only `visibleMenuItemCount()` of them are passed to drawList — the
   // BookFusion row at index 3 is hidden whenever the user hasn't linked an
@@ -85,7 +111,7 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
                                                             UIIcon::BookFusion};
 
   GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, contentHeight}, visibleMenuItemCount(), selectedIndex,
+      renderer, listRect(), visibleMenuItemCount(), selectedIndex,
       [](int index) { return std::string(I18N.get(menuItems[index])); },
       [](int index) { return std::string(I18N.get(menuDescs[index])); }, [](int index) { return menuIcons[index]; });
 

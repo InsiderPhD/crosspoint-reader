@@ -164,6 +164,16 @@ void MappedInputManager::processTouchInput() const {
   } else {
     idx = ldy < 0 ? HalGPIO::BTN_LEFT : HalGPIO::BTN_RIGHT;  // up / down
   }
+
+  // Full Touch mode outside the readers: taps do the selecting and activating,
+  // so swipe-Confirm/Up/Down are redundant — and a sloppy tap that the panel
+  // classifies as a swipe must not silently activate or move the cursor. Only
+  // the Back swipe survives; list paging stays on the physical side keys. The
+  // readers keep all swipes (flag driven from the main loop).
+  if (swipesBackOnly && idx != HalGPIO::BTN_BACK) {
+    LOG_DBG("INPUT", "Swipe logical=(%d,%d) dropped (Full Touch keeps Back only)", ldx, ldy);
+    return;
+  }
   LOG_DBG("INPUT", "Swipe cal=(%d,%d) logical=(%d,%d) -> btn %u", dcx, dcy, ldx, ldy, idx);
 
   // A held BLE remote button on the same index must not be disturbed: the

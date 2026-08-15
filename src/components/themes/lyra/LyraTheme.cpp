@@ -226,6 +226,10 @@ void LyraTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);
 }
 
+int LyraTheme::tabCellWidth(const GfxRenderer& renderer, const TabInfo& tab) const {
+  return renderer.getTextWidth(UI_10_FONT_ID, tab.label, EpdFontFamily::REGULAR) + 2 * hPaddingInSelection;
+}
+
 void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,
                            bool selected) const {
   const int pad = LyraMetrics::values.contentSidePadding;
@@ -237,40 +241,15 @@ void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::ve
     renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
   }
 
-  // Pass 1: measure the natural layout and the selected tab's bounds so the
-  // ribbon can scroll horizontally when the tabs overflow, keeping the selected
-  // tab's full label readable. Each cell is text + 2*hPaddingInSelection.
-  int naturalX = startX;
-  int selLeft = startX;
-  int selRight = startX;
-  for (const auto& tab : tabs) {
-    const int cellW = renderer.getTextWidth(UI_10_FONT_ID, tab.label, EpdFontFamily::REGULAR) + 2 * hPaddingInSelection;
-    if (tab.selected) {
-      selLeft = naturalX;
-      selRight = naturalX + cellW;
-    }
-    naturalX += cellW + spacing;
-  }
-  const int totalWidth = naturalX - spacing - startX;
-  const int viewWidth = viewRight - startX;
-  // Keep a sliver of the neighbouring tab visible so it's obvious more tabs
-  // exist. Clamping still makes the genuine first/last tab sit flush.
-  constexpr int PEEK = 28;
-
-  int offset = 0;
-  if (totalWidth > viewWidth) {
-    if (selRight - offset > viewRight - PEEK) offset = selRight - (viewRight - PEEK);
-    if (selLeft - offset < startX + PEEK) offset = selLeft - (startX + PEEK);
-    const int maxOffset = totalWidth - viewWidth;
-    if (offset < 0) offset = 0;
-    if (offset > maxOffset) offset = maxOffset;
-  }
+  // Pass 1 (measure + PEEK scroll) lives in BaseTheme::computeTabScrollOffset,
+  // shared with hitTestTabBar; the Lyra cell width (text + 2*hPaddingInSelection)
+  // comes from the tabCellWidth override.
+  const int offset = computeTabScrollOffset(renderer, rect, tabs);
 
   // Pass 2: draw shifted by the scroll offset, skipping tabs fully off-view.
   int currentX = startX - offset;
   for (const auto& tab : tabs) {
-    const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, tab.label, EpdFontFamily::REGULAR);
-    const int cellW = textWidth + 2 * hPaddingInSelection;
+    const int cellW = tabCellWidth(renderer, tab);
 
     if (currentX + cellW >= startX && currentX <= viewRight) {
       if (tab.selected) {
@@ -297,9 +276,9 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
                          const std::function<bool(int index)>& rowDimmed) const {
-  int rowHeight =
-      (rowSubtitle != nullptr) ? LyraMetrics::values.listWithSubtitleRowHeight : LyraMetrics::values.listRowHeight;
-  int pageItems = rect.height / rowHeight;
+  const ListGeometry geo = listGeometry(rect, selectedIndex, rowSubtitle != nullptr);
+  const int rowHeight = geo.rowHeight;
+  const int pageItems = geo.pageItems;
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
   if (totalPages > 1) {
@@ -335,7 +314,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   }
 
   // Draw all items
-  const auto pageStartIndex = selectedIndex / pageItems * pageItems;
+  const int pageStartIndex = geo.pageStart;
   int iconY = (rowSubtitle != nullptr) ? 16 : 10;
   for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
     const int itemY = rect.y + (i % pageItems) * rowHeight;
@@ -399,6 +378,11 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
 void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
+#if FREEINK_DEVICE_X4PRO
+  // No front buttons to label on the X4 Pro; the strip is reclaimed by
+  // buttonHintsHeight = 0 in the metrics table.
+  return;
+#endif
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 

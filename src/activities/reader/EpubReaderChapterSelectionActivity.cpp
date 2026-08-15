@@ -9,9 +9,19 @@
 
 int EpubReaderChapterSelectionActivity::getTotalItems() const { return epub->getTocItemsCount(); }
 
+// Top edge of the first row's highlight band. Mirrors render()'s
+// fillRect(..., 60 + contentY + row * 30 - 2, ..., 30): the band starts 2px
+// above the text baseline row. Keep in sync with render() or taps land on the
+// wrong row.
+int EpubReaderChapterSelectionActivity::listTopY() const {
+  const bool isPortraitInverted = renderer.getOrientation() == GfxRenderer::Orientation::PortraitInverted;
+  const int hintGutterHeight = isPortraitInverted ? 50 : 0;
+  return 60 + hintGutterHeight - 2;
+}
+
 int EpubReaderChapterSelectionActivity::getPageItems() const {
   // Layout constants used in renderScreen
-  constexpr int lineHeight = 30;
+  constexpr int lineHeight = ROW_H;
 
   const int screenHeight = renderer.getScreenHeight();
   const auto orientation = renderer.getOrientation();
@@ -43,21 +53,53 @@ void EpubReaderChapterSelectionActivity::onEnter() {
 
 void EpubReaderChapterSelectionActivity::onExit() { Activity::onExit(); }
 
+// The Confirm short-press body, also fired by a Full Touch tap on the selected row.
+void EpubReaderChapterSelectionActivity::activateSelectedChapter() {
+  const auto newSpineIndex = epub->getSpineIndexForTocIndex(selectorIndex);
+  if (newSpineIndex == -1) {
+    ActivityResult result;
+    result.isCancelled = true;
+    setResult(std::move(result));
+    finish();
+  } else {
+    setResult(ChapterResult{newSpineIndex});
+    finish();
+  }
+}
+
 void EpubReaderChapterSelectionActivity::loop() {
   const int pageItems = getPageItems();
   const int totalItems = getTotalItems();
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    const auto newSpineIndex = epub->getSpineIndexForTocIndex(selectorIndex);
-    if (newSpineIndex == -1) {
-      ActivityResult result;
-      result.isCancelled = true;
-      setResult(std::move(result));
-      finish();
-    } else {
-      setResult(ChapterResult{newSpineIndex});
-      finish();
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: first tap on a row moves the cursor there; a second tap on the
+  // already-selected row opens the chapter. Rows are page-relative, so the
+  // tapped item is the current page start plus the row.
+  if (SETTINGS.fullTouchUi) {
+    int lx, ly;
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      const int top = listTopY();
+      const int row = (ly - top) / ROW_H;
+      if (ly >= top && row >= 0 && row < pageItems) {
+        const int pageStartIndex = selectorIndex / pageItems * pageItems;
+        const int itemIndex = pageStartIndex + row;
+        if (itemIndex < totalItems) {
+          if (itemIndex != selectorIndex) {
+            selectorIndex = itemIndex;
+            requestUpdate();
+          } else {
+            activateSelectedChapter();
+          }
+          return;
+        }
+      }
+      // Dead space (title bar, below the last row): no action.
     }
+  }
+#endif
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    activateSelectedChapter();
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     ActivityResult result;
     result.isCancelled = true;
@@ -111,13 +153,15 @@ void EpubReaderChapterSelectionActivity::render(RenderLock&&) {
   renderer.drawText(UI_12_FONT_ID, titleX, 15 + contentY, tr(STR_SELECT_CHAPTER), true, EpdFontFamily::BOLD);
 
   const auto pageStartIndex = selectorIndex / pageItems * pageItems;
+  // Row bands start at listTopY() (shared with the tap hit-testing in loop()).
+  const int listTop = listTopY();
   // Highlight only the content area, not the hint gutters.
-  renderer.fillRect(contentX, 60 + contentY + (selectorIndex % pageItems) * 30 - 2, contentWidth - 1, 30);
+  renderer.fillRect(contentX, listTop + (selectorIndex % pageItems) * ROW_H, contentWidth - 1, ROW_H);
 
   for (int i = 0; i < pageItems; i++) {
     int itemIndex = pageStartIndex + i;
     if (itemIndex >= totalItems) break;
-    const int displayY = 60 + contentY + i * 30;
+    const int displayY = listTop + 2 + i * ROW_H;
     const bool isSelected = (itemIndex == selectorIndex);
 
     auto item = epub->getTocItem(itemIndex);

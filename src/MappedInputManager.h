@@ -35,6 +35,13 @@ class MappedInputManager {
   // tap zones, keyboard hit-testing) via Activity::consumesTouchInput().
   void setTapActsAsConfirm(bool enabled) { tapActsAsConfirm = enabled; }
 
+  // When true (Full Touch mode outside the readers), swipe synthesis drops
+  // everything except the Back swipe: taps do the selecting/activating there,
+  // and a sloppy tap classified as a swipe must not act invisibly. The main
+  // loop keeps this false inside reader activities so their configured swipe
+  // actions keep working unchanged.
+  void setSwipesBackOnly(bool enabled) { swipesBackOnly = enabled; }
+
   // Completed screen tap this frame, classified into left/middle/right thirds
   // of the logical screen. None while a home-key event fires (a bar contact
   // also reports as an edge tap and must not double-dispatch).
@@ -87,6 +94,7 @@ class MappedInputManager {
   const GfxRenderer* renderer = nullptr;
   bool homeKeyActsAsConfirm = true;
   bool tapActsAsConfirm = true;
+  bool swipesBackOnly = false;
 
   // A touch point mapped into the logical frame, carried with the logical
   // screen size so callers can classify against it without re-deriving it.

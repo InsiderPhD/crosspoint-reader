@@ -56,4 +56,25 @@ class SortMenu {
   // Context-supplied field list (not owned; must outlive the menu). Set by checkTrigger.
   const SortOption* options_ = ALL_SORT_OPTIONS;
   int optionCount_ = ALL_SORT_OPTIONS_COUNT;
+
+#if FREEINK_DEVICE_X4PRO
+  // Field rows share one height so handleInput can map a tap y to a row.
+  // Must match render()'s row pitch.
+  static constexpr int OPTION_ROW_H = 30;
+  // Popup bounds + field-row top cached by render() for Full Touch tap
+  // handling (same pattern as BookContextMenu — handleInput has no renderer
+  // access).
+  mutable int popupX_ = 0;
+  mutable int popupY_ = 0;
+  mutable int popupW_ = 0;
+  mutable int popupH_ = 0;
+  mutable int optionsTopY_ = 0;
+  mutable bool popupRectValid_ = false;
+  // A tap has already injected a Confirm press; its release lands the NEXT
+  // frame. These latches redirect that release: dismiss closes-and-commits
+  // (outside tap, like Back); swallow drops it entirely (tap moved the cursor
+  // or hit the header) so it can't flip a field or leak to the host.
+  bool dismissOnNextConfirm_ = false;
+  bool swallowNextConfirm_ = false;
+#endif
 };

@@ -187,6 +187,43 @@ void SettingsActivity::onExit() {
 void SettingsActivity::loop() {
   bool hasChangedCategory = false;
 
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: a tap on a tab selects that category directly; a tap on a row
+  // selects and toggles/activates it. Both hit-tests need the raw point, so
+  // this reads wasTapPoint directly instead of the TouchListNav helper.
+  if (SETTINGS.fullTouchUi) {
+    int lx, ly;
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      std::vector<TabInfo> tabs;
+      buildTabs(tabs);
+      const int tabIndex = GUI.hitTestTabBar(renderer, tabBarRect(), tabs, lx, ly);
+      if (tabIndex >= 0) {
+        if (tabIndex != selectedCategoryIndex) {
+          selectedCategoryIndex = tabIndex;
+          currentSettings = categoryLists[selectedCategoryIndex];
+          settingsCount = static_cast<int>(currentSettings->size());
+        }
+        selectedSettingIndex = 0;  // focus moves to the tab bar, as in the button flow
+        requestUpdate();
+        return;
+      }
+      // selectedSettingIndex - 1 mirrors what render() passes to drawList, so
+      // the hit-test sees the same visible page. First tap on a row moves the
+      // cursor there; a second tap on the selected row toggles/activates it.
+      const int rowIndex = GUI.hitTestList(listRect(), settingsCount, selectedSettingIndex - 1, false, lx, ly);
+      if (rowIndex >= 0) {
+        if (rowIndex + 1 != selectedSettingIndex) {
+          selectedSettingIndex = rowIndex + 1;
+        } else {
+          toggleCurrentSetting();
+        }
+        requestUpdate();
+        return;
+      }
+    }
+  }
+#endif
+
   // Handle actions with early return
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     if (selectedSettingIndex == 0) {
@@ -390,11 +427,31 @@ void SettingsActivity::toggleCurrentSetting() {
   SETTINGS.saveToFile();
 }
 
+Rect SettingsActivity::tabBarRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  return Rect{0, metrics.topPadding + metrics.headerHeight, renderer.getScreenWidth(), metrics.tabBarHeight};
+}
+
+Rect SettingsActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - (metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight +
+                                    metrics.buttonHintsHeight + metrics.verticalSpacing * 2);
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
+void SettingsActivity::buildTabs(std::vector<TabInfo>& tabs) const {
+  tabs.reserve(categoryCount);
+  for (int i = 0; i < categoryCount; i++) {
+    tabs.push_back({I18N.get(categoryNames[i]), selectedCategoryIndex == i});
+  }
+}
+
 void SettingsActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
 
@@ -402,20 +459,12 @@ void SettingsActivity::render(RenderLock&&) {
                  CROSSPOINT_VERSION);
 
   std::vector<TabInfo> tabs;
-  tabs.reserve(categoryCount);
-  for (int i = 0; i < categoryCount; i++) {
-    tabs.push_back({I18N.get(categoryNames[i]), selectedCategoryIndex == i});
-  }
-  GUI.drawTabBar(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight}, tabs,
-                 selectedSettingIndex == 0);
+  buildTabs(tabs);
+  GUI.drawTabBar(renderer, tabBarRect(), tabs, selectedSettingIndex == 0);
 
   const auto& settings = *currentSettings;
   GUI.drawList(
-      renderer,
-      Rect{0, metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing, pageWidth,
-           pageHeight - (metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.buttonHintsHeight +
-                         metrics.verticalSpacing * 2)},
-      settingsCount, selectedSettingIndex - 1,
+      renderer, listRect(), settingsCount, selectedSettingIndex - 1,
       [&settings](int index) { return std::string(I18N.get(settings[index].nameId)); }, nullptr, nullptr,
       [&settings](int i) {
         const auto& setting = settings[i];

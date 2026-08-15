@@ -19,13 +19,13 @@ using Action = BookContextMenu::Action;
 int collectActions(Action* out) {
   const bool dev = SETTINGS.devMode != 0;
   int n = 0;
+  out[n++] = Action::BookInfo;  // First: the most common, least destructive action
   out[n++] = Action::MarkRead;
   if (dev) out[n++] = Action::ResetProgress;
   out[n++] = Action::Shelve;
   out[n++] = Action::Delete;
   if (dev) out[n++] = Action::Reindex;
   if (dev) out[n++] = Action::RegenerateCover;
-  out[n++] = Action::BookInfo;
   return n;
 }
 
@@ -111,22 +111,36 @@ bool BookContextMenu::handleInput(ButtonNavigator& nav, const MappedInputManager
   }
 
 #if FREEINK_DEVICE_X4PRO
-  // A tap outside the popup dismisses the menu. A tap inside is not handled
-  // here: the main loop's tap-to-Confirm injection turns it into the Confirm
-  // release below, selecting the highlighted option. The outside-tap path must
-  // still set the suppression flag — the same tap has already injected a
-  // Confirm press whose release would otherwise reach the host's short-press
-  // handler after we close.
+  // A tap outside the popup dismisses the menu. In Full Touch mode an inside
+  // tap hit-tests the option rows: a tap on an unselected row moves the
+  // highlight there (two-tap model), a tap on the highlighted row falls
+  // through to the tap-injected Confirm release below, which activates it.
+  // Every consumed path must swallow that injected release — outside-tap via
+  // the host's longPressFlagSet_ gate, row-moves via awaitingRelease_ —
+  // otherwise it fires as a stray Confirm after we've acted.
   int tapX, tapY;
   if (popupRectValid_ && input.wasTapPoint(tapX, tapY)) {
-    const bool insidePopup =
-        tapX >= popupX_ && tapX < popupX_ + popupW_ && tapY >= popupY_ && tapY < popupY_ + popupH_;
+    const bool insidePopup = tapX >= popupX_ && tapX < popupX_ + popupW_ && tapY >= popupY_ && tapY < popupY_ + popupH_;
     if (!insidePopup) {
       if (outCancelled) *outCancelled = true;
       longPressFlagSet_ = true;
       showing_ = false;
       triggered_ = false;
       return true;
+    }
+    if (SETTINGS.fullTouchUi) {
+      const int row = (tapY - optionsTopY_) / OPTION_ROW_H;
+      const bool onRow = tapY >= optionsTopY_ && row >= 0 && row < actionCount;
+      if (onRow && row != selectedIndex_) {
+        selectedIndex_ = row;
+        awaitingRelease_ = true;  // swallow this tap's injected Confirm release
+        return false;
+      }
+      if (!onRow) {
+        awaitingRelease_ = true;  // title/info tap: swallow, no action
+        return false;
+      }
+      // Tap on the highlighted row: fall through to the Confirm release.
     }
   }
 #endif
@@ -162,7 +176,11 @@ void BookContextMenu::render(GfxRenderer& renderer) const {
   constexpr int BORDER = 2;
   constexpr int H_PAD = 14;
   constexpr int INFO_H = 28;
+#if FREEINK_DEVICE_X4PRO
+  constexpr int OPTION_H = OPTION_ROW_H;  // shared with handleInput's tap-row mapping
+#else
   constexpr int OPTION_H = 34;
+#endif
   constexpr int LINE_V_PAD = 6;
 
   const auto titleLines = renderer.wrappedText(UI_10_FONT_ID, title_.c_str(), POPUP_W - H_PAD * 2, 2);
@@ -206,6 +224,7 @@ void BookContextMenu::render(GfxRenderer& renderer) const {
   popupY_ = py;
   popupW_ = POPUP_W;
   popupH_ = POPUP_H;
+  optionsTopY_ = py + TITLE_H + infoBlockH;
   popupRectValid_ = true;
 #endif
 

@@ -17,6 +17,30 @@ void EpubReaderFootnotesActivity::onEnter() {
 
 void EpubReaderFootnotesActivity::onExit() { Activity::onExit(); }
 
+// Top edge of the first visible row. Mirrors render()'s
+// fillRect(0, 60 + contentY + row * lineHeight, ..., lineHeight).
+// Keep in sync with render() or taps land on the wrong row.
+int EpubReaderFootnotesActivity::listTopY() const {
+  const bool isPortraitInverted = renderer.getOrientation() == GfxRenderer::Orientation::PortraitInverted;
+  const int contentY = isPortraitInverted ? 50 : 0;
+  return 60 + contentY;
+}
+
+// Size of the scroll window. Mirrors render()'s visibleCount verbatim.
+int EpubReaderFootnotesActivity::visibleRows() const {
+  const bool isPortraitInverted = renderer.getOrientation() == GfxRenderer::Orientation::PortraitInverted;
+  const int contentY = isPortraitInverted ? 50 : 0;
+  return std::max(1, (renderer.getScreenHeight() - contentY) / ROW_H);
+}
+
+// The Confirm short-press body, also fired by a Full Touch tap on the selected row.
+void EpubReaderFootnotesActivity::activateSelectedFootnote() {
+  if (selectedIndex >= 0 && selectedIndex < static_cast<int>(footnotes.size())) {
+    setResult(FootnoteResult{footnotes[selectedIndex].href});
+    finish();
+  }
+}
+
 void EpubReaderFootnotesActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     ActivityResult result;
@@ -26,11 +50,34 @@ void EpubReaderFootnotesActivity::loop() {
     return;
   }
 
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (selectedIndex >= 0 && selectedIndex < static_cast<int>(footnotes.size())) {
-      setResult(FootnoteResult{footnotes[selectedIndex].href});
-      finish();
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: first tap on a row moves the cursor there; a second tap on the
+  // already-selected row follows the footnote. The list is a scroll window, so
+  // the tapped item is scrollOffset (as of the last render) plus the row.
+  if (SETTINGS.fullTouchUi && !footnotes.empty()) {
+    int lx, ly;
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      const int top = listTopY();
+      const int row = (ly - top) / ROW_H;
+      if (ly >= top && row >= 0 && row < visibleRows()) {
+        const int itemIndex = scrollOffset + row;
+        if (itemIndex < static_cast<int>(footnotes.size())) {
+          if (itemIndex != selectedIndex) {
+            selectedIndex = itemIndex;
+            requestUpdate();
+          } else {
+            activateSelectedFootnote();
+          }
+          return;
+        }
+      }
+      // Dead space (title bar, below the last row): no action.
     }
+  }
+#endif
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    activateSelectedFootnote();
     return;
   }
 
@@ -80,16 +127,19 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
     return;
   }
 
-  constexpr int lineHeight = 36;
+  constexpr int lineHeight = ROW_H;
   const int screenWidth = renderer.getScreenWidth();
   const int marginLeft = contentX + 20;
 
-  const int visibleCount = std::max(1, (renderer.getScreenHeight() - contentY) / lineHeight);
+  // listTopY()/visibleRows() mirror the values below and are shared with the tap
+  // hit-testing in loop().
+  const int listTop = listTopY();
+  const int visibleCount = visibleRows();
   if (selectedIndex < scrollOffset) scrollOffset = selectedIndex;
   if (selectedIndex >= scrollOffset + visibleCount) scrollOffset = selectedIndex - visibleCount + 1;
 
   for (int i = scrollOffset; i < static_cast<int>(footnotes.size()) && i < scrollOffset + visibleCount; i++) {
-    const int y = 60 + contentY + (i - scrollOffset) * lineHeight;
+    const int y = listTop + (i - scrollOffset) * lineHeight;
     const bool isSelected = (i == selectedIndex);
 
     if (isSelected) {

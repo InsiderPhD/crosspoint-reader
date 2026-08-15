@@ -46,6 +46,7 @@ class EpubReaderMenuActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool isReaderActivity() const override { return true; }
+  bool handlesDirectTouch() const override { return true; }
 
  private:
   struct MenuItem {
@@ -54,6 +55,15 @@ class EpubReaderMenuActivity final : public Activity {
   };
 
   static std::vector<MenuItem> buildMenuItems(bool hasFootnotes);
+
+  // Menu row pitch; row i spans [menuTopY() + i*MENU_ROW_H, + MENU_ROW_H).
+  // Shared by render() and the Full Touch tap hit-testing in loop().
+  static constexpr int MENU_ROW_H = 30;
+  int menuTopY() const;
+  // The Confirm action for the selected row (in-place cycling rows cycle;
+  // everything else closes the menu with a MenuResult). Also fired by a Full
+  // Touch tap on the selected row.
+  void activateSelectedItem();
 
   // Fixed menu layout
   const std::vector<MenuItem> menuItems;

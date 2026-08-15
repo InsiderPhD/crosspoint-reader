@@ -23,9 +23,11 @@ class LanguageSelectActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 
  private:
   void handleSelection();
+  Rect listRect() const;
 
   void onBack() { finish(); }
   ButtonNavigator buttonNavigator;

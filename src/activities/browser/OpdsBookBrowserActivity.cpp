@@ -54,6 +54,21 @@ void OpdsBookBrowserActivity::onExit() {
   }
 }
 
+// Top edge of the first row's highlight band. Mirrors render()'s
+// fillRect(0, 60 + row * 30 - 2, ..., 30): the band starts 2px above the text
+// baseline row. This screen draws no orientation gutters, so there is no
+// content offset to account for. Keep in sync with render().
+int OpdsBookBrowserActivity::listTopY() const { return 60 - 2; }
+
+// The BROWSING Confirm short-press body, also fired by a Full Touch tap on the
+// selected row.
+void OpdsBookBrowserActivity::activateSelectedEntry() {
+  if (entries.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(entries.size())) return;
+
+  const auto& entry = entries[selectorIndex];
+  entry.type == OpdsEntryType::BOOK ? downloadBook(entry) : navigateToEntry(entry);
+}
+
 void OpdsBookBrowserActivity::loop() {
   if (state == BrowserState::WIFI_SELECTION || state == BrowserState::SEARCH_INPUT) {
     return;
@@ -94,11 +109,34 @@ void OpdsBookBrowserActivity::loop() {
   if (state == BrowserState::DOWNLOADING) return;
 
   if (state == BrowserState::BROWSING) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      if (!entries.empty()) {
-        const auto& entry = entries[selectorIndex];
-        entry.type == OpdsEntryType::BOOK ? downloadBook(entry) : navigateToEntry(entry);
+#if FREEINK_DEVICE_X4PRO
+    // Full Touch: first tap on a row moves the cursor there; a second tap on the
+    // already-selected row opens (or downloads) it. Rows are page-relative, so
+    // the tapped entry is the current page start plus the row.
+    if (SETTINGS.fullTouchUi && !entries.empty()) {
+      int lx, ly;
+      if (mappedInput.wasTapPoint(lx, ly)) {
+        const int top = listTopY();
+        const int row = (ly - top) / ROW_H;
+        if (ly >= top && row >= 0 && row < PAGE_ITEMS) {
+          const int itemIndex = selectorIndex / PAGE_ITEMS * PAGE_ITEMS + row;
+          if (itemIndex < static_cast<int>(entries.size())) {
+            if (itemIndex != selectorIndex) {
+              selectorIndex = itemIndex;
+              requestUpdate();
+            } else {
+              activateSelectedEntry();
+            }
+            return;
+          }
+        }
+        // Dead space (title bar, below the last row): no action.
       }
+    }
+#endif
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      activateSelectedEntry();
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       navigateBack();
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
@@ -175,14 +213,16 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_NO_ENTRIES));
   } else {
     const auto pageStartIndex = selectorIndex / PAGE_ITEMS * PAGE_ITEMS;
-    renderer.fillRect(0, 60 + (selectorIndex % PAGE_ITEMS) * 30 - 2, pageWidth - 1, 30);
+    // Row bands start at listTopY() (shared with the tap hit-testing in loop()).
+    const int listTop = listTopY();
+    renderer.fillRect(0, listTop + (selectorIndex % PAGE_ITEMS) * ROW_H, pageWidth - 1, ROW_H);
 
     for (size_t i = pageStartIndex; i < entries.size() && i < static_cast<size_t>(pageStartIndex + PAGE_ITEMS); i++) {
       const auto& entry = entries[i];
       std::string displayText = (entry.type == OpdsEntryType::NAVIGATION) ? "> " + entry.title : entry.title;
       if (entry.type == OpdsEntryType::BOOK && !entry.author.empty()) displayText += " - " + entry.author;
       auto item = renderer.truncatedText(UI_10_FONT_ID, displayText.c_str(), pageWidth - 40);
-      renderer.drawText(UI_10_FONT_ID, 20, 60 + (i % PAGE_ITEMS) * 30, item.c_str(),
+      renderer.drawText(UI_10_FONT_ID, 20, listTop + 2 + (i % PAGE_ITEMS) * ROW_H, item.c_str(),
                         i != static_cast<size_t>(selectorIndex));
     }
   }

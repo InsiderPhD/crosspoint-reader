@@ -9,6 +9,9 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+struct TabInfo;
+
 enum class SettingType { TOGGLE, ENUM, ACTION, VALUE, STRING };
 
 enum class SettingAction {
@@ -181,6 +184,12 @@ class SettingsActivity final : public Activity {
 
   void enterCategory(int categoryIndex);
   void toggleCurrentSetting();
+  // Layout shared by render() and the Full Touch tap hit-testing in loop().
+  Rect tabBarRect() const;
+  Rect listRect() const;
+  // The live tab vector: hit-testing must use the same TabInfo flags render
+  // draws (Classic measures the selected tab bold, so widths depend on them).
+  void buildTabs(std::vector<TabInfo>& tabs) const;
 
  public:
   explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -189,4 +198,5 @@ class SettingsActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 };

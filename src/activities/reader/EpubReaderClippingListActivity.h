@@ -23,6 +23,9 @@ class EpubReaderClippingListActivity final : public Activity {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // Only the list has hit-testable rows: the paged detail view and the empty
+  // state keep the injected-Confirm tap behaviour.
+  bool handlesDirectTouch() const override { return !detailMode && !clippings.empty(); }
 
  private:
   const std::vector<Clipping>& clippings;
@@ -37,10 +40,16 @@ class EpubReaderClippingListActivity final : public Activity {
   bool detailMode = false;
 
   int getPageItems() const;
+  // Top edge of the first list row band; row i spans
+  // [listTopY() + i*ROW_HEIGHT, + ROW_HEIGHT). Shared by render() and the Full
+  // Touch tap hit-testing in loop().
+  int listTopY() const;
   int getDetailTextWidth() const;
   int getDetailLinesPerPage() const;
   int getDetailPageCount() const;
-  void deleteSelectedClipping();
+  // The hold-Confirm delete, also fired by a Full Touch long tap on a row.
+  // Returns true when a clipping was actually removed.
+  bool deleteSelectedClipping();
   void closeDetail();
   void jumpToSelectedClipping();
   void openSelectedDetail();

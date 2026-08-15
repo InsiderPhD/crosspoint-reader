@@ -49,4 +49,29 @@ inline bool hasEmSpacePrefix(const char* text) {
 // True when the text contains only ASCII whitespace (or is empty).
 inline bool isBlank(const char* text) { return text[strspn(text, " \t\r\n")] == '\0'; }
 
+// Index of the word on `pageIdx` under the logical-frame point (x, y): the word whose
+// box contains it, else the nearest word — vertical distance weighted so a tap in the
+// gap between lines snaps to the nearer line rather than a far word on the same row.
+// Returns -1 when the page holds no words. Shared by the reader's tap-and-hold clip
+// start and the selection overlay's tap handling so both resolve a touch identically.
+inline int findWordAt(const WordList& list, const uint8_t pageIdx, const int x, const int y) {
+  int best = -1;
+  long bestScore = 0;
+  for (size_t i = 0; i < list.words.size(); i++) {
+    const WordRef& word = list.words[i];
+    if (word.pageIdx != pageIdx) continue;
+    if (x >= word.x && x < word.x + word.w && y >= word.y && y < word.y + word.h) {
+      return static_cast<int>(i);
+    }
+    const int dx = (x < word.x) ? (word.x - x) : (x > word.x + word.w ? x - (word.x + word.w) : 0);
+    const int dy = (y < word.y) ? (word.y - y) : (y > word.y + word.h ? y - (word.y + word.h) : 0);
+    const long score = static_cast<long>(dx) + static_cast<long>(dy) * 4;
+    if (best < 0 || score < bestScore) {
+      best = static_cast<int>(i);
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
 }  // namespace clipword

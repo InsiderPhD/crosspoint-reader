@@ -32,6 +32,9 @@ class LibraryActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // While the sort/context menus are open, taps belong to them (inside-row
+  // hit-testing + injected Confirm); the grid resumes tap ownership on close.
+  bool handlesDirectTouch() const override { return !contextMenu.isOpen() && !sortMenu.isOpen(); }
 
   // Delete the persisted library index so the next library open re-scans the SD
   // card. Call after adding or removing a book from outside the library (e.g. a
@@ -172,6 +175,9 @@ class LibraryActivity final : public Activity {
     int x, y, width, height;
   };
   SlotRect slotRect(int slotIndexInPage) const;
+  // Page-local slot under a logical-frame point (Full Touch tap dispatch), or
+  // -1 for a miss / an empty trailing slot on the last page.
+  int slotIndexAt(int lx, int ly) const;
 
   // Apply a chosen context-menu action to the book at `path`. Mirrors
   // HomeActivity::dispatchBookAction with library-flavored reload logic:

@@ -26,6 +26,8 @@
       FONTS_MANIFEST_VERSION) "-b" FONT_MANIFEST_URL_STRINGIFY(CPFONT_VERSION) "/fonts.json"
 #endif
 
+struct Rect;
+
 class FontDownloadActivity : public Activity {
  public:
   explicit FontDownloadActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
@@ -36,6 +38,9 @@ class FontDownloadActivity : public Activity {
   void render(RenderLock&&) override;
   bool preventAutoSleep() override { return state_ == LOADING_MANIFEST || state_ == DOWNLOADING; }
   bool skipLoopDelay() override { return true; }
+  // Only the family list has tap hit-testing; the other states keep the global
+  // tap-is-Confirm injection (e.g. to retry from ERROR / dismiss COMPLETE).
+  bool handlesDirectTouch() const override { return state_ == FAMILY_LIST && !families_.empty(); }
 
   // Public: the streaming manifest parser (FontDownloadActivity.cpp) builds
   // these directly as the HTTP body arrives.
@@ -83,6 +88,8 @@ class FontDownloadActivity : public Activity {
   bool fetchAndParseManifest();
   void downloadFamily(ManifestFamily& family);
   void downloadAll();
+  void activateSelected();
+  Rect listRect() const;
   bool isDownloadAllSelected() const { return selectedIndex_ == 0 && !families_.empty(); }
   int familyIndexFromList(int listIndex) const { return listIndex - 1; }
   int listItemCount() const { return families_.empty() ? 0 : static_cast<int>(families_.size()) + 1; }

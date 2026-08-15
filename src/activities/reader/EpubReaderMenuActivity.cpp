@@ -100,6 +100,53 @@ void EpubReaderMenuActivity::onEnter() {
 
 void EpubReaderMenuActivity::onExit() { Activity::onExit(); }
 
+void EpubReaderMenuActivity::activateSelectedItem() {
+  const auto selectedAction = menuItems[selectedIndex].action;
+  if (selectedAction == MenuAction::ROTATE_SCREEN) {
+    // Cycle orientation preview locally; actual rotation happens on menu exit.
+    pendingOrientation = (pendingOrientation + 1) % orientationLabels.size();
+    requestUpdate();
+    return;
+  }
+
+  if (selectedAction == MenuAction::AUTO_PAGE_TURN) {
+    selectedPageTurnOption = (selectedPageTurnOption + 1) % pageTurnLabels.size();
+    requestUpdate();
+    return;
+  }
+
+  if (selectedAction == MenuAction::BUTTON_HINTS) {
+    // Cycle the hint mode preview locally; applied on menu exit.
+    pendingButtonHints = (pendingButtonHints + 1) % CrossPointSettings::BUTTON_HINTS_MODE_COUNT;
+    requestUpdate();
+    return;
+  }
+
+  if (selectedAction == MenuAction::AUTOSYNC) {
+    // Cycle the autosync mode preview locally; applied on menu exit.
+    pendingAutosyncMode = (pendingAutosyncMode + 1) % CrossPointSettings::AUTOSYNC_COUNT;
+    requestUpdate();
+    return;
+  }
+
+  if (selectedAction == MenuAction::FRONTLIGHT_BRIGHTNESS || selectedAction == MenuAction::FRONTLIGHT_WARMTH) {
+    // Cycle in 10% steps and drive the light immediately so the user can see
+    // the level; the reader persists the values once, on menu exit.
+    uint8_t& pending =
+        (selectedAction == MenuAction::FRONTLIGHT_BRIGHTNESS) ? pendingFrontlightBrightness : pendingFrontlightWarmth;
+    // Values are multiples of 10 from the UI, but the web API accepts any
+    // 0-100 — cap the step at 100 before wrapping so odd values still cycle.
+    pending = (pending >= 100) ? 0 : (pending + 10 > 100 ? 100 : pending + 10);
+    halFrontlight.apply(pendingFrontlightBrightness, pendingFrontlightWarmth);
+    requestUpdate();
+    return;
+  }
+
+  setResult(MenuResult{static_cast<int>(selectedAction), pendingOrientation, selectedPageTurnOption, pendingButtonHints,
+                       pendingAutosyncMode, pendingFrontlightBrightness, pendingFrontlightWarmth});
+  finish();
+}
+
 void EpubReaderMenuActivity::loop() {
   // Handle navigation
   buttonNavigator.onNext([this] {
@@ -112,52 +159,30 @@ void EpubReaderMenuActivity::loop() {
     requestUpdate();
   });
 
+#if FREEINK_DEVICE_X4PRO
+  // Full Touch: first tap on a row moves the cursor; a second tap on the
+  // selected row runs its Confirm action (cycling rows cycle in place).
+  if (SETTINGS.fullTouchUi) {
+    int lx, ly;
+    if (mappedInput.wasTapPoint(lx, ly)) {
+      const int top = menuTopY();
+      const int row = (ly - top) / MENU_ROW_H;
+      if (ly >= top && row >= 0 && row < static_cast<int>(menuItems.size())) {
+        if (row != selectedIndex) {
+          selectedIndex = row;
+          requestUpdate();
+        } else {
+          activateSelectedItem();
+        }
+        return;
+      }
+      // Dead space (title/summary area): no action.
+    }
+  }
+#endif
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    const auto selectedAction = menuItems[selectedIndex].action;
-    if (selectedAction == MenuAction::ROTATE_SCREEN) {
-      // Cycle orientation preview locally; actual rotation happens on menu exit.
-      pendingOrientation = (pendingOrientation + 1) % orientationLabels.size();
-      requestUpdate();
-      return;
-    }
-
-    if (selectedAction == MenuAction::AUTO_PAGE_TURN) {
-      selectedPageTurnOption = (selectedPageTurnOption + 1) % pageTurnLabels.size();
-      requestUpdate();
-      return;
-    }
-
-    if (selectedAction == MenuAction::BUTTON_HINTS) {
-      // Cycle the hint mode preview locally; applied on menu exit.
-      pendingButtonHints = (pendingButtonHints + 1) % CrossPointSettings::BUTTON_HINTS_MODE_COUNT;
-      requestUpdate();
-      return;
-    }
-
-    if (selectedAction == MenuAction::AUTOSYNC) {
-      // Cycle the autosync mode preview locally; applied on menu exit.
-      pendingAutosyncMode = (pendingAutosyncMode + 1) % CrossPointSettings::AUTOSYNC_COUNT;
-      requestUpdate();
-      return;
-    }
-
-    if (selectedAction == MenuAction::FRONTLIGHT_BRIGHTNESS || selectedAction == MenuAction::FRONTLIGHT_WARMTH) {
-      // Cycle in 10% steps and drive the light immediately so the user can see
-      // the level; the reader persists the values once, on menu exit.
-      uint8_t& pending =
-          (selectedAction == MenuAction::FRONTLIGHT_BRIGHTNESS) ? pendingFrontlightBrightness : pendingFrontlightWarmth;
-      // Values are multiples of 10 from the UI, but the web API accepts any
-      // 0-100 — cap the step at 100 before wrapping so odd values still cycle.
-      pending = (pending >= 100) ? 0 : (pending + 10 > 100 ? 100 : pending + 10);
-      halFrontlight.apply(pendingFrontlightBrightness, pendingFrontlightWarmth);
-      requestUpdate();
-      return;
-    }
-
-    setResult(MenuResult{static_cast<int>(selectedAction), pendingOrientation, selectedPageTurnOption,
-                         pendingButtonHints, pendingAutosyncMode, pendingFrontlightBrightness,
-                         pendingFrontlightWarmth});
-    finish();
+    activateSelectedItem();
     return;
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     ActivityResult result;
@@ -173,6 +198,18 @@ void EpubReaderMenuActivity::loop() {
     finish();
     return;
   }
+}
+
+int EpubReaderMenuActivity::menuTopY() const {
+  // Mirrors render()'s vertical flow: title block (45 + inverted-portrait
+  // gutter), summary line, status line, 10px gap. Any change to those offsets
+  // in render() must be reflected here or taps land on the wrong row.
+  const bool isPortraitInverted = renderer.getOrientation() == GfxRenderer::Orientation::PortraitInverted;
+  const int contentY = isPortraitInverted ? 50 : 0;
+  const int summaryLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int summaryY = 45 + contentY;
+  const int statusY = summaryY + summaryLineHeight + 2;
+  return statusY + summaryLineHeight + 10;
 }
 
 void EpubReaderMenuActivity::render(RenderLock&&) {
@@ -269,9 +306,10 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   const int statusY = summaryY + summaryLineHeight + 2;
   renderer.drawCenteredText(UI_10_FONT_ID, statusY, statusLine.c_str());
 
-  // Menu Items
-  const int startY = statusY + summaryLineHeight + 10;
-  constexpr int lineHeight = 30;
+  // Menu Items (menuTopY() == statusY + summaryLineHeight + 10; shared with
+  // the tap hit-testing so paint and touch can never disagree)
+  const int startY = menuTopY();
+  constexpr int lineHeight = MENU_ROW_H;
 
   for (size_t i = 0; i < menuItems.size(); ++i) {
     const int displayY = startY + (i * lineHeight);

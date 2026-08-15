@@ -10,6 +10,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
+#include "util/TouchListNav.h"
 
 namespace {
 constexpr int SUMMARY_CARD_HEIGHT = 70;
@@ -32,7 +33,8 @@ void ReadingDayDetailActivity::refreshEntries() {
 }
 
 void ReadingDayDetailActivity::openSelectedBook() {
-  if (selectedIndex < 0 || selectedIndex >= static_cast<int>(entries.size()) || entries[selectedIndex].book == nullptr) {
+  if (selectedIndex < 0 || selectedIndex >= static_cast<int>(entries.size()) ||
+      entries[selectedIndex].book == nullptr) {
     return;
   }
 
@@ -64,6 +66,22 @@ void ReadingDayDetailActivity::loop() {
     return;
   }
 
+  if (!entries.empty()) {
+    int tappedIndex;
+    switch (TouchListNav::tapRow(mappedInput, listRect(), static_cast<int>(entries.size()), selectedIndex,
+                                 /*hasSubtitle=*/true, tappedIndex)) {
+      case TouchListNav::TapResult::SelectionMoved:
+        selectedIndex = tappedIndex;
+        requestUpdate();
+        return;
+      case TouchListNav::TapResult::Activated:
+        openSelectedBook();
+        return;
+      case TouchListNav::TapResult::None:
+        break;
+    }
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     openSelectedBook();
     return;
@@ -86,12 +104,22 @@ void ReadingDayDetailActivity::loop() {
   });
 }
 
+// Book list body below the summary cards and "Top book" sub-header. Shared by
+// render() and the loop()'s tap hit-testing so the two can never disagree.
+Rect ReadingDayDetailActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int listContentTop = contentTop + SUMMARY_CARD_HEIGHT + metrics.verticalSpacing + 34 + 10;
+  const int listHeight =
+      renderer.getScreenHeight() - listContentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  return Rect{0, listContentTop, renderer.getScreenWidth(), listHeight};
+}
+
 void ReadingDayDetailActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
-  const int pageHeight = renderer.getScreenHeight();
   const int sidePadding = metrics.contentSidePadding;
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const int cardWidth = (pageWidth - sidePadding * 2 - SUMMARY_GAP) / 2;
@@ -107,32 +135,33 @@ void ReadingDayDetailActivity::render(RenderLock&&) {
                  tr(STR_BOOKS_READ), std::to_string(entries.size()));
 
   const char* topBookLabel = tr(STR_TOP_BOOK);
-  const std::string topBookTitle =
-      !entries.empty() && entries.front().book != nullptr ? getBookTitle(*entries.front().book) : std::string(tr(STR_NOT_SET));
+  const std::string topBookTitle = !entries.empty() && entries.front().book != nullptr
+                                       ? getBookTitle(*entries.front().book)
+                                       : std::string(tr(STR_NOT_SET));
   const int listTop = contentTop + SUMMARY_CARD_HEIGHT + metrics.verticalSpacing;
   GUI.drawSubHeader(renderer, Rect{0, listTop, pageWidth, 34}, topBookLabel, topBookTitle.c_str());
 
-  const int listContentTop = listTop + 34 + 10;
-  const int listHeight = pageHeight - listContentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  const Rect contentRect = listRect();
   if (entries.empty()) {
-    renderer.drawText(UI_10_FONT_ID, sidePadding, listContentTop + 20, tr(STR_NO_READING_DAY));
+    renderer.drawText(UI_10_FONT_ID, sidePadding, contentRect.y + 20, tr(STR_NO_READING_DAY));
   } else {
-    GUI.drawList(renderer, Rect{0, listContentTop, pageWidth, listHeight}, static_cast<int>(entries.size()), selectedIndex,
-                 [this](const int index) {
-                   return entries[index].book ? getBookTitle(*entries[index].book) : std::string(tr(STR_NOT_SET));
-                 },
-                 [this](const int index) {
-                   if (!entries[index].book) {
-                     return std::string(tr(STR_NOT_SET));
-                   }
-                   return entries[index].book->author.empty() ? std::string(tr(STR_IN_PROGRESS)) : entries[index].book->author;
-                 },
-                 [](const int) { return UIIcon::Book; },
-                 [this](const int index) { return ReadingStatsAnalytics::formatDurationHm(entries[index].readingMs); });
+    GUI.drawList(
+        renderer, contentRect, static_cast<int>(entries.size()), selectedIndex,
+        [this](const int index) {
+          return entries[index].book ? getBookTitle(*entries[index].book) : std::string(tr(STR_NOT_SET));
+        },
+        [this](const int index) {
+          if (!entries[index].book) {
+            return std::string(tr(STR_NOT_SET));
+          }
+          return entries[index].book->author.empty() ? std::string(tr(STR_IN_PROGRESS)) : entries[index].book->author;
+        },
+        [](const int) { return UIIcon::Book; },
+        [this](const int index) { return ReadingStatsAnalytics::formatDurationHm(entries[index].readingMs); });
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), entries.empty() ? "" : tr(STR_OPEN), tr(STR_DIR_UP),
-                                            tr(STR_DIR_DOWN));
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), entries.empty() ? "" : tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

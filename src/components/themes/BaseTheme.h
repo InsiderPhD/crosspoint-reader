@@ -119,7 +119,13 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeCoverHeight = 400,
                                  .homeCoverTileHeight = 400,
                                  .homeRecentBooksCount = 1,
+#if FREEINK_DEVICE_X4PRO
+                                 // No front buttons on the X4 Pro: the bottom hint bar is never
+                                 // drawn (drawButtonHints no-ops), so screens reclaim its strip.
+                                 .buttonHintsHeight = 0,
+#else
                                  .buttonHintsHeight = 40,
+#endif
                                  .sideButtonHintsWidth = 40,  // match buttonHintsHeight so side/power boxes
                                                               // are the same thickness as the front hint bar
                                  .progressBarHeight = 16,
@@ -138,11 +144,47 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .keyboardTextFieldWidthPercent = 85,
                                  .keyboardWidthPercent = 90,
                                  .keyboardKeyCornerRadius = 0};
-}
+}  // namespace BaseMetrics
 
 class BaseTheme {
  public:
   virtual ~BaseTheme() = default;
+
+  // The metrics table this theme draws with. Every geometry consumer below
+  // (listGeometry, hitTestList, hitTestTabBar, hitTestButtonMenu) reads this,
+  // so a theme that overrides drawList/drawTabBar against its own table must
+  // override this too — that single override keeps paint and hit-test in
+  // lockstep.
+  virtual const ThemeMetrics& themeMetrics() const { return BaseMetrics::values; }
+
+  // Row geometry of a drawList call. Single source for drawList AND
+  // hitTestList so the two can never drift.
+  struct ListGeometry {
+    int rowHeight;
+    int pageItems;  // rows per page, >= 1
+    int pageStart;  // first visible item index
+  };
+  ListGeometry listGeometry(const Rect& rect, int selectedIndex, bool hasSubtitle) const;
+
+  // Item index under a logical-frame point (Full Touch tap dispatch), or -1 on
+  // a miss. rect/selectedIndex/hasSubtitle MUST match the concurrent drawList
+  // call — they determine the visible page and the row height.
+  int hitTestList(const Rect& rect, int itemCount, int selectedIndex, bool hasSubtitle, int lx, int ly) const;
+
+  // Tab index under the point for the ribbon drawTabBar painted, or -1. Takes
+  // the live TabInfo vector because cell widths depend on selection state
+  // (Classic measures the selected tab bold) and the scroll offset tracks it.
+  int hitTestTabBar(const GfxRenderer& renderer, const Rect& rect, const std::vector<TabInfo>& tabs, int lx,
+                    int ly) const;
+
+  // Tile index under the point for the menu drawButtonMenu painted, or -1.
+  int hitTestButtonMenu(const Rect& rect, int buttonCount, int lx, int ly) const;
+
+  // Cover slot under the point within the strip drawRecentBookCover painted, or
+  // -1. Single-cover themes (homeRecentBooksCount == 1) treat the whole strip as
+  // slot 0; multi-cover themes split it into that many equal columns inset by
+  // contentSidePadding, matching Lyra3CoversTheme's tile layout.
+  int hitTestRecentBookCover(const Rect& rect, int slotCount, int lx, int ly) const;
 
   // Component drawing methods
   virtual void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total) const;
@@ -207,4 +249,24 @@ class BaseTheme {
   static constexpr int batteryPercentSpacing = 4;
   static void drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight);
   static void drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX, int boltY);
+
+ protected:
+  // Tab badge dot (Classic theme): drawn after the label, so part of the cell width.
+  static constexpr int TAB_BADGE_SIZE = 5;  // diameter of the filled square dot
+  static constexpr int TAB_BADGE_GAP = 3;   // gap between text right edge and dot left edge
+
+  // Drawn width of one tab cell — the theme-specific half of the tab-bar
+  // geometry (font, bold-when-selected, padding, badge). Used by drawTabBar's
+  // advance, computeTabScrollOffset, and hitTestTabBar; override alongside
+  // drawTabBar or the ribbon and the hit-test disagree.
+  virtual int tabCellWidth(const GfxRenderer& renderer, const TabInfo& tab) const;
+
+  // Horizontal scroll offset of the tab ribbon (the PEEK-clamped pass-1 math,
+  // identical in both themes). Shared by drawTabBar and hitTestTabBar.
+  int computeTabScrollOffset(const GfxRenderer& renderer, const Rect& rect, const std::vector<TabInfo>& tabs) const;
+
+  // Vertical offset of the first drawButtonMenu tile inside its rect: Classic
+  // leads with verticalSpacing, Lyra starts flush. Keep in lockstep with the
+  // theme's drawButtonMenu.
+  virtual int buttonMenuTopOffset() const { return themeMetrics().verticalSpacing; }
 };

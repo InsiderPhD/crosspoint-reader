@@ -10,8 +10,17 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 namespace {
+// Main-menu row indices, shared by handleMainMenuInput() and
+// activateMainMenuItem(). Must stay aligned with the list built in
+// renderMainMenu().
+constexpr int kToggleBluetoothIndex = 0;
+constexpr int kRemoteIndex = 1;
+constexpr int kReconnectIndex = 2;
+constexpr int kMapButtonsIndex = 3;
+
 // The manager reports outcomes as codes because it sits below I18n; translate
 // them here, at the layer that actually draws them.
 const char* btStatusText(const BtStatus status) {
@@ -139,10 +148,6 @@ void BluetoothSettingsActivity::beginScan() {
 }
 
 void BluetoothSettingsActivity::handleMainMenuInput() {
-  constexpr int kToggleBluetoothIndex = 0;
-  constexpr int kRemoteIndex = 1;
-  constexpr int kReconnectIndex = 2;
-  constexpr int kMapButtonsIndex = 3;
   // The reconnect and mapping rows only exist once there is a remote, mirroring
   // the list built in renderMainMenu().
   const bool bonded = SETTINGS.bleBondedDeviceAddr[0] != '\0';
@@ -151,6 +156,20 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     finish();
     return;
+  }
+
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), kMainMenuItemCount, selectedIndex,
+                               /*hasSubtitle=*/false, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedIndex = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      activateMainMenuItem();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
   }
 
   // A remote press is injected as a virtual page-forward, which arrives here as
@@ -171,73 +190,101 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    if (!btMgr) {
-      lastError = tr(STR_BT_NOT_AVAILABLE);
-      LOG_ERR("BT", "BLE manager not available");
-      requestUpdate();
-      return;
-    }
+    activateMainMenuItem();
+  }
+}
 
-    if (selectedIndex == kToggleBluetoothIndex) {
-      // Toggle Bluetooth — stack start/stop blocks for up to a second or two.
-      {
-        RenderLock lock(*this);
-        GUI.drawPopup(renderer, btMgr->isEnabled() ? tr(STR_BT_TURNING_OFF) : tr(STR_BT_TURNING_ON));
-        renderer.displayBuffer();
-      }
-      if (btMgr->isEnabled()) {
-        LOG_INF("BT", "Disabling Bluetooth...");
-        // Clear the session flag so auto-restore doesn't bring the stack back
-        // after the user explicitly turned it off here.
-        btMgr->setBluetoothWanted(false);
-        if (btMgr->disable()) {
-          lastError = tr(STR_BT_DISABLED);
-        } else {
-          lastError = tr(STR_BT_DISABLE_FAILED);
-        }
+void BluetoothSettingsActivity::activateMainMenuItem() {
+  if (!btMgr) {
+    lastError = tr(STR_BT_NOT_AVAILABLE);
+    LOG_ERR("BT", "BLE manager not available");
+    requestUpdate();
+    return;
+  }
+
+  if (selectedIndex == kToggleBluetoothIndex) {
+    // Toggle Bluetooth — stack start/stop blocks for up to a second or two.
+    {
+      RenderLock lock(*this);
+      GUI.drawPopup(renderer, btMgr->isEnabled() ? tr(STR_BT_TURNING_OFF) : tr(STR_BT_TURNING_ON));
+      renderer.displayBuffer();
+    }
+    if (btMgr->isEnabled()) {
+      LOG_INF("BT", "Disabling Bluetooth...");
+      // Clear the session flag so auto-restore doesn't bring the stack back
+      // after the user explicitly turned it off here.
+      btMgr->setBluetoothWanted(false);
+      if (btMgr->disable()) {
+        lastError = tr(STR_BT_DISABLED);
       } else {
-        LOG_INF("BT", "Enabling Bluetooth...");
-        // Arm auto-restore: the remote should return by itself after later
-        // memory-critical operations (chapter builds, syncs) tear the stack down.
-        btMgr->setBluetoothWanted(true);
-        if (btMgr->enable()) {
-          lastError = tr(STR_BT_ENABLED);
-        } else {
-          lastError = btStatusText(btMgr->lastStatus);
-        }
+        lastError = tr(STR_BT_DISABLE_FAILED);
       }
-      requestUpdate();
-    } else if (selectedIndex == kRemoteIndex) {
+    } else {
+      LOG_INF("BT", "Enabling Bluetooth...");
+      // Arm auto-restore: the remote should return by itself after later
+      // memory-critical operations (chapter builds, syncs) tear the stack down.
+      btMgr->setBluetoothWanted(true);
+      if (btMgr->enable()) {
+        lastError = tr(STR_BT_ENABLED);
+      } else {
+        lastError = btStatusText(btMgr->lastStatus);
+      }
+    }
+    requestUpdate();
+  } else if (selectedIndex == kRemoteIndex) {
+    if (SETTINGS.bleBondedDeviceAddr[0] != '\0') {
       if (!btMgr->isEnabled()) {
         lastError = tr(STR_BT_TURN_ON_FIRST);
         requestUpdate();
-      } else if (SETTINGS.bleBondedDeviceAddr[0] != '\0') {
-        // Forget the remembered remote: drop the connection and the bond.
-        const std::string addr = SETTINGS.bleBondedDeviceAddr;
-        if (btMgr->isConnected(addr)) {
-          btMgr->disconnectFromDevice(addr);
-        }
-        SETTINGS.bleBondedDeviceAddr[0] = '\0';
-        SETTINGS.bleBondedDeviceName[0] = '\0';
-        SETTINGS.bleBondedDeviceAddrType = 0;
-        // The learned button mapping belongs to the forgotten remote.
-        SETTINGS.bleBackSigIndex = 0xFF;
-        SETTINGS.bleBackSigValue = 0;
-        SETTINGS.bleFwdSigIndex = 0xFF;
-        SETTINGS.bleFwdSigValue = 0;
-        SETTINGS.saveToFile();
-        btMgr->setBondedDevice("", "");
-        btMgr->setButtonMapping(0xFF, 0, 0xFF, 0);
-        lastError = tr(STR_BT_REMOTE_FORGOTTEN);
-        requestUpdate();
-      } else {
-        beginScan();
+        return;
       }
-    } else if (selectedIndex == kReconnectIndex) {
-      reconnectBonded();
-    } else if (selectedIndex == kMapButtonsIndex) {
-      beginButtonMapping();
+      // Forget the remembered remote: drop the connection and the bond.
+      const std::string addr = SETTINGS.bleBondedDeviceAddr;
+      if (btMgr->isConnected(addr)) {
+        btMgr->disconnectFromDevice(addr);
+      }
+      SETTINGS.bleBondedDeviceAddr[0] = '\0';
+      SETTINGS.bleBondedDeviceName[0] = '\0';
+      SETTINGS.bleBondedDeviceAddrType = 0;
+      // The learned button mapping belongs to the forgotten remote.
+      SETTINGS.bleBackSigIndex = 0xFF;
+      SETTINGS.bleBackSigValue = 0;
+      SETTINGS.bleFwdSigIndex = 0xFF;
+      SETTINGS.bleFwdSigValue = 0;
+      SETTINGS.saveToFile();
+      btMgr->setBondedDevice("", "");
+      btMgr->setButtonMapping(0xFF, 0, 0xFF, 0);
+      lastError = tr(STR_BT_REMOTE_FORGOTTEN);
+      requestUpdate();
+    } else {
+      // First-time guided setup: enable -> scan -> pair -> map -> test. Turn
+      // the radio on ourselves instead of bouncing the user back with "turn
+      // Bluetooth on first" — the row's whole purpose is getting a remote
+      // working.
+      if (!btMgr->isEnabled()) {
+        {
+          RenderLock lock(*this);
+          GUI.drawPopup(renderer, tr(STR_BT_TURNING_ON));
+          renderer.displayBuffer();
+        }
+        // Arm auto-restore, same as the toggle row: the stack should return by
+        // itself after memory-critical operations tear it down.
+        btMgr->setBluetoothWanted(true);
+        if (!btMgr->enable()) {
+          // Surface the specific reason (fragmented heap, no memory, ...) the
+          // same way the toggle row does.
+          lastError = btStatusText(btMgr->lastStatus);
+          requestUpdate();
+          return;
+        }
+      }
+      guidedSetup = true;
+      beginScan();
     }
+  } else if (selectedIndex == kReconnectIndex) {
+    reconnectBonded();
+  } else if (selectedIndex == kMapButtonsIndex) {
+    beginButtonMapping();
   }
 }
 
@@ -248,6 +295,7 @@ void BluetoothSettingsActivity::handleScanningInput() {
     if (btMgr && btMgr->isScanning()) {
       btMgr->stopScan();
     }
+    guidedSetup = false;
     viewMode = ViewMode::MAIN_MENU;
     selectedIndex = 0;
     requestUpdate();
@@ -258,6 +306,7 @@ void BluetoothSettingsActivity::handleDeviceListInput() {
   if (!btMgr) return;
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    guidedSetup = false;
     viewMode = ViewMode::MAIN_MENU;
     selectedIndex = 0;
     requestUpdate();
@@ -283,11 +332,27 @@ void BluetoothSettingsActivity::handleDeviceListInput() {
   }
 
   if (devices.empty()) {
-    // Empty list: Confirm rescans, matching "Press OK to scan again".
+    // Empty list: Confirm rescans, matching "Press OK to scan again". A tap
+    // arrives here as an injected Confirm (handlesDirectTouch is false for the
+    // empty list), so it rescans too.
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       beginScan();
     }
     return;
+  }
+
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), static_cast<int>(devices.size()), selectedIndex,
+                               /*hasSubtitle=*/false, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedIndex = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      connectToSelected();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
   }
 
   const int maxIndex = static_cast<int>(devices.size()) - 1;
@@ -312,9 +377,20 @@ void BluetoothSettingsActivity::handleResultInput() {
   }
 
   if (viewMode == ViewMode::CONNECTED) {
+    connectingBonded = false;
+    if (guidedSetup && confirm) {
+      // Guided setup: the freshly paired remote is connected, which is exactly
+      // the wizard's precondition — flow straight into teaching its buttons.
+      // Land on the menu first so the wizard's own error paths (remote dropped
+      // in the meantime) have somewhere sensible to show their message.
+      viewMode = ViewMode::MAIN_MENU;
+      selectedIndex = 0;
+      beginButtonMapping();
+      return;
+    }
     // Done: the remote is paired and remembered, so there is nothing left to do
     // on the picker — return to the screen that shows its status.
-    connectingBonded = false;
+    guidedSetup = false;
     viewMode = ViewMode::MAIN_MENU;
     selectedIndex = 0;
   } else if (connectingBonded) {
@@ -431,11 +507,13 @@ void BluetoothSettingsActivity::disconnectAll() {
 
 void BluetoothSettingsActivity::beginButtonMapping() {
   if (!btMgr->isEnabled()) {
+    guidedSetup = false;  // guided chain ends here; message shows on the menu
     lastError = tr(STR_BT_TURN_ON_FIRST);
     requestUpdate();
     return;
   }
   if (!btMgr->isConnected(SETTINGS.bleBondedDeviceAddr)) {
+    guidedSetup = false;
     lastError = tr(STR_BT_MAP_NEED_CONNECTED);
     requestUpdate();
     return;
@@ -451,7 +529,9 @@ void BluetoothSettingsActivity::beginButtonMapping() {
 
 void BluetoothSettingsActivity::handleMappingInput() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-    endButtonMapping(MappingOutcome::CANCELLED);
+    // In the guided flow Back means "skip this step", not "undo": clear any
+    // mapping (it would belong to a previous remote) and finish the setup.
+    endButtonMapping(guidedSetup ? MappingOutcome::SKIPPED : MappingOutcome::CANCELLED);
   }
 }
 
@@ -510,7 +590,7 @@ void BluetoothSettingsActivity::pollMappingPress() {
 }
 
 void BluetoothSettingsActivity::endButtonMapping(const MappingOutcome outcome) {
-  if (outcome == MappingOutcome::CLEARED) {
+  if (outcome == MappingOutcome::CLEARED || outcome == MappingOutcome::SKIPPED) {
     SETTINGS.bleBackSigIndex = 0xFF;
     SETTINGS.bleBackSigValue = 0;
     SETTINGS.bleFwdSigIndex = 0xFF;
@@ -527,15 +607,21 @@ void BluetoothSettingsActivity::endButtonMapping(const MappingOutcome outcome) {
   lastSeenRemoteInputMs = btMgr->lastRemoteInputMs();
   switch (outcome) {
     case MappingOutcome::SAVED:
-      lastError = tr(STR_BT_MAP_SAVED);
+      // In the guided flow, close the loop: the test box below the menu is the
+      // final step, so point the user at it.
+      lastError = guidedSetup ? tr(STR_BT_SETUP_DONE) : tr(STR_BT_MAP_SAVED);
       break;
     case MappingOutcome::CLEARED:
       lastError = tr(STR_BT_MAP_CANT_TELL_APART);
+      break;
+    case MappingOutcome::SKIPPED:
+      lastError = tr(STR_BT_SETUP_DONE);
       break;
     case MappingOutcome::CANCELLED:
       lastError = "";
       break;
   }
+  guidedSetup = false;
   viewMode = ViewMode::MAIN_MENU;
   requestUpdate();
 }
@@ -626,6 +712,20 @@ void BluetoothSettingsActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
+// List body of the current view, between the sub-header and the button hints.
+// Shared by render() and the loop()'s tap hit-testing so the two can never
+// disagree. DEVICE_LIST reserves one extra verticalSpacing at the bottom for
+// the legend help text.
+Rect BluetoothSettingsActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
+  int contentHeight = renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  if (viewMode == ViewMode::DEVICE_LIST) {
+    contentHeight -= metrics.verticalSpacing;
+  }
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
 void BluetoothSettingsActivity::renderMainMenu() {
   auto metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
@@ -683,13 +783,9 @@ void BluetoothSettingsActivity::renderMainMenu() {
   }
 
   GUI.drawList(
-      renderer,
-      Rect{0, metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing, pageWidth,
-           pageHeight - (metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.buttonHintsHeight +
-                         metrics.verticalSpacing * 2)},
-      static_cast<int>(itemLabels.size()), selectedIndex, [&itemLabels](int index) { return itemLabels[index]; },
-      nullptr, nullptr, [&itemValues](int i) { return i < (int)itemValues.size() ? itemValues[i] : std::string(""); },
-      true);
+      renderer, listRect(), static_cast<int>(itemLabels.size()), selectedIndex,
+      [&itemLabels](int index) { return itemLabels[index]; }, nullptr, nullptr,
+      [&itemValues](int i) { return i < (int)itemValues.size() ? itemValues[i] : std::string(""); }, true);
 
   const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
   const int statusY = pageHeight - metrics.buttonHintsHeight - metrics.contentSidePadding - lineH;
@@ -787,10 +883,8 @@ void BluetoothSettingsActivity::renderDeviceList() const {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_BT_NO_DEVICES));
     renderer.drawCenteredText(SMALL_FONT_ID, top + height + 10, tr(STR_PRESS_OK_SCAN));
   } else {
-    const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
-    const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
     GUI.drawList(
-        renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(devices.size()), selectedIndex,
+        renderer, listRect(), static_cast<int>(devices.size()), selectedIndex,
         [&devices](int index) { return devices[index].name; }, nullptr, nullptr,
         [this, &devices](int index) {
           const auto& device = devices[index];
@@ -832,8 +926,13 @@ void BluetoothSettingsActivity::renderConnected() const {
   const std::string deviceInfo = std::string(tr(STR_BT_DEVICE_PREFIX)) + selectedDeviceName;
   renderer.drawCenteredText(UI_10_FONT_ID, top + 10, deviceInfo.c_str());
   renderer.drawCenteredText(UI_10_FONT_ID, top + 40, tr(STR_BT_REMOTE_REMEMBERED));
+  if (guidedSetup) {
+    // Guided setup continues into the mapping wizard, so set the expectation
+    // here and label the confirm hint Next rather than Done.
+    renderer.drawCenteredText(UI_10_FONT_ID, top + 70, tr(STR_BT_SETUP_NEXT_MAP));
+  }
 
-  const auto labels = mappedInput.mapLabels("", tr(STR_DONE), "", "");
+  const auto labels = mappedInput.mapLabels("", guidedSetup ? tr(STR_NEXT) : tr(STR_DONE), "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
@@ -887,7 +986,8 @@ void BluetoothSettingsActivity::renderMapping() const {
   const char* prompt = mapStepPresses == 0 ? tr(STR_BT_MAP_PRESS_TWICE) : tr(STR_BT_MAP_PRESS_AGAIN);
   renderer.drawCenteredText(UI_10_FONT_ID, top + static_cast<int>(titleLines.size()) * titleLineH + lineH, prompt);
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+  // During guided setup this step is optional, so Back reads as Skip.
+  const auto labels = mappedInput.mapLabels(guidedSetup ? tr(STR_SKIP) : tr(STR_BACK), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 

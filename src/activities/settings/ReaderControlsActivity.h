@@ -4,6 +4,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 class ReaderControlsActivity final : public Activity {
  public:
   explicit ReaderControlsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -13,12 +15,15 @@ class ReaderControlsActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 
   // Returns the localized action name for a READER_ACTION enum value. Public + static so
   // the reader can reuse it when drawing the button-hint bar.
   static const char* actionName(CrossPointSettings::READER_ACTION action);
 
  private:
+  Rect listRect() const;
+
 #if FREEINK_DEVICE_X4PRO
   // Rows 14-18 are the X4 Pro touch extras: tap left/middle/right, home key
   // short and long press.

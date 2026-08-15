@@ -6,6 +6,8 @@
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 class BookReadingAdjustmentActivity final : public Activity {
   ButtonNavigator buttonNavigator;
   std::string bookPath;
@@ -27,6 +29,13 @@ class BookReadingAdjustmentActivity final : public Activity {
   std::string getDateLabel() const;
   const char* getDurationLabel() const;
   bool applyAdjustment();
+  // The Confirm short-press body, also fired by a Full Touch tap on the
+  // selected row: the date row opens the picker, the others apply.
+  void activateSelectedField();
+  // Touch variant: value rows step instead of applying (the Confirm button
+  // applies), so a tap can change a value rather than committing it.
+  void touchActivateSelectedField();
+  Rect listRect() const;
 
  public:
   explicit BookReadingAdjustmentActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string bookPath,
@@ -38,4 +47,5 @@ class BookReadingAdjustmentActivity final : public Activity {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
 };

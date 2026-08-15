@@ -82,15 +82,21 @@ class BookContextMenu {
 
   int selectedIndex_ = 0;
 #if FREEINK_DEVICE_X4PRO
-  // Popup rect cached by render() so handleInput() can hit-test screen taps:
-  // a tap outside the popup dismisses the menu, a tap inside is left to the
-  // tap-injected Confirm. Mutable because render() is const. Invalid until the
-  // open menu has been drawn once (no tap can land before that: the opening
-  // contact is suppressed, so the earliest tap is a fresh contact).
+  // Option rows share one height so handleInput can map a tap y to a row.
+  // Must match render()'s row pitch.
+  static constexpr int OPTION_ROW_H = 34;
+  // Popup rect + option-block top cached by render() so handleInput() can
+  // hit-test screen taps: a tap outside the popup dismisses the menu; a tap on
+  // an unselected option row moves the highlight (two-tap); a tap on the
+  // selected row is left to the tap-injected Confirm, which activates it.
+  // Mutable because render() is const. Invalid until the open menu has been
+  // drawn once (no tap can land before that: the opening contact is
+  // suppressed, so the earliest tap is a fresh contact).
   mutable int popupX_ = 0;
   mutable int popupY_ = 0;
   mutable int popupW_ = 0;
   mutable int popupH_ = 0;
+  mutable int optionsTopY_ = 0;
   mutable bool popupRectValid_ = false;
 #endif
   std::string path_;

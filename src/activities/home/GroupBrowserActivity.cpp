@@ -22,6 +22,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 #include "util/WifiTimeSync.h"
 
 namespace {
@@ -486,6 +487,31 @@ void GroupBrowserActivity::dispatchBookAction(BookContextMenu::Action action, co
   }
 }
 
+Rect GroupBrowserActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
+void GroupBrowserActivity::activateSelectedRow() {
+  if (atGroupList()) {
+    if (isFolderRow(selectorIndex)) {
+      selectedGroupIndex = static_cast<int>(selectorIndex);
+      buildGroupBookList();
+      selectorIndex = 0;
+      requestUpdate();
+    } else if (selectorIndex < rootListSize()) {
+      onSelectBook(bookPaths[rootBookIdx[selectorIndex - groups.size()]]);
+    }
+    return;
+  }
+  if (!groupBookIdx.empty() && selectorIndex < groupBookIdx.size()) {
+    onSelectBook(bookPaths[groupBookIdx[selectorIndex]]);
+  }
+}
+
 void GroupBrowserActivity::loop() {
   if (initialLoadPending) return;  // First render performs the load.
 
@@ -542,7 +568,28 @@ void GroupBrowserActivity::loop() {
   // --- Shared: long-press on the selected book opens its context menu ---
   // Skipped while the entry Confirm is still being swallowed (see lockNextConfirmRelease).
   if (!lockNextConfirmRelease) {
-    const std::string path = selectedBookPath();
+    bool touchLongPressOnNonBook = false;
+#if FREEINK_DEVICE_X4PRO
+    // Full Touch: a touch hold points at a row, not the current selector. Move
+    // the selector to the touched book first so contextMenu.checkLongPress —
+    // which reads the same per-frame touch event below and suppresses the
+    // contact — opens the menu for the touched row. A hold on a folder or dead
+    // space opens nothing and is NOT suppressed, so the lift still counts as a
+    // tap (two-tap row selection).
+    if (SETTINGS.fullTouchUi) {
+      int lx, ly;
+      if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
+        const int rowCount = atGroupList() ? static_cast<int>(rootListSize()) : static_cast<int>(groupBookIdx.size());
+        const int index = GUI.hitTestList(listRect(), rowCount, static_cast<int>(selectorIndex), false, lx, ly);
+        if (index >= 0 && !(atGroupList() && isFolderRow(static_cast<size_t>(index)))) {
+          selectorIndex = static_cast<size_t>(index);
+        } else {
+          touchLongPressOnNonBook = true;
+        }
+      }
+    }
+#endif
+    const std::string path = touchLongPressOnNonBook ? std::string{} : selectedBookPath();
     if (!path.empty()) {
       const std::string title = stemOf(path);
       std::string author;
@@ -560,6 +607,25 @@ void GroupBrowserActivity::loop() {
     }
   }
 
+  // Full Touch: only reached with no modal open (the sort menu and context
+  // menu blocks above return first).
+  const int touchRowCount = atGroupList() ? static_cast<int>(rootListSize()) : static_cast<int>(groupBookIdx.size());
+  if (touchRowCount > 0) {
+    int tappedIndex;
+    switch (TouchListNav::tapRow(mappedInput, listRect(), touchRowCount, static_cast<int>(selectorIndex),
+                                 /*hasSubtitle=*/false, tappedIndex)) {
+      case TouchListNav::TapResult::SelectionMoved:
+        selectorIndex = static_cast<size_t>(tappedIndex);
+        requestUpdate();
+        return;
+      case TouchListNav::TapResult::Activated:
+        activateSelectedRow();
+        return;
+      case TouchListNav::TapResult::None:
+        break;
+    }
+  }
+
   // --- Level 0: root list (folders first, then loose books) ---
   if (atGroupList()) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
@@ -568,14 +634,7 @@ void GroupBrowserActivity::loop() {
         return;
       }
       if (contextMenu.consumeLongPressFlag()) return;
-      if (isFolderRow(selectorIndex)) {
-        selectedGroupIndex = static_cast<int>(selectorIndex);
-        buildGroupBookList();
-        selectorIndex = 0;
-        requestUpdate();
-      } else if (selectorIndex < rootListSize()) {
-        onSelectBook(bookPaths[rootBookIdx[selectorIndex - groups.size()]]);
-      }
+      activateSelectedRow();
       return;
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
@@ -606,7 +665,7 @@ void GroupBrowserActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (contextMenu.consumeLongPressFlag()) return;
     if (!groupBookIdx.empty() && selectorIndex < groupBookIdx.size()) {
-      onSelectBook(bookPaths[groupBookIdx[selectorIndex]]);
+      activateSelectedRow();
       return;
     }
   }
@@ -653,7 +712,6 @@ void GroupBrowserActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   const char* headerTitle = atGroupList() ? headerLabel() : groups[selectedGroupIndex].c_str();
@@ -667,18 +725,16 @@ void GroupBrowserActivity::render(RenderLock&&) {
     GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle);
   }
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
-  const Rect listRect{0, contentTop, pageWidth, contentHeight};
+  const Rect contentRect = listRect();
 
   const bool empty = atGroupList() ? (rootListSize() == 0) : groupBookIdx.empty();
   if (empty) {
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, tr(STR_NO_FILES_FOUND));
+    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentRect.y + 20, tr(STR_NO_FILES_FOUND));
   } else if (atGroupList()) {
     // Root list: folders (with a count) first, then the loose ungrouped books (with a file
     // icon and progress), so folders always sort above the loose entries.
     GUI.drawList(
-        renderer, listRect, rootListSize(), selectorIndex,
+        renderer, contentRect, rootListSize(), selectorIndex,
         [this](int index) {
           return isFolderRow(index) ? groups[index] : stemOf(bookPaths[rootBookIdx[index - groups.size()]]);
         },
@@ -704,7 +760,7 @@ void GroupBrowserActivity::render(RenderLock&&) {
         false);
   } else {
     GUI.drawList(
-        renderer, listRect, groupBookIdx.size(), selectorIndex,
+        renderer, contentRect, groupBookIdx.size(), selectorIndex,
         [this](int index) { return stemOf(bookPaths[groupBookIdx[index]]); }, nullptr,
         [this](int index) { return UITheme::getFileIcon(bookPaths[groupBookIdx[index]]); },
         [this](int index) -> std::string {

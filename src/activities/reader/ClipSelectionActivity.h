@@ -34,14 +34,21 @@ struct ClipWordStyle {
 // buffer would OOM alongside the reader's resident section/font caches on the ESP32-C3.
 class ClipSelectionActivity final : public Activity {
  public:
+  // initialCursorIdx/preAnchored implement the Kindle-style entry: a tap-and-hold on a
+  // word in the reader opens this overlay with that word already under the cursor and
+  // anchored, so the selection grows from where the finger landed.
   ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList, int fontId,
-                        Section& section, int startPageInSection, int marginTop, int marginLeft);
+                        Section& section, int startPageInSection, int marginTop, int marginLeft,
+                        int initialCursorIdx = 0, bool preAnchored = false);
 
   void onEnter() override;
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
   bool isReaderActivity() const override { return true; }
+  // Taps pick words here, so the global tap-is-Confirm injection must stay off
+  // (it would anchor or finish the selection at the current cursor instead).
+  bool handlesDirectTouch() const override { return true; }
 
  private:
   WordList wordList;
@@ -62,6 +69,10 @@ class ClipSelectionActivity final : public Activity {
   mutable std::array<std::string, 4> prewarmTextByStyle;
 
   ButtonNavigator buttonNavigator;
+
+  // Anchor at the cursor if unset, then build and return the clipping for the
+  // anchored range. Shared by the Confirm button and the touch finish paths.
+  void finishSelection();
 
   bool renderSelectionPage(int pageIdx);
   void prewarmHighlightedWords() const;

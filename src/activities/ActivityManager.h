@@ -109,6 +109,7 @@ class ActivityManager {
   bool preventAutoSleep() const;
   bool isReaderActivity() const;
   bool consumesTouchInput() const;
+  bool handlesDirectTouch() const;
   bool keepsBluetoothActive() const;
   // Shut the BLE stack down if the current activity does not need it. Called at
   // the transition point so the incoming screen allocates against the recovered

@@ -277,6 +277,8 @@ bool ActivityManager::isReaderActivity() const { return currentActivity && curre
 
 bool ActivityManager::consumesTouchInput() const { return currentActivity && currentActivity->consumesTouchInput(); }
 
+bool ActivityManager::handlesDirectTouch() const { return currentActivity && currentActivity->handlesDirectTouch(); }
+
 bool ActivityManager::keepsBluetoothActive() const {
   return currentActivity && currentActivity->keepsBluetoothActive();
 }

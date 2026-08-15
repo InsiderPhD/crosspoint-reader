@@ -52,6 +52,15 @@ class Activity {
   // sub-screens (menu, chapter select, footnotes) claim reader status for the
   // Bluetooth lifecycle but are plain menus that want the Confirm injections.
   virtual bool consumesTouchInput() const { return false; }
+  // True for activities that hit-test taps against their own drawn UI when
+  // Full Touch mode (SETTINGS.fullTouchUi, X4 Pro) is enabled. The main loop
+  // then disables ONLY the tap-anywhere-is-Confirm injection; the
+  // home-key-tap-is-Confirm injection stays on (these screens have no home-key
+  // geometry of their own). Deliberately separate from consumesTouchInput(),
+  // which kills both. May be dynamic: return false while a modal without tap
+  // hit-testing is open, so tap-activates-the-highlighted-option comes back
+  // for the modal.
+  virtual bool handlesDirectTouch() const { return false; }
   // Bluetooth (BLE page-turner) is only allowed to stay up in activities that
   // actually use it — the reader and the Bluetooth settings screen. Everywhere
   // else the main loop shuts the stack down to return its heap.

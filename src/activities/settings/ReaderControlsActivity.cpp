@@ -8,6 +8,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 namespace {
 // Row layout:
@@ -59,6 +60,22 @@ void ReaderControlsActivity::loop() {
     return;
   }
 
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), kVisibleRows, selectedRow,
+                               /*hasSubtitle=*/false, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedRow = static_cast<uint8_t>(tappedIndex);
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      cycleActionForRow(kRowIds[selectedRow]);
+      isDirty = true;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
+  }
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     cycleActionForRow(kRowIds[selectedRow]);
     isDirty = true;
@@ -77,20 +94,26 @@ void ReaderControlsActivity::loop() {
   });
 }
 
+// List body between the header and the button hints. Shared by render() and
+// the loop()'s tap hit-testing so the two can never disagree.
+Rect ReaderControlsActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int topOffset = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - topOffset - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  return Rect{0, topOffset, renderer.getScreenWidth(), contentHeight};
+}
+
 void ReaderControlsActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
 
   renderer.clearScreen();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READER_CONTROLS));
 
-  const int topOffset = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = pageHeight - topOffset - metrics.buttonHintsHeight - metrics.verticalSpacing;
-
   GUI.drawList(
-      renderer, Rect{0, topOffset, pageWidth, contentHeight}, kVisibleRows, selectedRow,
+      renderer, listRect(), kVisibleRows, selectedRow,
       [this](int index) -> std::string { return getRowTitle(kRowIds[index]); }, nullptr, nullptr,
       [this](int index) -> std::string { return getRowActionName(kRowIds[index]); }, true, nullptr);
 
