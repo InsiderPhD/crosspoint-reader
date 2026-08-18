@@ -18,6 +18,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 namespace {
 constexpr unsigned long GO_HOME_MS = 1000;
@@ -542,6 +543,14 @@ void FileBrowserActivity::loop() {
     selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), listSize);
     requestUpdate();
   });
+
+  // Full Touch: a vertical swipe turns a page, matching the held side key.
+  int swipeIndex = static_cast<int>(selectorIndex);
+  if (TouchListNav::pageSwipe(mappedInput, listSize, pageItems, swipeIndex)) {
+    selectorIndex = static_cast<size_t>(swipeIndex);
+    requestUpdate();
+    return;
+  }
 
   buttonNavigator.onNextContinuous([this, listSize, pageItems] {
     selectorIndex = ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);

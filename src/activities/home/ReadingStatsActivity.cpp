@@ -34,6 +34,7 @@
 #include "fontIds.h"
 #include "util/ReadingStatsAnalytics.h"
 #include "util/TimeUtils.h"
+#include "util/TouchListNav.h"
 
 namespace {
 constexpr unsigned long BOOK_LONG_PRESS_MS = 1000;
@@ -798,6 +799,16 @@ void ReadingStatsActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+#if FREEINK_DEVICE_X4PRO
+    // Full Touch: Back arrives only as the leftward swipe (the X4 Pro has no
+    // front buttons), so it mirrors the rightward swipe — step to the previous
+    // tab, and close only when already on the first one.
+    if (SETTINGS.fullTouchUi && currentPage > 0) {
+      changePage(-1);
+      scrollOffset = 0;  // each tab always opens at the top
+      return;
+    }
+#endif
     finish();
     return;
   }
@@ -816,6 +827,13 @@ void ReadingStatsActivity::loop() {
   // wasTapPoint directly instead of the TouchListNav helper (mirrors
   // SettingsActivity).
   if (SETTINGS.fullTouchUi) {
+    // Swipe right = next tab, wrapping like Confirm-on-the-ribbon does. The
+    // leftward swipe is Back and walks back out through the tabs (above).
+    if (TouchListNav::tabSwipeNext(mappedInput)) {
+      changePage(1);
+      scrollOffset = 0;  // each tab always opens at the top
+      return;
+    }
     int lx, ly;
     // Long tap on a Books-tab row = the hold-Confirm "remove stats entry" for
     // that row. Suppress the contact so the lift doesn't also tap.
@@ -897,6 +915,17 @@ void ReadingStatsActivity::loop() {
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+#if FREEINK_DEVICE_X4PRO
+    // Full Touch handles Back on the RELEASE frame (top of loop) as
+    // previous-tab/close. An injected swipe presses on one frame and releases
+    // on the next, so this press frame runs first and must do nothing at all —
+    // finishing here would close the screen from any tab before the release
+    // intercept ever ran, and the row→ribbon step is not part of the way out
+    // in Full Touch (taps move the cursor; there is nothing to back out of).
+    if (SETTINGS.fullTouchUi) {
+      return;
+    }
+#endif
     if (selectedItemIndex > 0) {
       selectedItemIndex = 0;
       requestUpdate();

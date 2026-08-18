@@ -667,12 +667,16 @@ void loop() {
   const bool directTouch = SETTINGS.fullTouchUi && activityManager.handlesDirectTouch();
   mappedInputManager.setHomeKeyActsAsConfirm(!activityOwnsTouch);
   mappedInputManager.setTapActsAsConfirm(!activityOwnsTouch && !directTouch);
-  // Full Touch keeps only the Back swipe everywhere except the actual reading
-  // screens, whose swipe/tap actions the user configures explicitly in Reader
-  // Controls. Those are the activities that are BOTH isReaderActivity AND
-  // consumesTouchInput — reader sub-screens (menu, chapters, bookmarks) claim
-  // reader status only for the Bluetooth lifecycle and are plain UI, so the
-  // Back-only rule applies to them like any other screen.
+  // Full Touch keeps only the Back swipe as an injected press everywhere except
+  // the actual reading screens, whose swipe/tap actions the user configures
+  // explicitly in Reader Controls. Those are the activities that are BOTH
+  // isReaderActivity AND consumesTouchInput — reader sub-screens (menu,
+  // chapters, bookmarks) claim reader status only for the Bluetooth lifecycle
+  // and are plain UI, so the Back-only rule applies to them like any other
+  // screen. The up/down/right swipes on those screens are recorded rather than
+  // injected: lists that actually paginate turn a page with up/down
+  // (TouchListNav::pageSwipe) and the tabbed screens take the next tab from
+  // right (TouchListNav::tabSwipeNext).
   const bool onReadingScreen = activityManager.isReaderActivity() && activityOwnsTouch;
   mappedInputManager.setSwipesBackOnly(SETTINGS.fullTouchUi && !onReadingScreen);
 #endif

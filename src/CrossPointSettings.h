@@ -287,6 +287,7 @@ class CrossPointSettings {
     READER_ACTION_ROTATE_SCREEN = 20,
     READER_ACTION_CREATE_CLIPPING = 21,
     READER_ACTION_TOGGLE_BLUETOOTH = 22,
+    READER_ACTION_HIDE_STATUS_BAR = 23,
     READER_ACTION_COUNT
   };
 
@@ -358,6 +359,10 @@ class CrossPointSettings {
   // Bluetooth remote state: reports Down (stack off) / Up (on, no remote linked)
   // / Connected. Hidden by default — opt-in for page-turner users.
   uint8_t statusBarBluetoothPos = SB_POS_HIDE;
+  // Master hide toggled by READER_ACTION_HIDE_STATUS_BAR. Layout still reserves
+  // the bar's strip so the section cache stays valid; readers skip drawing the
+  // bar and the EPUB reader re-centres the page in the freed space at draw time.
+  uint8_t statusBarHidden = 0;
   // Extra empty pixels reserved above the status bar (between body text and the
   // bar). 0 = classic layout; capped at STATUS_BAR_TOP_MARGIN_MAX.
   static constexpr uint8_t STATUS_BAR_TOP_MARGIN_MAX = 20;
@@ -513,10 +518,25 @@ class CrossPointSettings {
   uint8_t readerTapLeft = READER_ACTION_PAGE_BACK;
   uint8_t readerTapMiddle = READER_ACTION_OPEN_MENU;
   uint8_t readerTapRight = READER_ACTION_PAGE_FORWARD;
+  // Touch hold (long-press) zone actions. Default Clip everywhere so the
+  // historical "hold anywhere starts a clipping" gesture is preserved.
+  uint8_t readerHoldLeft = READER_ACTION_CREATE_CLIPPING;
+  uint8_t readerHoldMiddle = READER_ACTION_CREATE_CLIPPING;
+  uint8_t readerHoldRight = READER_ACTION_CREATE_CLIPPING;
   uint8_t readerShortPressHome = READER_ACTION_GO_HOME;
-  uint8_t readerLongPressHome = READER_ACTION_SLEEP;
+  uint8_t readerLongPressHome = READER_ACTION_OPEN_MENU;
   // Migration flag: 0 = old settings not yet applied to new per-button fields.
   uint8_t readerActionsMigrated = 0;
+
+  // Home-key hold is hard-wired to the reader menu: with every other slot
+  // remappable, the menu (and its Go Home row) must stay reachable from at
+  // least one binding, or a stray remap strands the user inside a book.
+  // A Dev Mode override (`devMode ? readerLongPressHome : ...`) is deliberately
+  // NOT enabled yet: a stale stored slot would strand a dev-mode device the
+  // same way. Re-enable once the raw slot is migrated/validated.
+  uint8_t effectiveReaderLongPressHome() const {
+    return static_cast<uint8_t>(READER_ACTION_OPEN_MENU);
+  }
 
   ~CrossPointSettings() = default;
 

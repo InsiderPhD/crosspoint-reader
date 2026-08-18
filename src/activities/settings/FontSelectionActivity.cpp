@@ -76,6 +76,13 @@ void FontSelectionActivity::loop() {
       break;
   }
 
+  // Full Touch: a vertical swipe turns a page, matching the held side key.
+  const int pageItems = GUI.listGeometry(listRect(), selectedIndex_, /*hasSubtitle=*/false).pageItems;
+  if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(fonts_.size()), pageItems, selectedIndex_)) {
+    requestUpdate();
+    return;
+  }
+
   buttonNavigator_.onNextRelease([this] {
     selectedIndex_ = ButtonNavigator::nextIndex(selectedIndex_, static_cast<int>(fonts_.size()));
     requestUpdate();

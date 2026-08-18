@@ -18,6 +18,7 @@
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
 #include "util/StringUtils.h"
+#include "util/TouchListNav.h"
 #include "util/UrlUtils.h"
 
 namespace {
@@ -152,6 +153,11 @@ void OpdsBookBrowserActivity::loop() {
         selectorIndex = ButtonNavigator::previousIndex(selectorIndex, entries.size());
         requestUpdate();
       });
+      // Full Touch: a vertical swipe turns a page, matching the held side key.
+      if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(entries.size()), PAGE_ITEMS, selectorIndex)) {
+        requestUpdate();
+        return;
+      }
       buttonNavigator.onNextContinuous([this] {
         selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, entries.size(), PAGE_ITEMS);
         requestUpdate();

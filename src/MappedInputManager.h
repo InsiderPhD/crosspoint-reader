@@ -39,8 +39,23 @@ class MappedInputManager {
   // everything except the Back swipe: taps do the selecting/activating there,
   // and a sloppy tap classified as a swipe must not act invisibly. The main
   // loop keeps this false inside reader activities so their configured swipe
-  // actions keep working unchanged.
+  // actions keep working unchanged. Up/down/right swipes are not injected but
+  // are recorded for wasSwipe() so screens can give them a meaning of their own.
   void setSwipesBackOnly(bool enabled) { swipesBackOnly = enabled; }
+
+  // Swipe recorded this frame, and only while swipesBackOnly is on (i.e. Full
+  // Touch mode outside the reading screens). Nothing was injected for it, so a
+  // consumer is free to give it a meaning of its own: paginated lists turn
+  // Up/Down into a whole-page jump (TouchListNav::pageSwipe) and the tabbed
+  // screens turn Right into "next tab" (TouchListNav::tabSwipeNext).
+  //
+  // Left is deliberately absent: it is still INJECTED as Back, because it is
+  // the only Back the X4 Pro has (no front buttons). A screen that wants the
+  // left swipe reads the Back press instead — see SettingsActivity's Back
+  // handler, which steps to the previous tab there rather than closing.
+  // Cleared at the start of every update().
+  enum class Swipe : uint8_t { None, Up, Down, Right };
+  Swipe wasSwipe() const { return swipe; }
 
   // Completed screen tap this frame, classified into left/middle/right thirds
   // of the logical screen. None while a home-key event fires (a bar contact
@@ -59,6 +74,12 @@ class MappedInputManager {
   // that acts on this MUST call suppressTouchContact() or the same key
   // double-dispatches.
   bool wasTouchLongPressPoint(int& lx, int& ly) const;
+
+  // Long-press analogue of wasTapZone(): the same event as
+  // wasTouchLongPressPoint(), classified into the same left/middle/right
+  // thirds. The point out-params let a consumer that needs the exact spot
+  // (clip selection) keep it. Same suppressTouchContact() obligation.
+  TapZone wasTouchLongPressZone(int& lx, int& ly) const;
 
   // Drop the remainder of the current contact after consuming a gesture.
   void suppressTouchContact() const { gpio.suppressTouchContact(); }
@@ -95,6 +116,9 @@ class MappedInputManager {
   bool homeKeyActsAsConfirm = true;
   bool tapActsAsConfirm = true;
   bool swipesBackOnly = false;
+  // Written by the const processTouchInput(); the injected presses live in gpio
+  // so this is the only piece of per-frame touch state the manager itself owns.
+  mutable Swipe swipe = Swipe::None;
 
   // A touch point mapped into the logical frame, carried with the logical
   // screen size so callers can classify against it without re-deriving it.

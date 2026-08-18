@@ -8,6 +8,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 // Top edge of the first row's highlight band. Mirrors render()'s
 // fillRect(..., 60 + contentY + row * 30 - 2, ..., 30): the band starts 2px
@@ -120,6 +121,12 @@ void XtcReaderChapterSelectionActivity::loop() {
     selectorIndex = ButtonNavigator::previousIndex(selectorIndex, totalItems);
     requestUpdate();
   });
+
+  // Full Touch: a vertical swipe turns a page, matching the held side key.
+  if (TouchListNav::pageSwipe(mappedInput, totalItems, pageItems, selectorIndex)) {
+    requestUpdate();
+    return;
+  }
 
   buttonNavigator.onNextContinuous([this, totalItems, pageItems] {
     selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, totalItems, pageItems);

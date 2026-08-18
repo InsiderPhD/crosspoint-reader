@@ -616,6 +616,11 @@ void BookFusionBrowserActivity::loop() {
       selectedCategory = ButtonNavigator::previousIndex(selectedCategory, total);
       requestUpdate();
     });
+    // Full Touch: a vertical swipe turns a page, matching the held side key.
+    if (TouchListNav::pageSwipe(mappedInput, total, pageItems, selectedCategory)) {
+      requestUpdate();
+      return;
+    }
     buttonNavigator.onNextContinuous([this, total, pageItems] {
       selectedCategory = ButtonNavigator::nextPageIndex(selectedCategory, total, pageItems);
       requestUpdate();

@@ -695,14 +695,24 @@ void EpubReaderActivity::loop() {
   }
 
 #if FREEINK_DEVICE_X4PRO
-  // ── Tap and hold on a word starts a clipping (Kindle-style) ───────────────
+  // ── Tap-and-hold zones (configurable; default Clip in every zone) ─────────
   // Runs before the tap zones: a hold fires while the finger is still down, and
   // suppressing the contact stops the lift from also firing a tap-zone action.
   {
     int holdX, holdY;
-    if (mappedInput.wasTouchLongPressPoint(holdX, holdY)) {
+    const auto holdZone = mappedInput.wasTouchLongPressZone(holdX, holdY);
+    if (holdZone != MappedInputManager::TapZone::None) {
       mappedInput.suppressTouchContact();
-      startClipSelection(holdX, holdY);
+      uint8_t holdSetting = SETTINGS.readerHoldMiddle;
+      if (holdZone == MappedInputManager::TapZone::Left) holdSetting = SETTINGS.readerHoldLeft;
+      if (holdZone == MappedInputManager::TapZone::Right) holdSetting = SETTINGS.readerHoldRight;
+      const auto holdAction = static_cast<CrossPointSettings::READER_ACTION>(holdSetting);
+      if (holdAction == CrossPointSettings::READER_ACTION_CREATE_CLIPPING) {
+        // Keep the Kindle-style word-precise anchor the generic action lacks.
+        startClipSelection(holdX, holdY);
+      } else {
+        executeReaderAction(holdAction);
+      }
       return;
     }
   }
@@ -722,7 +732,9 @@ void EpubReaderActivity::loop() {
       break;
   }
   if (mappedInput.wasHomeKeyLongPressed()) {
-    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressHome))) return;
+    if (executeReaderAction(
+            static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.effectiveReaderLongPressHome())))
+      return;
   } else if (mappedInput.wasHomeKeyTapped()) {
     if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressHome))) return;
   }
@@ -1079,6 +1091,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       onGoHome();
       return;
     }
+    case EpubReaderMenuActivity::MenuAction::DARK_MODE:
+      executeReaderAction(CrossPointSettings::READER_ACTION_DARK_MODE);
+      break;
     case EpubReaderMenuActivity::MenuAction::SCREENSHOT: {
       {
         RenderLock lock(*this);
@@ -1540,6 +1555,16 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
                  static_cast<uint8_t>(statusBarHeight + UITheme::getInstance().getMetrics().statusBarVerticalMargin));
   } else {
     orientedMarginBottom += std::max(SETTINGS.screenMargin, statusBarHeight);
+  }
+
+  // Status bar hidden via READER_ACTION_HIDE_STATUS_BAR: pagination must not
+  // change (top+bottom sum — and therefore the viewport/section-cache key —
+  // stays identical), so move half the strip the bar would have used from the
+  // bottom margin to the top, re-centring the text block in the freed space.
+  if (SETTINGS.statusBarHidden && statusBarHeight > SETTINGS.screenMargin) {
+    const int shift = (statusBarHeight - SETTINGS.screenMargin) / 2;
+    orientedMarginTop += shift;
+    orientedMarginBottom -= shift;
   }
 
   // Reserve space for the button-hint widgets so text never runs under them. The widgets
@@ -2236,7 +2261,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // a BLE clicker feel dead on image pages — its one-shot press pulses collapse or
   // debounce away while the render task churns. Blank image => render like plain
   // text, and page turns stay responsive.
-  bool imagePageWithAA = page->hasImages() && SETTINGS.textAntiAliasing && !renderer.areImagesSuppressed();
+  // Also skipped in dark mode: the grayscale pass this dance prepares for is skipped
+  // there, and the intermediate display + re-render on the inverted framebuffer would
+  // cancel out to a blank page (text and background both end up white).
+  bool imagePageWithAA =
+      page->hasImages() && SETTINGS.textAntiAliasing && !SETTINGS.darkMode && !renderer.areImagesSuppressed();
 
   page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
   if (ReaderUtils::footnotesOnPage())
@@ -2411,13 +2440,27 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 }
 
 void EpubReaderActivity::renderStatusBar() const {
+  using CPS = CrossPointSettings;
+
+  // Hints render in every orientation, but the reserved layout space only lines up in
+  // portrait (the widgets draw in portrait coords). In landscape/inverted the hints
+  // overlay the edge (read sideways) and no space is reserved.
+  const bool hintsActive = SETTINGS.showButtonHints != CPS::BUTTON_HINTS_OFF;
+  const bool hintsReserved = hintsActive && SETTINGS.orientation == CPS::PORTRAIT;
+
+  // Master hide (reader shortcut): skip the whole bar — including the
+  // auto-page-turn banner it hosts — but keep the footnote/button-hint tail
+  // below, which draws independently of the bar.
+  if (SETTINGS.statusBarHidden) {
+    renderStatusBarTail(hintsActive);
+    return;
+  }
+
   // Calculate progress in book
   const int currentPage = section->currentPage + 1;
   const float pageCount = section->pageCount;
   const float sectionChapterProg = (pageCount > 0) ? (static_cast<float>(currentPage) / pageCount) : 0;
   const float bookProgress = epub->calculateProgress(currentSpineIndex, sectionChapterProg) * 100;
-
-  using CPS = CrossPointSettings;
 
   // Auto page-turn banner replaces the titles in the centre cluster while active.
   std::string centerOverride;
@@ -2487,17 +2530,17 @@ void EpubReaderActivity::renderStatusBar() const {
     }
   }
 
-  // Hints render in every orientation, but the reserved layout space only lines up in
-  // portrait (the widgets draw in portrait coords). In landscape/inverted the hints
-  // overlay the edge (read sideways) and no space is reserved.
-  const bool hintsActive = SETTINGS.showButtonHints != CPS::BUTTON_HINTS_OFF;
-  const bool hintsReserved = hintsActive && SETTINGS.orientation == CPS::PORTRAIT;
-
   // When space is reserved for the hint bar, lift the status bar above it.
   const int statusPaddingBottom = hintsReserved ? UITheme::getInstance().getMetrics().buttonHintsHeight : 0;
   GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, bookTitle, chapterTitle, chapterTimeLeftSeconds,
                     bookTimeLeftSeconds, isCurrentPageBookmarked(), statusPaddingBottom, textYOffset, centerOverride);
 
+  renderStatusBarTail(hintsActive);
+}
+
+// Footnote-return hint / button hints strip below the bar; drawn whether or
+// not the status bar itself is shown.
+void EpubReaderActivity::renderStatusBarTail(const bool hintsActive) const {
   if (footnoteDepth > 0) {
     int ot, or_, ob, ol;
     renderer.getOrientedViewableTRBL(&ot, &or_, &ob, &ol);
@@ -2772,6 +2815,8 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
     case A::READER_ACTION_DARK_MODE:
       SETTINGS.darkMode = !SETTINGS.darkMode;
       SETTINGS.saveToFile();
+      // Every pixel flips polarity; a differential fast refresh would ghost badly.
+      pagesUntilFullRefresh = 1;
       requestUpdate();
       return false;
 
@@ -2847,6 +2892,18 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
     case A::READER_ACTION_ROTATE_SCREEN:
       // Cycle Portrait -> Landscape CW -> Inverted -> Landscape CCW -> ...
       applyOrientation((SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT);
+      requestUpdate();
+      return false;
+
+    case A::READER_ACTION_HIDE_STATUS_BAR:
+      // No reflow: pagination keeps reserving the bar's strip and the page is
+      // merely re-centred at draw time (see computeOrientedMargins), so the
+      // section cache and line breaks are untouched.
+      SETTINGS.statusBarHidden = !SETTINGS.statusBarHidden;
+      SETTINGS.saveToFile();
+      // The whole text block shifts vertically; a differential fast refresh
+      // would ghost the old position.
+      pagesUntilFullRefresh = 1;
       requestUpdate();
       return false;
 

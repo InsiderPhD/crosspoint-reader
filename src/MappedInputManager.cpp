@@ -97,6 +97,10 @@ uint8_t MappedInputManager::getPhysicalButtonIndex(const Button button) const {
 
 #if FREEINK_DEVICE_X4PRO
 void MappedInputManager::processTouchInput() const {
+  // Cleared before any early return, or a swipe recorded on one frame would
+  // still be reported as fresh on the next.
+  swipe = Swipe::None;
+
   // Home key first: a bar contact also reports as an edge screen tap, so drop
   // the rest of the contact the moment a home-key event fires (the GT911 raises
   // it before the finger lifts) — otherwise the lift would double-dispatch as a
@@ -166,12 +170,27 @@ void MappedInputManager::processTouchInput() const {
   }
 
   // Full Touch mode outside the readers: taps do the selecting and activating,
-  // so swipe-Confirm/Up/Down are redundant — and a sloppy tap that the panel
-  // classifies as a swipe must not silently activate or move the cursor. Only
-  // the Back swipe survives; list paging stays on the physical side keys. The
-  // readers keep all swipes (flag driven from the main loop).
+  // so swipe-Confirm/Up/Down are wrong as button injections — a sloppy tap that
+  // the panel classifies as a swipe must not silently activate a row or move
+  // the cursor by one. Only the Back swipe is still injected (it is the X4
+  // Pro's only Back). The other three are RECORDED instead: screens read them
+  // via wasSwipe() and give them a page/tab meaning of their own (see
+  // TouchListNav::pageSwipe and ::tabSwipeNext); screens that don't poll simply
+  // ignore them. The readers keep all swipes as injections (flag driven from
+  // the main loop).
   if (swipesBackOnly && idx != HalGPIO::BTN_BACK) {
-    LOG_DBG("INPUT", "Swipe logical=(%d,%d) dropped (Full Touch keeps Back only)", ldx, ldy);
+    switch (idx) {
+      case HalGPIO::BTN_LEFT:
+        swipe = Swipe::Up;
+        break;
+      case HalGPIO::BTN_RIGHT:
+        swipe = Swipe::Down;
+        break;
+      default:
+        swipe = Swipe::Right;  // BTN_CONFIRM: the rightward swipe
+        break;
+    }
+    LOG_DBG("INPUT", "Swipe logical=(%d,%d) -> Full Touch gesture %u", ldx, ldy, static_cast<unsigned>(swipe));
     return;
   }
   LOG_DBG("INPUT", "Swipe cal=(%d,%d) logical=(%d,%d) -> btn %u", dcx, dcy, ldx, ldy, idx);
@@ -273,6 +292,21 @@ MappedInputManager::TapZone MappedInputManager::wasTapZone() const {
                                                   : TapZone::Middle;
   LOG_DBG("INPUT", "Tap logical=(%d,%d)/%d -> zone %u", p.x, p.y, p.width, static_cast<unsigned>(zone));
   return zone;
+}
+
+MappedInputManager::TapZone MappedInputManager::wasTouchLongPressZone(int& lx, int& ly) const {
+  if (gpio.wasHomeKeyTapped() || gpio.wasHomeKeyLongPressed()) {
+    return TapZone::None;
+  }
+  float nx, ny;
+  if (!gpio.wasTouchLongPress(nx, ny)) {
+    return TapZone::None;
+  }
+  const LogicalTouchPoint p = toLogicalPoint(nx, ny);
+  lx = p.x;
+  ly = p.y;
+  // Same thirds classification as wasTapZone().
+  return (p.x < p.width / 3) ? TapZone::Left : (p.x >= 2 * p.width / 3) ? TapZone::Right : TapZone::Middle;
 }
 #endif
 

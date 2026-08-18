@@ -18,6 +18,7 @@ class EpubReaderMenuActivity final : public Activity {
     AUTO_PAGE_TURN,
     ROTATE_SCREEN,
     BUTTON_HINTS,
+    DARK_MODE,
     FRONTLIGHT_BRIGHTNESS,
     FRONTLIGHT_WARMTH,
     FONT_LAYOUT,
@@ -60,6 +61,10 @@ class EpubReaderMenuActivity final : public Activity {
   // Shared by render() and the Full Touch tap hit-testing in loop().
   static constexpr int MENU_ROW_H = 30;
   int menuTopY() const;
+  // Rows that fit between menuTopY() and the bottom of the usable area. The
+  // list pages by this window (render, tap hit-testing, and swipe paging all
+  // derive from it, so they can never disagree).
+  int visibleMenuRows() const;
   // The Confirm action for the selected row (in-place cycling rows cycle;
   // everything else closes the menu with a MenuResult). Also fired by a Full
   // Touch tap on the selected row.

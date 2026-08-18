@@ -650,6 +650,13 @@ void GroupBrowserActivity::loop() {
       selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), listSize);
       requestUpdate();
     });
+    // Full Touch: a vertical swipe turns a page, matching the held side key.
+    int swipeIndex = static_cast<int>(selectorIndex);
+    if (TouchListNav::pageSwipe(mappedInput, listSize, pageItems, swipeIndex)) {
+      selectorIndex = static_cast<size_t>(swipeIndex);
+      requestUpdate();
+      return;
+    }
     buttonNavigator.onNextContinuous([this, listSize, pageItems] {
       selectorIndex = ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
       requestUpdate();
@@ -688,6 +695,13 @@ void GroupBrowserActivity::loop() {
     selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), listSize);
     requestUpdate();
   });
+  // Full Touch: a vertical swipe turns a page, matching the held side key.
+  int swipeIndex = static_cast<int>(selectorIndex);
+  if (TouchListNav::pageSwipe(mappedInput, listSize, pageItems, swipeIndex)) {
+    selectorIndex = static_cast<size_t>(swipeIndex);
+    requestUpdate();
+    return;
+  }
   buttonNavigator.onNextContinuous([this, listSize, pageItems] {
     selectorIndex = ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), listSize, pageItems);
     requestUpdate();

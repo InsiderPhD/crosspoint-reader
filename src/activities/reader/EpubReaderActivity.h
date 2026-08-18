@@ -83,6 +83,8 @@ class EpubReaderActivity final : public Activity {
   void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
                       int orientedMarginBottom, int orientedMarginLeft);
   void renderStatusBar() const;
+  // Footnote-return hint / button-hint strip; drawn even when the bar is hidden.
+  void renderStatusBarTail(bool hintsActive) const;
   // Draws the optional button hints (themed front-button bar + Up/Down side boxes) showing
   // each button's mapped reader action, when SETTINGS.showButtonHints is enabled.
   void renderButtonHints() const;

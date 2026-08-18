@@ -433,6 +433,10 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                SettingInfo::Enum(StrId::STR_BLUETOOTH, &CrossPointSettings::statusBarBluetoothPos,
                                  {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                  "statusBarBluetoothPos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               // Master hide, toggled from the reader via READER_ACTION_HIDE_STATUS_BAR;
+               // listed here so it persists and is visible/reversible from the web UI.
+               SettingInfo::Toggle(StrId::STR_HIDE_STATUS_BAR, &CrossPointSettings::statusBarHidden, "statusBarHidden",
+                                   StrId::STR_CUSTOMISE_STATUS_BAR),
                SettingInfo::Enum(StrId::STR_PROGRESS_BAR, &CrossPointSettings::statusBarProgressBar,
                                  {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE}, "statusBarProgressBar",
                                  StrId::STR_CUSTOMISE_STATUS_BAR),

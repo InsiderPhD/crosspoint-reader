@@ -1,6 +1,8 @@
 #include "HalPowerManager.h"
 
+#include <BoardConfig.h>
 #include <Logging.h>
+#include <PowerManager.h>
 #include <WiFi.h>
 #include <driver/gpio.h>
 #include <esp_bt.h>
@@ -100,13 +102,41 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
     gpio.update();
   }
 
-#if !FREEINK_DEVICE_X4PRO
+#if FREEINK_DEVICE_X4PRO
+  // No battery-disconnect latch on this board (GPIO13 is the display CS line —
+  // see the X3/X4 branch below), so every gated peripheral must be cut
+  // individually or it stays powered all through deep sleep: the GT911 touch
+  // rail (GPIO2, active-LOW) and the SD card enable (GPIO5, active-LOW) alone
+  // are milliamps of standby drain. powerDownRailsForSleep() drives each
+  // assigned rail enable to its OFF level and latches it with gpio_hold_en();
+  // the boot/init paths (holdPowerRails, InputManager, SdmmcBlockDevice,
+  // EpdBus) all gpio_hold_dis before re-driving those pins after the wake
+  // reset. Cutting the touch rail forfeits touch-to-wake — fine here, wake is
+  // the power button via ext1 below.
+  freeink::PowerManager::powerDownRailsForSleep();
+
+  // The master peripheral rail (power.latch0, GPIO1) stays ON but must be
+  // latched: an unheld output goes high-Z in deep sleep and would leave the
+  // rail switch floating half-on. Keeping it up costs only µA — behind it sit
+  // the BM8563 RTC, which keeps the wall clock through sleep, and the panel,
+  // already commanded into DSLP (display.deepSleep()) with its RESET held HIGH
+  // by powerDownRailsForSleep() so it cannot drift back out.
+  const int8_t latch0 = BoardConfig::ACTIVE.power.latch0;
+  if (latch0 >= 0) {
+    const auto latchGpio = static_cast<gpio_num_t>(latch0);
+    gpio_hold_dis(latchGpio);
+    gpio_set_direction(latchGpio, GPIO_MODE_OUTPUT);
+    gpio_set_level(latchGpio, 1);
+    gpio_hold_en(latchGpio);
+  }
+
+  // Isolate floating GPIOs and make the rail holds persist through deep sleep.
+  esp_sleep_config_gpio_isolate();
+  gpio_deep_sleep_hold_en();
+#else
   // Drive GPIO13 (SPIWP) LOW to disconnect the battery via the hardware protection circuit.
   // On battery power this triggers a full MCU shutdown; the power button is a hardware wake trigger.
   // On USB power, the software GPIO wakeup below still applies.
-  // X4 PRO: deliberately skipped. This latch is an X3/X4 board feature, and on the
-  // X4 Pro GPIO13 is the display CS line — driving it low and holding it through
-  // deep sleep would clamp chip select, not disconnect the battery.
   gpio_set_direction(GPIO_SPIWP, GPIO_MODE_OUTPUT);
   gpio_set_level(GPIO_SPIWP, 0);
 

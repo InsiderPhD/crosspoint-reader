@@ -33,9 +33,10 @@ constexpr uint8_t kFixedRow = 13;
 // X4 Pro: rows 0/2/4/6 configure the four screen swipes (left/right/up/down
 // reuse the Back/Confirm/Left/Right short-press action slots). A swipe cannot
 // be long-pressed, so the corresponding long-press rows are hidden. Rows 14-16
-// are the screen tap zones, 17/18 the home key tap and long press; the side
-// keys and Power keep their short/long pairs.
-constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 14, 15, 16, 17, 18, 8, 9, 10, 11, 12, 13};
+// are the screen tap zones with 19-21 their hold (long-press) variants shown
+// as tap/hold pairs, 17/18 the home key tap and long press; the side keys and
+// Power keep their short/long pairs.
+constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 14, 19, 15, 20, 16, 21, 17, 18, 8, 9, 10, 11, 12, 13};
 #else
 constexpr uint8_t kRowIds[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
 #endif
@@ -79,6 +80,15 @@ void ReaderControlsActivity::loop() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     cycleActionForRow(kRowIds[selectedRow]);
     isDirty = true;
+    requestUpdate();
+    return;
+  }
+
+  // Full Touch: a vertical swipe turns a page, matching the held side key.
+  const int pageItems = GUI.listGeometry(listRect(), selectedRow, /*hasSubtitle=*/false).pageItems;
+  int swipeIndex = selectedRow;
+  if (TouchListNav::pageSwipe(mappedInput, kVisibleRows, pageItems, swipeIndex)) {
+    selectedRow = static_cast<uint8_t>(swipeIndex);
     requestUpdate();
     return;
   }
@@ -135,6 +145,12 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
       return tr(STR_TAP_MIDDLE);
     case 16:
       return tr(STR_TAP_RIGHT);
+    case 19:
+      return tr(STR_HOLD_LEFT);
+    case 20:
+      return tr(STR_HOLD_MIDDLE);
+    case 21:
+      return tr(STR_HOLD_RIGHT);
     case 17:
       snprintf(buf, sizeof(buf), "%s %s", tr(STR_HOME_BUTTON), tr(STR_SHORT_PRESS));
       return buf;
@@ -213,6 +229,11 @@ const char* ReaderControlsActivity::getRowActionName(const uint8_t row) const {
     // Power long press is always sleep; show with Fixed indicator.
     return tr(STR_SLEEP);
   }
+  if (row == 18) {
+    // Home hold is hard-wired to the reader menu (see
+    // CrossPointSettings::effectiveReaderLongPressHome).
+    return tr(STR_READER_ACTION_OPEN_MENU);
+  }
   const auto action = getActionForRow(row);
   return actionName(action);
 }
@@ -244,13 +265,15 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
     case CrossPointSettings::READER_ACTION_FORCE_REFRESH:
       return tr(STR_REFRESH);
     case CrossPointSettings::READER_ACTION_DARK_MODE:
-      return tr(STR_READER_DARK_MODE);
+      // Short variant; settings/menu keep the full STR_READER_DARK_MODE wording.
+      return tr(STR_READER_ACTION_DARK_MODE);
     case CrossPointSettings::READER_ACTION_SCREENSHOT:
       return tr(STR_READER_ACTION_SCREENSHOT);
     case CrossPointSettings::READER_ACTION_MARK_FINISHED:
       return tr(STR_READER_ACTION_MARK_FINISHED);
     case CrossPointSettings::READER_ACTION_FOOTNOTES:
-      return tr(STR_FOOTNOTES);
+      // Short variant; the reader menu keeps the full STR_FOOTNOTES wording.
+      return tr(STR_READER_ACTION_FOOTNOTES);
     case CrossPointSettings::READER_ACTION_AUTO_PAGE_TURN:
       return tr(STR_READER_ACTION_AUTO_PAGE_TURN);
     case CrossPointSettings::READER_ACTION_READING_STATS:
@@ -264,7 +287,11 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
     case CrossPointSettings::READER_ACTION_CREATE_CLIPPING:
       return tr(STR_READER_ACTION_CREATE_CLIPPING);
     case CrossPointSettings::READER_ACTION_TOGGLE_BLUETOOTH:
-      return tr(STR_BT_REMOTE_TOGGLE);
+      // Deliberately short (like the other action labels); the reader menu row
+      // keeps the full STR_BT_REMOTE_TOGGLE wording.
+      return tr(STR_READER_ACTION_BLUETOOTH);
+    case CrossPointSettings::READER_ACTION_HIDE_STATUS_BAR:
+      return tr(STR_READER_ACTION_STATUS_BAR);
     default:
       return tr(STR_NONE_OPT);
   }
@@ -311,6 +338,12 @@ CrossPointSettings::READER_ACTION ReaderControlsActivity::getActionForRow(const 
       return static_cast<A>(SETTINGS.readerShortPressHome);
     case 18:
       return static_cast<A>(SETTINGS.readerLongPressHome);
+    case 19:
+      return static_cast<A>(SETTINGS.readerHoldLeft);
+    case 20:
+      return static_cast<A>(SETTINGS.readerHoldMiddle);
+    case 21:
+      return static_cast<A>(SETTINGS.readerHoldRight);
     default:
       return CrossPointSettings::READER_ACTION_NONE;
   }
@@ -379,7 +412,18 @@ void ReaderControlsActivity::cycleActionForRow(const uint8_t row) {
       advance(SETTINGS.readerShortPressHome);
       break;
     case 18:
-      advance(SETTINGS.readerLongPressHome);
+      // Hard-wired to Open Menu: the menu is the only guaranteed route to Go
+      // Home once every other slot is remappable. (Dev-mode override parked —
+      // see CrossPointSettings::effectiveReaderLongPressHome.)
+      break;
+    case 19:
+      advance(SETTINGS.readerHoldLeft);
+      break;
+    case 20:
+      advance(SETTINGS.readerHoldMiddle);
+      break;
+    case 21:
+      advance(SETTINGS.readerHoldRight);
       break;
     default:
       break;

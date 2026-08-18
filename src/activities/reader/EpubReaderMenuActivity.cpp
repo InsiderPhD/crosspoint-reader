@@ -8,6 +8,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "util/TouchListNav.h"
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -35,13 +36,14 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
 
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes) {
   std::vector<MenuItem> items;
-  items.reserve(21);  // 9 fixed + footnotes + frontlight + bookmarks/clippings/autosync+sync + 2 dev-mode items
+  items.reserve(23);  // 10 fixed + footnotes + frontlight + bookmarks/clippings/autosync+sync + 2 dev-mode items
   items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
   if (hasFootnotes) {
     items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
   }
   items.push_back({MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION});
   items.push_back({MenuAction::BUTTON_HINTS, StrId::STR_SHOW_BUTTON_HINTS});
+  items.push_back({MenuAction::DARK_MODE, StrId::STR_READER_DARK_MODE});
 #if FREEINK_CAP_FRONTLIGHT
   // Frontlight rows (X4 Pro): cycle in place and light the panel immediately.
   if (halFrontlight.present()) {
@@ -160,14 +162,25 @@ void EpubReaderMenuActivity::loop() {
   });
 
 #if FREEINK_DEVICE_X4PRO
+  // Full Touch: a vertical swipe turns a page of the menu, same as the
+  // paginated list screens (inert while the whole menu fits on one page).
+  if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(menuItems.size()), visibleMenuRows(), selectedIndex)) {
+    requestUpdate();
+    return;
+  }
+
   // Full Touch: first tap on a row moves the cursor; a second tap on the
   // selected row runs its Confirm action (cycling rows cycle in place).
   if (SETTINGS.fullTouchUi) {
     int lx, ly;
     if (mappedInput.wasTapPoint(lx, ly)) {
       const int top = menuTopY();
-      const int row = (ly - top) / MENU_ROW_H;
-      if (ly >= top && row >= 0 && row < static_cast<int>(menuItems.size())) {
+      const int rowsPerPage = visibleMenuRows();
+      const int rowInPage = (ly - top) / MENU_ROW_H;
+      // Taps address the drawn window: offset by the page the selection is on
+      // (the same window render() draws, so paint and touch cannot disagree).
+      const int row = selectedIndex / rowsPerPage * rowsPerPage + rowInPage;
+      if (ly >= top && rowInPage >= 0 && rowInPage < rowsPerPage && row < static_cast<int>(menuItems.size())) {
         if (row != selectedIndex) {
           selectedIndex = row;
           requestUpdate();
@@ -210,6 +223,17 @@ int EpubReaderMenuActivity::menuTopY() const {
   const int summaryY = 45 + contentY;
   const int statusY = summaryY + summaryLineHeight + 2;
   return statusY + summaryLineHeight + 10;
+}
+
+int EpubReaderMenuActivity::visibleMenuRows() const {
+  // Mirrors render()'s vertical layout: the hint bar occupies the bottom edge
+  // only in upright portrait — landscape puts hints in a side gutter and
+  // inverted portrait reserves the top inside menuTopY().
+  const int bottomReserve = renderer.getOrientation() == GfxRenderer::Orientation::Portrait
+                                ? UITheme::getInstance().getMetrics().buttonHintsHeight
+                                : 0;
+  const int usable = renderer.getScreenHeight() - menuTopY() - bottomReserve;
+  return usable >= MENU_ROW_H ? usable / MENU_ROW_H : 1;
 }
 
 void EpubReaderMenuActivity::render(RenderLock&&) {
@@ -307,12 +331,28 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   renderer.drawCenteredText(UI_10_FONT_ID, statusY, statusLine.c_str());
 
   // Menu Items (menuTopY() == statusY + summaryLineHeight + 10; shared with
-  // the tap hit-testing so paint and touch can never disagree)
+  // the tap hit-testing so paint and touch can never disagree). The list pages
+  // by visibleMenuRows(): the window containing the selection is drawn, and
+  // Up/Down wrap (or a Full Touch vertical swipe) walks through the pages.
   const int startY = menuTopY();
   constexpr int lineHeight = MENU_ROW_H;
+  const int rowsPerPage = visibleMenuRows();
+  const size_t pageStart = static_cast<size_t>(selectedIndex / rowsPerPage * rowsPerPage);
+  const size_t pageEnd =
+      menuItems.size() < pageStart + rowsPerPage ? menuItems.size() : pageStart + rowsPerPage;
 
-  for (size_t i = 0; i < menuItems.size(); ++i) {
-    const int displayY = startY + (i * lineHeight);
+  if (menuItems.size() > static_cast<size_t>(rowsPerPage)) {
+    // Page indicator, right-aligned on the status line: the hidden rows are
+    // otherwise invisible on a menu this long.
+    char pageBuf[8];
+    const int totalPages = (static_cast<int>(menuItems.size()) + rowsPerPage - 1) / rowsPerPage;
+    snprintf(pageBuf, sizeof(pageBuf), "%d/%d", selectedIndex / rowsPerPage + 1, totalPages);
+    const auto pageW = renderer.getTextWidth(UI_10_FONT_ID, pageBuf);
+    renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - pageW, statusY, pageBuf);
+  }
+
+  for (size_t i = pageStart; i < pageEnd; ++i) {
+    const int displayY = startY + static_cast<int>(i - pageStart) * lineHeight;
     const bool isSelected = (static_cast<int>(i) == selectedIndex);
 
     if (isSelected) {
@@ -331,6 +371,12 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
 
     if (menuItems[i].action == MenuAction::BUTTON_HINTS) {
       const char* value = I18N.get(buttonHintsLabels[pendingButtonHints]);
+      const auto width = renderer.getTextWidth(UI_10_FONT_ID, value);
+      renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, value, !isSelected);
+    }
+
+    if (menuItems[i].action == MenuAction::DARK_MODE) {
+      const char* value = SETTINGS.darkMode ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
       const auto width = renderer.getTextWidth(UI_10_FONT_ID, value);
       renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, value, !isSelected);
     }

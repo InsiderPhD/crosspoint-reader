@@ -106,13 +106,25 @@ are **gone** — decoding is now a **structural press detector** in
 - On connect, the manager **learns each report's idle baseline** (~`BASELINE_LEARN_MS`)
   and a volatile-byte mask (rolling counters, joystick axes). Any unmasked
   deviation from idle = a press; re-masking handles reports that churn.
+- **A byte counts as "rests at zero" (keycode, idle forced to 0, never masked)
+  only if it was 0x00 for ≥¼ of the learn-window frames** (`byteZeroCount`,
+  2026-08-18). The old any-single-zero-visit rule misclassified the high byte of
+  a 16-bit joystick axis transiting below 0x100 (idle 0x01F4 → transient 0x00C8),
+  inverting the detector for the session. Smoking gun in logs: a press sig whose
+  value equals the byte's steady-state value (`sig 5=0x01`).
 - Each press records a **signature**: the first unmasked byte that left idle,
-  plus its value (`lastPressSignature()`).
+  plus its value (`lastPressSignature()`). That's what the **wizard** captures.
 - Mapping is a signature pair in settings (`SETTINGS.bleBackSigIndex/Value`,
   `bleFwdSigIndex/Value`, `0xFF` = unmapped), pushed to the manager at boot via
-  `setButtonMapping()`. Decode: matches the back signature → PageBack;
+  `setButtonMapping()`. **Decode matches the back signature against the edge
+  frame's CONTENT** (`frame[backIdx]==backVal` + left-idle-or-masked guard,
+  `lastPressIsBack`), NOT against the first-deviating byte — the learned mask is
+  session-dependent (depends on what traffic flowed in the 1s window), so the
+  first-deviating index can flip between the wizard's session and a later one
+  (that was the "back also pages forward" bug, 2026-08-18). Match → PageBack;
   **anything else → PageForward**. Unmapped = every press pages forward, which
-  is the right default for one-button clickers.
+  is the right default for one-button clickers. Mappings stored before
+  2026-08-18 were learned under the zero-visit bug — re-run the wizard.
 - The wizard (BluetoothSettingsActivity) requires **two matching presses per
   direction**. A mismatch within a step means the button alternates codes per
   press (one-button toggle remote) — mapping is cleared with an explanation and

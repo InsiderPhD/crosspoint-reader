@@ -53,20 +53,37 @@ EInkDisplay::RefreshMode convertRefreshMode(HalDisplay::RefreshMode mode) {
   }
 }
 
-void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
-  if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
-    einkDisplay.requestResync(1);
+void HalDisplay::applyRefreshPolicy(HalDisplay::RefreshMode mode) {
+  if (mode != RefreshMode::FAST_REFRESH) {
+    // FULL flashes natively on every driver. HALF is the readers' periodic
+    // scrub, but the UC8179 (X4 Pro) and UC8279 X4 drivers route any non-Full
+    // mode down the fast partial path, so without the resync the "scrub"
+    // never actually cleans accumulated residue there. Drivers whose Half
+    // waveform already scrubs (UC8253/SSD1677) treat the resync as the same
+    // flash or a no-op, so arming it unconditionally is safe.
+    if (mode == RefreshMode::HALF_REFRESH) einkDisplay.requestResync(1);
+    _fastRefreshStreak = 0;
+    return;
   }
+  // Fast/partial waveforms are not DC-balanced; menus and browsers only ever
+  // request FAST, so a long UI session accumulates residual charge that shows
+  // up as speckle/noise. Promote every Nth consecutive fast paint to a full
+  // GC flash of the frame being displayed. Reader page turns reset the streak
+  // via their HALF scrub above, so this only fires on fast-only streaks.
+  if (++_fastRefreshStreak >= FAST_REFRESH_SCRUB_LIMIT) {
+    einkDisplay.requestResync(1);
+    _fastRefreshStreak = 0;
+  }
+}
 
+void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
+  applyRefreshPolicy(mode);
   einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);
   _lastRefreshMs = millis();
 }
 
 void HalDisplay::refreshDisplay(HalDisplay::RefreshMode mode, bool turnOffScreen) {
-  if (gpio.deviceIsX3() && mode == RefreshMode::HALF_REFRESH) {
-    einkDisplay.requestResync(1);
-  }
-
+  applyRefreshPolicy(mode);
   einkDisplay.refreshDisplay(convertRefreshMode(mode), turnOffScreen);
   _lastRefreshMs = millis();
 }

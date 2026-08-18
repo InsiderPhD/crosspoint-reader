@@ -85,8 +85,22 @@ class HalDisplay {
   uint32_t getBufferSize() const;
 
  private:
+  // Scrub bookkeeping shared by displayBuffer()/refreshDisplay(). HALF is the
+  // app's periodic ghost-cleanup mode, but on the UC8179/UC8279 X4-family
+  // drivers Half runs the same partial path as FAST, so it is promoted to a
+  // one-shot GC resync here. FAST-only streaks (menus/browsers never request
+  // anything else) are promoted to a resync every FAST_REFRESH_SCRUB_LIMIT
+  // paints so heavy UI use can't accumulate speckle indefinitely.
+  void applyRefreshPolicy(RefreshMode mode);
+
+  // Must exceed the reader's largest full-refresh cadence (REFRESH_30) so the
+  // user's per-page refresh-frequency setting stays in charge of flash timing
+  // while reading; this limit only kicks in for fast-only UI streaks.
+  static constexpr uint16_t FAST_REFRESH_SCRUB_LIMIT = 40;
+
   EInkDisplay einkDisplay;
   unsigned long _lastRefreshMs = 0;
+  uint16_t _fastRefreshStreak = 0;
 };
 
 extern HalDisplay display;

@@ -364,6 +364,14 @@ void BluetoothSettingsActivity::handleDeviceListInput() {
     requestUpdate();
   }
 
+  // Full Touch: a vertical swipe turns a page, matching the held side key.
+  // pageItems mirrors drawList's windowing of listRect() (rect.height / rowHeight).
+  const int pageItems = listRect().height / UITheme::getInstance().getMetrics().listRowHeight;
+  if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(devices.size()), pageItems, selectedIndex)) {
+    requestUpdate();
+    return;
+  }
+
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     connectToSelected();
   }

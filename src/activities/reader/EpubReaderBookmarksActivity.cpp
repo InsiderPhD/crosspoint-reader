@@ -183,6 +183,13 @@ void EpubReaderBookmarksActivity::loop() {
     requestUpdate();
   });
 
+  // Full Touch: a vertical swipe turns a page, matching the held side key.
+  if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(bookmarks.size()),
+                              getPageItemsForBookmarkList(renderer, getListHeight(renderer)), selectorIndex)) {
+    requestUpdate();
+    return;
+  }
+
   buttonNavigator.onNextContinuous([this] {
     const int pageItems = getPageItemsForBookmarkList(renderer, getListHeight(renderer));
     selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, static_cast<int>(bookmarks.size()), pageItems);

@@ -102,6 +102,13 @@ void ReadingDayDetailActivity::loop() {
     selectedIndex = ButtonNavigator::previousIndex(selectedIndex, static_cast<int>(entries.size()));
     requestUpdate();
   });
+
+  // Full Touch: a vertical swipe turns a page of the book list.
+  const int pageItems = GUI.listGeometry(listRect(), selectedIndex, /*hasSubtitle=*/true).pageItems;
+  if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(entries.size()), pageItems, selectedIndex)) {
+    requestUpdate();
+    return;
+  }
 }
 
 // Book list body below the summary cards and "Top book" sub-header. Shared by

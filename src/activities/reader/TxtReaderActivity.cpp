@@ -424,6 +424,11 @@ void TxtReaderActivity::renderPage() {
 }
 
 void TxtReaderActivity::renderStatusBar() const {
+  // Master hide from the reader shortcut. Layout still reserves the strip
+  // (see the getStatusBarHeight() bottom margin above), so the text stays put.
+  if (SETTINGS.statusBarHidden) {
+    return;
+  }
   using CPS = CrossPointSettings;
   const float progress = totalPages > 0 ? (currentPage + 1) * 100.0f / totalPages : 0;
 

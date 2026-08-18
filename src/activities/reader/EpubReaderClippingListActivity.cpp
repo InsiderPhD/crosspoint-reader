@@ -13,6 +13,7 @@
 #include "activities/ActivityResult.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 namespace {
 constexpr int ROW_HEIGHT = 56;
@@ -394,6 +395,13 @@ void EpubReaderClippingListActivity::loop() {
     selectedIndex = ButtonNavigator::previousIndex(selectedIndex, total);
     requestUpdate();
   });
+  // Full Touch: a vertical swipe turns a page, matching the held side key.
+  // List mode only — detail mode returned above and pages the clipping text.
+  if (TouchListNav::pageSwipe(mappedInput, total, pageItems, selectedIndex)) {
+    requestUpdate();
+    return;
+  }
+
   buttonNavigator.onNextContinuous([this, total, pageItems] {
     selectedIndex = ButtonNavigator::nextPageIndex(selectedIndex, total, pageItems);
     requestUpdate();

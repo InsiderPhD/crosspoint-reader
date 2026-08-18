@@ -25,6 +25,7 @@
 #include "components/icons/bookfusion24.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 #include "util/WifiTimeSync.h"
 
 namespace {
@@ -1026,6 +1027,15 @@ void LibraryActivity::loop() {
     if (selectorIndex / pageSize() != prev / pageSize()) pageBufferStored = false;
     requestUpdate();
   });
+
+  // Full Touch: a vertical swipe turns a page, matching the held side key.
+  int swipeIndex = static_cast<int>(selectorIndex);
+  if (TouchListNav::pageSwipe(mappedInput, total, pageItems, swipeIndex)) {
+    selectorIndex = static_cast<size_t>(swipeIndex);
+    pageBufferStored = false;  // Page-jump always invalidates the snapshot.
+    requestUpdate();
+    return;
+  }
 
   buttonNavigator.onNextContinuous([this, total, pageItems] {
     selectorIndex = ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), total, pageItems);

@@ -165,6 +165,16 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
     case A::READER_ACTION_DARK_MODE:
       SETTINGS.darkMode = !SETTINGS.darkMode;
       SETTINGS.saveToFile();
+      // Every pixel flips polarity; a differential fast refresh would ghost badly.
+      pagesUntilFullRefresh = 1;
+      requestUpdate();
+      return false;
+
+    case A::READER_ACTION_HIDE_STATUS_BAR:
+      // XTC pages are pre-rendered full-screen and the bar is an overlay, so
+      // hiding it just skips the overlay draw — no layout change involved.
+      SETTINGS.statusBarHidden = !SETTINGS.statusBarHidden;
+      SETTINGS.saveToFile();
       requestUpdate();
       return false;
 
@@ -336,6 +346,22 @@ void XtcReaderActivity::loop() {
   }
 
 #if FREEINK_DEVICE_X4PRO
+  // ── Tap-and-hold zones (configurable; actions XTC lacks are no-ops) ───────
+  // Runs before the tap zones: a hold fires while the finger is still down, and
+  // suppressing the contact stops the lift from also firing a tap-zone action.
+  {
+    int holdX, holdY;
+    const auto holdZone = mappedInput.wasTouchLongPressZone(holdX, holdY);
+    if (holdZone != MappedInputManager::TapZone::None) {
+      mappedInput.suppressTouchContact();
+      uint8_t holdSetting = SETTINGS.readerHoldMiddle;
+      if (holdZone == MappedInputManager::TapZone::Left) holdSetting = SETTINGS.readerHoldLeft;
+      if (holdZone == MappedInputManager::TapZone::Right) holdSetting = SETTINGS.readerHoldRight;
+      executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(holdSetting));
+      return;
+    }
+  }
+
   // ── Screen tap zones and the home key (configurable reader actions) ───────
   switch (mappedInput.wasTapZone()) {
     case MappedInputManager::TapZone::Left:
@@ -351,7 +377,9 @@ void XtcReaderActivity::loop() {
       break;
   }
   if (mappedInput.wasHomeKeyLongPressed()) {
-    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressHome))) return;
+    if (executeReaderAction(
+            static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.effectiveReaderLongPressHome())))
+      return;
   } else if (mappedInput.wasHomeKeyTapped()) {
     if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressHome))) return;
   }
@@ -412,6 +440,10 @@ XtcReaderActivity::StatusBarInfo XtcReaderActivity::getStatusBarInfo() const {
 }
 
 void XtcReaderActivity::renderStatusBarOverlay(const StatusBarOverlayPosition position) const {
+  // Master hide from the reader shortcut.
+  if (SETTINGS.statusBarHidden) {
+    return;
+  }
   const bool drawBottom = SETTINGS.xtcStatusBarMode == CrossPointSettings::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_BOTTOM &&
                           position == StatusBarOverlayPosition::Bottom;
   const bool drawTop = SETTINGS.xtcStatusBarMode == CrossPointSettings::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_TOP &&

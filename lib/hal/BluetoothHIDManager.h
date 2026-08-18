@@ -49,7 +49,7 @@ inline constexpr size_t HID_FRAME_BYTES = 8;
 // button report AND a 6-byte analog/dial report. Sharing one idle/mask between
 // them is what broke it: interleaved shapes make each other's constant bytes
 // look churny, the churn re-masker then masks the real signal byte, and the
-// detector goes blind. Fixed pool, ~34 bytes per slot — no heap.
+// detector goes blind. Fixed pool, ~48 bytes per slot — no heap.
 inline constexpr size_t MAX_REPORT_SHAPES = 3;
 
 // Per-report-shape press detector state. We never decode HID keycodes. Instead
@@ -62,10 +62,11 @@ struct PressDetectorState {
   uint8_t prevFrame[HID_FRAME_BYTES] = {0};  // Previous report, for churn detection
   uint8_t volatileMask = 0;                  // Bit i set => byte i free-runs, ignore it
   uint8_t byteChangeCount[HID_FRAME_BYTES] = {0};
-  uint8_t byteSeenZero = 0;           // Bit i set => byte i was 0x00 at least once while learning
-                                      // (=> it rests at 0, it's the keycode, never mask it)
-  unsigned long baselineStartMs = 0;  // Start of the learning window for this shape
-  uint16_t baselineFrames = 0;        // Frames seen during the learning window
+  uint8_t byteZeroCount[HID_FRAME_BYTES] = {0};  // Frames in which byte i was 0x00 while learning.
+                                                 // A byte that RESTS at zero is a keycode; one that
+                                                 // merely visits zero is an axis/counter transiting 0x00.
+  unsigned long baselineStartMs = 0;             // Start of the learning window for this shape
+  uint16_t baselineFrames = 0;                   // Frames seen during the learning window
   bool baselineReady = false;
   bool active = false;              // Current frame differs from idle on unmasked bytes
   unsigned long activeSinceMs = 0;  // When the current active run began
@@ -85,10 +86,13 @@ struct ConnectedDevice {
 
   // --- Structural press detector ---
   // One learning state per report shape (see PressDetectorState). Which button
-  // was pressed is identified purely by its signature — the (byte index, value)
-  // of the first unmasked byte that left idle — matched against the mapping the
-  // user taught us in Bluetooth settings. An unmatched or unmapped signature
-  // pages forward, so a fresh remote works with no setup. Press dedupe and the
+  // was pressed is identified by the mapping the user taught us in Bluetooth
+  // settings: the wizard captures the signature — the (byte index, value) of
+  // the first unmasked byte that left idle — and the decode then matches that
+  // signature against each edge frame's CONTENT (frame[index] == value), not
+  // against the first-deviating byte, because which byte deviates first depends
+  // on the session's learned mask. An unmatched or unmapped press pages
+  // forward, so a fresh remote works with no setup. Press dedupe and the
   // signature stay device-level: the same physical press often mirrors onto
   // several report characteristics (even with different shapes) within a few
   // ms, and must collapse into one turn.
@@ -99,6 +103,10 @@ struct ConnectedDevice {
   // differed from idle, and its value. 0xFF index = no press seen yet.
   uint8_t lastPressSigIndex = 0xFF;
   uint8_t lastPressSigValue = 0;
+  // Whether the most recent press's edge frame matched the learned back
+  // signature by CONTENT (see detectPress). The first-deviating-byte signature
+  // above is what the wizard captures; this is what the decode consumes.
+  bool lastPressIsBack = false;
 };
 
 class BluetoothHIDManager {

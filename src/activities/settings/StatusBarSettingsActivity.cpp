@@ -193,6 +193,13 @@ void StatusBarSettingsActivity::loop() {
     return;
   }
 
+  // Full Touch: a vertical swipe turns a page, matching the held side key.
+  const int pageItems = GUI.listGeometry(listRect(), selectedIndex, /*hasSubtitle=*/false).pageItems;
+  if (TouchListNav::pageSwipe(mappedInput, visibleItemCount, pageItems, selectedIndex)) {
+    requestUpdate();
+    return;
+  }
+
   // Handle navigation
   buttonNavigator.onNextRelease([this] {
     selectedIndex = ButtonNavigator::nextIndex(selectedIndex, visibleItemCount);

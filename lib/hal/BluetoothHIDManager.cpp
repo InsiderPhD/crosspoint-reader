@@ -1106,7 +1106,7 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
       det->baselineFrames = 1;
       memcpy(det->idleFrame, frame, HID_FRAME_BYTES);
       for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
-        if (frame[i] == 0) det->byteSeenZero |= static_cast<uint8_t>(1u << i);
+        if (frame[i] == 0 && det->byteZeroCount[i] < 0xFF) det->byteZeroCount[i]++;
       }
       return false;
     }
@@ -1116,9 +1116,9 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
         if (frame[i] != det->idleFrame[i] && det->byteChangeCount[i] < 0xFF) {
           det->byteChangeCount[i]++;
         }
-        // A byte that visits 0x00 is resting between presses (a keycode), not a
-        // free-running counter — remember that so we never mask it below.
-        if (frame[i] == 0) det->byteSeenZero |= static_cast<uint8_t>(1u << i);
+        // Count how often each byte sits at 0x00: a keycode RESTS at zero
+        // between presses, an axis/counter merely transits it (see below).
+        if (frame[i] == 0 && det->byteZeroCount[i] < 0xFF) det->byteZeroCount[i]++;
       }
       memcpy(det->idleFrame, frame, HID_FRAME_BYTES);
       if (det->baselineFrames < 0xFFFF) {
@@ -1135,17 +1135,24 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
       memset(det->idleFrame, 0, HID_FRAME_BYTES);
     } else {
       for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
-        if (det->byteSeenZero & static_cast<uint8_t>(1u << i)) {
-          // This byte returned to 0x00 during the window, so it is the shape's
-          // signal byte (a keycode that rests at 0 between presses), NOT a
-          // free-running counter. Its true idle is 0 — even if the window
-          // happened to close on a press frame — and it must never be masked or
-          // the detector goes blind. This is what keeps a press-only clicker
-          // (AB Shutter3: byte0 = E9 pressed / 00 released) working even when
-          // the user presses during the learn window.
+        // A byte RESTING at 0x00 for a meaningful share of the window is the
+        // shape's signal byte (a keycode that rests at 0 between presses), NOT
+        // a free-running counter. Its true idle is 0 — even if the window
+        // happened to close on a press frame — and it must never be masked or
+        // the detector goes blind. This is what keeps a press-only clicker
+        // (AB Shutter3: byte0 = E9 pressed / 00 released) working even when
+        // the user presses during the learn window. The frequency test is what
+        // separates it from the high byte of a 16-bit joystick axis, which
+        // VISITS zero for a frame or two when the axis transits below 0x100:
+        // adopting idle 0 for that byte inverts the detector for the session
+        // and makes press signatures differ between sessions.
+        const bool restsAtZero =
+            det->byteZeroCount[i] > 0 &&
+            (det->byteZeroCount[i] == 0xFF || static_cast<uint16_t>(det->byteZeroCount[i]) * 4 >= det->baselineFrames);
+        if (restsAtZero) {
           det->idleFrame[i] = 0;
         } else if (det->byteChangeCount[i] >= VOLATILE_CHANGE_THRESHOLD) {
-          // Stayed non-zero on every frame AND churned: a real rolling counter.
+          // Rarely-or-never zero AND churned: a real rolling counter/axis.
           det->volatileMask |= static_cast<uint8_t>(1u << i);
         }
       }
@@ -1227,6 +1234,22 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
       break;
     }
   }
+
+  // WHICH unmasked byte fires the edge first depends on this session's learned
+  // mask — and the mask depends on what traffic happened to flow during the
+  // learn window, so it can differ from the wizard's session. The edge frame's
+  // CONTENT is stable across sessions, so the back decision matches the learned
+  // signature against the frame, not against the first-deviating byte: back iff
+  // the frame holds the back value at the back index AND that byte actually
+  // left idle there (or is masked this session, in which case its idle is
+  // meaningless) — the deviation guard stops a stored value from coinciding
+  // with another shape's resting byte or zero padding.
+  // g_instance is non-null here: detectPress is only reached via onHIDNotify,
+  // which returns early without it.
+  const uint8_t backIdx = g_instance->_backSigIndex;
+  device->lastPressIsBack =
+      backIdx < HID_FRAME_BYTES && frame[backIdx] == g_instance->_backSigValue &&
+      (frame[backIdx] != det->idleFrame[backIdx] || (det->volatileMask & static_cast<uint8_t>(1u << backIdx)) != 0);
   memcpy(det->prevFrame, frame, HID_FRAME_BYTES);
 
   // Remotes commonly expose the same press on several report characteristics,
@@ -1291,12 +1314,11 @@ void BluetoothHIDManager::onHIDNotify(NimBLERemoteCharacteristic* pChar, uint8_t
     return;
   }
 
-  // A press matching the learned back signature pages back; everything else —
-  // unmapped remotes, unlearned extra buttons — pages forward, the behaviour a
-  // fresh remote gets with no setup.
-  const bool pageForward =
-      !(g_instance->_backSigIndex != 0xFF && device->lastPressSigIndex == g_instance->_backSigIndex &&
-        device->lastPressSigValue == g_instance->_backSigValue);
+  // A press whose edge frame matched the learned back signature (see
+  // detectPress) pages back; everything else — unmapped remotes, unlearned
+  // extra buttons — pages forward, the behaviour a fresh remote gets with no
+  // setup.
+  const bool pageForward = !device->lastPressIsBack;
 
   // Which physical button counts as page forward/back depends on the user's
   // side button layout, which this layer cannot see; the app supplies the resolver.

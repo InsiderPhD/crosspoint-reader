@@ -37,6 +37,19 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
+
+// Switch to a category tab: its list, its count, and the focus reset. Shared by
+// the two Full Touch paths (tab tap, tab swipe); the button paths do the same
+// work through the hasChangedCategory tail in loop(), which keeps the caller on
+// a content row instead of the ribbon.
+void SettingsActivity::enterCategory(const int categoryIndex) {
+  selectedCategoryIndex = categoryIndex;
+  currentSettings = categoryLists[selectedCategoryIndex];
+  settingsCount = static_cast<int>(currentSettings->size());
+  selectedSettingIndex = 0;  // focus moves to the tab bar, as in the button flow
+  requestUpdate();
+}
 
 void SettingsActivity::onEnter() {
   Activity::onEnter();
@@ -192,19 +205,30 @@ void SettingsActivity::loop() {
   // selects and toggles/activates it. Both hit-tests need the raw point, so
   // this reads wasTapPoint directly instead of the TouchListNav helper.
   if (SETTINGS.fullTouchUi) {
+    // Swipe right = next tab, wrapping like Confirm-on-the-ribbon does. The
+    // leftward swipe is still Back and walks back out through the tabs — see
+    // the Back handler below.
+    if (TouchListNav::tabSwipeNext(mappedInput)) {
+      enterCategory(selectedCategoryIndex < categoryCount - 1 ? selectedCategoryIndex + 1 : 0);
+      return;
+    }
+    // Full Touch: a vertical swipe turns a page of the active tab's settings
+    // list, matching the held side key on the plain list screens. Row focus is
+    // selectedSettingIndex - 1 (0 is the tab bar), mirroring drawList below.
+    int swipeIndex = selectedSettingIndex > 0 ? selectedSettingIndex - 1 : 0;
+    const int pageItems = GUI.listGeometry(listRect(), swipeIndex, /*hasSubtitle=*/false).pageItems;
+    if (TouchListNav::pageSwipe(mappedInput, settingsCount, pageItems, swipeIndex)) {
+      selectedSettingIndex = swipeIndex + 1;
+      requestUpdate();
+      return;
+    }
     int lx, ly;
     if (mappedInput.wasTapPoint(lx, ly)) {
       std::vector<TabInfo> tabs;
       buildTabs(tabs);
       const int tabIndex = GUI.hitTestTabBar(renderer, tabBarRect(), tabs, lx, ly);
       if (tabIndex >= 0) {
-        if (tabIndex != selectedCategoryIndex) {
-          selectedCategoryIndex = tabIndex;
-          currentSettings = categoryLists[selectedCategoryIndex];
-          settingsCount = static_cast<int>(currentSettings->size());
-        }
-        selectedSettingIndex = 0;  // focus moves to the tab bar, as in the button flow
-        requestUpdate();
+        enterCategory(tabIndex);
         return;
       }
       // selectedSettingIndex - 1 mirrors what render() passes to drawList, so
@@ -238,6 +262,22 @@ void SettingsActivity::loop() {
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+#if FREEINK_DEVICE_X4PRO
+    // Full Touch: Back arrives only as the leftward swipe (the X4 Pro has no
+    // front buttons), so it mirrors the rightward swipe — step to the previous
+    // tab, and close only when already on the first one. Row focus is not a
+    // step on the way out here: taps move the cursor, so there is nothing to
+    // back out of.
+    if (SETTINGS.fullTouchUi) {
+      if (selectedCategoryIndex > 0) {
+        enterCategory(selectedCategoryIndex - 1);
+        return;
+      }
+      SETTINGS.saveToFile();
+      onGoHome();
+      return;
+    }
+#endif
     if (selectedSettingIndex > 0) {
       selectedSettingIndex = 0;
       requestUpdate();

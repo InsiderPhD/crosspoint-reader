@@ -185,6 +185,7 @@ const FontLayoutPreviewActivity::Row FontLayoutPreviewActivity::kRows[] = {
      false},
     {StrId::STR_BIONIC_READING, RowKind::Toggle, &CrossPointSettings::bionicReading, nullptr, 0, 0, 0, 0, false, false},
     {StrId::STR_TEXT_AA, RowKind::Toggle, &CrossPointSettings::textAntiAliasing, nullptr, 0, 0, 0, 0, false, false},
+    {StrId::STR_READER_DARK_MODE, RowKind::Toggle, &CrossPointSettings::darkMode, nullptr, 0, 0, 0, 0, false, false},
     {StrId::STR_ORIENTATION, RowKind::Enum, &CrossPointSettings::orientation, kOrientLabels,
      CrossPointSettings::ORIENTATION_COUNT, 0, 0, 0, false, true},
     // Font Download deliberately NOT here: launching it from inside this
@@ -297,6 +298,14 @@ void FontLayoutPreviewActivity::changeRow(const Row& row) {
   // once — right after the user enables AA — instead of on every keystroke.
   if (row.field == &CrossPointSettings::textAntiAliasing && SETTINGS.textAntiAliasing) {
     aaPreviewNext = true;
+  }
+  // Dark mode flips every pixel's polarity; a differential fast refresh would ghost badly.
+  if (row.field == &CrossPointSettings::darkMode) {
+    fullRefreshNext = true;
+    // Leaving dark mode makes the AA pass (skipped while dark) visible again.
+    if (!SETTINGS.darkMode && SETTINGS.textAntiAliasing) {
+      aaPreviewNext = true;
+    }
   }
   if (row.isOrientation) {
     ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
