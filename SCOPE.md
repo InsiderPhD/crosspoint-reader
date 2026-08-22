@@ -1,12 +1,12 @@
 # Project Vision & Scope: KatiePoint Reader
 
-The goal of KatiePoint Reader is to create an efficient, open-source reading experience for the Xteink X4. We believe a
-dedicated e-reader should do one thing exceptionally well: **facilitate focused reading.**
+The goal of KatiePoint Reader is to create an efficient, open-source reading experience for the Xteink X4, X3 and X4 Pro.
+We believe a dedicated e-reader should do one thing exceptionally well: **facilitate focused reading.**
 
 ## 1. Core Mission
 
-To provide a lightweight, high-performance firmware that maximizes the potential of the X4, prioritizing legibility and
-usability over "swiss-army-knife" functionality.
+To provide a lightweight, high-performance firmware that maximizes the potential of the hardware, prioritizing legibility
+and usability over "swiss-army-knife" functionality.
 
 ## 2. Scope
 
@@ -33,6 +33,7 @@ usability over "swiss-army-knife" functionality.
 | -- | -- |
 | X3 | The X3 uses a dedicated DS3231 RTC, which maintains accurate time across sleep cycles and can be treated as a reliable wall clock. |
 | X4 | The X4 relies on the ESP32-C3's internal RTC, which drifts significantly during deep sleep. NTP sync could correct this, with an appropriate user experience around connecting to the internet on wake or on demand. This causes some tension with the **Active Connectivity** section below, so please open a discussion about this UX if it's a feature you would find useful. |
+| X4 Pro | Same as the X4 — no dedicated RTC; the clock is kept by NTP. |
 
 ### Out-of-Scope
 

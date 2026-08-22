@@ -1,6 +1,6 @@
 # KatiePoint Reader Development Guide
 
-Project: Open-source e-reader firmware for Xteink X4 (ESP32-C3)
+Project: Open-source e-reader firmware for Xteink X4 / X3 (ESP32-C3) and, experimentally, X4 Pro (ESP32-S3)
 Mission: Provide a lightweight, high-performance reading experience focused on EPUB rendering on constrained hardware.
 
 ## AI Agent Identity and Cognitive Rules
@@ -112,12 +112,35 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
 - Must call `renderer.restoreBwBuffer()` to free temporary buffers
 - See [lib/GfxRenderer/GfxRenderer.cpp:439-440](../lib/GfxRenderer/GfxRenderer.cpp) for malloc usage
 
+### Second target: Xteink X4 Pro (`[env:x4pro]`)
+
+The X4 Pro is a **separate binary**, not an addition to the C3 image. It is an
+ESP32-S3 (16MB flash / 8MB PSRAM) with a GT911 digitizer, a capacitive home pad,
+a PWM warm/cool frontlight, and native SDMMC. `freeink-sdk`'s `BoardConfig.h`
+hard-errors if devices from two MCU families are selected at once, so
+`[env:x4pro]` **unsets** `FREEINK_DEVICE_X3` / `FREEINK_DEVICE_X4` (and the
+RISC-V-only `WOLFSSL_SP_RISCV32`) rather than adding to them.
+
+Rules when touching X4 Pro code:
+- Fence device-specific code behind `#if FREEINK_DEVICE_X4PRO`, and capability
+  code behind `FREEINK_CAP_FRONTLIGHT` / `FREEINK_CAP_WARMLIGHT` — never assume
+  a board has touch or a light.
+- **Settings fields exist on every build** even when the UI for them is fenced
+  out, so `settings.json` round-trips between devices. Hide a setting from the
+  UI by omitting its category, not by omitting the field.
+- The X4 Pro has **no front buttons**: `MappedInputManager` bypasses
+  `SETTINGS.frontButton*` there and synthesizes the four front roles from
+  swipes. Never reintroduce a path where a stale remap can make Back or Confirm
+  unreachable.
+- PSRAM exists on this board, but the code is shared with the C3 — keep the
+  same heap discipline.
+
 ### Directory Structure
 * lib/: Internal libraries (Epub engine, GfxRenderer, UITheme, I18n)
   * lib/hal/: Hardware Abstraction Layer (HalDisplay, HalGPIO, HalStorage)
   * lib/I18n/: Internationalization (translations in `translations/*.yaml`, generated string tables)
 * src/activities/: UI logic using the Activity Lifecycle (onEnter, loop, onExit)
-* freeink-sdk/: Low-level SDK (EInkDisplay, InputManager, BatteryMonitor, SDCardManager, BoardConfig). MIT re-architecture of the former open-x4-epaper/community-sdk; the original include paths and class names are preserved by a compat shim. Device profile (X3/X4) selected at runtime via einkDisplay.setDisplayX3().
+* freeink-sdk/: Low-level SDK (EInkDisplay, InputManager, BatteryMonitor, SDCardManager, BoardConfig). MIT re-architecture of the former open-x4-epaper/community-sdk; the original include paths and class names are preserved by a compat shim. Device profile (X3/X4) selected at runtime via einkDisplay.setDisplayX3(); the X4 Pro profile is selected at build time (`[env:x4pro]`). Also provides FrontlightManager (X4 Pro PWM light), PowerManager (deep-sleep rail shutdown) and SecureNet (wolfSSL TLS).
 * .crosspoint/: SD-based binary cache for EPUB metadata and pre-rendered layout sections
 
 ### Hardware Abstraction Layer (HAL)
@@ -129,6 +152,8 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
 | `HalDisplay` | `EInkDisplay` | E-ink display control | *(none)* |
 | `HalGPIO` | `InputManager` | Button input handling | *(none)* |
 | `HalStorage` | `SDCardManager` | SD card file I/O | `Storage` |
+| `HalFrontlight` | `FrontlightManager` | PWM frontlight (X4 Pro); inert elsewhere | `halFrontlight` |
+| `HalPowerManager` | `PowerManager` | Rail shutdown for deep sleep | `powerManager` |
 
 **Location**: [lib/hal/](../lib/hal/)
 
@@ -455,6 +480,10 @@ pio run -t upload
 
 # Build specific environment
 pio run -e gh_release
+
+# Build/upload the X4 Pro (ESP32-S3) binary — a separate image, see below
+pio run -e x4pro
+pio run -e x4pro -t upload
 
 # Clean build artifacts
 pio run -t clean
@@ -853,8 +882,10 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 **Source**: `lib/Epub/Epub/Section.cpp`, `lib/Epub/Epub/BookMetadataCache.cpp`
 
 **Current Versions** (as of docs/file-formats.md):
-- `book.bin`: **Version 5** (metadata structure)
-- `section.bin`: **Version 12** (layout structure)
+- `book.bin`: **Version 12** (metadata structure) — `lib/Epub/Epub/BookMetadataCache.cpp`
+- `section.bin`: **Version 37** (layout structure) — `lib/Epub/Epub/Section.cpp`
+
+Check the constants in those files rather than trusting this list; they move often.
 
 **Version Increment Rules**:
 1. **ALWAYS increment version** BEFORE changing binary structure
@@ -864,7 +895,7 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 **Example** (incrementing section format version):
 ```cpp
 // lib/Epub/Epub/Section.cpp
-static constexpr uint8_t SECTION_FILE_VERSION = 13;  // Was 12, now 13
+constexpr uint8_t SECTION_FILE_VERSION = 38;  // Was 37, now 38
 
 // Add new field to structure
 struct PageLine {

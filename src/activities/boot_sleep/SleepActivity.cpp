@@ -30,6 +30,12 @@ void SleepActivity::onEnter() {
     return renderLastScreenSleepScreen();
   }
 
+  // Scrub the panel before the sleep image goes up: promote the popup paint
+  // below to a full GC flash so residue accumulated while reading (fast/partial
+  // waveforms are not DC-balanced) doesn't ghost through the sleep screen.
+  // The seamless path above deliberately skips this — it must not flash.
+  display.requestResync(1);
+
   // Show popup with reader orientation only when going to sleep from reader
   if (APP_STATE.lastSleepFromReader) {
     ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);

@@ -68,6 +68,15 @@ struct PressDetectorState {
   unsigned long baselineStartMs = 0;             // Start of the learning window for this shape
   uint16_t baselineFrames = 0;                   // Frames seen during the learning window
   bool baselineReady = false;
+  // Quiescence-anchored idle. A clicker transmits only while a button is doing
+  // something, so the frame immediately BEFORE a gap in the traffic is the one
+  // the report came to rest on — the release. Learning that as idle, instead of
+  // whatever frame happens to close the timed window, is what stops a window
+  // that closes mid-hold from learning a PRESSED frame as idle (which inverts
+  // every signature this shape produces for the rest of the session).
+  unsigned long lastFrameMs = 0;             // Arrival of the previous learning frame
+  uint8_t restFrame[HID_FRAME_BYTES] = {0};  // Last frame followed by a quiet gap
+  bool restFrameValid = false;
   bool active = false;              // Current frame differs from idle on unmasked bytes
   unsigned long activeSinceMs = 0;  // When the current active run began
   uint8_t churnMask = 0;            // Bytes that changed during the current active run
@@ -158,6 +167,10 @@ class BluetoothHIDManager {
     byteIndex = _lastPressSigIndex;
     value = _lastPressSigValue;
   }
+  // True once a connected remote's learned idle report shows the stored back
+  // signature is unmatchable — the mapping was captured against a bad baseline
+  // and every press will page forward until the wizard is re-run.
+  bool mappingLooksStale() const { return _mappingLooksStale; }
   void setDebugCaptureEnabled(bool enabled) { _debugCaptureEnabled = enabled; }
   bool isDebugCaptureEnabled() const { return _debugCaptureEnabled; }
   void setBondedDevice(const std::string& address, const std::string& name = "", uint8_t addrType = 0);
@@ -261,6 +274,9 @@ class BluetoothHIDManager {
   uint8_t _backSigValue = 0;
   uint8_t _fwdSigIndex = 0xFF;
   uint8_t _fwdSigValue = 0;
+  // Set from the NimBLE task when a connected remote's learned idle report
+  // proves the stored back signature can never match (see detectPress).
+  volatile bool _mappingLooksStale = false;
   // Written from the NimBLE task, read from the loop task. Single-byte/word
   // fields, same cross-task pattern as ConnectedDevice::lastRemoteInputMs.
   volatile uint8_t _lastPressSigIndex = 0xFF;

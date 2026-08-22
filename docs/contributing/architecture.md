@@ -1,6 +1,11 @@
 # Architecture Overview
 
-CrossPoint is firmware for the Xteink X4 (unaffiliated with Xteink), built with PlatformIO targeting the ESP32-C3 microcontroller.
+CrossPoint is firmware for Xteink e-paper readers (unaffiliated with Xteink), built with PlatformIO.
+
+Two build targets:
+
+- **X4 / X3** — ESP32-C3, one binary for both. The board profile is resolved at boot from an I²C fingerprint (`HalGPIO` → `einkDisplay.setDisplayX3()`).
+- **X4 Pro** — ESP32-S3, a **separate binary** (`pio run -e x4pro`) with PSRAM, a GT911 touch digitizer, a capacitive home pad, a PWM frontlight and native SDMMC. `freeink-sdk`'s `BoardConfig.h` refuses to link devices from two MCU families, so `[env:x4pro]` unsets the C3 device flags rather than adding to them. Device-specific code is fenced behind `FREEINK_DEVICE_X4PRO`; capability-specific code behind `FREEINK_CAP_FRONTLIGHT` / `FREEINK_CAP_WARMLIGHT`.
 
 At a high level, it is firmware that uses an activity-driven application architecture loop with persistent settings/state, SD-card-first caching, and a rendering pipeline optimized for e-ink constraints.
 
@@ -8,7 +13,7 @@ At a high level, it is firmware that uses an activity-driven application archite
 
 ```mermaid
 graph TD
-    A[Hardware: ESP32-C3 + SD + E-ink + Buttons] --> B[open-x4-sdk HAL]
+    A[Hardware: ESP32-C3/S3 + SD + E-ink + Buttons/Touch] --> B[lib/hal wrappers over freeink-sdk]
     B --> C[src/main.cpp runtime loop]
     C --> D[Activities layer]
     C --> E[State and settings]
@@ -60,6 +65,27 @@ Top-level activity groups:
 - `src/activities/settings/`: settings menus and configuration
 - `src/activities/network/`: WiFi selection, AP/STA mode, file transfer server
 - `src/activities/boot_sleep/`: boot and sleep transitions
+
+## Hardware abstraction layer
+
+Firmware code talks to `lib/hal/`, never to the SDK classes directly.
+
+| HAL class | Wraps | Purpose |
+|-----------|-------|---------|
+| `HalDisplay` | `EInkDisplay` | e-ink control and refresh policy |
+| `HalGPIO` | `InputManager` | buttons, and (X4 Pro) touch/home-pad events |
+| `HalStorage` (`Storage`) | `SDCardManager` | **all** SD access, serialised behind `storageMutex` |
+| `HalFrontlight` | `FrontlightManager` | PWM frontlight; inert on boards without one |
+| `HalPowerManager` | `PowerManager` | rail shutdown before deep sleep |
+| `BluetoothHIDManager` | NimBLE (vendored) | BLE page-turner remotes |
+
+`MappedInputManager` sits above `HalGPIO` and resolves *logical* buttons
+(`Back`, `Confirm`, `PageForward`, …) to physical indices, applying the user's
+front-button remap. On the X4 Pro there are no front buttons, so it synthesizes
+those four roles from screen swipes instead and bypasses the remap settings
+entirely. Activities must use logical buttons, never raw `HalGPIO::BTN_*`.
+
+SdFat is not thread-safe — every SD read/write must go through `HalStorage`.
 
 ## Reader and content pipeline
 
@@ -137,12 +163,13 @@ Typical persisted areas on SD:
 ```text
 /.crosspoint/
   epub_<hash>/
-    book.bin
-    progress.bin
-    cover.bmp
-    sections/*.bin
-  settings.bin
-  state.bin
+    book.bin        # metadata (title, author, spine, TOC)
+    desc.bin        # book description sidecar, read lazily
+    progress.bin    # reading position
+    cover.bmp       # cached cover
+    sections/*.bin  # per-chapter layout cache
+  settings.json     # user settings (migrated from legacy settings.bin)
+  state.json        # runtime/session state (migrated from legacy state.bin)
 ```
 
 For binary cache formats, see `docs/file-formats.md`.
@@ -158,8 +185,9 @@ Modes:
 
 Server behavior:
 
-- HTTP server on port 80
-- WebSocket upload server on port 81
+- HTTP server on port 80 — file browse/upload/download/rename/move/delete, a settings editor, and font management
+- WebSocket upload server on port 81 (fast binary upload)
+- TLS for outbound requests (BookFusion, KOReader, OPDS, OTA) goes through `SecureNet`/wolfSSL, which borrows the display framebuffer as its session arena — see `src/activities/reader/TlsFramebufferBorrow.h`
 - file operations backed by SD storage
 - activity requests faster loop responsiveness while server is running
 
@@ -181,7 +209,9 @@ When editing related source assets, regenerate via normal build steps/scripts.
 - `src/components/`: theming and shared UI components
 - `lib/Epub/`: EPUB parser, layout, CSS handling, and hyphenation
 - `lib/`: supporting libraries (fonts, text, filesystem helpers, etc.)
-- `open-x4-sdk/`: hardware SDK submodule (display, input, storage, battery)
+- `lib/hal/`: hardware abstraction layer wrapping the SDK
+- `freeink-sdk/`: hardware SDK submodule (display, input, storage, battery, frontlight, power, TLS) — an MIT re-architecture of the former open-x4-epaper/community-sdk, with the original include paths preserved by a compat shim
+- `lib/NimBLE-Arduino/`: vendored NimBLE with RAM patches (BLE page turner)
 - `docs/`: user and technical documentation
 
 ## Embedded constraints that shape design

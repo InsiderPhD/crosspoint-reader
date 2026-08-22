@@ -8,20 +8,21 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
-#include "util/TouchListNav.h"
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ReadingStatsAnalytics.h"
 #include "util/TimeUtils.h"
+#include "util/TouchListNav.h"
 
 EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                const std::string& title, const int currentPage, const int totalPages,
                                                const int bookProgressPercent, const uint8_t currentOrientation,
-                                               const bool hasFootnotes, const uint32_t timeLeftChapterSeconds,
+                                               const bool hasFootnotes, const ProgressAutoSync::Provider syncProvider,
+                                               const uint32_t timeLeftChapterSeconds,
                                                const uint32_t timeLeftBookSeconds)
     : Activity("EpubReaderMenu", renderer, mappedInput),
-      menuItems(buildMenuItems(hasFootnotes)),
+      menuItems(buildMenuItems(hasFootnotes, syncProvider)),
       title(title),
       pendingOrientation(currentOrientation),
       pendingButtonHints(SETTINGS.showButtonHints),
@@ -34,7 +35,8 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
       timeLeftChapterSeconds(timeLeftChapterSeconds),
       timeLeftBookSeconds(timeLeftBookSeconds) {}
 
-std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes) {
+std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(
+    bool hasFootnotes, ProgressAutoSync::Provider syncProvider) {
   std::vector<MenuItem> items;
   items.reserve(23);  // 10 fixed + footnotes + frontlight + bookmarks/clippings/autosync+sync + 2 dev-mode items
   items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
@@ -78,13 +80,26 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
     items.push_back({MenuAction::TOGGLE_BLUETOOTH, StrId::STR_BT_REMOTE_TOGGLE});
   }
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
-  // Autosync sits with the manual sync rows and is hidden by the same toggle
-  // (Settings > Reader "Sync in Menu"). It cycles the Progress Autosync mode in
-  // place, applied on menu exit like the other cycling rows.
-  if (SETTINGS.readerMenuSync) {
+  // Sync rows. Gated on the backend that would actually handle a Push/Pull for
+  // THIS book (ProgressAutoSync::providerFor, resolved by the reader and passed
+  // in) — not just on the "Sync in Menu" toggle. A book with no linked backend
+  // has nothing to sync to, and the reader's SYNC_PUSH/SYNC_PULL handler simply
+  // falls out of its if/else and returns: the rows used to be shown anyway and
+  // did nothing at all when pressed, with no error and no log line.
+  //
+  // Naming the destination also removes the guesswork about WHICH service a
+  // generic "Push Local Progress" was about to talk to. Autosync rides the same
+  // gate: it resolves its provider through the identical predicate, so it can't
+  // fire for this book either. Its mode is still reachable in Settings > Reader,
+  // and pendingAutosyncMode is seeded from SETTINGS regardless of whether the
+  // row exists, so hiding it never writes the setting back.
+  if (SETTINGS.readerMenuSync && syncProvider != ProgressAutoSync::Provider::None) {
+    const bool isBookFusion = (syncProvider == ProgressAutoSync::Provider::BookFusion);
     items.push_back({MenuAction::AUTOSYNC, StrId::STR_AUTOSYNC});
-    items.push_back({MenuAction::SYNC_PUSH, StrId::STR_SYNC_PUSH_PROGRESS});
-    items.push_back({MenuAction::SYNC_PULL, StrId::STR_SYNC_PULL_PROGRESS});
+    items.push_back(
+        {MenuAction::SYNC_PUSH, isBookFusion ? StrId::STR_SYNC_PUSH_BOOKFUSION : StrId::STR_SYNC_PUSH_KOREADER});
+    items.push_back(
+        {MenuAction::SYNC_PULL, isBookFusion ? StrId::STR_SYNC_PULL_BOOKFUSION : StrId::STR_SYNC_PULL_KOREADER});
   }
   // Delete Book Cache is a testing aid — only surface it in Dev Mode.
   if (SETTINGS.devMode) {
@@ -338,8 +353,7 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   constexpr int lineHeight = MENU_ROW_H;
   const int rowsPerPage = visibleMenuRows();
   const size_t pageStart = static_cast<size_t>(selectedIndex / rowsPerPage * rowsPerPage);
-  const size_t pageEnd =
-      menuItems.size() < pageStart + rowsPerPage ? menuItems.size() : pageStart + rowsPerPage;
+  const size_t pageEnd = menuItems.size() < pageStart + rowsPerPage ? menuItems.size() : pageStart + rowsPerPage;
 
   if (menuItems.size() > static_cast<size_t>(rowsPerPage)) {
     // Page indicator, right-aligned on the status line: the hidden rows are

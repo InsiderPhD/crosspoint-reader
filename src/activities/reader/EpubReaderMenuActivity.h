@@ -7,6 +7,7 @@
 
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
+#include "util/ProgressAutoSync.h"
 
 class EpubReaderMenuActivity final : public Activity {
  public:
@@ -37,9 +38,14 @@ class EpubReaderMenuActivity final : public Activity {
     DELETE_CACHE
   };
 
+  // syncProvider is the backend that would actually handle a Push/Pull for THIS
+  // book, resolved by the caller via ProgressAutoSync::providerFor(). It decides
+  // whether the sync rows appear at all and what they're labelled — see
+  // buildMenuItems().
   explicit EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title,
                                   const int currentPage, const int totalPages, const int bookProgressPercent,
                                   const uint8_t currentOrientation, const bool hasFootnotes,
+                                  const ProgressAutoSync::Provider syncProvider = ProgressAutoSync::Provider::None,
                                   const uint32_t timeLeftChapterSeconds = 0, const uint32_t timeLeftBookSeconds = 0);
 
   void onEnter() override;
@@ -55,7 +61,7 @@ class EpubReaderMenuActivity final : public Activity {
     StrId labelId;
   };
 
-  static std::vector<MenuItem> buildMenuItems(bool hasFootnotes);
+  static std::vector<MenuItem> buildMenuItems(bool hasFootnotes, ProgressAutoSync::Provider syncProvider);
 
   // Menu row pitch; row i spans [menuTopY() + i*MENU_ROW_H, + MENU_ROW_H).
   // Shared by render() and the Full Touch tap hit-testing in loop().

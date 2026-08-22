@@ -436,6 +436,31 @@ Child calls: setResult(MyResult{...}); finish();
   └── requestUpdate()   // automatic re-render for parent
 ```
 
+### Touch hooks (X4 Pro)
+
+Two virtuals on `Activity` control how the main loop synthesizes button presses
+from touch on the X4 Pro. Both default to `false`, so non-touch boards and
+untouched activities need no changes.
+
+| Hook | Returns true when | Effect |
+|------|-------------------|--------|
+| `consumesTouchInput()` | The activity reads raw touch itself — reader tap/hold zones, home-key dispatch, keyboard hit-testing | Disables **both** the tap-anywhere-is-Confirm and home-key-is-Confirm injections, so a consumed touch can't also fire Confirm |
+| `handlesDirectTouch()` | The activity hit-tests taps against its own drawn UI under Full Touch mode | Disables **only** the tap-anywhere injection; the home-key injection stays on |
+
+`handlesDirectTouch()` may be dynamic — return `false` while a modal that has no
+tap hit-testing is open, so tap-activates-the-highlighted-option comes back for
+the modal.
+
+Neither is tied to `isReaderActivity()`. Reader sub-screens (menu, chapter
+select, footnotes) claim reader status for the Bluetooth lifecycle
+(`keepsBluetoothActive()`) but are plain menus that *want* the Confirm
+injections.
+
+An activity that opts into `handlesDirectTouch()` must dispatch taps via
+`TouchListNav::tapRow()` with the **same** rect, item count and subtitle flag it
+passes to `drawList()` — those determine the visible page and row height, so a
+mismatch means hit-testing and rendering disagree silently.
+
 ### Common Pitfalls
 
 **Calling `finish()` and continuing to access `this`**: `finish()` sets `pendingAction = Pop` but does not immediately destroy the activity. The activity is destroyed on the next `ActivityManager::loop()` iteration. It's safe to access member variables after `finish()` within the same function, but don't rely on the activity surviving past the current `loop()` call.

@@ -772,7 +772,7 @@ void BookFusionBrowserActivity::loop() {
     // Hold = flip to the next/previous API page. Pagination is server-side
     // (only `hasMore` is known, not the total page count), so we just bounce off
     // the ends rather than wrapping.
-    buttonNavigator.onNextContinuous([this] {
+    const auto nextApiPage = [this] {
       if (searchResult.hasMore) {
         loadPage(currentPage + 1);
         return;
@@ -782,9 +782,9 @@ void BookFusionBrowserActivity::loop() {
       if (currentPage > 1) {
         loadPage(1);
       }
-    });
+    };
 
-    buttonNavigator.onPreviousContinuous([this] {
+    const auto previousApiPage = [this] {
       if (currentPage > 1) {
         loadPage(currentPage - 1);
         return;
@@ -798,7 +798,26 @@ void BookFusionBrowserActivity::loop() {
       if (lastPage > 1) {
         loadPage(lastPage);
       }
-    });
+    };
+
+    // Full Touch: a vertical swipe flips API pages, matching the held side
+    // key. Return immediately after dispatch — loadPage can leave BROWSING, so
+    // the button bindings below must not run against a state we just left. The
+    // lambdas' own bounds checks provide the one-page inertness pageSwipeDelta
+    // deliberately doesn't (see its doc comment).
+    switch (TouchListNav::pageSwipeDelta(mappedInput)) {
+      case +1:
+        nextApiPage();
+        return;
+      case -1:
+        previousApiPage();
+        return;
+      default:
+        break;
+    }
+
+    buttonNavigator.onNextContinuous(nextApiPage);
+    buttonNavigator.onPreviousContinuous(previousApiPage);
   }
 }
 

@@ -39,6 +39,10 @@ class FontDecompressor {
     uint32_t getBitmapTimeUs = 0;  // cumulative getBitmap time (micros)
     uint32_t getBitmapCalls = 0;   // number of getBitmap calls
   };
+  // Per-page font-cache profiling. Ten lines of serial per page turn drowns
+  // everything else out, so the output is compiled in only under
+  // -DFONT_CACHE_STATS (put it in platformio.local.ini when profiling); the
+  // counters themselves always run and always reset.
   void logStats(const char* label = "FDC");
   void resetStats();
   const Stats& getStats() const { return stats; }

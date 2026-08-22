@@ -513,8 +513,10 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
     free(tempBuf);
   }
 
+#ifdef FONT_CACHE_STATS
   LOG_DBG("FDC", "Prewarm: %u glyphs in %u bytes from %u groups (%d missed)", glyphCount, writeOffset, groupCount,
           missed);
+#endif
 
   return missed;
 }
@@ -524,6 +526,7 @@ int FontDecompressor::prewarmCache(const EpdFontData* fontData, const char* utf8
 void FontDecompressor::resetStats() { stats = Stats{}; }
 
 void FontDecompressor::logStats(const char* label) {
+#ifdef FONT_CACHE_STATS
   const uint32_t total = stats.cacheHits + stats.cacheMisses;
   LOG_DBG("FDC", "[%s] hits=%lu misses=%lu (%.1f%% hit rate)", label, stats.cacheHits, stats.cacheMisses,
           total > 0 ? 100.0f * stats.cacheHits / total : 0.0f);
@@ -534,5 +537,11 @@ void FontDecompressor::logStats(const char* label) {
     LOG_DBG("FDC", "[%s] getBitmap: %lu calls, %luus total, %luus/call avg", label, stats.getBitmapCalls,
             stats.getBitmapTimeUs, stats.getBitmapTimeUs / stats.getBitmapCalls);
   }
+#else
+  (void)label;
+#endif
+  // Counters are always reset: they are per-page figures, and letting them run
+  // for a whole session would make the numbers meaningless the moment someone
+  // does turn the flag on.
   resetStats();
 }

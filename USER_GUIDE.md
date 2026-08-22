@@ -1,6 +1,6 @@
 # KatiePoint User Guide
 
-Welcome to **KatiePoint** — a heavily-customised fork of CrossPoint firmware for the **Xteink X4** (and X3) e-paper reader. This guide covers the hardware controls, navigation, and reading features of the device.
+Welcome to **KatiePoint** — a heavily-customised fork of CrossPoint firmware for the **Xteink X4**, **X3**, and (experimentally) **X4 Pro** e-paper readers. This guide covers the hardware controls, navigation, and reading features of the device.
 
 > [!NOTE]
 > KatiePoint has diverged substantially from upstream CrossPoint. If you have used CrossPoint before, the sections on the **[Home Screen](#3-home-screen)**, **[Getting Books onto the Device](#5-getting-books-onto-the-device)**, **[Sync](#10-sync-bookfusion--koreader)**, **[Reading Stats](#9-reading-stats)**, and the **[Settings Reference](#12-settings-reference)** are the ones most worth reading. For the full technical changelog, see [CHANGES.md](./CHANGES.md).
@@ -28,7 +28,7 @@ Welcome to **KatiePoint** — a heavily-customised fork of CrossPoint firmware f
 
 ## 1. Hardware Overview
 
-KatiePoint runs on the **Xteink X4** and **X3**. Physical button positions differ slightly between models, but the *logical* functions are the same.
+KatiePoint runs on the **Xteink X4**, **X3**, and **X4 Pro**. Physical controls differ between models, but the *logical* functions are the same — throughout this guide, button names refer to their *logical* role, not a fixed physical position.
 
 ### Button Layout (X4)
 
@@ -39,7 +39,29 @@ KatiePoint runs on the **Xteink X4** and **X3**. Physical button positions diffe
 
 On the **X3**, the **Power** button is on the top-right; the **Up**/**Down** buttons sit on the right edge. On the **X4**, Power is on the right edge above Up/Down.
 
-The four **front buttons** (Back / Confirm / Left / Right) can be reassigned to different physical positions in **Settings → System → Remap Front Buttons**. Throughout this guide, button names refer to their *logical* role, not a fixed physical position.
+The four **front buttons** (Back / Confirm / Left / Right) can be reassigned to different physical positions in **Settings → System → Remap Front Buttons**.
+
+### Controls on the X4 Pro *(experimental)*
+
+The X4 Pro has **no front buttons**. It has two side keys, a capacitive **home pad**, and a **touchscreen**, so the four logical front-button roles come from swipes instead:
+
+| Gesture / key   | Logical role                                    |
+| --------------- | ----------------------------------------------- |
+| **Swipe left**  | **Back**                                        |
+| **Swipe right** | **Confirm**                                     |
+| **Swipe up**    | **Up** (previous item)                          |
+| **Swipe down**  | **Down** (next item)                            |
+| **Left side key**  | **Left** in menus, **Page Back** while reading    |
+| **Right side key** | **Right** in menus, **Page Forward** while reading |
+| **Home pad tap**   | **Confirm** outside the readers; a configurable action while reading |
+| **Home pad hold**  | Opens the reader menu                            |
+| **Screen tap**     | **Confirm** outside the readers; a tap-zone action while reading |
+
+Because every other slot is remappable, the **home-pad hold is hard-wired to the reader menu** — that guarantees the menu (and its **Go Home** row) is always reachable, so a stray remap can never strand you inside a book.
+
+**Remap Front Buttons** and **Front Button Follows Orientation** are hidden on this device (there are no front buttons to remap), and see **[Full Touch Mode](#full-touch-mode-x4-pro)** for tap-to-select navigation.
+
+The X4 Pro is a **separate firmware binary** (`pio run -e x4pro`) — it is an ESP32-S3, not the ESP32-C3 the X4/X3 image is built for. The port is still in bring-up; expect rough edges.
 
 ### Taking a Screenshot
 
@@ -54,7 +76,8 @@ The four **front buttons** (Back / Confirm / Left / Right) can be reassigned to 
 ### Power On / Off
 
 - **Turn on/off:** press and hold **Power** for about half a second.
-- You can configure a **short** Power press to do something else (page turn, sleep, sync, bookmark) — see **[Short Power Button](#system-tab)**. When a short press is repurposed, turning the device *off* requires a long press.
+- You can configure what a **short** Power press does while reading (page turn, sleep, sync, bookmark, and more) in **[Reader Controls](#reader-tab)**. When a short press is repurposed, turning the device *off* requires a long press.
+- **Waking from sleep:** a short Power press always wakes the device — there's no hold-to-wake delay.
 - **Reboot / recover:** press and release **Reset**, then quickly press and hold **Power** for a few seconds.
 
 ### First Launch
@@ -79,7 +102,7 @@ The Home screen is the main hub. Its layout depends on the **UI Theme** (Setting
 Shows your most recently opened book(s) with cover, title, author, and progress.
 
 - **Confirm** on a tile → open that book.
-- **Long-press Confirm** on a tile → open the **Book Options** popup (an inline modal): *Mark as Read, Reset Progress, Shelve, Delete, Reindex, Regenerate Cover*. This does not navigate away from Home.
+- **Long-press Confirm** on a tile → open the **Book Options** popup (an inline modal): *Book Info, Mark as Read, Remove from Recents, Delete from Device* — plus *Reset Progress, Delete Book Cache* and *Regenerate Cover* when **Developer Mode** is on. This does not navigate away from Home.
 
 <img src="docs/images/user-guide/home-book-options.png" alt="Home screen with the Book Options popup open on a recent-book tile" width="300">
 
@@ -131,6 +154,21 @@ This behaviour is configurable. By default long-press skips chapters; you can ch
 - **Return Home:** press **Back**.
 - **Return to Browse Files:** press and *hold* **Back**.
 - **Reader Menu:** press **Confirm** (see **[The Reader Menu](#7-the-reader-menu)**).
+
+### Touch controls while reading *(X4 Pro)*
+
+The screen is split into **left / middle / right thirds**. Each third has a **tap** action and a **hold** action, and the capacitive home pad has a **short** and a **long** press — all bindable in **Settings → Reader → Reader Controls**, from the same action list the physical buttons use.
+
+Defaults:
+
+| Gesture | Action |
+| ------- | ------ |
+| **Tap left** | Previous page |
+| **Tap middle** | Open reader menu |
+| **Tap right** | Next page |
+| **Hold** (any third) | Save Clipping — hold on the passage you want |
+| **Home pad, short** | Go Home |
+| **Home pad, long** | Open reader menu *(fixed — see [Hardware Overview](#controls-on-the-x4-pro-experimental))* |
 
 ### On-screen button hints
 
@@ -195,9 +233,11 @@ A file/folder browser over the SD card.
 
 - **Navigate:** **Left/Up** and **Right/Down** move the cursor; long-press to jump a full page.
 - **Open:** **Confirm** opens a folder or reads a book.
-- **Delete:** hold and release **Confirm** to delete the selected file (with a confirm/cancel prompt). Folder deletion is not supported.
+- **Book Options:** hold **Confirm** on a *book* row to open its **Book Options** popup — *Book Info, Mark as Read, Reset Progress, Remove from Recents, Delete from Device*, plus *Delete Clippings* when that book has clippings and *Delete Book Cache* in Developer Mode.
+- **Delete:** hold and release **Confirm** on a *folder* or non-book file to delete it (with a confirm/cancel prompt). Books are deleted from the Book Options popup instead.
 - **Progress column:** each row shows a right-aligned marker — `X` (finished, ≥90%), a percentage like `21%` (in progress), or blank (unopened / directory).
 - A **`& `** prefix marks books linked to your BookFusion account.
+- *(X4 Pro)* A long **hold on a book row** opens the same Book Options popup; a hold on a folder starts the delete prompt.
 
 <img src="docs/images/user-guide/browse-files.png" alt="Browse Files list showing books with right-aligned progress percentages and the Sort tab" width="300">
 
@@ -228,31 +268,41 @@ Press **Confirm** while reading to open the reader menu.
 
 <img src="docs/images/user-guide/reader-menu.png" alt="Reader menu showing chapter position, time-left estimate, and the list of actions" width="300">
 
+At the top the menu shows a **two-line summary** of where you are:
+
+- **Line 1** — your calibrated reading speed (e.g. `24s/pg`), chapter position and time left (`Ch 4/18 12m`), and book progress with time left (`Book 37% 5h20m`).
+- **Line 2** — the clock and date (once the clock has been set), a warning if **Progress Autosync** is on but couldn't reach the network this boot, and today's reading time against your daily goal (e.g. `17m / 15m`).
+
 Available actions:
 
 | Action | What it does |
 |--------|--------------|
 | **Select Chapter** | Table of contents — jump to any chapter. |
 | **Footnotes** | *(shown only when the page has footnotes)* View footnotes in a menu. |
-| **Go to Percent** | Jump to a position by percentage. |
+| **Orientation** | Cycles orientation in place (Portrait / Landscape CW / Inverted / Landscape CCW). |
+| **Show Button Hints** | Cycles the on-screen button-hint mode in place. |
+| **Dark Mode** | Toggles light-on-dark reading in place. |
+| **Frontlight Brightness / Warmth** | *(frontlight devices only)* Adjusts the light in place, without leaving the page. |
+| **Font & Layout Preview** | Live split-screen font/layout editor. |
+| **Reader Controls** | Rebind per-button, per-tap-zone and home-pad reader actions. |
 | **Auto Page Turn** | Set the auto-turn interval (see **[Auto-Turn](#auto-turn)**). |
-| **Reading Speed** | View / calibrate your reading speed (drives Auto-Turn and time-left estimates). |
-| **Rotate Screen** | Change orientation (Portrait / Landscape CW / Inverted / Landscape CCW). |
-| **Button Hints** | Toggle on-screen button-hint mode. |
+| **Go to %** | Jump to a position by percentage. |
+| **Bookmarks** | *(hideable)* View and jump to saved bookmarks. |
+| **Create Bookmark** | *(hideable)* Bookmark the current page. |
+| **Save Clipping** | *(hideable)* Save a text clipping/highlight from the current page. |
+| **View Clippings** | *(hideable)* Browse saved clippings for this book. |
+| **Take Screenshot** | *(Developer Mode only)* Save the current screen to `screenshots/`. |
 | **Bluetooth Remote** | *(shown when a remote is paired)* Turn the BLE page turner on/off — see **[Bluetooth Page Turner](#11-bluetooth-page-turner)**. |
-| **Font & Layout** | Live font/layout preview editor. |
-| **Reader Controls** | Rebind per-button reader actions. |
-| **Bookmarks** | View and jump to saved bookmarks. |
-| **Add Bookmark** | Bookmark the current page. |
-| **Save Clipping** | Save a text clipping/highlight from the current page. |
-| **View Clippings** | Browse saved clippings for this book. |
-| **Take Screenshot** | Save the current screen to `screenshots/`. |
-| **Display QR** | Show a QR code (e.g. to open a link). |
-| **Book Info** | Full metadata panel (see below). |
-| **Mark as Completed** | Sets progress to 100%, counts the book as finished, returns Home. |
+| **Show page as QR** | Show the current page as a QR code. |
+| **Progress Autosync** | *(shown when this book has a sync backend)* Cycles Off / Every Chapter / Every 5% / On Exit. |
+| **Sync: Push / Pull** | *(shown when this book has a sync backend)* Labelled for the backend that actually handles it — **Push to BookFusion**, **Pull from KOReader**, and so on. |
+| **Delete Book Cache** | *(Developer Mode only)* Clear this book's cached layout (forces a re-parse). |
 | **Go Home** | Close the book and return to the Home screen. |
-| **Sync: Push / Pull** | Upload or apply reading progress with your sync server. |
-| **Delete Cache** | Clear this book's cached layout (forces a re-parse). |
+
+Rows marked *in place* cycle their value without closing the menu. Rows marked *hideable* — along with **Bluetooth Remote** and the sync rows — can be turned off in **Settings → Reader** if you drive those functions from buttons instead.
+
+> [!NOTE]
+> **Reading Speed** and **Mark as Read** are no longer menu rows. Your reading speed is shown in the summary line above; **Mark Finished** is available as a bindable **[Reader Controls](#reader-tab)** action, and as **Mark as Read** in the **Book Options** popup. **Book Info** has likewise moved out of the reader menu — open it from the book's entry in the file browser or Library.
 
 ### Book Info panel
 
@@ -433,80 +483,61 @@ KatiePoint can pair with cheap BLE page-turner remotes and clickers (Bluetooth H
 
 <img src="docs/images/user-guide/bluetooth-page-turner.gif" alt="Animated demo: turning Bluetooth on from the reader, the remote reconnecting, and pages turning from the handheld clicker" width="300">
 
-### Every button turns the page forward
+### Setting up
 
-KatiePoint does **not** map remote buttons to separate forward/back actions. *Any*
-button on the remote turns one page forward.
+Go to **Settings → System → Bluetooth Page Turner**. First time through, it runs as a guided setup: **turn on → scan → pair → map buttons → test**.
 
-This is deliberate. Cheap clickers disagree about almost everything — some send a
-different code per button, some send the *same* code for every button, and
-one-button models alternate between two codes on each press. Trying to tell those
-apart was unreliable in practice, so KatiePoint doesn't try. There is no button
-mapping step, and nothing to configure.
+1. **Put the remote into pairing mode first.** This is the step most people miss — the remote must be actively advertising or it will not appear in the scan. How you do it varies by model; commonly it is holding a button for a few seconds until an LED flashes. Check your remote's instructions.
+2. Set **Bluetooth** to On, then choose **No remote - connect one** to scan.
+3. Pick your remote from the list (unnamed devices that aren't input devices are hidden automatically). Once connected, it's remembered for reconnection.
+4. The setup chains straight into the **button mapping** step (below). You can skip it.
 
-The trade-off: **you cannot page backwards with the remote.** Use the device's own
-buttons for that. Remotes that only send data while a button is held (rather than
-on press) are not supported.
+When it connects, KatiePoint spends about a second watching the remote sit idle so it can learn what "no button pressed" looks like for that model. **Don't hold a button during those first couple of seconds after connecting.**
 
-### Pairing a remote
+The main Bluetooth screen has a **live press test** box: press a button on the remote and it tells you it saw the press. Use it to confirm the remote is really talking to the device.
 
-1. **Put the remote into pairing mode first.** This is the step most people miss —
-   the remote must be actively advertising or it will not appear in the scan. How
-   you do it varies by model; commonly it is holding a button for a few seconds
-   until an LED flashes. Check your remote's instructions.
-2. Go to **Settings → System → Bluetooth Page Turner**.
-3. Set **Bluetooth** to On, then choose **No remote - connect one** to scan.
-4. Pick your remote from the list (unnamed devices that aren't input devices are
-   hidden automatically). Once connected, it's remembered for reconnection.
+### Mapping buttons (optional)
 
-When it connects, KatiePoint spends about a second watching the remote sit idle so
-it can learn what "no button pressed" looks like for that model. Don't hold a
-button during those first couple of seconds after connecting.
+KatiePoint never decodes HID keycodes — it learns the *shape* of your remote's reports. That gives you two modes:
 
-### Give yourself a way to turn it back on
+| Mode | Behaviour |
+|------|-----------|
+| **All forward** (default, no mapping) | *Any* button on the remote turns one page forward. Page back stays on the device's own buttons. |
+| **2 buttons** (after mapping) | One remote button pages **back**, one pages **forward**, and any other button still pages forward. |
 
-**Do this while you're setting up, not later.** Bluetooth turns itself off often
-(see below), and if you have no quick way to switch it on, using a remote becomes
-tedious. Either:
+To map: choose **Map remote buttons**. You'll be asked to press the **page back** button — twice, so a one-button "toggle" remote that alternates codes gives itself away — then the **page forward** button, the same way. If the two buttons look identical to the detector, KatiePoint says so and stays in "every press pages forward" mode rather than guessing.
 
-- Keep the **Bluetooth Remote** row visible in the reader menu (**Settings → Reader
-  → Bluetooth in Menu**), or
-- Bind **Bluetooth Remote** to a button via **Settings → Reader Controls** — this
-  is the faster option, and pressing the bound button again turns it off and frees
-  the memory.
+If the row ever reads **Re-map** with the hint *"Remote mapping no longer matches"*, the stored mapping was learned against a bad baseline and every press is paging forward. Run the wizard again.
+
+> [!IMPORTANT]
+> **Re-run the mapping wizard after a firmware update** if page-back stops working. The remote's random address also rotates between pairings, so a remote that's been re-paired elsewhere may need pairing again here.
 
 ### Day-to-day use
 
-- If the remote stops responding, **press one of its buttons** — the device listens
-  for it waking up and reconnects within a couple of seconds.
-- Long-press gestures (such as chapter skip) work from the device's own buttons
-  only. A remote press is always a single page turn.
-- **Images are hidden while the remote is connected.** Decoding a picture needs
-  more memory than is free with Bluetooth running, so illustrations draw blank.
-  The page layout is unchanged — text sits exactly where it otherwise would, and
-  the images come back as soon as you turn Bluetooth off.
+- If the remote stops responding, **press one of its buttons** — the device listens for it waking up and reconnects within a couple of seconds.
+- Long-press gestures (such as chapter skip) work from the device's own buttons only. A remote press is always a single page turn.
+- Remotes that only send data while a button is held (rather than on press) are not supported.
+- **Images are hidden while the remote is connected.** Decoding a picture needs more memory than is free with Bluetooth running, so illustrations draw blank. The page layout is unchanged — text sits exactly where it otherwise would, and the images come back as soon as you turn Bluetooth off.
+- Turn the status bar's **Bluetooth** indicator on (**Customise Status Bar → Bluetooth**) to see at a glance whether the stack is off, on, or connected.
 
 ### Why does Bluetooth keep turning itself off?
 
-By design. Bluetooth needs a large slice of the device's very limited RAM, so
-KatiePoint shuts it down whenever that memory is needed elsewhere: during
-**syncing**, while **indexing chapters**, when you **leave the reader** (home
-screen, library, settings), and in **sleep**.
+By design. Bluetooth needs a large slice of the device's very limited RAM, so KatiePoint shuts it down whenever that memory is needed elsewhere: during **syncing**, while **indexing chapters**, when you **leave the reader** (home screen, library, settings), and in **sleep**.
 
-**It never turns itself back on — including after a sync.** This catches people
-out: you sync, carry on reading, and the remote is silently dead. Flip the
-reader-menu row or press your bound button to bring it back.
+**It now brings itself back.** Once you're back on a page in the EPUB reader and things have settled — a chapter is loaded, a few seconds have passed since the last page turn, and the radio has had quiet time since any WiFi session — the reader frees the chapter layout, re-enables Bluetooth, and reloads the page. You should see the remote come back on its own within a few seconds. This includes after a **Progress Autosync** push, which no longer costs you the remote for the rest of the session.
 
-That is not laziness on the device's part. Bringing Bluetooth up immediately after
-a WiFi session is unreliable on this chip — it has been observed to freeze the
-device outright — so re-enabling is always left as a deliberate choice you make
-once the radio has settled.
+The wait is not laziness on the device's part. Bringing Bluetooth up immediately after a WiFi session is unreliable on this chip — it has been observed to freeze the device outright — so the restore deliberately holds off until the radio has settled, and backs off and retries if memory is still too tight.
 
-Occasionally the toggle will refuse with a memory message. Bluetooth needs one
-large *unbroken* run of free memory, and after heavy activity the free memory can
-be plentiful but fragmented into pieces too small to use. Turning a page or two,
-or leaving and re-entering the book, usually frees a large enough run; a restart
-always will.
+If a restore attempt can't find enough memory it simply retries later. You'll see this as the remote taking a while to come back rather than as an error.
+
+### Give yourself a manual override
+
+Even with auto-restore, it's worth having a quick manual toggle for when you want the memory back (or want Bluetooth up right now). Either:
+
+- Keep the **Bluetooth Remote** row visible in the reader menu (**Settings → Reader → Bluetooth in Menu**), or
+- Bind **Bluetooth Remote** to a button via **Settings → Reader → Reader Controls** — the faster option, and pressing it again turns Bluetooth off and frees the memory.
+
+Occasionally the toggle will refuse with a memory message. Bluetooth needs one large *unbroken* run of free memory, and after heavy activity the free memory can be plentiful but fragmented into pieces too small to use. Turning a page or two, or leaving and re-entering the book, usually frees a large enough run; a restart always will.
 
 ---
 
@@ -524,8 +555,10 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Refresh Frequency** — full-refresh every 1 / 5 / 10 / 15 / 30 pages (reduces ghosting).
 - **UI Theme** — Classic / Lyra / Lyra Extended / Lyra Library (see **[Home Screen](#3-home-screen)**).
 - **Sunlight Fading Fix** — software fix for white X4 units fading in direct sunlight.
-- **Reader Dark Mode** — invert reading to light-on-dark.
+- **Reader Dark Mode** — invert reading to light-on-dark. Also cycled in place from the reader menu, and bindable as a reader action.
 - **Folder View** — Folders / Tags / Authors / Series (see **[Folder views](#folder-views)**).
+- **Frontlight Brightness** *(frontlight devices only — X4 Pro)* — 0–100% in 10% steps; 0 is off.
+- **Frontlight Warmth** *(warm/cool devices only — X4 Pro)* — 0 = fully cool, 100 = fully warm. Splits the total light between the two LED strings; overall brightness stays constant across the mix.
 
 ### Reader tab
 
@@ -535,6 +568,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Screen Margin** — 5–40 px in 5-px steps.
 - **Paragraph Alignment** — Justify / Left / Center / Right / Book's Style.
 - **Embedded Style** — use the EPUB's own HTML/CSS formatting.
+- **Hyphenation** — dictionary hyphenation at line breaks. Changing it re-lays out text, so cached pages regenerate.
 - **Orientation** — Portrait / Landscape CW / Inverted / Landscape CCW.
 - **Extra Paragraph Spacing** — space between paragraphs vs. first-line indent.
 - **Text Anti-Aliasing** — smooth grey edges on text (slightly slower page turns).
@@ -542,12 +576,14 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Footnotes** — On page / In menu.
 - **Bionic Reading** — bold word-starts (see **[Bionic Reading](#bionic-reading)**).
 - **Show Button Hints** — None / Short Press / Long Press / Front Only Short / Front Only Long.
+- **Clippings in Menu / Bookmarks in Menu / Bluetooth in Menu / Sync in Menu** — hide those groups from the reader menu if you drive them from buttons instead.
+- **Progress Autosync** — silent background progress push: Off / Every Chapter / Every 5% / On Exit. Needs the boot-time network check to have succeeded; the reader menu says so when it hasn't. A Bluetooth remote is torn down for the sync session and restored afterwards.
 - **Font & Layout Preview** *(action)* — live split-screen font/layout editor: the sample page at the top re-renders as you change each option below.
 
   <img src="docs/images/user-guide/font-layout-preview.png" alt="Font and Layout preview with a live sample page above the list of font and spacing options" width="300">
 
 - **Customise Status Bar** *(action)* — see below.
-- **Reader Controls** *(action)* — bind a **short-press** and **long-press** action to each reader button. Choose from Chapter Forward/Back, Menu, Files, Sync, Bookmark, Screenshot, Mark Finished, Auto Turn, Bionic, Button Hints, Rotate, and more. Bindings attach to *logical* button roles, so they survive front-button remaps. There's a live preview; **Confirm** cycles, **Back** saves.
+- **Reader Controls** *(action)* — bind a **short-press** and **long-press** action to every reader control. Choose from Next/Previous Page, Chapter Forward/Back, Menu, Home, Files, Sleep, Sync, Bookmark, Force Refresh, Dark Mode, Screenshot, Mark Finished, Footnotes, Auto Page Turn, Reading Stats, Bionic Reading, Button Hints, Rotate Screen, Create Clipping, Bluetooth Remote, Hide Status Bar, or None. Bindings attach to *logical* button roles, so they survive front-button remaps. On the X4 Pro the same screen also binds the **tap** and **hold** zones (left / middle / right) and the **home pad** (short and long). There's a live preview; **Confirm** cycles, **Back** saves.
 
   <p>
   <img src="docs/images/user-guide/reader-controls.png" alt="Reader Controls screen listing short- and long-press bindings for every reader button" width="300">
@@ -556,7 +592,32 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 #### Customise Status Bar
 
-Configure what the reading status bar shows: **Chapter Page Count**, **Book Progress %**, **Progress Bar** (Book / Chapter / Hide) and its **thickness** (Thin / Medium / Thick), **Title** (Book / Chapter / Hide), **Battery**, **Time Left** (Hide / Chapter / Book), and a **Clock** (with UTC offset and 12h/24h format). These are also editable from the web settings page.
+Every status-bar element is positioned independently. Each one cycles **Hide → Left → Center → Right**, so you can put anything in any cluster:
+
+| Element | Default |
+|---------|---------|
+| **Battery** | Left |
+| **Bookmark** — a marker shown only on pages that carry a bookmark | Left |
+| **Chapter Title** | Center |
+| **Book Title** | Hide |
+| **Book Progress %** | Right |
+| **Chapter Page Count** | Right |
+| **Book Time Left** | Hide |
+| **Chapter Time Left** | Hide |
+| **Clock** | Hide |
+| **Bluetooth** — Off / On (no remote) / Connected | Hide |
+
+Plus:
+
+- **Hide status bar** — master toggle. The layout still reserves the bar's strip so your cached pages stay valid; the reader just skips drawing it and re-centres the page in the freed space. Also available as a bindable **Hide Status Bar** reader action.
+- **Progress Bar** — Book / Chapter / Hide, and its **thickness** (Thin / Medium / Thick).
+- **Top Margin** — 0–20 px of extra space between the body text and the bar, in 4 px steps.
+- **Clock** extras — UTC offset and 12h/24h format.
+
+All of these are also editable from the web settings page.
+
+> [!NOTE]
+> If you're upgrading, your old show/hide status-bar settings are migrated to the new per-element positions automatically on first boot.
 
 ### Stats tab
 
@@ -564,10 +625,9 @@ See **[Reading Stats](#9-reading-stats)** — Daily Reading Goal, Minimum Sessio
 
 ### System tab
 
-- **Front Button Follows Orientation** — front-button roles rotate with the screen.
-- **Remap Front Buttons** *(action)* — reassign the four front buttons to different physical positions.
-- **Short Power Button** — what a short Power press does: Sync / Page Turn / Force Refresh / Sleep / Create Bookmark.
-- **Long-press Action** — the reader long-press action (Sync / Page Turn / Force Refresh / Sleep / Create Bookmark).
+- **Front Button Follows Orientation** *(not on X4 Pro)* — front-button roles rotate with the screen.
+- **Remap Front Buttons** *(action, not on X4 Pro)* — reassign the four front buttons to different physical positions.
+- **Full Touch Mode** *(X4 Pro only)* — see **[Full Touch Mode](#full-touch-mode-x4-pro)** below.
 - **Tilt Page Turn** *(X3 only, when the IMU is present)* — Off / Normal / Inverted.
 - **WiFi Networks** *(action)* — manage saved networks.
 - **Bluetooth Page Turner** *(action)* — pair a BLE remote (see **[Bluetooth Page Turner](#11-bluetooth-page-turner)**).
@@ -580,6 +640,21 @@ See **[Reading Stats](#9-reading-stats)** — Daily Reading Goal, Minimum Sessio
 - **Time to Sleep** — auto-sleep after 1 / 5 / 10 / 15 / 30 min of inactivity.
 - **Show Hidden Files** — show dotfiles in the browser.
 - **Developer Mode** — reveals the Developer tab.
+
+#### Full Touch Mode *(X4 Pro)*
+
+Off by default. With Full Touch **off**, a tap anywhere is just a **Confirm** on whatever is currently selected, and you move the selection with swipes or the side keys.
+
+With Full Touch **on**, taps hit-test the drawn UI directly:
+
+- **Tap an unselected row** — moves the cursor there.
+- **Tap the selected row** — activates it. (Two taps to act, so a mis-tap never fires something destructive.)
+- **Swipe up / down** on a list that actually paginates — jumps a whole page, wrapping like the held side key.
+- **Swipe right** on a tabbed screen (Settings, Reading Stats) — next tab.
+- **Swipe left** — Back. On tabbed screens, Back steps to the *previous tab* first and only closes the screen once you're on the first tab, so "keep swiping left" still gets you out.
+- **Taps on dead space** (headers, gaps, below the last row) do nothing, and gestures still work there.
+
+Reading screens are unaffected: your configured tap zones, hold zones and swipe actions keep working either way (see **[Touch controls while reading](#touch-controls-while-reading-x4-pro)**).
 
 ### Developer tab *(Developer Mode only)*
 

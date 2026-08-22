@@ -99,12 +99,14 @@ class EpubReaderActivity final : public Activity {
   // still alive. Main task only. Returns nullptr when the position can't be
   // built or the allocation fails.
   std::unique_ptr<ProgressAutoSync::Payload> buildAutosyncPayload(const ProgressAutoSync::Trigger& trigger);
-  // Arm on a threshold crossing, fire on the 2nd page of a chapter. Called from
-  // pageTurn() (main task only — never from render()).
+  // Arm on a threshold crossing, report a fire on the 2nd page of a chapter.
+  // Cheap and network-free: it decides *whether* to push, never pushes. Called
+  // from pageTurn() (main task only — never from render()).
+  bool autosyncDueThisTurn();
+  // Blocking push. On a tight-heap board it releases the section and Epub first
+  // and reloads them after; see ProgressAutoSync.h for why. Takes the reader
+  // unresponsive for a few seconds either way.
   // Returns false when the reader was torn down (epub reload failed -> Home).
-  bool maybeAutosync();
-  // Blocking push: releases the section and Epub, syncs, reloads. Takes the
-  // reader unresponsive for a few seconds; see ProgressAutoSync.h for why.
   bool runAutosyncNow();
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);

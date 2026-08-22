@@ -4,6 +4,108 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ---
 
+## Unreleased
+
+### X4 Pro support (experimental)
+
+Initial port to the **Xteink X4 Pro** — an ESP32-S3 board, so it ships as a **separate binary** (`pio run -e x4pro`) rather than as an addition to the C3 image. `freeink-sdk`'s `BoardConfig.h` refuses to link devices from two MCU families, so `[env:x4pro]` unsets `FREEINK_DEVICE_X3`/`FREEINK_DEVICE_X4` and the RISC-V-only `WOLFSSL_SP_RISCV32`, and switches SD to the native SDMMC block-device interface.
+
+The board has no front buttons, so `MappedInputManager` synthesizes the four front roles from screen swipes (left = Back, right = Confirm, up/down = Up/Down) and deliberately bypasses `SETTINGS.frontButton*` — a stale or imported remap can never make Back or Confirm unreachable. The two side keys are Left/Right in menus and PageBack/PageForward in the readers. The home-pad hold is hard-wired to the reader menu so the menu (and its Go Home row) always stays reachable.
+
+Also: deep-sleep rail shutdown (`powerDownRailsForSleep`) for the gated GT911/SD rails, and PWM frontlight support.
+
+**Files changed**: `platformio.ini`, `src/MappedInputManager.*`, `lib/hal/HalPowerManager.*`, `lib/hal/HalGPIO.*`, `lib/hal/HalDisplay.*`, plus device fences across the activity layer.
+
+### Full Touch mode
+
+Opt-in tap hit-testing for the X4 Pro (**Settings → System → Full Touch Mode**, off by default). With it off, a tap is a Confirm on the current selection. With it on, `TouchListNav` dispatches taps against the real drawn geometry: tap an unselected row to move the cursor, tap the selected row to activate. Vertical swipes page whole lists, a right swipe steps tabs, a left swipe is Back — and on tabbed screens Back steps back through the tabs before closing.
+
+The list rect, item count and subtitle flag passed to `TouchListNav::tapRow()` must match the activity's `drawList()` call, or hit-testing and rendering disagree. Activities that consume touch themselves override `handlesDirectTouch()`.
+
+Readers are unaffected: tap zones (left/middle/right thirds), hold zones and the home pad keep their own configurable actions, all bindable from Reader Controls.
+
+**Files changed**: `src/util/TouchListNav.h`, `src/components/UITheme.*`, `src/components/themes/*`, most of `src/activities/settings/`, `src/activities/home/`, `src/activities/reader/`.
+
+### Frontlight
+
+Brightness (0–100%, 10% steps) and, on warm/cool boards, a warmth mix that splits the total between the two LED strings at constant brightness. Exposed in **Settings → Display** and as in-place cycling rows in the reader menu, so the light can be changed without leaving the page. Fenced behind `FREEINK_CAP_FRONTLIGHT` / `FREEINK_CAP_WARMLIGHT`, so the JSON keys don't round-trip on hardware that can never drive them.
+
+**Files changed**: `lib/hal/HalFrontlight.*`, `src/SettingsList.h`, `src/activities/reader/EpubReaderMenuActivity.*`, `platformio.ini` (FrontlightManager dep).
+
+### Per-element status bar
+
+The status bar's show/hide toggles and Book/Chapter enums are replaced by one position picker per element: **Hide → Left → Center → Right**. Battery, book title, chapter title, book %, chapter page count, book/chapter time-left, clock, a new **bookmark indicator** (drawn only on bookmarked pages) and a new **Bluetooth indicator** (Down / Up / Connected) can each sit in any cluster.
+
+Added alongside: a **Top Margin** setting (0–20 px, 4 px steps) between body text and the bar, and a **Hide Status Bar** reader action. Hiding keeps the bar's strip reserved during layout so the section cache stays valid — the reader skips drawing it and re-centres the page by redistributing the margin at draw time.
+
+`migrateStatusBarPositions()` derives the new fields from the legacy toggles the first time a settings file without them is loaded.
+
+**Files changed**: `src/CrossPointSettings.*`, `src/SettingsList.h`, `src/JsonSettingsIO.cpp`, `src/activities/settings/StatusBarSettingsActivity.cpp`, `src/components/themes/BaseTheme.*`, `src/components/icons/bookmark.h`, `src/components/icons/bluetooth*.h`.
+
+### Reader menu revamp
+
+Two-line summary at the top: reading speed, chapter position + time left, book % + time left on line one; clock, date, an "autosync off" notice when the boot NTP check failed, and today's reading against the daily goal on line two.
+
+**Reading Speed** and **Mark as Read** rows are gone (speed now lives in the summary; Mark Finished is a bindable reader action and a Book Options entry). Dark Mode, Button Hints, Orientation and Frontlight cycle **in place** without closing the menu. Sync rows are resolved per book via `ProgressAutoSync::providerFor()` and labelled for the backend that will actually handle them (*Sync: Push to BookFusion*, *Pull from KOReader*, …), appearing only when a provider exists. Clippings / Bookmarks / Bluetooth / Sync groups can each be hidden from **Settings → Reader**.
+
+**Files changed**: `src/activities/reader/EpubReaderMenuActivity.*`, `src/activities/reader/EpubReaderActivity.*`, `lib/I18n/translations/english.yaml`.
+
+### BLE page turner: two-button mapping and auto-restore
+
+The press detector learns each remote's report *shape* rather than decoding HID keycodes, and now tracks up to three shapes per device (multi-function remotes send more than one; sharing one idle mask between them made the detector go blind). Idle is anchored on quiescence — the frame before a gap in the traffic is the one the report came to rest on — which stops a learning window that closes mid-hold from learning a *pressed* frame as idle and inverting every signature for the session.
+
+On top of that: a **mapping wizard** (each step captures the same button twice, which is what exposes a one-button toggle remote that alternates codes), so a mapped remote gets **page back** as well as forward, while unmapped remotes keep the any-button-pages-forward behaviour. Stale mappings are detected against the learned idle frame and surfaced as a **Re-map** prompt. First-time setup is guided end to end: enable → scan → pair → map → live press test.
+
+**Bluetooth now restores itself.** `maybeAutoRestoreBluetooth()` brings the stack back once the reader is idle with a chapter resident, a few seconds past the last page turn, and past a WiFi settle gate — the same heap the manual toggle frees, freed the same way. Progress Autosync therefore no longer costs the remote for the rest of the session.
+
+**Files changed**: `lib/hal/BluetoothHIDManager.*`, `src/activities/settings/BluetoothSettingsActivity.*`, `src/activities/reader/EpubReaderActivity.cpp`, `src/CrossPointSettings.h`.
+
+---
+
+## 1.7.6 — July 2026
+
+### Section builds no longer fail on a fragmented heap
+
+Metadata rebuilds and `loadEpub()` now lend the display framebuffer to inflate as its dictionary window, so a chapter build that needs a ~32KB contiguous block can find one even when free heap is plentiful but fragmented.
+
+### Wake from deep sleep on a short power press
+
+The 400ms hold gate (an anti-pocket-wake measure tied to the legacy `shortPwrBtn` field) made waking feel unresponsive, and the field it keyed on is no longer what the Reader Controls UI writes. A short press now always wakes.
+
+**Files changed**: `src/activities/reader/EpubReaderActivity.cpp`, `lib/Epub/`, `src/CrossPointSettings.h`
+
+---
+
+## 1.7.3 – 1.7.5 — June–July 2026
+
+*(1.7.3 and 1.7.4 were mid-stream version bumps, not separate releases; everything below shipped in 1.7.5.)*
+
+### Bluetooth page-turner remotes
+
+NimBLE-Arduino is **vendored** in `lib/NimBLE-Arduino` with RAM patches (halved mbuf pools, 4KB host stack, trimmed controller config) — the framework's `sdkconfig.h` hard-defines `CONFIG_BT_NIMBLE_*`, so command-line flags alone don't work. Pair a cheap BLE HID clicker and any button turns the page forward; the press detector learns what "idle" looks like for that model instead of decoding keycodes. Bluetooth settings gained a live press test and a reworked UI, and all of its text is translated.
+
+Heap is the binding constraint: image decoding is skipped while the BLE stack is up, and the stack is torn down whenever the RAM is needed elsewhere.
+
+### TLS migrated from mbedTLS to wolfSSL
+
+Outbound HTTPS (BookFusion, KOReader, OPDS, OTA, fonts) now runs through `SecureNet`/wolfSSL. The precompiled mbedTLS transport needed two ~16.7KB **contiguous** record buffers plus a P-256 bignum spike — the X3 sync OOM. wolfSSL pins the TLS 1.3 key_share to X25519 (fixed 32-byte field math, no bignum temporaries) and uses the RISC-V single-precision backend.
+
+### Framebuffer leases
+
+TLS sessions, JPEG decode, OPDS/URL transfers and OTA downloads borrow the display framebuffer as scratch instead of allocating. Downloads are "quiet": a frozen info card stays on screen rather than repainting mid-transfer, which also removes a class of ghosting.
+
+### Library, sorting, clippings and stats
+
+Library browsing and sorting improvements; clippings (highlights) ported from the CrossInk fork; reading-stats fixes plus sleep-screen stats; the recent-books activity removed in favour of the new browse/library flows; sleep screens full-refresh so they don't ghost on battery.
+
+### SDK migrated to freeink-sdk
+
+`open-x4-epaper/community-sdk` → `Free-Ink/freeink-sdk`, an MIT re-architecture. Include paths and class names are preserved by a compat shim, so firmware source was unchanged; the new required dependency is `BoardConfig` (device profiles carrying geometry, pins and waveforms).
+
+**Files changed**: `platformio.ini`, `lib/NimBLE-Arduino/`, `lib/hal/BluetoothHIDManager.*`, `src/network/`, `freeink-sdk/`
+
+---
+
 ## 1.7.2 — June 2026
 
 Maintenance re-release of 1.7.1 to ensure the OTA update is delivered reliably (version bumped so devices reliably detect it as newer). No functional or code changes from 1.7.1.

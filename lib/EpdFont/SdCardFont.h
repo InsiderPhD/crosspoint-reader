@@ -99,6 +99,7 @@ class SdCardFont {
     uint32_t uniqueGlyphs = 0;
     uint32_t bitmapBytes = 0;
   };
+  // Compiled in only under -DFONT_CACHE_STATS — see FontDecompressor::logStats.
   void logStats(const char* label = "SDCF");
   void resetStats();
   const Stats& getStats() const { return stats_; }

@@ -84,6 +84,25 @@ inline bool pageSwipe(const MappedInputManager& mappedInput, const int itemCount
   }
 }
 
+// Full Touch paging for lists whose pagination is server-side (BookFusion
+// browse): one fetched page fits on one screen, so pageSwipe()'s local index
+// jump can never fire there. Returns -1 for swipe up (previous page), +1 for
+// swipe down (next page), 0 otherwise — the same direction mapping as
+// pageSwipe(). The call site performs the page fetch itself and MUST supply
+// its own bounds (no-op when there is no adjacent page): unlike pageSwipe()
+// there is no single-page inertness guard here, and a sloppy tap the panel
+// classifies as a swipe must not trigger a network fetch on a one-page list.
+inline int pageSwipeDelta(const MappedInputManager& mappedInput) {
+  switch (mappedInput.wasSwipe()) {
+    case MappedInputManager::Swipe::Up:
+      return -1;
+    case MappedInputManager::Swipe::Down:
+      return +1;
+    default:
+      return 0;
+  }
+}
+
 // Full Touch tab paging for the tabbed screens (Settings, Reading Stats): a
 // rightward swipe moves to the next tab, wrapping at the end the same way
 // Confirm-on-the-ribbon and the held side key already do.
@@ -101,6 +120,7 @@ inline bool tabSwipeNext(const MappedInputManager& mappedInput) {
 // Non-touch boards: compiles to a constant so call sites need no #if fence.
 inline TapResult tapRow(const MappedInputManager&, const Rect&, int, int, bool, int&) { return TapResult::None; }
 inline bool pageSwipe(const MappedInputManager&, int, int, int&) { return false; }
+inline int pageSwipeDelta(const MappedInputManager&) { return 0; }
 inline bool tabSwipeNext(const MappedInputManager&) { return false; }
 #endif
 

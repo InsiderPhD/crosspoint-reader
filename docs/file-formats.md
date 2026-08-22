@@ -2,7 +2,12 @@
 
 ## `book.bin`
 
-> **Current version: 11.** The ImHex pattern below documents the original v3 layout
+> **Current version: 12** (`BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`).
+> v12 did not change the layout: multiple `<dc:creator>` authors are now joined with
+> `" & "` instead of `", "`, so the Authors folder view can split co-authors without
+> breaking "Last, First" names. The bump exists to force stale `book.bin` files to rebuild.
+>
+> The ImHex pattern below documents the original v3 layout
 > and has not been kept fully in sync. Since then the metadata section gained, in order:
 > `language` (v5); `tags`, `seriesName`, `seriesIndex` (v10); and `publisher`, `pubDate`,
 > `rating`, `bookshelf` (v11) — each a length-prefixed UTF-8 string appended after
@@ -114,6 +119,16 @@ if (parsedSize != fileSize) {
 ```
 
 ## `section.bin`
+
+> **Current version: 37** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
+> v30 inline ("on page") footnotes; v31–v33 KOReader xpath/paragraph sync data and
+> nested block styles; v34 `<pre>` blocks carry a monospace font override; v35 hanging
+> indent stored as a signed `xpos`; v36 bionic-reading spans; v37 bionic stored as whole
+> words and expanded at layout time.
+>
+> Any change to the on-disk structure **must** bump this constant — a stale cache read
+> against a new layout is how you get a hard fault, not a graceful failure.
 
 ### Version 24
 

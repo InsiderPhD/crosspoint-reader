@@ -66,6 +66,7 @@ constexpr unsigned long BASELINE_LEARN_MS = 1000;     // Post-connect window to 
 constexpr uint8_t VOLATILE_CHANGE_THRESHOLD = 3;      // Byte changes in a window => free-running, mask it
 constexpr unsigned long MIN_PRESS_INTERVAL_MS = 120;  // Floor between injected page turns
 constexpr unsigned long STUCK_ACTIVE_MS = 2500;       // Active this long with churning bytes => re-learn
+constexpr unsigned long REST_GAP_MS = 300;            // Silence this long => the frame before it was the rest state
 
 // RAII flag: while alive, tells pauseForMemory() that loop-task BLE work is in
 // flight so it waits (or skips) instead of tearing the stack down underneath us.
@@ -995,6 +996,7 @@ void BluetoothHIDManager::setButtonMapping(const uint8_t backIndex, const uint8_
   _backSigValue = backValue;
   _fwdSigIndex = fwdIndex;
   _fwdSigValue = fwdValue;
+  _mappingLooksStale = false;
   if (backIndex != 0xFF) {
     LOG_INF("BT", "Button mapping: back sig %u=0x%02X, fwd sig %u=0x%02X", static_cast<unsigned>(backIndex),
             static_cast<unsigned>(backValue), static_cast<unsigned>(fwdIndex), static_cast<unsigned>(fwdValue));
@@ -1104,6 +1106,7 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
       // First frame of this shape: it opens the window and seeds the reference.
       det->baselineStartMs = nowMs;
       det->baselineFrames = 1;
+      det->lastFrameMs = nowMs;
       memcpy(det->idleFrame, frame, HID_FRAME_BYTES);
       for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
         if (frame[i] == 0 && det->byteZeroCount[i] < 0xFF) det->byteZeroCount[i]++;
@@ -1112,6 +1115,13 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
     }
 
     if ((nowMs - det->baselineStartMs) < BASELINE_LEARN_MS) {
+      // Silence since the previous frame means the report SAT at that frame:
+      // it is a release, not a press. Remember it as the rest candidate.
+      if ((nowMs - det->lastFrameMs) >= REST_GAP_MS) {
+        memcpy(det->restFrame, det->idleFrame, HID_FRAME_BYTES);
+        det->restFrameValid = true;
+      }
+      det->lastFrameMs = nowMs;
       for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
         if (frame[i] != det->idleFrame[i] && det->byteChangeCount[i] < 0xFF) {
           det->byteChangeCount[i]++;
@@ -1134,6 +1144,14 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
       // Silent shape: no idle traffic to characterise, so assume all-zero idle.
       memset(det->idleFrame, 0, HID_FRAME_BYTES);
     } else {
+      // The window closes on whatever frame happens to arrive after 1000 ms —
+      // which is a PRESSED frame if the user is holding a button as it expires
+      // (easy to do in the mapping wizard, which asks for presses immediately
+      // after connecting). A frame observed to have been followed by silence is
+      // strictly better evidence of the rest state, so prefer it.
+      if (det->restFrameValid) {
+        memcpy(det->idleFrame, det->restFrame, HID_FRAME_BYTES);
+      }
       for (size_t i = 0; i < HID_FRAME_BYTES; i++) {
         // A byte RESTING at 0x00 for a meaningful share of the window is the
         // shape's signal byte (a keycode that rests at 0 between presses), NOT
@@ -1161,6 +1179,34 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
     det->baselineReady = true;
     LOG_INF("BT", "Idle report learned for %s len=%u: frames=%u volatileMask=0x%02X", device->address.c_str(),
             static_cast<unsigned>(det->reportLen), static_cast<unsigned>(det->baselineFrames), det->volatileMask);
+
+    // A stored back signature whose value IS this shape's idle value can never
+    // match a press (the deviation guard in the decode rejects it), so the
+    // remote silently pages forward on every button. That mapping was captured
+    // in a session whose idle baseline was wrong, and the only cure is a re-run
+    // of the wizard — say so instead of failing mutely.
+    const uint8_t mapBackIdx = g_instance->_backSigIndex;
+    if (mapBackIdx < HID_FRAME_BYTES) {
+      // Every learned shape must be unable to match before we say so: the back
+      // button may well live on a shape that has not connected/learned yet, and
+      // a false "re-map me" on a working remote is worse than a missing one.
+      bool anyShapeCanMatch = false;
+      for (const auto& other : device->detectors) {
+        if (other.reportLen == 0 || !other.baselineReady) {
+          continue;
+        }
+        if ((other.volatileMask & static_cast<uint8_t>(1u << mapBackIdx)) != 0 ||
+            g_instance->_backSigValue != other.idleFrame[mapBackIdx]) {
+          anyShapeCanMatch = true;
+          break;
+        }
+      }
+      if (!anyShapeCanMatch) {
+        LOG_ERR("BT", "Stale mapping: back sig %u=0x%02X is the IDLE value of every learned shape - re-run BT setup",
+                static_cast<unsigned>(mapBackIdx), static_cast<unsigned>(g_instance->_backSigValue));
+      }
+      g_instance->_mappingLooksStale = !anyShapeCanMatch;
+    }
     // Fall through: evaluate this frame normally so a press that arrives right
     // as the window closes still turns a page.
   }
@@ -1250,6 +1296,7 @@ bool BluetoothHIDManager::detectPress(ConnectedDevice* device, const uint8_t* da
   device->lastPressIsBack =
       backIdx < HID_FRAME_BYTES && frame[backIdx] == g_instance->_backSigValue &&
       (frame[backIdx] != det->idleFrame[backIdx] || (det->volatileMask & static_cast<uint8_t>(1u << backIdx)) != 0);
+
   memcpy(det->prevFrame, frame, HID_FRAME_BYTES);
 
   // Remotes commonly expose the same press on several report characteristics,

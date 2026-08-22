@@ -1,6 +1,7 @@
 #include "EpubReaderActivity.h"
 
 #include <BluetoothHIDManager.h>
+#include <DevicePolicy.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
@@ -1193,6 +1194,14 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                 }
               }
             });
+      } else {
+        // Unreachable by design: buildMenuItems() only emits SYNC_PUSH/SYNC_PULL
+        // when ProgressAutoSync::providerFor() resolved a backend, which is this
+        // same predicate. Reaching here means the two have drifted apart — and
+        // the symptom is a menu row that does nothing whatsoever when pressed,
+        // which is invisible without this line.
+        LOG_ERR("BFS", "Sync row shown with no provider (bookId=%lu token=%d koreader=%d)", (unsigned long)bookId,
+                (int)BF_TOKEN_STORE.hasToken(), (int)KOREADER_STORE.hasCredentials());
       }
       break;
     }
@@ -1318,14 +1327,39 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
     recordStatsProgress();
   }
 
-  // Returns false when the autosync teardown could not reload the book and
-  // sent us Home — the activity is finishing, so don't request another render.
-  if (!maybeAutosync()) {
+  lastPageTurnTime = millis();
+
+  // ── Autosync ─────────────────────────────────────────────────────────────
+  // Deciding whether to push is cheap and never touches the network; the push
+  // itself holds the main task for several seconds (WiFi association + TLS
+  // handshake). Where that stall lands relative to the render is the whole
+  // difference between "the page turn hung" and "the buttons were dead for a
+  // moment while I was already reading", so the two boards order it
+  // differently.
+  const bool syncDue = autosyncDueThisTurn();
+
+#if CROSSPOINT_TIGHT_HEAP
+  // The push has to release the chapter layout to fit the TLS session, so it
+  // cannot run after the render — the page it just drew would be gone and a
+  // second full repaint would be needed to get it back. Sync first, draw once.
+  // Returns false when the teardown could not reload the book and sent us Home
+  // — the activity is finishing, so don't request another render.
+  if (syncDue && !runAutosyncNow()) {
     return;
   }
-
-  lastPageTurnTime = millis();
   requestUpdate();
+#else
+  // Roomy board: the push keeps the section and Epub resident, so the page can
+  // go up first. Wait for it to actually land on the panel (requestUpdate()
+  // only sets a flag the manager acts on after this loop iteration, which would
+  // put the render back behind the push) and push after.
+  if (!syncDue) {
+    requestUpdate();
+    return;
+  }
+  requestUpdateAndWait();
+  runAutosyncNow();
+#endif
 }
 
 // TODO: Failure handling
@@ -1808,9 +1842,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
     currentPageFootnotes = p->footnotes;
 
-    const auto start = millis();
+    // renderContents logs its own "Page render: ...total=" breakdown, which
+    // covers exactly this span — no second timer needed.
     renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
-    LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
   }
   silentIndexNextChapterIfNeeded(viewportWidth, viewportHeight);
   saveProgress(currentSpineIndex, section->currentPage, section->pageCount);
@@ -2120,10 +2154,10 @@ std::unique_ptr<ProgressAutoSync::Payload> EpubReaderActivity::buildAutosyncPayl
   return payload;
 }
 
-bool EpubReaderActivity::maybeAutosync() {
+bool EpubReaderActivity::autosyncDueThisTurn() {
   // Cheapest possible bail-out: this runs on every page turn.
   if (SETTINGS.autosyncMode == CrossPointSettings::AUTOSYNC_OFF || !epub || !section || section->pageCount <= 0) {
-    return true;
+    return false;
   }
 
   // Fire an armed sync only on the second page of a chapter. That's the
@@ -2133,13 +2167,13 @@ bool EpubReaderActivity::maybeAutosync() {
   // reader has just settled into a new chapter.
   static constexpr int AUTOSYNC_FIRE_PAGE = 1;  // zero-based; the 2nd page
   if (ProgressAutoSync::isArmed() && section->currentPage == AUTOSYNC_FIRE_PAGE) {
-    return runAutosyncNow();
+    return true;
   }
 
   const float chapterProgress = static_cast<float>(section->currentPage) / static_cast<float>(section->pageCount);
   const float bookPercent = epub->calculateProgress(currentSpineIndex, chapterProgress) * 100.0f;
   ProgressAutoSync::armIfThresholdCrossed(epub->getPath(), currentSpineIndex, bookPercent);
-  return true;
+  return false;
 }
 
 bool EpubReaderActivity::runAutosyncNow() {
@@ -2149,17 +2183,20 @@ bool EpubReaderActivity::runAutosyncNow() {
     ProgressAutoSync::disarm();
     return true;
   }
-  const std::string epubPath = payload->epubPath;
-
-  // Autosync coexists with a Bluetooth remote. The BLE stack holds ~56KB and
-  // shares the single radio with WiFi, so it MUST come down before the push —
-  // otherwise the WiFi+TLS session has no heap. Pausing it here (rather than
-  // leaving it to the section-build path) also keeps the loop-task auto-restore
-  // fenced out for the whole memory-critical section. If Bluetooth is "wanted",
-  // the reader's maybeAutoRestoreBluetooth() brings the stack back once the push
-  // is done, the WiFi settle timer has elapsed, and a chapter is resident again.
+  // Autosync coexists with a Bluetooth remote. On a tight-heap board the BLE
+  // stack holds ~56KB and shares the single radio with WiFi, so it MUST come
+  // down before the push — otherwise the WiFi+TLS session has no heap. Pausing
+  // it here (rather than leaving it to the section-build path) also keeps the
+  // loop-task auto-restore fenced out for the whole memory-critical section. If
+  // Bluetooth is "wanted", the reader's maybeAutoRestoreBluetooth() brings the
+  // stack back once the push is done, the WiFi settle timer has elapsed, and a
+  // chapter is resident again. Self-gating: on a roomy board pauseForMemory()
+  // declines and this is a no-op (see DevicePolicy.h).
   std::optional<BleMemoryPause> blePause;
   blePause.emplace();
+
+#if CROSSPOINT_TIGHT_HEAP
+  const std::string epubPath = payload->epubPath;
 
   // Release the chapter layout AND the book metadata before the TLS session,
   // exactly as the manual sync does. The wolfSSL handshake is far leaner than
@@ -2168,6 +2205,10 @@ bool EpubReaderActivity::runAutosyncNow() {
   // ~40KB, so this insurance stays until the new headroom is measured
   // on-device with BLE up. The section reloads from its cache file on the
   // next render; the Epub is reloaded below.
+  //
+  // None of this applies to a PSRAM board, where the push runs with megabytes
+  // free — and holding onto the chapter there is what lets pageTurn() render
+  // the page *before* the push instead of after it.
   {
     RenderLock lock(*this);
     if (section) {
@@ -2180,6 +2221,7 @@ bool EpubReaderActivity::runAutosyncNow() {
   if (auto* fcm = renderer.getFontCacheManager()) {
     fcm->clearCache();  // re-warms on the next render
   }
+#endif
 
   if (ProgressAutoSync::heapAllowsPush()) {
     ProgressAutoSync::pushBlocking(*payload);
@@ -2192,6 +2234,7 @@ bool EpubReaderActivity::runAutosyncNow() {
   }
   payload.reset();
 
+#if CROSSPOINT_TIGHT_HEAP
   // Reload the book metadata released above. Failing here leaves the reader
   // with no book, so bail to Home rather than rendering a half-dead activity.
   {
@@ -2206,6 +2249,7 @@ bool EpubReaderActivity::runAutosyncNow() {
       return false;
     }
   }
+#endif
   return true;
 }
 
@@ -2674,36 +2718,43 @@ void EpubReaderActivity::openReaderMenu() {
     }
   }
 
-  startActivityForResult(std::make_unique<EpubReaderMenuActivity>(
-                             renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent,
-                             SETTINGS.orientation, !currentPageFootnotes.empty(), timeLeftChapter, timeLeftBook),
-                         [this](const ActivityResult& result) {
-                           const auto& menu = std::get<MenuResult>(result.data);
-                           applyOrientation(menu.orientation);
-                           toggleAutoPageTurn(menu.pageTurnOption);
-                           if (menu.buttonHints != SETTINGS.showButtonHints) {
-                             SETTINGS.showButtonHints = menu.buttonHints;
-                             SETTINGS.saveToFile();
-                             reflowCurrentChapter();  // hint reservation changed — repaginate
-                           }
-                           // Autosync mode cycles in the menu and applies here on exit. It's a
-                           // pure setting change — no cache invalidation or reflow needed.
-                           if (menu.autosyncMode != SETTINGS.autosyncMode) {
-                             SETTINGS.autosyncMode = menu.autosyncMode;
-                             SETTINGS.saveToFile();
-                           }
-                           // Frontlight was already driven live while cycling; persist the final
-                           // levels once here so the menu doesn't hit SPIFFS on every step.
-                           if (menu.frontlightBrightness != SETTINGS.frontlightBrightness ||
-                               menu.frontlightWarmth != SETTINGS.frontlightWarmth) {
-                             SETTINGS.frontlightBrightness = menu.frontlightBrightness;
-                             SETTINGS.frontlightWarmth = menu.frontlightWarmth;
-                             SETTINGS.saveToFile();
-                           }
-                           if (!result.isCancelled) {
-                             onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
-                           }
-                         });
+  // Which backend a Push/Pull would actually reach for this book. Resolved with
+  // the same predicate the SYNC_PUSH/SYNC_PULL handler branches on (BookFusion
+  // sidecar + token, else KOReader credentials) so the menu can never offer a
+  // sync row that the handler would silently drop on the floor.
+  const auto syncProvider = ProgressAutoSync::providerFor(epub->getPath()).provider;
+
+  startActivityForResult(
+      std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), currentPage, totalPages,
+                                               bookProgressPercent, SETTINGS.orientation, !currentPageFootnotes.empty(),
+                                               syncProvider, timeLeftChapter, timeLeftBook),
+      [this](const ActivityResult& result) {
+        const auto& menu = std::get<MenuResult>(result.data);
+        applyOrientation(menu.orientation);
+        toggleAutoPageTurn(menu.pageTurnOption);
+        if (menu.buttonHints != SETTINGS.showButtonHints) {
+          SETTINGS.showButtonHints = menu.buttonHints;
+          SETTINGS.saveToFile();
+          reflowCurrentChapter();  // hint reservation changed — repaginate
+        }
+        // Autosync mode cycles in the menu and applies here on exit. It's a
+        // pure setting change — no cache invalidation or reflow needed.
+        if (menu.autosyncMode != SETTINGS.autosyncMode) {
+          SETTINGS.autosyncMode = menu.autosyncMode;
+          SETTINGS.saveToFile();
+        }
+        // Frontlight was already driven live while cycling; persist the final
+        // levels once here so the menu doesn't hit SPIFFS on every step.
+        if (menu.frontlightBrightness != SETTINGS.frontlightBrightness ||
+            menu.frontlightWarmth != SETTINGS.frontlightWarmth) {
+          SETTINGS.frontlightBrightness = menu.frontlightBrightness;
+          SETTINGS.frontlightWarmth = menu.frontlightWarmth;
+          SETTINGS.saveToFile();
+        }
+        if (!result.isCancelled) {
+          onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
+        }
+      });
 }
 
 bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION action) {

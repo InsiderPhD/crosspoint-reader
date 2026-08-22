@@ -6,10 +6,10 @@ on the desk and cross boxes off as you go.
 
 ## Global preconditions (read before flashing anything)
 
-- [ ] Build from the **current working tree, including the `freeink-sdk` submodule diff**
+- [ x ] Build from the **current working tree, including the `freeink-sdk` submodule diff**
       (the reimplemented `FreeInkDisplay::powerOffIdle()` lives uncommitted in the
       submodule — a clean submodule checkout silently reverts the X4 Pro display fixes).
-- [ ] `pio run` completes with 0 errors/warnings. Several pending changes have never
+- [ x ] `pio run` completes with 0 errors/warnings. Several pending changes have never
       been built (autosync, BLE reconnect fixes, X3 TLS fix, speckle repaint) — fix
       compile errors before any hardware time.
 - [ ] For the X3 TLS test: confirm the asymmetric mbedTLS sdkconfig

@@ -763,6 +763,10 @@ void BluetoothSettingsActivity::renderMainMenu() {
                     statusLine.c_str());
 
   const bool bonded = SETTINGS.bleBondedDeviceAddr[0] != '\0';
+  // A mapping the connected remote can no longer produce reads as "2 buttons"
+  // while silently paging forward on every press, so it is called out both on
+  // the row that fixes it and on the status line.
+  const bool mappingStale = bonded && btMgr && btMgr->mappingLooksStale();
   std::vector<std::string> itemLabels;
   std::vector<std::string> itemValues;
   itemLabels.reserve(4);
@@ -784,7 +788,9 @@ void BluetoothSettingsActivity::renderMainMenu() {
     itemLabels.push_back(tr(STR_BT_RECONNECT));
     itemValues.push_back(btMgr && btMgr->isConnected(SETTINGS.bleBondedDeviceAddr) ? tr(STR_CONNECTED) : "");
     itemLabels.push_back(tr(STR_BT_MAP_BUTTONS));
-    itemValues.push_back(SETTINGS.bleBackSigIndex != 0xFF ? tr(STR_BT_MAP_TWO_BUTTON) : tr(STR_BT_MAP_ONE_BUTTON));
+    itemValues.push_back(mappingStale                       ? tr(STR_BT_MAP_STALE)
+                         : SETTINGS.bleBackSigIndex != 0xFF ? tr(STR_BT_MAP_TWO_BUTTON)
+                                                            : tr(STR_BT_MAP_ONE_BUTTON));
   } else {
     itemLabels.push_back(tr(STR_BT_NO_REMOTE_CONNECT));
     itemValues.push_back("");
@@ -817,9 +823,12 @@ void BluetoothSettingsActivity::renderMainMenu() {
     }
   }
 
-  if (!lastError.empty()) {
+  // A stale mapping is silent otherwise — the remote still turns pages, just
+  // always forward — so it outranks whatever transient message is sitting here.
+  const char* statusMessage = mappingStale ? tr(STR_BT_MAP_STALE_HINT) : lastError.c_str();
+  if (statusMessage[0] != '\0') {
     std::string statusText =
-        renderer.truncatedText(UI_10_FONT_ID, lastError.c_str(), pageWidth - metrics.contentSidePadding * 2);
+        renderer.truncatedText(UI_10_FONT_ID, statusMessage, pageWidth - metrics.contentSidePadding * 2);
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, statusY, statusText.c_str(), true);
   }
 
