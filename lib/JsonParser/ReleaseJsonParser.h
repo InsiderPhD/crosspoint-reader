@@ -7,7 +7,10 @@
 
 class ReleaseJsonParser {
  public:
-  ReleaseJsonParser();
+  // `assetName` is the release asset to pick out of the assets array. It must
+  // outlive the parser — callers pass a string literal. Defaults to the C3
+  // image so existing call sites and tests are unaffected.
+  explicit ReleaseJsonParser(const char* assetName = "firmware.bin");
 
   ReleaseJsonParser(const ReleaseJsonParser&) = delete;
   ReleaseJsonParser& operator=(const ReleaseJsonParser&) = delete;
@@ -50,6 +53,9 @@ class ReleaseJsonParser {
   void commitAsset();
 
   StreamingJsonParser parser;
+
+  // Not owned; a string literal supplied by the caller.
+  const char* wantedAssetName;
 
   Position position;
   LastKey lastKey;

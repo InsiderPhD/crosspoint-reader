@@ -791,6 +791,72 @@ void testChunkedRealisticEveryBoundary() {
   PASS();
 }
 
+// A release carrying one binary per MCU family. The two are not
+// interchangeable, so each build must pick its own by exact name.
+static const char* kMultiArchRelease = R"({
+  "tag_name": "1.7.7",
+  "assets": [
+    {"name": "firmware.bin",
+     "browser_download_url": "https://example.test/download/1.7.7/firmware.bin",
+     "size": 1572864},
+    {"name": "x4pro_firmware.bin",
+     "browser_download_url": "https://example.test/download/1.7.7/x4pro_firmware.bin",
+     "size": 5968330}
+  ]
+})";
+
+void testSelectsC3AssetByDefault() {
+  printf("testSelectsC3AssetByDefault...\n");
+
+  ReleaseJsonParser p;
+  p.feed(kMultiArchRelease, strlen(kMultiArchRelease));
+
+  ASSERT_TRUE(p.foundFirmware());
+  ASSERT_STREQ(p.getFirmwareUrl(), "https://example.test/download/1.7.7/firmware.bin");
+  ASSERT_EQ(p.getFirmwareSize(), 1572864u);
+
+  printf("  passed\n");
+  PASS();
+}
+
+void testSelectsX4ProAssetWhenRequested() {
+  printf("testSelectsX4ProAssetWhenRequested...\n");
+
+  ReleaseJsonParser p("x4pro_firmware.bin");
+  p.feed(kMultiArchRelease, strlen(kMultiArchRelease));
+
+  ASSERT_TRUE(p.foundFirmware());
+  ASSERT_STREQ(p.getFirmwareUrl(), "https://example.test/download/1.7.7/x4pro_firmware.bin");
+  ASSERT_EQ(p.getFirmwareSize(), 5968330u);
+
+  printf("  passed\n");
+  PASS();
+}
+
+// The whole point of the per-family name: an X4 Pro must NOT fall back to the
+// C3 image when a release ships only that one.
+void testX4ProIgnoresC3OnlyRelease() {
+  printf("testX4ProIgnoresC3OnlyRelease...\n");
+
+  static const char* kC3Only = R"({
+    "tag_name": "1.7.6",
+    "assets": [
+      {"name": "firmware.bin",
+       "browser_download_url": "https://example.test/download/1.7.6/firmware.bin",
+       "size": 1572864}
+    ]
+  })";
+
+  ReleaseJsonParser p("x4pro_firmware.bin");
+  p.feed(kC3Only, strlen(kC3Only));
+
+  ASSERT_TRUE(p.foundTag());
+  ASSERT_TRUE(!p.foundFirmware());
+
+  printf("  passed\n");
+  PASS();
+}
+
 // ============================================================================
 
 int main() {
@@ -827,6 +893,9 @@ int main() {
   testSizeZero();
   testMinimalValidJson();
   testChunkedRealisticEveryBoundary();
+  testSelectsC3AssetByDefault();
+  testSelectsX4ProAssetWhenRequested();
+  testX4ProIgnoresC3OnlyRelease();
 
   printf("\n=== Results: %d passed, %d failed ===\n", testsPassed, testsFailed);
   return testsFailed > 0 ? 1 : 0;

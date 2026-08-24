@@ -17,10 +17,22 @@ constexpr char latestReleaseUrl[] = "https://api.github.com/repos/InsiderPhD/cro
 // failed/interrupted flash leaves an obvious artifact rather than silently
 // consuming hidden space.
 constexpr char kTmpPath[] = "/firmware_ota.bin";
+
+// One release carries a binary per MCU family and they are NOT interchangeable:
+// FirmwareFlasher raw-writes the OTA partition without an image chip-ID check
+// (that bypass is deliberate — X3/X4 units reject otherwise-valid images with
+// bogus efuse-blk-rev errors), so a C3 image landing on an X4 Pro's ESP32-S3
+// produces an unbootable device. Match only this build's own asset name; a
+// release with no matching asset reports NO_UPDATE, which is the safe outcome.
+#if FREEINK_DEVICE_X4PRO
+constexpr char kFirmwareAssetName[] = "x4pro_firmware.bin";
+#else
+constexpr char kFirmwareAssetName[] = "firmware.bin";
+#endif
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
-  ReleaseJsonParser releaseParser;
+  ReleaseJsonParser releaseParser(kFirmwareAssetName);
 
   LOG_DBG("OTA", "Checking for update (current: %s)", CROSSPOINT_VERSION);
 
@@ -70,7 +82,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   }
 
   if (!releaseParser.foundFirmware()) {
-    LOG_ERR("OTA", "No firmware.bin asset found");
+    LOG_ERR("OTA", "No %s asset found", kFirmwareAssetName);
     return NO_UPDATE;
   }
 
