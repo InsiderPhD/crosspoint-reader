@@ -12,9 +12,10 @@ on the desk and cross boxes off as you go.
 - [ x ] `pio run` completes with 0 errors/warnings. Several pending changes have never
       been built (autosync, BLE reconnect fixes, X3 TLS fix, speckle repaint) — fix
       compile errors before any hardware time.
-- [ ] For the X3 TLS test: confirm the asymmetric mbedTLS sdkconfig
-      (`CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096` via `custom_sdkconfig`) actually made
-      it into the built image before flashing, otherwise the test is meaningless.
+- [ ] For the X3 TLS test: BookFusion/OPDS/OTA now go through wolfSSL (`SecureNet`),
+      not the old asymmetric-mbedTLS sdkconfig — confirm `FREEINK_NET_WOLFSSL=1` and
+      `WOLFSSL_SP_RISCV32` are in the built image before flashing, or the test is
+      meaningless. KOReader sync is still on esp-tls and is a separate check.
 - [ ] Record per session: date, `git rev-parse --short HEAD`, submodule dirty (y/n),
       environment (`default` / `gh_release_rc`).
 - [ ] Delete `.crosspoint/` on the SD card before the "fresh cache" tests below
@@ -62,7 +63,7 @@ Session log:
 - [ ] Save a clipping; it appears in the clipping list; delete it.
 - [ ] Heap before/after clip selection roughly equal (no leak from the pooled WordRef path).
 
-## UI changes (uncommitted work)
+## UI changes (landed in `86c56619`)
 - [ ] **Status bar per-element positions**: for each element, cycle Hide / Left /
       Middle / Right in settings — layout updates live, nothing overlaps, bookmark
       icon appears on bookmarked pages.
@@ -148,7 +149,7 @@ Session log:
       not from RTC).
 - [ ] **BookFusion manual sync — TLS OOM fix**: run a manual sync from a fragmented
       state (open/close a large book first, then sync). Must complete with **no "-1"
-      error**. Check serial for the mbedTLS handshake succeeding; repeat 3×.
+      error**. Check serial for the wolfSSL TLS 1.3 handshake succeeding; repeat 3×.
 - [ ] Power-button UI hints render **top-right** (X3 position), not on the right edge.
 
 ## Core reading (fresh cache)
@@ -225,9 +226,9 @@ Session log:
       single taps 20× — every one registers as a tap/Confirm, never a long-press action.
 - [ ] Tap-anywhere-is-Confirm works in ordinary menus; reader touch zones page correctly.
 
-## Full Touch mode (opt-in, uncommitted pilots)
+## Full Touch mode (opt-in; landed in `c139e9a3` / `e207694e`)
 - [ ] Enable Full Touch in settings; setting persists across reboot.
-- [ ] In each **piloted activity** (Home, File browser, Library, Group browser,
+- [ ] In each **touch-enabled activity** (Home, File browser, Library, Group browser,
       reader menu, chapter select, bookmarks, clippings, footnotes, settings lists,
       WiFi/network selection, OPDS browser, BookFusion browser, sort/context menus):
       - [ ] Tapping a row/button activates **that** item (hit-test), not the highlighted one.
