@@ -29,6 +29,12 @@ struct MenuResult {
   uint8_t frontlightWarmth = 50;
 };
 
+// Returned by FrontlightBrightnessActivity. The picker previews levels live but
+// never persists; the caller decides when the chosen level reaches SPIFFS.
+struct FrontlightResult {
+  uint8_t brightness = 0;
+};
+
 struct ChapterResult {
   int spineIndex = 0;
 };
@@ -99,9 +105,10 @@ struct ClippingJumpResult {
   uint16_t clippingIndex = UINT16_MAX;
 };
 
-using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult,
-                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult, BookContextResult,
-                                   FilePathResult, ClippingResult, ClippingJumpResult>;
+using ResultVariant =
+    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, FrontlightResult, ChapterResult, PercentResult,
+                 PageResult, SyncResult, NetworkModeResult, FootnoteResult, BookContextResult, FilePathResult,
+                 ClippingResult, ClippingJumpResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

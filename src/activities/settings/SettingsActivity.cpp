@@ -16,6 +16,7 @@
 #include "FontDownloadActivity.h"
 #include "FontLayoutPreviewActivity.h"
 #include "FontSelectionActivity.h"
+#include "FrontlightBrightnessActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "LanguageSelectActivity.h"
 #include "ManualDateActivity.h"
@@ -341,18 +342,37 @@ void SettingsActivity::toggleCurrentSetting() {
       return;
     }
   } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
+#if FREEINK_CAP_FRONTLIGHT
+    if (setting.valuePtr == &CrossPointSettings::frontlightBrightness) {
+      // Too many useful levels to tap-cycle — the dim end alone wants five rungs
+      // — so this row opens the picker, which previews each level live and
+      // returns the chosen one. See util/FrontlightLevels.h.
+      startActivityForResult(std::make_unique<FrontlightBrightnessActivity>(
+                                 renderer, mappedInput, SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth),
+                             [](const ActivityResult& result) {
+                               if (const auto* picked = std::get_if<FrontlightResult>(&result.data)) {
+                                 SETTINGS.frontlightBrightness = picked->brightness;
+                                 SETTINGS.saveToFile();
+                               }
+                               // Also covers the cancel path: the picker already
+                               // restored the light, this just keeps the two in step.
+                               halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
+                             });
+      return;
+    }
+#endif
     const int8_t currentValue = SETTINGS.*(setting.valuePtr);
     if (currentValue + setting.valueRange.step > setting.valueRange.max) {
       SETTINGS.*(setting.valuePtr) = setting.valueRange.min;
     } else {
       SETTINGS.*(setting.valuePtr) = currentValue + setting.valueRange.step;
     }
-    // Frontlight changes take effect immediately so the user can judge the
-    // level while cycling through values.
-    if (setting.valuePtr == &CrossPointSettings::frontlightBrightness ||
-        setting.valuePtr == &CrossPointSettings::frontlightWarmth) {
+#if FREEINK_CAP_FRONTLIGHT
+    // Warmth takes effect immediately so the user can judge the mix while cycling.
+    if (setting.valuePtr == &CrossPointSettings::frontlightWarmth) {
       halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
     }
+#endif
   } else if (setting.type == SettingType::ACTION) {
     auto resultHandler = [this](const ActivityResult&) { SETTINGS.saveToFile(); };
 
@@ -523,7 +543,14 @@ void SettingsActivity::render(RenderLock&&) {
             valueText = I18N.get(setting.enumValues[value]);
           }
         } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
-          valueText = std::to_string(SETTINGS.*(setting.valuePtr));
+          const uint8_t value = SETTINGS.*(setting.valuePtr);
+#if FREEINK_CAP_FRONTLIGHT
+          if (setting.valuePtr == &CrossPointSettings::frontlightBrightness) {
+            // Picker row, so show the level the way the picker labels it.
+            valueText = value ? std::to_string(value) + "%" : tr(STR_STATE_OFF);
+          } else
+#endif
+            valueText = std::to_string(value);
         } else if (setting.type == SettingType::ACTION && setting.action == SettingAction::FontFamily) {
           if (SETTINGS.sdFontFamilyName[0] != '\0') {
             valueText = SETTINGS.sdFontFamilyName;

@@ -9,6 +9,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReadingStatsStore.h"
+#include "activities/settings/FrontlightBrightnessActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ReadingStatsAnalytics.h"
@@ -146,14 +147,31 @@ void EpubReaderMenuActivity::activateSelectedItem() {
     return;
   }
 
-  if (selectedAction == MenuAction::FRONTLIGHT_BRIGHTNESS || selectedAction == MenuAction::FRONTLIGHT_WARMTH) {
-    // Cycle in 10% steps and drive the light immediately so the user can see
-    // the level; the reader persists the values once, on menu exit.
-    uint8_t& pending =
-        (selectedAction == MenuAction::FRONTLIGHT_BRIGHTNESS) ? pendingFrontlightBrightness : pendingFrontlightWarmth;
-    // Values are multiples of 10 from the UI, but the web API accepts any
-    // 0-100 — cap the step at 100 before wrapping so odd values still cycle.
-    pending = (pending >= 100) ? 0 : (pending + 10 > 100 ? 100 : pending + 10);
+#if FREEINK_CAP_FRONTLIGHT
+  if (selectedAction == MenuAction::FRONTLIGHT_BRIGHTNESS) {
+    // Brightness has too many useful levels to cycle in place, so it opens the
+    // picker. Only the pending value moves — the reader still persists once, on
+    // menu exit, so a session of fiddling costs one SPIFFS write.
+    startActivityForResult(std::make_unique<FrontlightBrightnessActivity>(
+                               renderer, mappedInput, pendingFrontlightBrightness, pendingFrontlightWarmth),
+                           [this](const ActivityResult& result) {
+                             if (const auto* picked = std::get_if<FrontlightResult>(&result.data)) {
+                               pendingFrontlightBrightness = picked->brightness;
+                             }
+                             halFrontlight.apply(pendingFrontlightBrightness, pendingFrontlightWarmth);
+                             requestUpdate();
+                           });
+    return;
+  }
+#endif
+
+  if (selectedAction == MenuAction::FRONTLIGHT_WARMTH) {
+    // Warmth stays a plain 10% cycle in place; the web API accepts any 0-100, so
+    // cap the step at 100 before wrapping so odd values still cycle. Driven live
+    // here, persisted with the rest on menu exit.
+    pendingFrontlightWarmth = (pendingFrontlightWarmth >= 100)
+                                  ? 0
+                                  : (pendingFrontlightWarmth + 10 > 100 ? 100 : pendingFrontlightWarmth + 10);
     halFrontlight.apply(pendingFrontlightBrightness, pendingFrontlightWarmth);
     requestUpdate();
     return;

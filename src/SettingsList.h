@@ -108,8 +108,11 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
   // Frontlight boards only (compiled out elsewhere, so the JSON keys don't
   // round-trip on hardware that can never drive them). Warmth additionally
   // needs the second (warm) PWM channel.
+  // Step 1 is the web slider's granularity, not the device's: the on-device row
+  // cycles the FrontlightLevels ladder instead, so the dim end stays reachable
+  // without 100 taps. Any 0-100 the web sets still cycles correctly from there.
   v.push_back(SettingInfo::Value(StrId::STR_FRONTLIGHT_BRIGHTNESS, &CrossPointSettings::frontlightBrightness,
-                                 {0, 100, 10}, "frontlightBrightness", StrId::STR_CAT_DISPLAY));
+                                 {0, 100, 1}, "frontlightBrightness", StrId::STR_CAT_DISPLAY));
 #if FREEINK_CAP_WARMLIGHT
   v.push_back(SettingInfo::Value(StrId::STR_FRONTLIGHT_WARMTH, &CrossPointSettings::frontlightWarmth, {0, 100, 10},
                                  "frontlightWarmth", StrId::STR_CAT_DISPLAY));
