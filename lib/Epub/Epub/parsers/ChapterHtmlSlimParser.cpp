@@ -34,8 +34,13 @@ struct PreScanState {
   bool capturing = false;
   int captureDepth = -1;
   char currentId[64] = {};
-  char currentText[1024] = {};
+  // Body text is accumulated straight into the pool's tail (see FootnoteBodyPool),
+  // not a fixed scratch buffer: a 1KB buffer here used to cut long footnotes off
+  // mid-sentence before the layout ever got to flow them across pages.
+  char* currentText = nullptr;
+  int currentTextCap = 0;
   int currentTextLen = 0;
+  bool bodyTruncated = false;  // a body hit MAX_BODY_BYTES / the pool tail
   // Cross-file href collection (optional — nullptr means disabled)
   char (*crossFiles)[80] = nullptr;
   int* crossFileCount = nullptr;
@@ -115,6 +120,14 @@ struct PreScanState {
           }
           if (!isTarget) break;  // not a target — skip without resetting capture
         }
+        if (!self->pool) break;
+        // Re-fetch the capture area on every start: a committed body moved the tail.
+        self->currentText = self->pool->captureBuffer();
+        self->currentTextCap = self->pool->captureCapacity();
+        if (!self->currentText || self->currentTextCap <= 0) {
+          self->poolExhausted = true;
+          break;
+        }
         strncpy(self->currentId, id, sizeof(self->currentId) - 1);
         self->currentId[sizeof(self->currentId) - 1] = '\0';
         self->capturing = true;
@@ -128,8 +141,12 @@ struct PreScanState {
 
   static void XMLCALL onChars(void* ud, const XML_Char* s, int len) {
     auto* self = static_cast<PreScanState*>(ud);
-    if (!self->capturing) return;
-    for (int i = 0; i < len && self->currentTextLen < (int)sizeof(self->currentText) - 1; i++) {
+    if (!self->capturing || !self->currentText) return;
+    for (int i = 0; i < len; i++) {
+      if (self->currentTextLen >= self->currentTextCap) {
+        self->bodyTruncated = true;
+        break;
+      }
       char c = s[i];
       // Normalize HTML whitespace: newlines/tabs (used for source formatting) become spaces.
       if (c == '\n' || c == '\r' || c == '\t') c = ' ';
@@ -219,7 +236,7 @@ struct PreScanState {
         // worse than no entry at all, because lookupFootnoteText would return
         // nullptr and the reference would silently render blank. If the pool is
         // full, drop the entry so the footnote falls back to off-page display.
-        const uint16_t offset = self->pool->add(self->currentText, static_cast<uint16_t>(self->currentTextLen));
+        const uint16_t offset = self->pool->commitCapture(static_cast<uint16_t>(self->currentTextLen));
         if (offset == FOOTNOTE_POOL_NO_TEXT) {
           self->poolExhausted = true;
         } else {
@@ -235,6 +252,20 @@ struct PreScanState {
     self->depth--;
   }
 };
+
+// Largest offset at or before `maxLen` that a footnote body can be cut at without
+// splitting a word. Falls back to the last UTF-8 lead byte so a hard cut can never
+// leave half a multi-byte character behind (it would render as the missing-glyph box).
+// Returns 0 when neither exists, letting the caller decide.
+size_t lastBreakAtOrBefore(const char* text, const size_t maxLen) {
+  size_t space = 0;
+  size_t charStart = 0;
+  for (size_t i = 0; i < maxLen && text[i]; i++) {
+    if (text[i] == ' ') space = i;
+    if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) charStart = i;
+  }
+  return space > 0 ? space : charStart;
+}
 
 }  // namespace
 
@@ -1413,11 +1444,9 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   if (self->insideFootnoteLink && self->depth == self->footnoteLinkDepth) {
     if (self->currentFootnoteLinkText[0] != '\0' && self->currentFootnoteLinkHref[0] != '\0' &&
         strstr(self->currentFootnoteLinkText, "hapter") == nullptr) {
-      FootnoteEntry entry;
+      FootnoteRef entry;
       strncpy(entry.number, self->currentFootnoteLinkText, sizeof(entry.number) - 1);
-      entry.number[sizeof(entry.number) - 1] = '\0';
       strncpy(entry.href, self->currentFootnoteLinkHref, sizeof(entry.href) - 1);
-      entry.href[sizeof(entry.href) - 1] = '\0';
       int wordIndex =
           self->wordsExtractedInBlock + (self->currentTextBlock ? static_cast<int>(self->currentTextBlock->size()) : 0);
       self->pendingFootnotes.push_back({wordIndex, entry});
@@ -1764,6 +1793,11 @@ int ChapterHtmlSlimParser::preScanAnchors(const std::string& filepath, FootnoteB
     // chapter that silently loses its later footnotes is diagnosable.
     LOG_DBG("EHP", "Footnote body pool full after %d bodies; remainder fall back to off-page", state.count);
   }
+  if (state.bodyTruncated) {
+    // A single body hit FootnoteBodyPool::MAX_BODY_BYTES (or the pool tail). The note
+    // still renders and still flows across pages — it just stops early.
+    LOG_DBG("EHP", "Footnote body exceeded %u bytes and was truncated", FootnoteBodyPool::MAX_BODY_BYTES);
+  }
 
   return state.count;
 }
@@ -1827,11 +1861,11 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
     int pendingLines = 0;
     bool hasNewPending = false;
     for (const auto& fn : currentPage->footnotes) {
-      if (fn.text[0] == '\0') continue;
-      existingLines += Page::countWrappedLines(renderer, fontId, fn.text, viewportWidth);
+      if (!fn.hasText()) continue;
+      existingLines += Page::countWrappedLines(renderer, fontId, fn.text.get(), viewportWidth);
     }
     for (const auto& fn : deferredFootnotes) {
-      if (fn.text[0] == '\0') continue;
+      if (!fn.text || fn.text[0] == '\0') continue;
       deferredLines += Page::countWrappedLines(renderer, fontId, fn.text, viewportWidth);
     }
     for (const auto& [idx, entry] : pendingFootnotes) {
@@ -1865,57 +1899,66 @@ void ChapterHtmlSlimParser::addLineToPage(std::shared_ptr<TextBlock> line) {
   const int footnoteLineH = renderer.getLineHeight(fontId);
   const int maxFnLines = (viewportHeight / 2 - 4) / footnoteLineH;
 
-  // Fit a footnote entry onto the current page; if it doesn't fit fully, split text
-  // mid-stream and push the remainder to deferredFootnotes for the next page.
-  auto fitOrDeferFootnote = [&](const FootnoteEntry& src) {
-    if (!footnoteDisplayOnPage || src.text[0] == '\0') {
-      currentPage->addFootnote(src.number, src.href, src.text);
+  auto deferFootnote = [&](const char* number, const char* href, const char* text) {
+    FootnoteRef ref;
+    strncpy(ref.number, number, sizeof(ref.number) - 1);
+    strncpy(ref.href, href, sizeof(ref.href) - 1);
+    ref.text = text;
+    deferredFootnotes.push_back(ref);
+  };
+
+  // Fit as much of a footnote body onto the current page as its footnote area holds,
+  // and push the rest to the next page. `text` points into the pool-resident body, so
+  // the remainder resumes at the exact byte the copied part stopped at — a body that
+  // spans several pages loses nothing at the seams. The page's own copy is right-sized
+  // to that slice, so what a page carries is what it shows.
+  auto fitOrDeferFootnote = [&](const char* number, const char* href, const char* text) {
+    if (!footnoteDisplayOnPage || !text || text[0] == '\0') {
+      currentPage->addFootnote(number, href, text);
       return;
     }
     int currentFnLines = 0;
     for (const auto& fn : currentPage->footnotes) {
-      if (fn.text[0] == '\0') continue;
-      currentFnLines += Page::countWrappedLines(renderer, fontId, fn.text, viewportWidth);
+      if (!fn.hasText()) continue;
+      currentFnLines += Page::countWrappedLines(renderer, fontId, fn.text.get(), viewportWidth);
     }
     const int availableLines = maxFnLines - currentFnLines;
-    const int textLines = Page::countWrappedLines(renderer, fontId, src.text, viewportWidth);
     if (availableLines <= 0) {
-      deferredFootnotes.push_back(src);
-    } else if (textLines <= availableLines) {
-      currentPage->addFootnote(src.number, src.href, src.text);
-    } else {
-      const size_t splitAt = Page::splitWrappedAtLine(renderer, fontId, src.text, availableLines, viewportWidth);
-      char firstPart[sizeof(FootnoteEntry::text)];
-      const size_t firstLen = std::min(splitAt, sizeof(firstPart) - 1);
-      memcpy(firstPart, src.text, firstLen);
-      firstPart[firstLen] = '\0';
-      currentPage->addFootnote(src.number, src.href, firstPart);
-
-      const char* remainder = src.text + splitAt;
-      while (*remainder == ' ') remainder++;
-      FootnoteEntry deferEntry;
-      strncpy(deferEntry.number, src.number, sizeof(deferEntry.number) - 1);
-      strncpy(deferEntry.href, src.href, sizeof(deferEntry.href) - 1);
-      strncpy(deferEntry.text, remainder, sizeof(deferEntry.text) - 1);
-      deferredFootnotes.push_back(deferEntry);
+      deferFootnote(number, href, text);
+      return;
     }
+
+    const size_t textLen = strlen(text);
+    const int textLines = Page::countWrappedLines(renderer, fontId, text, viewportWidth);
+    size_t splitAt = textLen;
+    if (textLines > availableLines) {
+      splitAt = Page::splitWrappedAtLine(renderer, fontId, text, availableLines, viewportWidth);
+    }
+    // Guard rail only: the line cap decides the split in practice, but a pathological
+    // body (no spaces, or one the pre-scan let run long) must not produce an entry
+    // beyond what deserialize will accept. Back off to a word boundary rather than
+    // cutting a word — or a UTF-8 sequence — in half.
+    if (splitAt > MAX_FOOTNOTE_TEXT_BYTES) splitAt = lastBreakAtOrBefore(text, MAX_FOOTNOTE_TEXT_BYTES);
+    if (splitAt == 0) splitAt = std::min(textLen, MAX_FOOTNOTE_TEXT_BYTES);  // no break found: never stall
+
+    currentPage->addFootnote(number, href, text, splitAt);
+    if (splitAt >= textLen) return;
+
+    const char* remainder = text + splitAt;
+    while (*remainder == ' ') remainder++;
+    if (*remainder != '\0') deferFootnote(number, href, remainder);
   };
 
   // Process any deferred footnotes from the previous page first (they wrap before new ones)
-  std::vector<FootnoteEntry> carryOver;
+  std::vector<FootnoteRef> carryOver;
   carryOver.swap(deferredFootnotes);
   for (const auto& fn : carryOver) {
-    fitOrDeferFootnote(fn);
+    fitOrDeferFootnote(fn.number, fn.href, fn.text);
   }
 
   auto footnoteIt = pendingFootnotes.begin();
   while (footnoteIt != pendingFootnotes.end() && footnoteIt->first <= wordsExtractedInBlock) {
-    const char* text = lookupFootnoteText(footnoteIt->second.href);
-    FootnoteEntry srcEntry;
-    strncpy(srcEntry.number, footnoteIt->second.number, sizeof(srcEntry.number) - 1);
-    strncpy(srcEntry.href, footnoteIt->second.href, sizeof(srcEntry.href) - 1);
-    if (text) strncpy(srcEntry.text, text, sizeof(srcEntry.text) - 1);
-    fitOrDeferFootnote(srcEntry);
+    fitOrDeferFootnote(footnoteIt->second.number, footnoteIt->second.href, lookupFootnoteText(footnoteIt->second.href));
     ++footnoteIt;
   }
   pendingFootnotes.erase(pendingFootnotes.begin(), footnoteIt);

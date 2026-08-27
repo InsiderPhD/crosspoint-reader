@@ -105,10 +105,17 @@ struct ClippingJumpResult {
   uint16_t clippingIndex = UINT16_MAX;
 };
 
+// Returned by ClipSelectionActivity in single-word mode: one word picked off the
+// page, with none of the surrounding context a clipping needs. Used by the
+// reader's dictionary lookup, which wants the word and nothing else.
+struct WordPickResult {
+  std::string word;
+};
+
 using ResultVariant =
     std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, FrontlightResult, ChapterResult, PercentResult,
                  PageResult, SyncResult, NetworkModeResult, FootnoteResult, BookContextResult, FilePathResult,
-                 ClippingResult, ClippingJumpResult>;
+                 ClippingResult, ClippingJumpResult, WordPickResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

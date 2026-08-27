@@ -23,6 +23,9 @@ static const char* HID_REPORT_UUID = "2A4D";
 static const char* HID_INFO_UUID = "2A4A";
 static const char* HID_PROTOCOL_MODE_UUID = "2A4E";
 
+// Cap on the per-scan "skipped advertiser" diagnostic (see onScanResult).
+static constexpr uint8_t SKIPPED_ADV_LOG_LIMIT = 24;
+
 namespace {
 // BLE intervals are in 1.25ms units and timeout is in 10ms units.
 constexpr uint16_t BLE_CONN_MIN_INTERVAL = 12;  // 15ms
@@ -83,6 +86,19 @@ static BluetoothHIDManager* g_instance = nullptr;
 
 // Scan callbacks for NimBLE 2.x - keep as static to ensure it stays alive
 class ScanCallbacks : public NimBLEScanCallbacks {
+  // On an ACTIVE scan NimBLE withholds onResult() for a scannable legacy
+  // advertiser until its SCAN_RSP arrives (NimBLEScan.cpp: the
+  // `!isScannable()` branch). A remote that advertises ADV_IND but never
+  // answers a scan request is therefore invisible to onResult() alone — it
+  // looks like "the remote isn't advertising" when it is. Take the first
+  // advertisement too; onScanResult() de-duplicates by address and back-fills
+  // the name if a scan response does turn up later.
+  void onDiscovered(const NimBLEAdvertisedDevice* advertisedDevice) override {
+    if (g_instance) {
+      g_instance->onScanResult(const_cast<NimBLEAdvertisedDevice*>(advertisedDevice));
+    }
+  }
+
   void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
     if (g_instance) {
       // onScanResult expects non-const pointer, need to cast
@@ -213,6 +229,27 @@ bool BluetoothHIDManager::enable() {
   lastError = "";
   lastStatus = BtStatus::None;
 
+  // The remembered address may be a rotating private one; correct it from the
+  // bond store before anything tries to use it.
+  reconcileBondedAddressWithStore();
+
+  // A bonded remote's address and address type are persisted in settings, so the
+  // link can be established without ever seeing an advertisement. Arm a one-shot
+  // direct connect rather than waiting for the background scan: a remote that
+  // advertises in short bursts, or that never answers a SCAN_REQ, can be missed
+  // by scanning indefinitely, while a connect procedure keeps the initiator
+  // listening for its whole timeout and takes the link the moment one appears.
+  // ...unless that address is a Resolvable Private Address AND we have a name to
+  // recognise the remote by: an RPA rotates on the peer's own timer, so the
+  // connect is a guaranteed BLE_HS_ETIMEOUT that blocks the loop task for the
+  // full timeout. Go straight to the rediscovery scan instead.
+  const bool rediscoverable = rememberedAddressIsRotating();
+  if (rediscoverable) {
+    LOG_INF("BT", "Remembered address %s is an RPA - waiting to rediscover '%s' by name instead",
+            _bondedDeviceAddress.c_str(), _bondedDeviceName.c_str());
+  }
+  _pendingEnableConnect = !_bondedDeviceAddress.empty() && !rediscoverable;
+
   LOG_INF("BT", "Bluetooth enabled successfully (heap %u, largest %u)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   loadState();
   return true;
@@ -228,6 +265,8 @@ bool BluetoothHIDManager::disable() {
 
   stopBackgroundScan();
   _pendingBondedConnect = false;
+  _pendingEnableConnect = false;
+  _pendingAddrAdopt = false;
   if (_scanning) {
     stopScan();
   }
@@ -266,6 +305,7 @@ void BluetoothHIDManager::startScan(uint32_t durationMs) {
   LOG_INF("BT", "Starting BLE scan for %lu ms", durationMs);
   stopBackgroundScan();
   _scanning = true;
+  _skippedAdvLogs = 0;
   _discoveredDevices.clear();
 
   NimBLEScan* pScan = NimBLEDevice::getScan();
@@ -332,7 +372,11 @@ void BluetoothHIDManager::startBackgroundScan() {
     return;
   }
   pScan->setScanCallbacks(&scanCallbacks, false);
-  pScan->setActiveScan(false);  // passive: the advertiser's address is all we need
+  // Active, not passive: a remote using a rotating private address can only be
+  // recognised by its NAME, and a name usually travels in the scan response,
+  // which passive scanning never asks for. The extra SCAN_REQ traffic is bounded
+  // to the window where the remote is disconnected.
+  pScan->setActiveScan(true);
   // A cheap HID clicker (e.g. AB Shutter3) only advertises in a short burst when
   // one of its buttons is pressed, then goes quiet again. At ~5% radio duty
   // (50ms every 1000ms) those bursts almost always land in the 95% the radio
@@ -373,7 +417,23 @@ void BluetoothHIDManager::onScanResult(NimBLEAdvertisedDevice* advertisedDevice)
   // Background reconnect mode: don't record devices — just watch for the bonded
   // remote waking up (it advertises after one of its buttons is pressed).
   if (_backgroundScanActive) {
-    if (!_bondedDeviceAddress.empty() && address == _bondedDeviceAddress) {
+    bool isBondedRemote = !_bondedDeviceAddress.empty() && address == _bondedDeviceAddress;
+    // A remote that advertises under a Resolvable Private Address rotates it on
+    // its own timer, so the remembered address stops matching and it becomes
+    // invisible to an address compare. Fall back to what does not rotate: the
+    // name captured when it was paired.
+    const bool matchedByName =
+        !isBondedRemote && !_bondedDeviceName.empty() && advertisedDevice->getName() == _bondedDeviceName;
+    if (matchedByName) {
+      LOG_INF("BT", "Bonded remote '%s' is advertising as %s (was %s) - address rotated", _bondedDeviceName.c_str(),
+              address.c_str(), _bondedDeviceAddress.c_str());
+      // Only stage it: this runs on the NimBLE host task, and persisting the new
+      // address writes SPIFFS. The loop task adopts it in checkAutoReconnect().
+      snprintf(_rediscoveredAddr, sizeof(_rediscoveredAddr), "%s", address.c_str());
+      _pendingAddrAdopt = true;
+      isBondedRemote = true;
+    }
+    if (isBondedRemote) {
       // The advertisement carries the authoritative address TYPE — refresh it so
       // the reconnect targets the peer correctly even for bonds saved before the
       // type was persisted (a random-address remote ignores PUBLIC-typed connects).
@@ -389,11 +449,23 @@ void BluetoothHIDManager::onScanResult(NimBLEAdvertisedDevice* advertisedDevice)
     return;
   }
 
+  // Only the pairing screen's foreground scan builds the device list. Without
+  // this guard a trailing callback after stopScan(), or the second callback for
+  // the advertisement that just satisfied the background reconnect above, would
+  // quietly append to a list nobody is showing.
+  if (!_scanning) return;
+
   std::string name = advertisedDevice->getName();
   int rssi = advertisedDevice->getRSSI();
 
-  // Check if device advertises HID service
+  // Check if device advertises HID service. Some remotes omit the 0x1812 UUID
+  // from the advertisement and only expose the appearance value, so accept the
+  // HID appearance category (0x03Cx >> 6 == 0x0F: keyboard, mouse, gamepad...)
+  // as equally good evidence — otherwise a nameless one is filtered out below.
   bool isHID = advertisedDevice->isAdvertisingService(NimBLEUUID(HID_SERVICE_UUID));
+  if (!isHID && advertisedDevice->haveAppearance() && (advertisedDevice->getAppearance() >> 6) == 0x0F) {
+    isHID = true;
+  }
 
   // Check if we already have this device
   for (auto& dev : _discoveredDevices) {
@@ -413,9 +485,17 @@ void BluetoothHIDManager::onScanResult(NimBLEAdvertisedDevice* advertisedDevice)
   // earbuds that flood the list as "Unknown" and can't be a page turner we could
   // use. Nameless HID devices stay visible (some clickers advertise no name), and
   // if the name shows up in a later scan response the back-fill above catches it.
-  // Not logged: busy RF means dozens of these per scan; the scanning screen is
-  // the user-visible feedback that the scan is running.
+  // Only a bounded sample is logged: busy RF means dozens of these per scan.
   if (name.empty() && !isHID) {
+    // Logging the drop matters: when a remote that is demonstrably in pairing
+    // mode never appears in the list, this is the only way to tell "the radio
+    // never saw it" from "we filtered it out".
+    if (_skippedAdvLogs < SKIPPED_ADV_LOG_LIMIT) {
+      _skippedAdvLogs++;
+      LOG_DBG("BT", "Skipped advertiser %s type=%u appearance=0x%04X RSSI:%d", address.c_str(),
+              advertisedDevice->getAdvType(),
+              advertisedDevice->haveAppearance() ? advertisedDevice->getAppearance() : 0, rssi);
+    }
     return;
   }
 
@@ -990,6 +1070,75 @@ void BluetoothHIDManager::setBondedDevice(const std::string& address, const std:
   LOG_INF("BT", "Bonded device set: %s (%s)", _bondedDeviceAddress.c_str(), _bondedDeviceName.c_str());
 }
 
+// True when the remembered address is a Resolvable Private Address that the peer
+// rotates on its own timer AND we kept a name we can rediscover it by. Connecting
+// to such an address is a guaranteed timeout, and connectToDevice() blocks the
+// loop task for the whole of it — so every caller should wait for the rediscovery
+// scan instead.
+bool BluetoothHIDManager::rememberedAddressIsRotating() const {
+  if (_bondedDeviceAddress.empty() || _bondedDeviceName.empty()) {
+    return false;
+  }
+  return NimBLEAddress(_bondedDeviceAddress, _bondedAddrType).isRpa();
+}
+
+void BluetoothHIDManager::setBondedAddressUpdatedCallback(void (*callback)(const char*, uint8_t)) {
+  _bondedAddrUpdatedCallback = callback;
+}
+
+// A BLE peripheral is free to advertise under a Resolvable Private Address that
+// rotates on its own timer (CONFIG_BT_NIMBLE_RPA_TIMEOUT, 900s by default). The
+// pairing screen stores whatever address the scan reported, so for such a remote
+// the remembered address is dead within minutes: a direct connect times out
+// (rc=13) and the background scan's address compare never matches, which reads
+// as "paired but it will never reconnect".
+//
+// The durable identity is the bond's identity address, which the peer hands over
+// as part of the ID key exchange (LL privacy is compiled in, so NimBLE adds
+// BLE_SM_PAIR_KEY_DIST_ID to both key distributions — NimBLEDevice.cpp:994-997).
+// ble_store_util_bonded_peers() returns exactly those identity addresses; the
+// controller resolves the rotating RPA back to it via the resolving list.
+void BluetoothHIDManager::reconcileBondedAddressWithStore() {
+  if (_bondedDeviceAddress.empty()) {
+    return;
+  }
+  const int numBonds = NimBLEDevice::getNumBonds();
+  const NimBLEAddress remembered(_bondedDeviceAddress, _bondedAddrType);
+  LOG_INF("BT", "Bond store holds %d bond(s); remembered %s (type %u%s)", numBonds, _bondedDeviceAddress.c_str(),
+          _bondedAddrType, remembered.isRpa() ? ", RPA" : "");
+
+  if (numBonds <= 0) {
+    // Paired per settings but no key material: the bond was lost (NVS erase, or
+    // the remote was re-paired to something else). Nothing here can reconnect it.
+    LOG_ERR("BT", "No bond stored for %s - the remote has to be paired again", _bondedDeviceAddress.c_str());
+    return;
+  }
+  // Only auto-adopt when there is exactly one bond. With several, index 0 is not
+  // necessarily this remote and guessing would point us at the wrong peer.
+  if (numBonds != 1) {
+    return;
+  }
+
+  const NimBLEAddress identity = NimBLEDevice::getBondedAddress(0);
+  if (identity.isNull()) {
+    return;
+  }
+  const std::string identityStr = identity.toString();
+  if (identityStr == _bondedDeviceAddress) {
+    return;
+  }
+
+  // Report only. Adopting this was tried and REVERTED: on the user's eMote the
+  // store handed back an address that timed out exactly like the stale RPA it
+  // replaced, and overwriting the remembered address destroyed the one link we
+  // do trust — the bonded NAME, which the rediscovery in onScanResult uses.
+  // Connecting to an identity address also needs the controller to resolve RPAs
+  // against the resolving list (peer type BLE_ADDR_*_ID), which is not wired up
+  // here; until that is proven on hardware this stays a diagnostic.
+  LOG_INF("BT", "Bond identity address is %s (type %u); remembered %s - NOT adopting", identityStr.c_str(),
+          identity.getType(), _bondedDeviceAddress.c_str());
+}
+
 void BluetoothHIDManager::setButtonMapping(const uint8_t backIndex, const uint8_t backValue, const uint8_t fwdIndex,
                                            const uint8_t fwdValue) {
   _backSigIndex = backIndex;
@@ -1433,6 +1582,19 @@ void BluetoothHIDManager::checkAutoReconnect(bool userInputDetected) {
   // Advertisement-triggered reconnect: the background scan saw the bonded remote
   // advertising (= the user pressed one of ITS buttons). Connect right away —
   // these remotes only advertise for a short window after waking.
+  // Adopt an address the background scan rediscovered by name. Done here, on the
+  // loop task, because persisting it writes SPIFFS.
+  if (_pendingAddrAdopt) {
+    _pendingAddrAdopt = false;
+    if (_rediscoveredAddr[0] != '\0' && _bondedDeviceAddress != _rediscoveredAddr) {
+      _bondedDeviceAddress = _rediscoveredAddr;
+      LOG_INF("BT", "Bonded remote address updated to %s (type %u)", _bondedDeviceAddress.c_str(), _bondedAddrType);
+      if (_bondedAddrUpdatedCallback) {
+        _bondedAddrUpdatedCallback(_bondedDeviceAddress.c_str(), _bondedAddrType);
+      }
+    }
+  }
+
   if (_pendingBondedConnect) {
     _pendingBondedConnect = false;
     if (!_bondedDeviceAddress.empty() && now - lastReconnectAttempt >= 2000) {
@@ -1443,6 +1605,32 @@ void BluetoothHIDManager::checkAutoReconnect(bool userInputDetected) {
         return;
       }
       LOG_ERR("BT", "Wake reconnect to %s failed: %s", _bondedDeviceAddress.c_str(), lastError.c_str());
+    }
+  }
+
+  // Bluetooth just came back up with a remote already bonded: go and get it,
+  // rather than waiting for it to advertise. Reader-only for the same reason as
+  // the physical-press fast path below — connectToDevice() blocks the loop task
+  // for the full connect timeout, and on the Bluetooth settings screen that
+  // freezes the pairing UI (the guided setup enables then scans, and the
+  // "Reconnect remote" row already connects on demand). The flag is consumed
+  // either way so it can't fire later at a surprising moment.
+  if (_pendingEnableConnect) {
+    _pendingEnableConnect = false;
+    const bool inReaderNow = _readerContextCallback && _readerContextCallback();
+    // Deliberately not re-checking rememberedAddressIsRotating() here: the flag
+    // is only armed when it was already false at enable() time.
+    if (inReaderNow && !_scanning && _connectedDevices.empty() && !_bondedDeviceAddress.empty()) {
+      lastReconnectAttempt = now;
+      LOG_INF("BT", "Bluetooth back up, forcing a connect to bonded remote %s", _bondedDeviceAddress.c_str());
+      if (connectToDevice(_bondedDeviceAddress)) {
+        LOG_INF("BT", "Connected to bonded device %s", _bondedDeviceAddress.c_str());
+        return;
+      }
+      // Not an error worth surfacing: the remote is simply asleep or out of
+      // range. The background scan below picks it up when it wakes.
+      LOG_INF("BT", "Forced connect to %s did not land (%s); falling back to the wake-up scan",
+              _bondedDeviceAddress.c_str(), lastError.c_str());
     }
   }
 
@@ -1480,7 +1668,7 @@ void BluetoothHIDManager::checkAutoReconnect(bool userInputDetected) {
   // the background scan (below) still reconnects a remote that wakes up, and
   // the device list connects explicitly.
   const bool inReader = _readerContextCallback && _readerContextCallback();
-  if (userInputDetected && inReader && now - lastReconnectAttempt >= 2000) {
+  if (userInputDetected && inReader && !rememberedAddressIsRotating() && now - lastReconnectAttempt >= 2000) {
     lastReconnectAttempt = now;
     LOG_INF("BT", "Button activity detected while disconnected, reconnecting to bonded device %s",
             _bondedDeviceAddress.c_str());

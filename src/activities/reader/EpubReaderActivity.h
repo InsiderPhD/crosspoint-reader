@@ -10,6 +10,7 @@
 #include "CrossPointSettings.h"
 #include "EpubReaderMenuActivity.h"
 #include "activities/Activity.h"
+#include "util/DictionaryLookup.h"
 #include "util/ProgressAutoSync.h"
 
 class EpubReaderActivity final : public Activity {
@@ -49,6 +50,16 @@ class EpubReaderActivity final : public Activity {
   bool bookmarkMessageWasRemoval = false;
   unsigned long bookmarkMessageTime = 0UL;
 
+  // Transient dictionary popup ("Not found", "No dictionary set", a named
+  // failure). Reuses the bookmark message's expiry timing rather than adding a
+  // second popup lifetime to keep in step.
+  bool showDictionaryMessage = false;
+  StrId dictionaryMessage = StrId::STR_DICT_NOT_FOUND;
+  unsigned long dictionaryMessageTime = 0UL;
+  // Opened lazily on the first lookup and kept for the visit, so a second word
+  // costs a lookup rather than another open + sidecar validate.
+  DictionaryLookup dictionaryLookup;
+
   // In-memory copy of this book's bookmarks so the status-bar indicator can be
   // computed per render without touching the SD card. Reloaded on entry and
   // whenever a toggle or the bookmark list may have changed the file.
@@ -58,8 +69,12 @@ class EpubReaderActivity final : public Activity {
 
   enum class BookmarkToggleResult { None, Added, Removed };
 
-  // Footnote support
+  // Footnote support: taken from the page by move once its render is done, so the
+  // footnotes menu can list them without holding the Page alive.
   std::vector<FootnoteEntry> currentPageFootnotes;
+  // The status bar is drawn mid-render, before that move lands, so its footnote
+  // indicator reads this instead of the vector.
+  bool currentPageHasFootnotes = false;
   struct SavedPosition {
     int spineIndex;
     int pageNumber;
@@ -80,8 +95,11 @@ class EpubReaderActivity final : public Activity {
   // menu and the onExit stash the sleep screen displays.
   uint32_t computeBookTimeLeftSeconds() const;
 
-  void renderContents(std::unique_ptr<Page> page, int orientedMarginTop, int orientedMarginRight,
-                      int orientedMarginBottom, int orientedMarginLeft);
+  // Renders `page` in place: the caller keeps ownership so it can move the page's
+  // footnotes out afterwards instead of copying them before the render (see the
+  // call site — the copy doubled peak heap on footnote-heavy pages).
+  void renderContents(Page& page, int orientedMarginTop, int orientedMarginRight, int orientedMarginBottom,
+                      int orientedMarginLeft);
   void renderStatusBar() const;
   // Footnote-return hint / button-hint strip; drawn even when the bar is hidden.
   void renderStatusBarTail(bool hintsActive) const;
@@ -146,7 +164,17 @@ class EpubReaderActivity final : public Activity {
   // viewport margins (shared with render() so the selection overlay uses the same text origin).
   // anchorX/anchorY (logical frame, -1 = unset): the Kindle-style tap-and-hold entry
   // point — the overlay opens with the word under that point selected and anchored.
-  void startClipSelection(int anchorX = -1, int anchorY = -1);
+  // forLookup swaps the range selection for a one-word pick feeding the
+  // dictionary (see ClipSelectionActivity's singleWordMode). The word geometry
+  // build is identical, which is the whole reason this is a mode rather than a
+  // second copy of it.
+  void startClipSelection(int anchorX = -1, int anchorY = -1, bool forLookup = false);
+  // Open the word picker for a lookup, or show "No dictionary set" when none is
+  // configured — there is nothing to pick a word for otherwise.
+  void openDictionaryLookup();
+  // Run the lookup for a picked word and open the definition viewer, or raise
+  // the popup naming why it could not.
+  void performDictionaryLookup(const std::string& word);
   void handleClippingJump(const ClippingJumpResult& jump);
   void computeOrientedMargins(int& orientedMarginTop, int& orientedMarginRight, int& orientedMarginBottom,
                               int& orientedMarginLeft) const;

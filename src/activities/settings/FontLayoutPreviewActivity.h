@@ -9,6 +9,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 // Split-screen reader-settings editor with a live sample-text preview.
 //
 // The top region renders two sample paragraphs re-laid-out (greedy word-wrap,
@@ -26,6 +28,9 @@ class FontLayoutPreviewActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // Full Touch (X4 Pro): rows are tap-dispatched here, so the main loop must
+  // stop injecting Confirm for taps.
+  bool handlesDirectTouch() const override { return true; }
 
  private:
   enum class RowKind : uint8_t { Enum, Value, Toggle, Action };
@@ -49,11 +54,28 @@ class FontLayoutPreviewActivity final : public Activity {
   static const Row kRows[];
   static const int kRowCount;
 
+  // Orientation-aware screen split, shared by render() and the loop()'s tap
+  // hit-testing so paint and hit-test can never disagree about where a row is.
+  struct Layout {
+    int contentX;
+    int contentW;
+    int contentTop;
+    int previewTop;
+    int previewH;
+    int sepY;
+    int topH;   // region above the list: title + sample + separator
+    int listY;  // top of the settings list
+    int listH;
+  };
+  Layout layout() const;
+  Rect listRect() const;  // layout().list* as the rect handed to drawList/hitTestList
+
   std::string rowValueText(const Row& row) const;
   void changeRow(const Row& row);
   void cycleFont();            // font-family row: cycle built-ins + installed SD families
   void prewarmSampleGlyphs();  // load SD-font sample glyph bitmaps into RAM (no-op for built-ins)
   void activateRow(const Row& row);
+  void activateSelectedRow();  // Confirm / second tap on the selected row
   void renderPreview(int x, int y, int w, int h) const;
 
   ButtonNavigator buttonNavigator;

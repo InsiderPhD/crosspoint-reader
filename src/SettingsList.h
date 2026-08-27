@@ -163,6 +163,12 @@ inline void appendReaderTypographySettings(std::vector<SettingInfo>& v) {
           // web UI categorization, but round-trips through settings.json.
           SettingInfo::String(StrId::STR_FONT_FAMILY, CrossPointSettings::getInstance().sdFontFamilyName,
                               sizeof(CrossPointSettings::getInstance().sdFontFamilyName), "sdFontFamilyName"),
+          // Dictionary folder name (persisted only; selection happens in
+          // DictionarySelectActivity, launched by the Dictionary action). Hidden
+          // from the device UI (no category) like sdFontFamilyName above, but
+          // round-trips through settings.json and the web UI.
+          SettingInfo::String(StrId::STR_DICTIONARY, CrossPointSettings::getInstance().dictionaryName,
+                              sizeof(CrossPointSettings::getInstance().dictionaryName), "dictionaryName"),
           SettingInfo::Enum(StrId::STR_FONT_SIZE, &CrossPointSettings::fontSize,
                             {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE, StrId::STR_X_LARGE}, "fontSize",
                             StrId::STR_CAT_READER),

@@ -37,9 +37,15 @@ class ClipSelectionActivity final : public Activity {
   // initialCursorIdx/preAnchored implement the Kindle-style entry: a tap-and-hold on a
   // word in the reader opens this overlay with that word already under the cursor and
   // anchored, so the selection grows from where the finger landed.
+  // singleWordMode turns the two-stage anchor->finish into a one-press pick and
+  // returns a WordPickResult instead of a ClippingResult — the reader's
+  // dictionary lookup needs one word, not a range, and none of the surrounding
+  // context ClipTextBuilder assembles. Everything else (cursor movement, touch,
+  // rendering) is deliberately shared, so there is only ever one word selector
+  // on the page to keep working.
   ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList, int fontId,
                         Section& section, int startPageInSection, int marginTop, int marginLeft,
-                        int initialCursorIdx = 0, bool preAnchored = false);
+                        int initialCursorIdx = 0, bool preAnchored = false, bool singleWordMode = false);
 
   void onEnter() override;
   void onExit() override;
@@ -57,6 +63,7 @@ class ClipSelectionActivity final : public Activity {
   int startPageInSection = 0;
   int marginTop = 0;
   int marginLeft = 0;
+  bool singleWordMode = false;
 
   int currentDisplayPage = -1;
   int savedSectionPage = 0;

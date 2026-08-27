@@ -70,6 +70,11 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
     items.push_back({MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING});
     items.push_back({MenuAction::VIEW_CLIPPINGS, StrId::STR_VIEW_CLIPPINGS});
   }
+  // Only offered once a dictionary is actually configured: the row would
+  // otherwise lead straight to a "No dictionary set" popup.
+  if (SETTINGS.dictionaryName[0] != '\0') {
+    items.push_back({MenuAction::LOOK_UP, StrId::STR_LOOKUP});
+  }
   // Screenshot is a developer/testing action — only surface it in Dev Mode.
   if (SETTINGS.devMode) {
     items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});

@@ -78,17 +78,19 @@ class Page {
   static constexpr uint16_t MAX_FOOTNOTES_PER_PAGE = 16;
 
   void addFootnote(const char* number, const char* href, const char* text = nullptr) {
+    addFootnote(number, href, text, text ? strlen(text) : 0);
+  }
+
+  // `textLen` bytes of `text` only — the layout hands over one page's worth of a
+  // footnote body at a time and keeps the rest for the next page, so the copy must
+  // stop where it was told to, not at the end of the string.
+  void addFootnote(const char* number, const char* href, const char* text, size_t textLen) {
     if (footnotes.size() >= MAX_FOOTNOTES_PER_PAGE) return;  // Cap per-page footnotes
     FootnoteEntry entry;
     strncpy(entry.number, number, sizeof(entry.number) - 1);
-    entry.number[sizeof(entry.number) - 1] = '\0';
     strncpy(entry.href, href, sizeof(entry.href) - 1);
-    entry.href[sizeof(entry.href) - 1] = '\0';
-    if (text) {
-      strncpy(entry.text, text, sizeof(entry.text) - 1);
-      entry.text[sizeof(entry.text) - 1] = '\0';
-    }
-    footnotes.push_back(entry);
+    entry.setText(text, textLen);
+    footnotes.push_back(std::move(entry));
   }
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;

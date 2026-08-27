@@ -27,6 +27,7 @@ class EpubReaderMenuActivity final : public Activity {
     BOOKMARKS,
     ADD_BOOKMARK,
     SAVE_CLIPPING,
+    LOOK_UP,
     VIEW_CLIPPINGS,
     SCREENSHOT,
     TOGGLE_BLUETOOTH,

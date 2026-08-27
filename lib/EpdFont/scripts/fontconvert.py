@@ -16,6 +16,7 @@ parser.add_argument("size", type=int, help="font size to use.")
 parser.add_argument("fontstack", action="store", nargs='+', help="list of font files, ordered by descending priority.")
 parser.add_argument("--2bit", dest="is2Bit", action="store_true", help="generate 2-bit greyscale bitmap instead of 1-bit black and white.")
 parser.add_argument("--additional-intervals", dest="additional_intervals", action="append", help="Additional code point intervals to export as min,max. This argument can be repeated.")
+parser.add_argument("--exclude-intervals", dest="exclude_intervals", action="append", help="Code point intervals to omit as min,max, subtracted from the built-in set. This argument can be repeated. Used to keep script coverage out of the reader families that only ever render book text, while the UI fonts keep it.")
 parser.add_argument("--compress", dest="compress", action="store_true", help="Compress glyph bitmaps using DEFLATE with group-based compression.")
 parser.add_argument("--force-autohint", dest="force_autohint", action="store_true", help="Force FreeType auto-hinter instead of native font hinting. Improves stem width consistency for fonts with weak or no native TrueType hints.")
 parser.add_argument("--pnum", dest="pnum", action="store_true", help="Use proportional numerals (pnum OpenType feature) instead of default tabular figures. Reduces visual gaps between digits in running prose.")
@@ -133,6 +134,37 @@ add_ints = []
 if args.additional_intervals:
     add_ints = [tuple([int(n, base=0) for n in i.split(",")]) for i in args.additional_intervals]
 
+exclude_ints = []
+if args.exclude_intervals:
+    exclude_ints = [tuple([int(n, base=0) for n in i.split(",")]) for i in args.exclude_intervals]
+
+def subtract_intervals(source, removals):
+    """Cut every removal range out of source, splitting ranges that straddle one.
+
+    Coverage is a flash cost in the generated header and, once compressed, a
+    contiguous-RAM cost too: each script block becomes one DEFLATE group that
+    must be decompressed whole into a single malloc. Dropping a block the font
+    will never be asked to render is the cheapest way to shrink both.
+    """
+    if not removals:
+        return source
+    result = []
+    for start, end in source:
+        pieces = [(start, end)]
+        for rem_start, rem_end in removals:
+            next_pieces = []
+            for p_start, p_end in pieces:
+                if rem_end < p_start or rem_start > p_end:
+                    next_pieces.append((p_start, p_end))
+                    continue
+                if p_start < rem_start:
+                    next_pieces.append((p_start, rem_start - 1))
+                if p_end > rem_end:
+                    next_pieces.append((rem_end + 1, p_end))
+            pieces = next_pieces
+        result.extend(pieces)
+    return result
+
 def norm_floor(val):
     return int(math.floor(val / (1 << 6)))
 
@@ -238,7 +270,7 @@ def load_glyph(code_point):
         face_index += 1
     return None
 
-unmerged_intervals = sorted(intervals + add_ints)
+unmerged_intervals = sorted(subtract_intervals(intervals, exclude_ints) + add_ints)
 intervals = []
 unvalidated_intervals = []
 for i_start, i_end in unmerged_intervals:

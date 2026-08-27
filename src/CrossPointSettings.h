@@ -288,6 +288,7 @@ class CrossPointSettings {
     READER_ACTION_CREATE_CLIPPING = 21,
     READER_ACTION_TOGGLE_BLUETOOTH = 22,
     READER_ACTION_HIDE_STATUS_BAR = 23,
+    READER_ACTION_DICTIONARY = 24,
     READER_ACTION_COUNT
   };
 
@@ -410,6 +411,12 @@ class CrossPointSettings {
   uint8_t fontFamily = BOOKERLY;
   // SD card font family name. Non-empty value overrides fontFamily.
   char sdFontFamilyName[32] = "";
+
+  // Folder name under /dictionaries (or /.dictionaries) holding the StarDict
+  // dictionary used for reader lookups; empty disables lookups. Stored by name
+  // rather than by index so adding or removing a dictionary folder cannot
+  // silently repoint the setting at a different one.
+  char dictionaryName[32] = "";
   // SD font resolver: returns the font ID for (sdFontFamilyName, fontSize), or 0 if not loaded.
   // Set by SdCardFontSystem::begin() so getReaderFontId() can route to SD fonts without
   // a hard link from CrossPointSettings (which is also built into web/tests).
@@ -534,9 +541,7 @@ class CrossPointSettings {
   // A Dev Mode override (`devMode ? readerLongPressHome : ...`) is deliberately
   // NOT enabled yet: a stale stored slot would strand a dev-mode device the
   // same way. Re-enable once the raw slot is migrated/validated.
-  uint8_t effectiveReaderLongPressHome() const {
-    return static_cast<uint8_t>(READER_ACTION_OPEN_MENU);
-  }
+  uint8_t effectiveReaderLongPressHome() const { return static_cast<uint8_t>(READER_ACTION_OPEN_MENU); }
 
   ~CrossPointSettings() = default;
 

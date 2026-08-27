@@ -14,6 +14,7 @@
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 // ---- Row table -------------------------------------------------------------
 // Enum value labels reuse the StrIds already defined for the flat Reader
@@ -232,14 +233,34 @@ void FontLayoutPreviewActivity::loop() {
     return;
   }
 
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    const Row& row = kRows[selectedIndex];
-    if (row.kind == RowKind::Action) {
-      activateRow(row);
-    } else {
-      changeRow(row);
+  // Full Touch (X4 Pro): tap a row to select it, tap it again to change it.
+  // Taps in the preview half fall on dead space and are dropped.
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), kRowCount, selectedIndex,
+                               /*hasSubtitle=*/false, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedIndex = tappedIndex;
       requestUpdate();
-    }
+      return;
+    case TouchListNav::TapResult::Activated:
+      activateSelectedRow();
+      return;
+    case TouchListNav::TapResult::None:
+      break;
+  }
+
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    activateSelectedRow();
+    return;
+  }
+
+  // Full Touch: a vertical swipe turns a whole page of rows, matching the held
+  // side key. Inert while every row fits on one page.
+  const int pageItems = GUI.listGeometry(listRect(), selectedIndex, /*hasSubtitle=*/false).pageItems;
+  int swipeIndex = selectedIndex;
+  if (TouchListNav::pageSwipe(mappedInput, kRowCount, pageItems, swipeIndex)) {
+    selectedIndex = swipeIndex;
+    requestUpdate();
     return;
   }
 
@@ -251,6 +272,18 @@ void FontLayoutPreviewActivity::loop() {
     selectedIndex = ButtonNavigator::previousIndex(selectedIndex, kRowCount);
     requestUpdate();
   });
+}
+
+// Shared by the Confirm button and the Full Touch second tap: Action rows open
+// their sub-activity, everything else cycles its value in place.
+void FontLayoutPreviewActivity::activateSelectedRow() {
+  const Row& row = kRows[selectedIndex];
+  if (row.kind == RowKind::Action) {
+    activateRow(row);
+    return;
+  }
+  changeRow(row);
+  requestUpdate();
 }
 
 void FontLayoutPreviewActivity::changeRow(const Row& row) {
@@ -430,7 +463,9 @@ void FontLayoutPreviewActivity::renderPreview(int x, int y, int w, int h) const 
   }
 }
 
-void FontLayoutPreviewActivity::render(RenderLock&&) {
+// Orientation-aware screen split. render() paints from this and loop() hit-tests
+// taps against the same numbers, so the two can never drift apart.
+FontLayoutPreviewActivity::Layout FontLayoutPreviewActivity::layout() const {
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -445,23 +480,44 @@ void FontLayoutPreviewActivity::render(RenderLock&&) {
   const bool isInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
 
   const int hintGutterW = isLandscape ? metrics.sideButtonHintsWidth : 0;
-  const int contentX = isLandscapeCw ? hintGutterW : 0;
-  const int contentW = pageWidth - hintGutterW;
+
+  Layout l{};
+  l.contentX = isLandscapeCw ? hintGutterW : 0;
+  l.contentW = pageWidth - hintGutterW;
   const int topGutter = isInverted ? metrics.buttonHintsHeight : 0;
   const int bottomGutter = (isLandscape || isInverted) ? 0 : metrics.buttonHintsHeight;
 
-  const int contentTop = topGutter + metrics.topPadding;
+  l.contentTop = topGutter + metrics.topPadding;
   const int contentBottom = pageHeight - bottomGutter - metrics.topPadding;
-  const int previewTop = contentTop + 26;
+  l.previewTop = l.contentTop + 26;
 
   // Split the remaining content: preview on top (~48%), list below.
-  const int available = contentBottom - previewTop;
-  int previewH = available * 48 / 100;
-  if (previewH < 40) previewH = 40;
+  const int available = contentBottom - l.previewTop;
+  l.previewH = available * 48 / 100;
+  if (l.previewH < 40) l.previewH = 40;
 
-  const int sepY = previewTop + previewH + metrics.verticalSpacing / 2;
-  const int listY = sepY + metrics.verticalSpacing / 2;
-  const int topH = listY;  // region above the list: title + sample + separator
+  l.sepY = l.previewTop + l.previewH + metrics.verticalSpacing / 2;
+  l.listY = l.sepY + metrics.verticalSpacing / 2;
+  l.topH = l.listY;  // region above the list: title + sample + separator
+  l.listH = contentBottom - l.listY;
+  return l;
+}
+
+Rect FontLayoutPreviewActivity::listRect() const {
+  const Layout l = layout();
+  return Rect{l.contentX, l.listY, l.contentW, l.listH};
+}
+
+void FontLayoutPreviewActivity::render(RenderLock&&) {
+  const int pageWidth = renderer.getScreenWidth();
+  const Layout l = layout();
+  const int contentX = l.contentX;
+  const int contentW = l.contentW;
+  const int contentTop = l.contentTop;
+  const int previewTop = l.previewTop;
+  const int previewH = l.previewH;
+  const int sepY = l.sepY;
+  const int topH = l.topH;
 
   renderer.clearScreen();
 
@@ -490,9 +546,8 @@ void FontLayoutPreviewActivity::render(RenderLock&&) {
   }
 
   GUI.drawList(
-      renderer, Rect{contentX, listY, contentW, contentBottom - listY}, kRowCount, selectedIndex,
-      [](int i) { return std::string(I18N.get(kRows[i].label)); }, nullptr, nullptr,
-      [this](int i) { return rowValueText(kRows[i]); }, true);
+      renderer, listRect(), kRowCount, selectedIndex, [](int i) { return std::string(I18N.get(kRows[i].label)); },
+      nullptr, nullptr, [this](int i) { return rowValueText(kRows[i]); }, true);
 
   const bool actionSelected = kRows[selectedIndex].kind == RowKind::Action;
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), actionSelected ? tr(STR_SELECT) : tr(STR_CHANGE),

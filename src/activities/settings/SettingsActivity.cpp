@@ -12,6 +12,7 @@
 #include "CalibreSettingsActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
+#include "DictionarySelectActivity.h"
 #include "DownloadUpdateFromUrlActivity.h"
 #include "FontDownloadActivity.h"
 #include "FontLayoutPreviewActivity.h"
@@ -38,6 +39,7 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/DictionaryRegistry.h"
 #include "util/TouchListNav.h"
 
 // Switch to a category tab: its list, its count, and the focus reset. Shared by
@@ -167,6 +169,17 @@ void SettingsActivity::onEnter() {
   readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_DOWNLOAD, SettingAction::FontDownload));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_READER_CONTROLS, SettingAction::ReaderControls));
+  // Dictionary: only listed when at least one usable dictionary folder exists,
+  // so a device with nothing under /dictionaries never shows a row whose only
+  // possible value is "None". Rescanned on every rebuild — one directory
+  // listing, and it picks up dictionaries copied to the card since last visit.
+  {
+    std::vector<DictionaryEntry> dictionaries;
+    DictionaryRegistry::discover(dictionaries);
+    if (!dictionaries.empty()) {
+      readerSettings.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::Dictionary));
+    }
+  }
   // Font family (built-in + SD) is edited inside the Font & Layout preview,
   // so it is not listed separately here.
 
@@ -461,6 +474,9 @@ void SettingsActivity::toggleCurrentSetting() {
                                  SETTINGS.saveToFile();
                                  ensureSdFontLoaded();
                                });
+        break;
+      case SettingAction::Dictionary:
+        startActivityForResult(std::make_unique<DictionarySelectActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::FontDownload:
         startActivityForResult(std::make_unique<FontDownloadActivity>(renderer, mappedInput),

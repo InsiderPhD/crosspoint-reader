@@ -174,6 +174,11 @@ class BluetoothHIDManager {
   void setDebugCaptureEnabled(bool enabled) { _debugCaptureEnabled = enabled; }
   bool isDebugCaptureEnabled() const { return _debugCaptureEnabled; }
   void setBondedDevice(const std::string& address, const std::string& name = "", uint8_t addrType = 0);
+  // Called when enable() finds the remembered address is stale and adopts the
+  // bond's identity address instead, so the caller can persist the correction.
+  // A plain function pointer, not std::function: no capture is needed and this
+  // avoids the per-signature heap closure (see CLAUDE.md).
+  void setBondedAddressUpdatedCallback(void (*callback)(const char* address, uint8_t addrType));
   void updateActivity();  // Call periodically to check inactivity timeout
   // Reconnect the bonded device when disconnected. Two triggers: a physical
   // button press on the device, or the remote itself advertising (it does so
@@ -251,6 +256,9 @@ class BluetoothHIDManager {
 
   void cleanup();
   void startBackgroundScan();
+  // Replace a stale remembered address with the bond store's identity address.
+  void reconcileBondedAddressWithStore();
+  bool rememberedAddressIsRotating() const;
   void stopBackgroundScan();
   ConnectedDevice* findConnectedDevice(const std::string& address);
   // Feeds one HID report to the device's press detector. Returns true when the
@@ -262,7 +270,20 @@ class BluetoothHIDManager {
   bool _enabled = false;
   bool _scanning = false;
   bool _backgroundScanActive = false;
+  // Bounded diagnostic: how many filtered-out advertisers this scan has logged.
+  // Capped so a busy RF environment can't flood the serial log (see onScanResult).
+  uint8_t _skippedAdvLogs = 0;
   volatile bool _pendingBondedConnect = false;  // set from NimBLE scan callback, consumed in loop task
+  // One-shot: BLE just came up with a remote already bonded, so try connecting to
+  // its stored address directly instead of waiting to see it advertise. Set in
+  // enable(), cleared in disable(), consumed in checkAutoReconnect (loop task).
+  bool _pendingEnableConnect = false;
+  // Set from the NimBLE scan callback when the bonded remote is recognised by
+  // name under a rotated address; consumed in checkAutoReconnect (loop task),
+  // which is where it is safe to persist. Fixed buffer, not std::string: this is
+  // written from the host task and must not allocate there.
+  volatile bool _pendingAddrAdopt = false;
+  char _rediscoveredAddr[18] = "";
   std::vector<BluetoothDevice> _discoveredDevices;
   std::vector<ConnectedDevice> _connectedDevices;
   std::function<void(uint8_t, bool)> _buttonInjector;
@@ -291,6 +312,7 @@ class BluetoothHIDManager {
   unsigned long _lastRestoreAttemptMs = 0;      // rate-limits maybeAutoRestore()
   unsigned long _restoreDeferStampMs = 0;       // deferAutoRestore() stamp...
   unsigned long _restoreDeferForMs = 0;         // ...and hold-off duration (0 = none)
+  void (*_bondedAddrUpdatedCallback)(const char*, uint8_t) = nullptr;
   std::string _bondedDeviceAddress;
   // BLE_ADDR_PUBLIC/BLE_ADDR_RANDOM. A CONNECT_IND targeting a random static
   // address (e.g. ff:.. clickers) as PUBLIC is ignored by the peer, so the type

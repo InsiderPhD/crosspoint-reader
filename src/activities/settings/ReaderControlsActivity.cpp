@@ -292,6 +292,8 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
       return tr(STR_READER_ACTION_BLUETOOTH);
     case CrossPointSettings::READER_ACTION_HIDE_STATUS_BAR:
       return tr(STR_READER_ACTION_STATUS_BAR);
+    case CrossPointSettings::READER_ACTION_DICTIONARY:
+      return tr(STR_LOOKUP);
     default:
       return tr(STR_NONE_OPT);
   }

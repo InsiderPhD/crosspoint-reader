@@ -513,6 +513,20 @@ void setup() {
                                                                  : MappedInputManager::Button::PageBack);
   });
   btMgr.setBondedDevice(SETTINGS.bleBondedDeviceAddr, SETTINGS.bleBondedDeviceName, SETTINGS.bleBondedDeviceAddrType);
+  // The pairing screen stores the address the scan reported, which for a remote
+  // using a Resolvable Private Address goes stale on the remote's own rotation
+  // timer. When enable() corrects it from the bond store, persist the correction
+  // so the next boot starts from the durable identity address. Guarded on a real
+  // change: this must not turn into a settings write on every enable.
+  btMgr.setBondedAddressUpdatedCallback([](const char* address, uint8_t addrType) {
+    if (strcmp(SETTINGS.bleBondedDeviceAddr, address) == 0 && SETTINGS.bleBondedDeviceAddrType == addrType) {
+      return;
+    }
+    strncpy(SETTINGS.bleBondedDeviceAddr, address, sizeof(SETTINGS.bleBondedDeviceAddr) - 1);
+    SETTINGS.bleBondedDeviceAddr[sizeof(SETTINGS.bleBondedDeviceAddr) - 1] = '\0';
+    SETTINGS.bleBondedDeviceAddrType = addrType;
+    SETTINGS.saveToFile();
+  });
   btMgr.setButtonMapping(SETTINGS.bleBackSigIndex, SETTINGS.bleBackSigValue, SETTINGS.bleFwdSigIndex,
                          SETTINGS.bleFwdSigValue);
 

@@ -149,8 +149,8 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
     // Show footnote number + body text if available, otherwise fall back to number only
     const auto& fn = footnotes[i];
     char buf[160];
-    if (fn.text[0] != '\0') {
-      snprintf(buf, sizeof(buf), "%s %s", fn.number[0] != '\0' ? fn.number : tr(STR_LINK), fn.text);
+    if (fn.hasText()) {
+      snprintf(buf, sizeof(buf), "%s %s", fn.number[0] != '\0' ? fn.number : tr(STR_LINK), fn.text.get());
     } else {
       snprintf(buf, sizeof(buf), "%s", fn.number[0] != '\0' ? fn.number : tr(STR_LINK));
     }

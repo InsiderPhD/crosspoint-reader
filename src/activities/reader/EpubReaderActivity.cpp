@@ -33,6 +33,7 @@
 #include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "DictionaryDefinitionActivity.h"
 #include "EpubReaderBookmarksActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderClippingListActivity.h"
@@ -526,6 +527,11 @@ void EpubReaderActivity::loop() {
     requestUpdate();
   }
 
+  if (showDictionaryMessage && (millis() - dictionaryMessageTime) >= bookmarkMessageDurationMs) {
+    showDictionaryMessage = false;
+    requestUpdate();
+  }
+
   // ── Power: long press always sleeps; short press = configured action ──────
   if (mappedInput.isPressed(MappedInputManager::Button::Power) &&
       mappedInput.getHeldTime(MappedInputManager::Button::Power) >= skipChapterMs) {
@@ -733,8 +739,7 @@ void EpubReaderActivity::loop() {
       break;
   }
   if (mappedInput.wasHomeKeyLongPressed()) {
-    if (executeReaderAction(
-            static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.effectiveReaderLongPressHome())))
+    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.effectiveReaderLongPressHome())))
       return;
   } else if (mappedInput.wasHomeKeyTapped()) {
     if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressHome))) return;
@@ -1027,6 +1032,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     }
     case EpubReaderMenuActivity::MenuAction::SAVE_CLIPPING:
       startClipSelection();
+      break;
+    case EpubReaderMenuActivity::MenuAction::LOOK_UP:
+      openDictionaryLookup();
       break;
     case EpubReaderMenuActivity::MenuAction::VIEW_CLIPPINGS: {
       startActivityForResult(
@@ -1371,7 +1379,7 @@ const char* clipVisibleText(const std::string& s) {
 }
 }  // namespace
 
-void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY) {
+void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY, const bool forLookup) {
   if (!section || !epub) {
     requestUpdate();
     return;
@@ -1395,7 +1403,10 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
     computeOrientedMargins(orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
     const int lineHeight = renderer.getLineHeight(readerFontId);
     startPage = section->currentPage;
-    const int pagesToLoad = std::min(3, section->pageCount - startPage);
+    // A lookup is about the word on screen, so it builds only the visible page:
+    // letting the cursor wander onto pages the reader is not showing would be
+    // confusing, and the extra two pages are pure heap for a one-word pick.
+    const int pagesToLoad = forLookup ? 1 : std::min(3, section->pageCount - startPage);
 
     for (int pageIdx = 0; pageIdx < pagesToLoad; ++pageIdx) {
       section->currentPage = startPage + pageIdx;
@@ -1508,7 +1519,7 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
   }
 
   if (clipWords.words.empty()) {
-    LOG_ERR("CLIP", "No selectable words on current EPUB page");
+    LOG_ERR(forLookup ? "DICT" : "CLIP", "No selectable words on current EPUB page");
     requestUpdate();
     return;
   }
@@ -1523,6 +1534,24 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
       initialCursorIdx = idx;
       preAnchored = true;
     }
+  }
+
+  if (forLookup) {
+    startActivityForResult(
+        std::make_unique<ClipSelectionActivity>(renderer, mappedInput, std::move(clipWords), readerFontId, *section,
+                                                startPage, orientedMarginTop, orientedMarginLeft, initialCursorIdx,
+                                                /*preAnchored=*/false, /*singleWordMode=*/true),
+        [this](const ActivityResult& result) {
+          // get_if, not get: a default ActivityResult is NOT cancelled but holds
+          // monostate, and std::get on the wrong alternative aborts under -fno-exceptions.
+          const auto* pick = result.isCancelled ? nullptr : std::get_if<WordPickResult>(&result.data);
+          if (!pick || pick->word.empty()) {
+            requestUpdate();
+            return;
+          }
+          performDictionaryLookup(pick->word);
+        });
+    return;
   }
 
   startActivityForResult(
@@ -1559,6 +1588,72 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
         }
         requestUpdate();
       });
+}
+
+void EpubReaderActivity::openDictionaryLookup() {
+  const auto refuse = [this](const StrId message) {
+    dictionaryMessage = message;
+    showDictionaryMessage = true;
+    dictionaryMessageTime = millis();
+    requestUpdate();
+  };
+
+  if (SETTINGS.dictionaryName[0] == '\0') {
+    refuse(StrId::STR_DICT_NO_DICT_SET);
+    return;
+  }
+
+#if CROSSPOINT_BLE_EXCLUSIVE
+  // A lookup wants far more than the framebuffer lease covers: the lease makes
+  // the 32KB inflate window immune to fragmentation, but the .dz chunk table,
+  // the definition buffer (up to MAX_DEFINITION_BYTES) and the styled-HTML page
+  // set all come off the same heap the BLE stack is holding ~50KB of. Refuse
+  // with an explanation rather than let the user pick a word and then fail on
+  // it — or, worse, abort on an unchecked allocation.
+  //
+  // Deliberately NOT a BleMemoryPause: tearing the stack down here would drop
+  // the user's page-turner mid-sentence to service a lookup they can retry a
+  // second later. Turning Bluetooth off is their call, not ours.
+  //
+  // Compiled out on the X4 Pro, where PSRAM and radio coexistence mean the two
+  // features never contend.
+  if (BluetoothHIDManager::getInstance().isEnabled()) {
+    refuse(StrId::STR_DICT_BT_ON);
+    return;
+  }
+#endif
+
+  startClipSelection(-1, -1, /*forLookup=*/true);
+}
+
+void EpubReaderActivity::performDictionaryLookup(const std::string& word) {
+  // Paint the busy popup BEFORE the lookup: opening the dictionary, building a
+  // stale sidecar and inflating the entry are all blocking SD work, and the
+  // first-run index pass takes seconds. requestUpdateAndWait so it is actually
+  // on the panel before we block, not merely queued.
+  dictionaryMessage = dictionaryLookup.needsIndexing() ? StrId::STR_DICT_INDEXING : StrId::STR_DICT_LOOKING_UP;
+  showDictionaryMessage = true;
+  dictionaryMessageTime = millis();
+  requestUpdateAndWait();
+
+  const auto outcome = dictionaryLookup.run(renderer, word.c_str());
+
+  // run() borrowed the framebuffer as its inflate window, so whatever is in it
+  // now is inflate scratch, not the page. Every path below therefore ends in a
+  // full repaint — never a popup drawn over what is left there.
+  showDictionaryMessage = false;
+
+  if (outcome.found) {
+    startActivityForResult(std::make_unique<DictionaryDefinitionActivity>(renderer, mappedInput, outcome.headword,
+                                                                          outcome.definition, outcome.html),
+                           [this](const ActivityResult&) { requestUpdate(); });
+    return;
+  }
+
+  dictionaryMessage = outcome.message;
+  showDictionaryMessage = true;
+  dictionaryMessageTime = millis();
+  requestUpdate();
 }
 
 void EpubReaderActivity::handleClippingJump(const ClippingJumpResult& jump) {
@@ -1840,11 +1935,21 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       return;
     }
 
-    currentPageFootnotes = p->footnotes;
+    // Hand the page's footnotes over by move, and only after the render. Copying
+    // them beforehand kept two full vectors resident across the whole render —
+    // MAX_FOOTNOTES_PER_PAGE * sizeof(FootnoteEntry) is ~17KB each — at exactly the
+    // moment the render needs contiguous blocks for glyph groups and the grayscale
+    // strip scratch, which is what drove both into their degraded fallbacks on
+    // footnote-heavy pages. Release the outgoing page's copy first (clear() alone
+    // keeps the capacity), and let the status bar read the cheap bool instead.
+    std::vector<FootnoteEntry>().swap(currentPageFootnotes);
+    currentPageHasFootnotes = !p->footnotes.empty();
 
     // renderContents logs its own "Page render: ...total=" breakdown, which
     // covers exactly this span — no second timer needed.
-    renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
+    renderContents(*p, orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
+
+    currentPageFootnotes = std::move(p->footnotes);
   }
   silentIndexNextChapterIfNeeded(viewportWidth, viewportHeight);
   saveProgress(currentSpineIndex, section->currentPage, section->pageCount);
@@ -1856,6 +1961,16 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
   if (showBookmarkMessage) {
     GUI.drawPopup(renderer, bookmarkMessageWasRemoval ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED));
+    if (SETTINGS.darkMode) {
+      renderer.invertScreen();
+    }
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  }
+
+  if (showDictionaryMessage) {
+    // I18N.get, not tr(): the message is chosen at runtime and tr() only accepts
+    // a literal key name.
+    GUI.drawPopup(renderer, I18N.get(dictionaryMessage));
     if (SETTINGS.darkMode) {
       renderer.invertScreen();
     }
@@ -2253,9 +2368,8 @@ bool EpubReaderActivity::runAutosyncNow() {
   return true;
 }
 
-void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int orientedMarginTop,
-                                        const int orientedMarginRight, const int orientedMarginBottom,
-                                        const int orientedMarginLeft) {
+void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop, const int orientedMarginRight,
+                                        const int orientedMarginBottom, const int orientedMarginLeft) {
   const auto t0 = millis();
 
   // Degraded-heap guard: with the BLE stack (and especially a connected remote)
@@ -2287,9 +2401,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // Font prewarm: scan pass accumulates text, then prewarm, then real render
   const uint32_t heapBefore = esp_get_free_heap_size();
   auto scope = fcm->createPrewarmScope();
-  page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);  // scan pass
+  page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);  // scan pass
   if (ReaderUtils::footnotesOnPage())
-    page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+    page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
   scope.endScanAndPrewarm();
   const uint32_t heapAfter = esp_get_free_heap_size();
   fcm->logStats("prewarm");
@@ -2309,11 +2423,11 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   // there, and the intermediate display + re-render on the inverted framebuffer would
   // cancel out to a blank page (text and background both end up white).
   bool imagePageWithAA =
-      page->hasImages() && SETTINGS.textAntiAliasing && !SETTINGS.darkMode && !renderer.areImagesSuppressed();
+      page.hasImages() && SETTINGS.textAntiAliasing && !SETTINGS.darkMode && !renderer.areImagesSuppressed();
 
-  page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+  page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
   if (ReaderUtils::footnotesOnPage())
-    page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+    page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
   renderStatusBar();
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
@@ -2325,16 +2439,16 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // Step 1: Display page with image area blanked (text appears, image area white)
     // Step 2: Re-render with images and display again (images appear clean)
     int16_t imgX, imgY, imgW, imgH;
-    if (page->getImageBoundingBox(imgX, imgY, imgW, imgH)) {
+    if (page.getImageBoundingBox(imgX, imgY, imgW, imgH)) {
       renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 
       // Re-render page content to restore images into the blanked area
       // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
-      page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+      page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
       if (ReaderUtils::footnotesOnPage())
-        page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+        page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
       renderStatusBar();
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
@@ -2393,10 +2507,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(0x00);
-        page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+        page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
         if (ReaderUtils::footnotesOnPage())
-          page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom,
-                                viewportWidth);
+          page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(true, scratch.get(), y, rows);
       }
@@ -2408,10 +2521,9 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
         const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(0x00);
-        page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+        page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
         if (ReaderUtils::footnotesOnPage())
-          page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom,
-                                viewportWidth);
+          page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(false, scratch.get(), y, rows);
       }
@@ -2445,18 +2557,18 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
 
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-      page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+      page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
       if (ReaderUtils::footnotesOnPage())
-        page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+        page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
 
       // Render and copy to MSB buffer
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-      page->render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+      page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
       if (ReaderUtils::footnotesOnPage())
-        page->renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+        page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
       renderer.copyGrayscaleMsbBuffers();
       const auto tGrayMsb = millis();
 
@@ -2726,7 +2838,7 @@ void EpubReaderActivity::openReaderMenu() {
 
   startActivityForResult(
       std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), currentPage, totalPages,
-                                               bookProgressPercent, SETTINGS.orientation, !currentPageFootnotes.empty(),
+                                               bookProgressPercent, SETTINGS.orientation, currentPageHasFootnotes,
                                                syncProvider, timeLeftChapter, timeLeftBook),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
@@ -2944,6 +3056,10 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
       // Cycle Portrait -> Landscape CW -> Inverted -> Landscape CCW -> ...
       applyOrientation((SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT);
       requestUpdate();
+      return false;
+
+    case A::READER_ACTION_DICTIONARY:
+      openDictionaryLookup();
       return false;
 
     case A::READER_ACTION_HIDE_STATUS_BAR:

@@ -17,14 +17,15 @@
 ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList,
                                              const int fontId, Section& section, const int startPageInSection,
                                              const int marginTop, const int marginLeft, const int initialCursorIdx,
-                                             const bool preAnchored)
+                                             const bool preAnchored, const bool singleWordMode)
     : Activity("ClipSelection", renderer, mappedInput),
       wordList(std::move(wordList)),
       fontId(fontId),
       section(section),
       startPageInSection(startPageInSection),
       marginTop(marginTop),
-      marginLeft(marginLeft) {
+      marginLeft(marginLeft),
+      singleWordMode(singleWordMode) {
   const int wordCount = static_cast<int>(this->wordList.words.size());
   if (initialCursorIdx > 0 && initialCursorIdx < wordCount) {
     cursorIdx = initialCursorIdx;
@@ -57,6 +58,15 @@ void ClipSelectionActivity::onExit() {
 }
 
 void ClipSelectionActivity::finishSelection() {
+  // Single-word mode returns the cursor word and nothing else. ClipTextBuilder
+  // is skipped deliberately: it assembles the before/after context a clipping
+  // needs, which for a one-word lookup is pure heap spent on text nobody reads.
+  if (singleWordMode) {
+    setResult(WordPickResult{wordList.textOf(wordList.words[cursorIdx])});
+    finish();
+    return;
+  }
+
   // A touch finish can land before any anchor was set (tap-to-select without a
   // prior hold): treat the cursor word as a single-word selection.
   if (startMarkIdx == -1) {
@@ -132,11 +142,12 @@ void ClipSelectionActivity::loop() {
 #endif
 
   if (mappedInput.wasReleased(Button::Confirm)) {
-    if (startMarkIdx == -1) {
+    // One press picks the word in single-word mode; there is no range to anchor.
+    if (singleWordMode || startMarkIdx != -1) {
+      finishSelection();
+    } else {
       startMarkIdx = cursorIdx;
       requestUpdate();
-    } else {
-      finishSelection();
     }
     return;
   }
@@ -163,7 +174,7 @@ void ClipSelectionActivity::render(RenderLock&&) {
   prewarmHighlightedWords();
   drawHighlights();
 
-  const auto confirmLabel = startMarkIdx == -1 ? tr(STR_SELECT) : tr(STR_DONE);
+  const auto confirmLabel = singleWordMode ? tr(STR_LOOKUP) : (startMarkIdx == -1 ? tr(STR_SELECT) : tr(STR_DONE));
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   // Up/Down side buttons move the cursor by line; label each box with its direction.

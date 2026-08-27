@@ -128,7 +128,10 @@ size_t Page::splitWrappedAtLine(GfxRenderer& renderer, const int fontId, const c
         lineBuf[lineLen] = ' ';
         memcpy(lineBuf + lineLen + 1, wordBuf, wCopy);
         lineBuf[lineLen + 1 + wCopy] = '\0';
-        if (renderer.getTextWidth(fontId, lineBuf) > maxWidth) {
+        // Must be the same measurement countWrappedLines()/drawWrappedText() use, or the
+        // split lands on a different word than the draw pass wraps at and the part kept
+        // on this page renders taller than the space reserved for it.
+        if (renderer.getTextAdvanceX(fontId, lineBuf, EpdFontFamily::REGULAR) > maxWidth) {
           if (lines >= maxLines) return static_cast<size_t>(wStart - text);
           lines++;
           memcpy(lineBuf, wordBuf, wCopy + 1);
@@ -268,13 +271,13 @@ void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xO
   int totalLines = 0;
   int includedFootnotes = 0;
   for (const auto& fn : footnotes) {
-    if (fn.text[0] == '\0') continue;
+    if (!fn.hasText()) continue;
     // Prewarm SD-card glyph metrics so this measurement (and the draw pass below) hit the
     // persistent advance table instead of the 8-slot on-demand overflow ring. Pages loaded
     // from cache never went through the parser's prewarm, so it must happen here too.
     // No-op for flash-resident fonts.
-    renderer.ensureSdCardFontReady(fontId, fn.text);
-    const int fnLines = countWrappedLines(renderer, fontId, fn.text, viewportWidth);
+    renderer.ensureSdCardFontReady(fontId, fn.text.get());
+    const int fnLines = countWrappedLines(renderer, fontId, fn.text.get(), viewportWidth);
     if (totalLines + fnLines > maxLines) break;
     totalLines += fnLines;
     includedFootnotes++;
@@ -287,9 +290,9 @@ void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xO
   int y = ruleY + 4;
   int drawn = 0;
   for (const auto& fn : footnotes) {
-    if (fn.text[0] == '\0') continue;
+    if (!fn.hasText()) continue;
     if (drawn >= includedFootnotes) break;
-    drawWrappedText(renderer, fontId, fn.text, xOffset, y, viewportWidth, lineH);
+    drawWrappedText(renderer, fontId, fn.text.get(), xOffset, y, viewportWidth, lineH);
     drawn++;
   }
 }
@@ -312,10 +315,17 @@ bool Page::serialize(FsFile& file) const {
   serialization::writePod(file, fnCount);
   for (uint16_t i = 0; i < fnCount; i++) {
     const auto& fn = footnotes[i];
+    // Length-prefixed body, not a fixed field: a page's notes are short, and writing
+    // the old 1KB worst case per entry cost the same again in every section file.
+    const uint16_t textLen = fn.hasText() ? static_cast<uint16_t>(strlen(fn.text.get())) : 0;
     if (file.write(fn.number, sizeof(fn.number)) != sizeof(fn.number) ||
-        file.write(fn.href, sizeof(fn.href)) != sizeof(fn.href) ||
-        file.write(fn.text, sizeof(fn.text)) != sizeof(fn.text)) {
+        file.write(fn.href, sizeof(fn.href)) != sizeof(fn.href)) {
       LOG_ERR("PGE", "Failed to write footnote");
+      return false;
+    }
+    serialization::writePod(file, textLen);
+    if (textLen > 0 && file.write(fn.text.get(), textLen) != textLen) {
+      LOG_ERR("PGE", "Failed to write footnote text");
       return false;
     }
   }
@@ -362,14 +372,35 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file) {
   for (uint16_t i = 0; i < fnCount; i++) {
     auto& entry = page->footnotes[i];
     if (file.read(entry.number, sizeof(entry.number)) != sizeof(entry.number) ||
-        file.read(entry.href, sizeof(entry.href)) != sizeof(entry.href) ||
-        file.read(entry.text, sizeof(entry.text)) != sizeof(entry.text)) {
+        file.read(entry.href, sizeof(entry.href)) != sizeof(entry.href)) {
       LOG_ERR("PGE", "Failed to read footnote %u", i);
       return nullptr;
     }
     entry.number[sizeof(entry.number) - 1] = '\0';
     entry.href[sizeof(entry.href) - 1] = '\0';
-    entry.text[sizeof(entry.text) - 1] = '\0';
+
+    uint16_t textLen;
+    serialization::readPod(file, textLen);
+    if (textLen > MAX_FOOTNOTE_TEXT_BYTES) {
+      LOG_ERR("PGE", "Invalid footnote text length %u", textLen);
+      return nullptr;
+    }
+    if (textLen > 0) {
+      auto buf = std::unique_ptr<char[]>(new (std::nothrow) char[textLen + 1]);
+      if (!buf) {
+        // Skip the body rather than fail the page: the note renders blank and its
+        // reference still works from the menu. The seek keeps the stream aligned
+        // for the entries after it.
+        LOG_ERR("PGE", "No heap for footnote text (%u bytes); skipping body", textLen);
+        if (!file.seekCur(textLen)) return nullptr;
+      } else if (file.read(buf.get(), textLen) != textLen) {
+        LOG_ERR("PGE", "Failed to read footnote text %u", i);
+        return nullptr;
+      } else {
+        buf[textLen] = '\0';
+        entry.text = std::move(buf);
+      }
+    }
   }
 
   return page;

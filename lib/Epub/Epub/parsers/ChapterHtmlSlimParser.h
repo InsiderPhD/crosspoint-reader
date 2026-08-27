@@ -50,13 +50,31 @@ class FootnoteBodyPool {
   }
   uint16_t bytesUsed() const { return used; }
 
-  // Copies `len` bytes of `text` plus a terminator into the pool.
+  // Per-body ceiling. Bodies are packed into one shared buffer, so without a ceiling
+  // a single footnote link pointing at a large id'd container (a whole <div> of notes,
+  // say) would swallow the pool and starve every later footnote in the chapter.
+  // 4KB is roughly three screenfuls of footnote area — far beyond any real note.
+  static constexpr uint16_t MAX_BODY_BYTES = 4 * 1024;
+
+  // The pre-scan accumulates body text directly into the unused tail of the pool
+  // instead of a fixed scratch buffer, then commits it with commitCapture(). An
+  // abandoned capture costs nothing: `used` only moves on commit. This is what lets
+  // a body be longer than any one scratch buffer would allow — the old 1KB buffer
+  // silently cut long footnotes mid-sentence before pagination ever saw them.
+  char* captureBuffer() { return buffer ? buffer.get() + used : nullptr; }
+
+  // Bytes of text a capture may hold, excluding the terminator commitCapture() writes.
+  uint16_t captureCapacity() const {
+    if (!buffer || used >= POOL_BYTES) return 0;
+    const uint16_t room = static_cast<uint16_t>(POOL_BYTES - used - 1);
+    return room < MAX_BODY_BYTES ? room : MAX_BODY_BYTES;
+  }
+
+  // Terminates and claims the first `len` captured bytes.
   // Returns the offset, or FOOTNOTE_POOL_NO_TEXT when the pool is full.
-  uint16_t add(const char* text, uint16_t len) {
-    if (!buffer || len == 0) return FOOTNOTE_POOL_NO_TEXT;
-    if (static_cast<uint32_t>(used) + len + 1 > POOL_BYTES) return FOOTNOTE_POOL_NO_TEXT;
+  uint16_t commitCapture(uint16_t len) {
+    if (!buffer || len == 0 || len > captureCapacity()) return FOOTNOTE_POOL_NO_TEXT;
     const uint16_t offset = used;
-    memcpy(buffer.get() + offset, text, len);
     buffer[offset + len] = '\0';
     used = static_cast<uint16_t>(used + len + 1);
     return offset;
@@ -164,7 +182,7 @@ class ChapterHtmlSlimParser {
 
   // First-body-element tracking: <a> links inside the first direct child of <body>
   // are treated as navigation (TOC), not footnote references.
-  int bodyChildDepth = -1;      // depth of first direct child of <body>; -1 = not yet seen
+  int bodyChildDepth = -1;  // depth of first direct child of <body>; -1 = not yet seen
   bool inFirstBodyElement = false;
 
   // Footnote link tracking
@@ -173,8 +191,17 @@ class ChapterHtmlSlimParser {
   char currentFootnoteLinkText[24] = {};
   int currentFootnoteLinkTextLen = 0;
   char currentFootnoteLinkHref[64] = {};
-  std::vector<std::pair<int, FootnoteEntry>> pendingFootnotes;  // <wordIndex, entry>
-  std::vector<FootnoteEntry> deferredFootnotes;  // overflow from previous page (half-device cap)
+  // References waiting for the page their word lands on. FootnoteRef, not
+  // FootnoteEntry: neither list owns a body, and a list of full entries would have
+  // carried a heap allocation each for text they never use.
+  std::vector<std::pair<int, FootnoteRef>> pendingFootnotes;  // <wordIndex, ref>
+
+  // Tail of a footnote body that did not fit on the page its anchor landed on; its
+  // `text` points into footnoteBodyPool at the exact byte the next page must resume
+  // from, so a body spanning several pages loses nothing at the seams. The pool is
+  // allocated before the parse and released only after the last page is emitted, so
+  // it outlives every deferral (never more than a handful of pages).
+  std::vector<FootnoteRef> deferredFootnotes;
   int wordsExtractedInBlock = 0;
 
   // Pre-scanned anchor id → body text (heap-allocated, freed after main parse)
@@ -208,9 +235,9 @@ class ChapterHtmlSlimParser {
  public:
   explicit ChapterHtmlSlimParser(std::shared_ptr<Epub> epub, const std::string& filepath, GfxRenderer& renderer,
                                  const int fontId, const int codeFontId, const float lineCompression,
-                                 const bool extraParagraphSpacing,
-                                 const uint8_t paragraphAlignment, const uint16_t viewportWidth,
-                                 const uint16_t viewportHeight, const bool hyphenationEnabled,
+                                 const bool extraParagraphSpacing, const uint8_t paragraphAlignment,
+                                 const uint16_t viewportWidth, const uint16_t viewportHeight,
+                                 const bool hyphenationEnabled,
                                  const std::function<void(std::unique_ptr<Page>, uint16_t, uint16_t)>& completePageFn,
                                  const bool embeddedStyle, const std::string& contentBase,
                                  const std::string& imageBasePath, const uint8_t imageRendering = 0,

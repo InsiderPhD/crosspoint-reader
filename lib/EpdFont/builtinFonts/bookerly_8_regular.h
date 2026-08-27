@@ -3,12 +3,12 @@
  * name: bookerly_8_regular
  * size: 8
  * mode: 2-bit  compressed: true
- * Command used: fontconvert.py bookerly_8_regular 8 ../builtinFonts/source/Bookerly/Bookerly-Regular.ttf --2bit --compress --pnum
+ * Command used: fontconvert.py bookerly_8_regular 8 ../builtinFonts/source/Bookerly/Bookerly-Regular.ttf --2bit --compress --pnum --exclude-intervals 0x0400,0x04FF --exclude-intervals 0x1EA0,0x1EF9 --exclude-intervals 0x01A0,0x01A1 --exclude-intervals 0x01AF,0x01B0
  */
 #pragma once
 #include "EpdFontData.h"
 
-static const uint8_t bookerly_8_regularBitmaps[15172] = {
+static const uint8_t bookerly_8_regularBitmaps[10031] = {
     0x95, 0x56, 0x4F, 0x68, 0x1C, 0xD7, 0x19, 0xFF, 0xCD, 0x4C, 0xE3, 0xC1, 0x7A, 0xDA, 0x79, 0x81,
     0x3A, 0x69, 0xA9, 0xB4, 0x1A, 0x1F, 0x7C, 0x30, 0xED, 0xEE, 0xCE, 0x52, 0xF6, 0x30, 0x6D, 0x57,
     0x3B, 0x2F, 0xE9, 0x21, 0x07, 0x07, 0xEA, 0x8B, 0xC9, 0xA1, 0x90, 0xE4, 0x18, 0x28, 0xB6, 0xB7,
@@ -356,608 +356,286 @@ static const uint8_t bookerly_8_regularBitmaps[15172] = {
     0xFE, 0xF0, 0x55, 0x92, 0xC4, 0xC0, 0x00, 0x86, 0x6A, 0xA6, 0xDE, 0x71, 0x55, 0x09, 0x12, 0x6B,
     0x60, 0xFF, 0x34, 0x83, 0x62, 0xB7, 0xD8, 0x39, 0xD8, 0xA8, 0xD4, 0x8F, 0x52, 0xFC, 0x1F, 0xAD,
     0x58, 0x31, 0x6C, 0x1C, 0xC7, 0x15, 0xFD, 0xBB, 0x43, 0xDD, 0xCA, 0x1A, 0x6A, 0xF7, 0x0A, 0x19,
-    0x11, 0x40, 0xDE, 0x2D, 0x0B, 0x16, 0x0E, 0x40, 0x72, 0x59, 0xB0, 0xD8, 0x24, 0x4B, 0xDE, 0xD8,
-    0x4D, 0xD2, 0x89, 0x85, 0x5D, 0x05, 0x30, 0xA8, 0x2A, 0x95, 0xA4, 0x43, 0x70, 0x85, 0x20, 0x91,
-    0xBA, 0x95, 0x5D, 0xA4, 0x30, 0x10, 0xB0, 0x77, 0x61, 0x01, 0x11, 0x10, 0x84, 0x2A, 0xEE, 0x1C,
-    0xD0, 0x80, 0x8C, 0x50, 0xBC, 0xB1, 0x55, 0xA4, 0x50, 0xB3, 0x92, 0x0B, 0x17, 0x69, 0x36, 0x89,
-    0x2A, 0x06, 0x48, 0xD6, 0xC0, 0xC5, 0x38, 0x48, 0xE4, 0xAD, 0xDF, 0x9F, 0xDD, 0xA3, 0x48, 0x80,
-    0x12, 0x29, 0x4A, 0x77, 0x33, 0x83, 0xD3, 0x6A, 0xF6, 0xFD, 0x99, 0x3F, 0xFF, 0xBF, 0xFF, 0x86,
-    0x44, 0x96, 0x26, 0xEE, 0xBD, 0xEF, 0x62, 0x67, 0x67, 0x48, 0x1E, 0x2D, 0xD1, 0x2C, 0xC6, 0x88,
-    0xA4, 0x3A, 0xD0, 0x69, 0x11, 0xCF, 0x7C, 0x8C, 0x72, 0x67, 0x40, 0x56, 0x2F, 0x26, 0xA2, 0x2E,
-    0x9A, 0xBD, 0x97, 0x7A, 0x1D, 0x1D, 0x09, 0x1D, 0xDA, 0xC9, 0x75, 0x2B, 0x09, 0xAD, 0x04, 0xBF,
-    0x83, 0x8E, 0x72, 0x06, 0x98, 0x60, 0x25, 0xDC, 0x7B, 0xBA, 0x17, 0x07, 0x80, 0x74, 0xA9, 0x76,
-    0x64, 0xF7, 0x68, 0x92, 0x3C, 0x98, 0x70, 0x76, 0xFA, 0x00, 0x5E, 0xC7, 0x7B, 0x11, 0xDA, 0x9A,
-    0xCC, 0xAE, 0x38, 0xBA, 0x66, 0xBF, 0x68, 0x75, 0xA1, 0xBD, 0xCE, 0x53, 0xA7, 0xCF, 0xC8, 0xC5,
-    0x47, 0xFC, 0x5A, 0xB1, 0x95, 0xFF, 0x9A, 0x7F, 0x5C, 0x2F, 0x1F, 0x06, 0xB9, 0xF2, 0xF2, 0x2C,
-    0xB8, 0x97, 0xB9, 0x1B, 0x99, 0xA4, 0xAD, 0x49, 0xA1, 0x25, 0xCD, 0x8D, 0x49, 0x25, 0x61, 0xA8,
-    0x4E, 0xB2, 0xD8, 0x19, 0xC6, 0x4D, 0x8C, 0xAE, 0x95, 0x62, 0x9C, 0x15, 0x7A, 0x4A, 0xD2, 0xAA,
-    0x47, 0xF3, 0xDE, 0xE7, 0x59, 0xB0, 0x91, 0x35, 0x72, 0xE5, 0xE7, 0xD9, 0xBE, 0x15, 0xB2, 0x78,
-    0x90, 0xE7, 0x19, 0x59, 0x0C, 0x08, 0xC8, 0x94, 0xE1, 0xAD, 0x2D, 0x7E, 0x48, 0x73, 0x7E, 0xCE,
-    0xC8, 0xF5, 0x0E, 0x8F, 0x17, 0x6B, 0x06, 0x39, 0x64, 0x64, 0x33, 0x07, 0xC8, 0x78, 0xBE, 0x2A,
-    0x2D, 0xCD, 0xC8, 0xF7, 0x62, 0x20, 0x03, 0x64, 0x1F, 0x58, 0x2D, 0x93, 0x8C, 0xBF, 0xD4, 0x34,
-    0x11, 0x37, 0x14, 0x89, 0xD8, 0xC3, 0x8E, 0xE0, 0x57, 0x3B, 0xBF, 0x9D, 0x67, 0x5E, 0xE7, 0xF6,
-    0x4E, 0x16, 0x89, 0x4F, 0x6E, 0x27, 0xA1, 0x88, 0x1D, 0xD5, 0x12, 0xB1, 0x4B, 0xF8, 0x15, 0x51,
-    0x24, 0xE2, 0xEC, 0xBD, 0xA0, 0xF3, 0x64, 0x67, 0x53, 0xFE, 0xF8, 0x63, 0xDE, 0x37, 0x38, 0x8D,
-    0x54, 0xE4, 0xE4, 0x2B, 0x6B, 0x00, 0x93, 0xD4, 0x7A, 0xD5, 0x30, 0xCF, 0x43, 0xB3, 0x45, 0xDE,
-    0x46, 0xD6, 0xA2, 0x76, 0x9E, 0x76, 0xF9, 0x75, 0xDE, 0xAA, 0xC5, 0x83, 0xA7, 0x79, 0x30, 0xEB,
-    0x53, 0xFC, 0xA8, 0x91, 0x5A, 0xA9, 0xAF, 0x78, 0x9B, 0xDC, 0x2B, 0xA9, 0x24, 0x0B, 0x9D, 0x0E,
-    0xF4, 0x79, 0xF4, 0x66, 0x0A, 0xB4, 0x14, 0x60, 0x29, 0xA6, 0xA5, 0xC5, 0xA9, 0x3B, 0x40, 0xAA,
-    0x33, 0xCC, 0x55, 0xA1, 0xD1, 0x5C, 0x22, 0x6E, 0x52, 0xBB, 0x8E, 0x76, 0xED, 0x43, 0xCD, 0xFF,
-    0x40, 0xF7, 0xBE, 0xD5, 0x24, 0x34, 0xEF, 0xDD, 0xE7, 0xB3, 0x6F, 0xA8, 0xC6, 0xF7, 0x43, 0x5F,
-    0xFB, 0xEF, 0xF7, 0x25, 0xD0, 0xB3, 0x73, 0x9B, 0x3C, 0x44, 0x3C, 0xF8, 0x3C, 0xC8, 0xCF, 0x30,
-    0x88, 0x47, 0x18, 0xE8, 0x39, 0x0F, 0x6D, 0xCA, 0x3C, 0x15, 0x50, 0xD6, 0x4E, 0x5C, 0xB3, 0x13,
-    0x5E, 0x02, 0x09, 0xAC, 0x81, 0x7C, 0xDE, 0x4E, 0x9D, 0xCA, 0xED, 0xE0, 0x19, 0x90, 0x9F, 0x24,
-    0x40, 0x56, 0xC4, 0xC8, 0x04, 0x64, 0x99, 0x00, 0xB9, 0x92, 0x00, 0xD9, 0x4A, 0x80, 0x8C, 0x41,
-    0x3C, 0xC2, 0x40, 0xCF, 0x79, 0x68, 0x5B, 0x09, 0x90, 0xAD, 0x04, 0xC8, 0xBC, 0x27, 0x93, 0x27,
-    0xBC, 0x50, 0x38, 0x83, 0xF1, 0x16, 0x19, 0xB8, 0x5A, 0x84, 0xAB, 0xE9, 0xE6, 0x73, 0xA5, 0xAD,
-    0xB6, 0xFC, 0xFF, 0x24, 0xAB, 0x9E, 0x95, 0x46, 0x2E, 0x1D, 0xEE, 0xD8, 0x52, 0xD4, 0x7E, 0xB8,
-    0x3B, 0x9A, 0x7F, 0xBD, 0x70, 0xBB, 0x13, 0xF3, 0xFA, 0xC4, 0xA7, 0x00, 0xCE, 0x0F, 0x20, 0xD5,
-    0xF8, 0x60, 0xD1, 0x6F, 0xA2, 0xFF, 0x09, 0x53, 0x1E, 0x6A, 0xB2, 0xBF, 0x49, 0x48, 0xEC, 0xA4,
-    0xE4, 0x20, 0x3A, 0x5D, 0x9C, 0x67, 0x0D, 0x93, 0x17, 0x69, 0x8D, 0xF2, 0xF7, 0x73, 0x35, 0x36,
-    0x46, 0xE7, 0x11, 0x78, 0x19, 0xD9, 0xBC, 0x40, 0x42, 0xFE, 0x05, 0x0F, 0xE8, 0xBD, 0x1A, 0x3B,
-    0xBE, 0x32, 0xA4, 0xC5, 0x8F, 0x29, 0x74, 0x69, 0xA9, 0x17, 0xFB, 0xDF, 0xC7, 0x54, 0xED, 0x76,
-    0x1B, 0xDA, 0x33, 0x71, 0xE3, 0x23, 0x3C, 0x0F, 0x7F, 0xBD, 0xB8, 0x9D, 0x56, 0xAB, 0x61, 0xD3,
-    0x4D, 0x78, 0x5D, 0x13, 0xB1, 0x13, 0x8B, 0xFD, 0xAF, 0x93, 0x04, 0x26, 0xE0, 0xAC, 0xC7, 0x70,
-    0xC7, 0xDF, 0xE0, 0x83, 0xD9, 0x72, 0xAD, 0xBD, 0x04, 0xD9, 0xBB, 0x7B, 0x72, 0xEA, 0xB0, 0x38,
-    0x9D, 0x90, 0x4B, 0xC5, 0x81, 0xD9, 0x7B, 0xE4, 0x75, 0xE2, 0x97, 0x70, 0x08, 0x3E, 0x23, 0x6B,
-    0xF5, 0xD2, 0x98, 0xEE, 0xE9, 0x80, 0xE6, 0x4E, 0xCE, 0x27, 0x16, 0x39, 0x2E, 0xD9, 0xBB, 0xA5,
-    0xB5, 0x35, 0xA9, 0x5F, 0x4A, 0x2C, 0x1F, 0xC1, 0x4A, 0x9E, 0x14, 0x66, 0x7E, 0x40, 0x1C, 0xFD,
-    0x33, 0x39, 0x95, 0x45, 0xEB, 0x23, 0x1C, 0x51, 0xE9, 0x1A, 0x79, 0x89, 0x9C, 0x4B, 0xE5, 0xEF,
-    0x57, 0x99, 0xA6, 0x92, 0x2F, 0xCF, 0xA9, 0x37, 0x36, 0xCF, 0x1F, 0xCF, 0x1C, 0xCE, 0xD4, 0xEB,
-    0xAC, 0xE0, 0x0E, 0x02, 0xE7, 0x26, 0x0E, 0xC7, 0xA7, 0xB7, 0xB1, 0x02, 0x29, 0x49, 0x8C, 0x5C,
-    0x7E, 0xD2, 0x15, 0xF0, 0xD6, 0x39, 0xC0, 0x66, 0xDE, 0xCA, 0x0A, 0x1C, 0x65, 0x92, 0x75, 0xE5,
-    0x35, 0x56, 0x20, 0xFB, 0xB4, 0xF4, 0x80, 0xAA, 0x1E, 0xD3, 0x5D, 0x23, 0xA7, 0x1B, 0x1D, 0x0A,
-    0x3D, 0x7E, 0x82, 0xE7, 0x1C, 0x1B, 0x76, 0x1E, 0x1B, 0x04, 0xFB, 0x3B, 0xE4, 0xE2, 0xC3, 0xF8,
-    0x54, 0x79, 0x7A, 0xE6, 0x43, 0xF2, 0x77, 0xCB, 0x95, 0xD4, 0x23, 0xAA, 0x8D, 0xF6, 0xFA, 0xAA,
-    0x84, 0x3D, 0x60, 0xFA, 0x10, 0xD9, 0xBC, 0x81, 0x69, 0x3B, 0xE1, 0x76, 0xBC, 0x69, 0x7A, 0x77,
-    0x99, 0x8D, 0xF4, 0x47, 0x53, 0xF3, 0x21, 0xDE, 0x1D, 0x76, 0xC0, 0x83, 0xD7, 0x2B, 0x08, 0xD6,
-    0x10, 0xCF, 0xC6, 0x79, 0x98, 0x6E, 0x20, 0x84, 0x6F, 0x6C, 0xDF, 0x45, 0xFE, 0xE0, 0x87, 0x8D,
-    0x54, 0x26, 0xA1, 0x42, 0x81, 0x33, 0xB9, 0xD5, 0xA1, 0xC6, 0x93, 0x3C, 0x2F, 0x90, 0xDA, 0x2F,
-    0xCA, 0xAA, 0xD3, 0xDF, 0xA6, 0xA0, 0xF7, 0xBF, 0x78, 0xC6, 0xC7, 0x29, 0xB9, 0x3F, 0xD3, 0x95,
-    0x3C, 0xD7, 0x73, 0x1F, 0x13, 0x7B, 0x1C, 0xC6, 0x77, 0xB4, 0xFF, 0x18, 0x95, 0xB2, 0xDD, 0x27,
-    0xF1, 0xEC, 0xBE, 0xA9, 0xA9, 0xB3, 0x34, 0x6D, 0x36, 0xCE, 0xD6, 0x42, 0x31, 0xA4, 0xC8, 0x5A,
-    0xA5, 0xC8, 0x46, 0x41, 0xB5, 0xD6, 0x40, 0x2C, 0x5B, 0x38, 0xF5, 0xA7, 0x64, 0x0D, 0x07, 0xCE,
-    0xE7, 0x09, 0xCA, 0x2D, 0x9A, 0xF3, 0x0F, 0x8D, 0x59, 0xA0, 0x79, 0xB9, 0xA1, 0x44, 0x9E, 0xC1,
-    0x19, 0xBD, 0x7C, 0xAF, 0xBE, 0x91, 0x3A, 0xC3, 0x11, 0xA9, 0xDC, 0x54, 0x25, 0xA5, 0xB4, 0xFB,
-    0x30, 0x02, 0x1B, 0x30, 0x11, 0x19, 0x03, 0xC0, 0x07, 0x3C, 0x8A, 0x6D, 0x40, 0x11, 0xB0, 0x01,
-    0x0D, 0x7A, 0x75, 0x27, 0x49, 0x6C, 0xA2, 0x02, 0x9A, 0xC5, 0x3F, 0x4F, 0xEB, 0xD7, 0xD4, 0x8C,
-    0x43, 0x68, 0xFE, 0x35, 0xF2, 0x06, 0x1C, 0xB3, 0x73, 0x7F, 0x21, 0x3F, 0xD7, 0x0B, 0x56, 0xD2,
-    0xB5, 0xF5, 0xAD, 0x8E, 0xF2, 0xCB, 0xA4, 0xFE, 0xE6, 0x30, 0x59, 0x36, 0xFE, 0xC5, 0xB5, 0xFA,
-    0x3E, 0x49, 0xD6, 0x1E, 0x28, 0x24, 0x12, 0x6F, 0x82, 0xB6, 0x49, 0x62, 0xBA, 0x5C, 0x42, 0xF7,
-    0x62, 0x92, 0x22, 0x05, 0x11, 0xEF, 0x51, 0x3B, 0x0D, 0xA8, 0x5A, 0xA5, 0x85, 0x2E, 0xCD, 0xE9,
-    0xA2, 0xE8, 0x80, 0x91, 0xB9, 0x89, 0xA2, 0xFD, 0x61, 0x80, 0xB2, 0x21, 0xFE, 0xC8, 0x54, 0x8A,
-    0x64, 0x13, 0x5F, 0x90, 0xF8, 0x4C, 0x3B, 0xDF, 0x66, 0x41, 0xBA, 0x7A, 0x72, 0x4A, 0xE6, 0x7C,
-    0xD1, 0x45, 0x8D, 0x3F, 0x5F, 0x96, 0x7F, 0x27, 0x39, 0x9A, 0x93, 0x7D, 0x70, 0xF2, 0xAE, 0x29,
-    0xB0, 0x78, 0xE1, 0x29, 0xB1, 0x04, 0x32, 0x8C, 0xA9, 0x5F, 0xB3, 0x0A, 0x1C, 0x6D, 0x12, 0xAC,
-    0x29, 0x87, 0xA3, 0xF0, 0x3C, 0xA1, 0x79, 0x84, 0xAC, 0xFB, 0xA2, 0x90, 0x34, 0x72, 0xBD, 0x74,
-    0x2F, 0x5E, 0x70, 0xA9, 0x1A, 0xF2, 0x13, 0x1B, 0x68, 0xD7, 0x0C, 0x09, 0x08, 0xDD, 0x74, 0x62,
-    0x04, 0xE2, 0x04, 0x66, 0x8E, 0x4D, 0x86, 0x32, 0x63, 0x62, 0x68, 0x0C, 0x6F, 0x6C, 0xAF, 0x84,
-    0x94, 0x8A, 0x58, 0xA6, 0x95, 0x5D, 0xC3, 0x2D, 0xEE, 0x4A, 0x6D, 0x7B, 0x37, 0x48, 0xAA, 0xD5,
-    0x85, 0x6E, 0x5D, 0xB3, 0xBF, 0x27, 0x54, 0xA0, 0xC4, 0xA1, 0xAF, 0x83, 0x8A, 0x39, 0x07, 0xF1,
-    0xF8, 0x76, 0x65, 0x66, 0xA1, 0x0A, 0x59, 0x5A, 0xD2, 0xDB, 0x90, 0x96, 0x32, 0x2E, 0x22, 0xA5,
-    0x10, 0x94, 0xA7, 0x54, 0x95, 0xAC, 0x77, 0xA4, 0xA6, 0x9F, 0x9F, 0x34, 0x45, 0xE8, 0xA2, 0x61,
-    0xA6, 0xAE, 0x39, 0x9E, 0x93, 0xA7, 0xC8, 0x1D, 0xA2, 0x72, 0xC3, 0x45, 0x7A, 0xA8, 0x86, 0x91,
-    0x68, 0xAC, 0xD0, 0x58, 0xFA, 0xB1, 0xF2, 0x63, 0xE1, 0xC7, 0xBA, 0x8F, 0x65, 0x1F, 0xAB, 0x3E,
-    0x16, 0x7D, 0xAC, 0xF9, 0x58, 0xF2, 0x51, 0x4C, 0x36, 0x22, 0x62, 0x93, 0xD8, 0xBC, 0x91, 0x5F,
-    0x50, 0x5F, 0x10, 0x5F, 0xD0, 0x5B, 0xFB, 0x0D, 0xBA, 0x0B, 0xB2, 0xAB, 0x60, 0x1D, 0x76, 0x33,
-    0xFA, 0xDD, 0xD2, 0x53, 0x48, 0x38, 0xFA, 0x33, 0xDC, 0xF6, 0xEF, 0x92, 0x4A, 0x7F, 0xC5, 0x54,
-    0xAA, 0x4A, 0x2A, 0xD5, 0x47, 0x50, 0xE9, 0x2D, 0x43, 0xA5, 0xD0, 0x7D, 0x90, 0x6E, 0x8E, 0xE1,
-    0x64, 0x98, 0x97, 0x2D, 0x7A, 0x67, 0x9A, 0x47, 0x91, 0x1E, 0x4B, 0xA8, 0xD4, 0xE4, 0x77, 0xF8,
-    0xA0, 0x47, 0xA5, 0xFE, 0x8D, 0x58, 0x95, 0x9D, 0xCD, 0x4C, 0xCE, 0x67, 0x5C, 0x79, 0x0D, 0x66,
-    0x65, 0x31, 0x8B, 0xD3, 0x2D, 0x8F, 0x17, 0xC9, 0xFB, 0x18, 0xB7, 0xBF, 0xBC, 0x4C, 0xDE, 0x1E,
-    0x98, 0xF5, 0x91, 0x8A, 0x40, 0x4F, 0xD1, 0x0C, 0x7A, 0xD7, 0xA3, 0x46, 0x5C, 0x24, 0x6F, 0x03,
-    0x12, 0xEE, 0x32, 0x4B, 0xB8, 0x71, 0x53, 0xA6, 0x5B, 0x44, 0xEB, 0x45, 0xBE, 0xAE, 0xF3, 0x35,
-    0x50, 0xEA, 0x70, 0x36, 0x69, 0x7D, 0x99, 0xFC, 0xF2, 0x76, 0xB2, 0x24, 0x74, 0xA3, 0xA3, 0x7E,
-    0x57, 0x70, 0xE0, 0x0C, 0xE2, 0xC2, 0xBB, 0xC4, 0x5C, 0x78, 0xBA, 0xA2, 0x39, 0xA5, 0x29, 0x4C,
-    0x69, 0xB2, 0xC9, 0x5E, 0x3E, 0xC6, 0xBF, 0x17, 0x60, 0x05, 0xB5, 0xD2, 0xFE, 0xE0, 0x74, 0x96,
-    0xAC, 0x65, 0x8E, 0xD4, 0xB3, 0x93, 0xC7, 0x98, 0x81, 0xEC, 0x6F, 0xB5, 0x68, 0x6E, 0x96, 0x84,
-    0x53, 0x10, 0x4F, 0xEA, 0x6F, 0x20, 0x60, 0xEF, 0x48, 0x13, 0xC7, 0x32, 0x8F, 0x51, 0x74, 0xCC,
-    0x6F, 0x64, 0x7C, 0xD3, 0xE3, 0x5C, 0x4F, 0x2F, 0xAC, 0xD3, 0x0C, 0xEC, 0x2D, 0x90, 0x7D, 0xB1,
-    0x04, 0xF7, 0xB7, 0x91, 0x3A, 0xF4, 0x8B, 0xDF, 0xE2, 0x22, 0xC6, 0x8E, 0x8C, 0x98, 0x00, 0xC8,
-    0xD9, 0x23, 0xFA, 0x90, 0x70, 0x9F, 0xAB, 0x9C, 0x18, 0x99, 0x70, 0x8D, 0xDC, 0xA5, 0xB3, 0xE3,
-    0xC7, 0xC1, 0x52, 0xAB, 0x3B, 0xBB, 0xE8, 0x00, 0x56, 0x0C, 0xAD, 0x3E, 0xF2, 0xF4, 0xF0, 0x77,
-    0xE0, 0x0C, 0x2F, 0xAB, 0xBF, 0xEA, 0x30, 0x3D, 0x3B, 0x75, 0x94, 0xEE, 0x3F, 0xA3, 0x1A, 0xE9,
-    0xCA, 0xCA, 0xCB, 0xEF, 0x0C, 0x67, 0x20, 0xD1, 0x62, 0xC4, 0xE1, 0x55, 0xB0, 0x9F, 0xBB, 0xFF,
-    0xF5, 0x55, 0x2F, 0x41, 0xE9, 0x24, 0x17, 0x85, 0xD6, 0x79, 0x04, 0xF7, 0xAF, 0xC7, 0xA7, 0xBA,
-    0x31, 0x60, 0x4D, 0x35, 0x5C, 0x5D, 0x23, 0xB2, 0xC7, 0x8F, 0xBB, 0x31, 0xBC, 0x6B, 0xD4, 0x22,
-    0xF2, 0x42, 0x9F, 0xEE, 0x6E, 0xB2, 0xCC, 0xBE, 0x7A, 0xE7, 0xDC, 0xF1, 0x17, 0x93, 0x6E, 0x46,
-    0x8B, 0x10, 0x9C, 0x66, 0x66, 0x30, 0xA4, 0xA0, 0xA3, 0xA5, 0x0D, 0xED, 0x91, 0xF2, 0xD8, 0x89,
-    0x71, 0x22, 0x12, 0x9C, 0xED, 0x29, 0x29, 0x70, 0x8B, 0x1C, 0xB4, 0xD3, 0xC5, 0xCB, 0xF1, 0xEF,
-    0xE1, 0xDD, 0x71, 0x78, 0xF7, 0xCA, 0x6C, 0x7D, 0xCF, 0x43, 0x42, 0x95, 0x3E, 0x5A, 0xEE, 0x65,
-    0x07, 0xAD, 0x9E, 0x04, 0xCB, 0x52, 0x7E, 0x7F, 0x7A, 0xFA, 0x48, 0xA4, 0x31, 0x53, 0x13, 0xC9,
-    0xF9, 0x3B, 0xF6, 0x72, 0x67, 0xFD, 0x54, 0xE2, 0x79, 0x7C, 0x9E, 0xE3, 0x14, 0xC2, 0xC4, 0xFE,
-    0xCD, 0x71, 0x92, 0xFD, 0xCC, 0xC8, 0xDB, 0xA7, 0x94, 0xE9, 0x08, 0xF5, 0x21, 0x55, 0x2A, 0xC7,
-    0x98, 0x41, 0x25, 0xF7, 0x3A, 0x5C, 0x48, 0x22, 0x41, 0x7C, 0x7B, 0x47, 0x81, 0xDA, 0x86, 0x4C,
-    0x57, 0xF3, 0x8E, 0x0A, 0xA5, 0x5A, 0xDA, 0x26, 0xBF, 0x28, 0x59, 0xA9, 0x11, 0x02, 0x29, 0xDF,
-    0xA7, 0x83, 0xF4, 0xAB, 0xAC, 0x3B, 0xBF, 0x46, 0x13, 0x89, 0xEA, 0x26, 0xCD, 0xFF, 0x67, 0x7C,
-    0xB4, 0x12, 0xF4, 0x2F, 0xE1, 0xA0, 0x76, 0xBE, 0x7B, 0x63, 0x7B, 0xAB, 0x19, 0x4E, 0x4E, 0x85,
-    0x17, 0x4C, 0x2D, 0x3B, 0xDC, 0x1E, 0x20, 0xFD, 0x0C, 0x35, 0x87, 0x26, 0x7B, 0x16, 0xF8, 0x96,
-    0x7F, 0x1E, 0x8B, 0xEF, 0xF5, 0xAF, 0x2E, 0xD7, 0x68, 0xF4, 0xF5, 0xEE, 0xB2, 0x6A, 0xB3, 0xB5,
-    0xA5, 0xD1, 0x61, 0xEE, 0xD9, 0x20, 0x8D, 0xF4, 0x0C, 0x64, 0x69, 0xDF, 0x1F, 0xCC, 0xF1, 0x5F,
-    0xBB, 0xEA, 0x88, 0xB7, 0xFB, 0x9D, 0x74, 0x5B, 0xC9, 0x6C, 0x69, 0xAB, 0x39, 0x33, 0x35, 0x43,
-    0x2D, 0xBB, 0x0F, 0x42, 0xE1, 0x93, 0xC2, 0xFF, 0x4C, 0xA4, 0xB7, 0x94, 0xF9, 0xFB, 0x41, 0x0A,
-    0x98, 0x86, 0x36, 0x57, 0xB6, 0xE2, 0x8F, 0x39, 0xED, 0xC4, 0x57, 0xBE, 0x11, 0x12, 0xFB, 0x1D,
-    0x4C, 0x2F, 0x37, 0x3A, 0x74, 0xF0, 0x99, 0x17, 0xFB, 0xAA, 0x8D, 0xB9, 0xAF, 0xD2, 0x87, 0x5F,
-    0x24, 0xE2, 0x19, 0xB4, 0x0E, 0xEA, 0xFC, 0x8B, 0xE6, 0x24, 0x5F, 0x07, 0x3F, 0xE4, 0x3F, 0x01,
-    0x25, 0xCE, 0x3F, 0x0A, 0xC2, 0x30, 0x18, 0x87, 0xE1, 0x1F, 0xFE, 0x29, 0x08, 0x85, 0x76, 0x11,
-    0x1C, 0x2C, 0xAD, 0x9B, 0x43, 0xC4, 0x0A, 0x41, 0x2A, 0x44, 0x9B, 0x23, 0x14, 0xC4, 0xDD, 0x23,
-    0x64, 0xA8, 0xE0, 0x20, 0x98, 0x23, 0xF4, 0x08, 0x3D, 0x42, 0x04, 0x17, 0x27, 0xBF, 0x23, 0xE4,
-    0x08, 0x99, 0x75, 0xC9, 0x11, 0xB4, 0x74, 0x79, 0xC7, 0x87, 0x37, 0xBB, 0xAE, 0x82, 0x50, 0xD4,
-    0x4D, 0x80, 0x54, 0xEF, 0xAC, 0x6A, 0x45, 0xF5, 0x76, 0x47, 0x9A, 0xFE, 0x5B, 0x65, 0x2F, 0xBB,
-    0xD6, 0x10, 0x02, 0xF0, 0xDE, 0x38, 0xA0, 0xA4, 0x0D, 0x0D, 0x28, 0x92, 0x13, 0xA4, 0x72, 0x4B,
-    0x39, 0xED, 0x28, 0x95, 0x93, 0x2C, 0xA9, 0x85, 0xCB, 0x49, 0xC6, 0x0F, 0x5B, 0xEA, 0x08, 0x0B,
-    0x7D, 0xB1, 0xCC, 0x87, 0xF9, 0x18, 0x77, 0xDB, 0x34, 0xA3, 0x25, 0xAF, 0x85, 0x29, 0xB8, 0x6A,
-    0x0A, 0xA3, 0xF8, 0x0C, 0xCA, 0xB4, 0x9A, 0x31, 0xDE, 0x99, 0xC6, 0x79, 0x0F, 0xEC, 0xBF, 0x9F,
-    0x9B, 0x60, 0x45, 0x2C, 0x92, 0x39, 0x07, 0x37, 0xCF, 0x83, 0x52, 0x2A, 0x8E, 0xB0, 0x26, 0xD5,
-    0x9E, 0xCF, 0x77, 0x3B, 0x46, 0xBF, 0xF3, 0x76, 0x27, 0xD9, 0x8B, 0xD0, 0x03, 0x1A, 0xCA, 0x00,
-    0xDD, 0x93, 0x77, 0xCE, 0x5D, 0x7F, 0xAD, 0x5A, 0x5D, 0x6C, 0x1C, 0xD7, 0x75, 0x3E, 0x33, 0x63,
-    0x6B, 0x1C, 0x8E, 0x76, 0x2E, 0x5B, 0xA4, 0x48, 0x00, 0x71, 0x39, 0x2C, 0xE0, 0x07, 0x35, 0xA0,
-    0xB8, 0x82, 0xA3, 0xA2, 0xEB, 0x62, 0xC9, 0xBD, 0x96, 0x1E, 0x0C, 0xD4, 0x80, 0xA3, 0x87, 0x3A,
-    0x79, 0x30, 0x20, 0x09, 0xC8, 0x4B, 0x1F, 0x1A, 0x6B, 0xE5, 0x6E, 0x10, 0x82, 0xB5, 0x34, 0x57,
-    0xD6, 0x43, 0x1E, 0x8C, 0x44, 0x7C, 0x68, 0xE1, 0x07, 0xFB, 0x41, 0x45, 0xFD, 0xD0, 0x92, 0x75,
-    0x77, 0x81, 0x32, 0x28, 0x9D, 0x50, 0xDC, 0x4B, 0xF3, 0x41, 0x08, 0x02, 0x14, 0x23, 0xE9, 0xC1,
-    0x40, 0x8D, 0xA2, 0x23, 0x57, 0xAD, 0x03, 0x32, 0xA8, 0xA7, 0xC5, 0xA6, 0xDD, 0x52, 0xCB, 0x9D,
-    0x7C, 0xE7, 0xCE, 0x70, 0xF9, 0x23, 0x92, 0x5A, 0xCA, 0xDD, 0xBD, 0x67, 0xB4, 0xDC, 0xBD, 0x73,
-    0x7F, 0xCE, 0x3D, 0xE7, 0x3B, 0xDF, 0x39, 0x23, 0x47, 0x92, 0x13, 0x13, 0xFD, 0x09, 0xE1, 0x55,
-    0x4D, 0xE3, 0x60, 0x2E, 0xF6, 0xE8, 0x96, 0x47, 0xC4, 0x2D, 0x55, 0xDE, 0x9C, 0x34, 0x9F, 0xC7,
-    0x3C, 0xAA, 0x89, 0xB9, 0x04, 0x1D, 0xD0, 0xCD, 0xBD, 0x29, 0xDD, 0x57, 0x06, 0xED, 0x1F, 0xA6,
-    0x5D, 0x9A, 0xF9, 0xE9, 0x22, 0xD5, 0xEA, 0x27, 0x69, 0xAC, 0x3E, 0x4C, 0x54, 0xC7, 0x8D, 0x61,
-    0x87, 0xE8, 0x5A, 0x0B, 0x9F, 0x3D, 0x45, 0x75, 0x47, 0x1B, 0xF9, 0xC8, 0xD1, 0x4E, 0xEA, 0x28,
-    0x22, 0x21, 0xC9, 0xEE, 0x11, 0x39, 0x6D, 0xA2, 0xAF, 0x10, 0x5D, 0x25, 0x2B, 0xCA, 0xE6, 0xD2,
-    0xC1, 0xBC, 0xF6, 0x2C, 0xED, 0x91, 0xCE, 0xA7, 0xDB, 0xD1, 0xC4, 0x2C, 0x85, 0x09, 0x51, 0x6B,
-    0xD6, 0x5D, 0x4F, 0x04, 0x35, 0xC7, 0xA9, 0x56, 0x21, 0x9A, 0xFA, 0x5B, 0xAA, 0x6E, 0x52, 0x99,
-    0xA8, 0x42, 0xC3, 0x13, 0x34, 0x2D, 0xD6, 0xDA, 0x56, 0xAA, 0x30, 0xB4, 0x68, 0xD0, 0xB8, 0x4B,
-    0x15, 0x87, 0x02, 0x49, 0x1E, 0x66, 0x59, 0xA6, 0x61, 0x21, 0x4F, 0xBB, 0xB2, 0xEC, 0xC9, 0xA9,
-    0x65, 0x0A, 0xDA, 0x54, 0x8D, 0x03, 0x6C, 0x63, 0xF7, 0x5B, 0xA8, 0x10, 0x7B, 0x5F, 0x48, 0x9A,
-    0x98, 0xE6, 0xA0, 0xDF, 0x83, 0x8E, 0x1B, 0xD9, 0x7A, 0xEF, 0x1B, 0xFB, 0xD2, 0x9E, 0x0A, 0x69,
-    0x9A, 0xDC, 0xB4, 0x47, 0xD6, 0x06, 0x66, 0xBC, 0xD5, 0xCC, 0x24, 0x86, 0x44, 0xAD, 0x87, 0xA4,
-    0x7F, 0x7A, 0xDB, 0xD2, 0x4D, 0x61, 0xAB, 0xA6, 0x70, 0x64, 0xD3, 0xFF, 0x7B, 0xDA, 0xB8, 0xBD,
-    0xE8, 0xA6, 0x71, 0x35, 0x4E, 0x15, 0x16, 0x79, 0x95, 0xB7, 0x38, 0xBE, 0xEB, 0x92, 0xA6, 0x9B,
-    0xE4, 0xCD, 0x2D, 0x37, 0xB0, 0x8C, 0x71, 0x47, 0xF1, 0x05, 0x4A, 0x19, 0x77, 0x95, 0x50, 0x53,
-    0x2D, 0x0A, 0xE3, 0xB4, 0x43, 0xFB, 0xEB, 0x7D, 0x13, 0x7A, 0x6F, 0x48, 0xAA, 0xBB, 0xAC, 0xF7,
-    0x4C, 0xF7, 0x1F, 0xB9, 0x91, 0x93, 0x06, 0x09, 0x59, 0x8A, 0x84, 0xA6, 0x17, 0x8D, 0xAE, 0xE3,
-    0xE9, 0x40, 0x76, 0x3C, 0x0C, 0xEC, 0x92, 0x57, 0x20, 0xAF, 0x4B, 0xDE, 0x28, 0x79, 0x9E, 0xF4,
-    0x30, 0x8B, 0x15, 0x0B, 0xD5, 0x09, 0xE3, 0x09, 0x1A, 0x43, 0xC7, 0x49, 0xB6, 0x06, 0x49, 0xD9,
-    0x3D, 0x61, 0x14, 0x48, 0xD6, 0x8B, 0xC0, 0x1A, 0x43, 0xF2, 0xAC, 0x2F, 0xC8, 0x73, 0x6F, 0x92,
-    0x57, 0xC4, 0xDF, 0x0B, 0x90, 0x08, 0x22, 0x05, 0x4E, 0x37, 0x90, 0x21, 0xFA, 0xDA, 0x3A, 0x22,
-    0x7B, 0x05, 0x47, 0xDB, 0xCA, 0xEE, 0x4F, 0x57, 0x52, 0x2A, 0xD1, 0x5B, 0xB8, 0xBB, 0x4E, 0xAE,
-    0x4A, 0xC8, 0x59, 0xD1, 0x64, 0x7D, 0x06, 0x73, 0xF8, 0x47, 0xFC, 0x38, 0x05, 0xC1, 0xB6, 0xF9,
-    0x2C, 0x3D, 0xE8, 0x1F, 0x56, 0x83, 0xF9, 0x60, 0x10, 0xF2, 0x1A, 0xE6, 0x3A, 0x75, 0xA8, 0x88,
-    0xB9, 0x65, 0x19, 0xA6, 0xA9, 0x26, 0x1F, 0xF7, 0x17, 0x72, 0x79, 0x0E, 0x52, 0xE4, 0x45, 0x43,
-    0xFE, 0x1C, 0xF2, 0xD7, 0x18, 0x70, 0x55, 0x9B, 0xF5, 0x38, 0x6B, 0x31, 0xCE, 0x29, 0x41, 0xF7,
-    0x3A, 0xBA, 0x54, 0xB0, 0xC5, 0xAB, 0x94, 0xBE, 0x94, 0xCA, 0xDC, 0xFE, 0xD8, 0xF8, 0x8C, 0x89,
-    0xA7, 0xD2, 0x9B, 0x87, 0xE9, 0x27, 0x1E, 0x35, 0x71, 0x0D, 0xE6, 0xA3, 0xB0, 0x27, 0x4B, 0x3D,
-    0x2A, 0x35, 0x34, 0x6B, 0xC9, 0x36, 0x57, 0xEE, 0x13, 0x99, 0x3E, 0x49, 0xBF, 0xCF, 0x20, 0x76,
-    0xEC, 0xA4, 0x29, 0x59, 0xBF, 0x5E, 0x84, 0x8D, 0xD4, 0x33, 0x89, 0x32, 0xB1, 0x74, 0x9D, 0x6C,
-    0x88, 0x23, 0xA1, 0x23, 0xAC, 0x2F, 0x98, 0xFB, 0x88, 0x5A, 0xE8, 0xBB, 0x80, 0x5B, 0x6B, 0x90,
-    0xD3, 0xF8, 0x76, 0x98, 0xAC, 0x81, 0xFC, 0xB2, 0xE8, 0x75, 0x47, 0xA9, 0x74, 0x36, 0x9E, 0xE2,
-    0x5D, 0xC3, 0x0C, 0xEF, 0xDE, 0xD5, 0x44, 0x57, 0xEE, 0x4B, 0xF6, 0x34, 0x68, 0xE4, 0x27, 0x9F,
-    0x43, 0x25, 0x0F, 0xEE, 0x41, 0x1F, 0x2B, 0x51, 0x42, 0xDE, 0xF5, 0xE8, 0x2D, 0x0A, 0xEC, 0x87,
-    0xEC, 0x45, 0x5D, 0x4F, 0x79, 0x9B, 0xD8, 0xA7, 0x2C, 0xBB, 0xEA, 0x79, 0x1C, 0xBE, 0x30, 0xDE,
-    0x7A, 0x59, 0x91, 0xA3, 0xC7, 0x1C, 0x3D, 0xED, 0xE8, 0x2A, 0xAC, 0xB2, 0x73, 0x64, 0x7B, 0xA0,
-    0xA8, 0x46, 0x94, 0x60, 0x21, 0x25, 0xF5, 0x54, 0xF6, 0x34, 0x88, 0xCD, 0xBA, 0x69, 0x6A, 0x6D,
-    0x74, 0x58, 0xA3, 0x68, 0x71, 0x9D, 0x55, 0xAA, 0xEB, 0x50, 0xAA, 0xA3, 0xEA, 0xAE, 0xAC, 0x2F,
-    0xD3, 0x47, 0x8B, 0x4E, 0x5A, 0xD5, 0x5E, 0x82, 0xB1, 0xB5, 0x17, 0x07, 0x7A, 0xA8, 0xF9, 0x0D,
-    0x3D, 0x54, 0x7F, 0x41, 0x17, 0xCA, 0x57, 0x74, 0x61, 0xFC, 0xAE, 0x2E, 0x14, 0x56, 0xA2, 0x82,
-    0x50, 0xD1, 0x71, 0x57, 0x46, 0x13, 0xB6, 0xD5, 0x86, 0x5E, 0xBB, 0xBB, 0xD7, 0x99, 0x0B, 0xCE,
-    0xC4, 0x9B, 0x6B, 0xD0, 0xCE, 0xEF, 0x84, 0xCA, 0xF7, 0xD9, 0x8A, 0xC8, 0x5D, 0xEB, 0xE2, 0x9B,
-    0x29, 0xB6, 0x4E, 0x58, 0x98, 0x27, 0x77, 0x08, 0xEC, 0x4D, 0x50, 0x80, 0xAB, 0xB7, 0xD6, 0x21,
-    0xAB, 0xA5, 0x70, 0x1A, 0x30, 0x98, 0xB9, 0x65, 0xFC, 0x52, 0x3C, 0x54, 0x84, 0x2A, 0x61, 0xFC,
-    0x54, 0xE7, 0x36, 0x68, 0xE3, 0xF8, 0x63, 0xCF, 0x8A, 0x3C, 0xD7, 0x98, 0xE1, 0x07, 0x7B, 0x70,
-    0x32, 0x72, 0xD7, 0x62, 0x41, 0xF1, 0x29, 0x9A, 0xAD, 0x18, 0xAF, 0x32, 0x20, 0xC9, 0xAD, 0x84,
-    0x6E, 0x8F, 0x12, 0xE0, 0x24, 0xF0, 0x63, 0x66, 0x79, 0xA9, 0x56, 0x1E, 0x19, 0x2B, 0x7F, 0x35,
-    0xEF, 0xB1, 0xB3, 0xDD, 0x86, 0x91, 0xCA, 0xA3, 0xFA, 0x2C, 0xB5, 0x60, 0x63, 0xF0, 0x43, 0x3B,
-    0x6D, 0x53, 0x70, 0xE1, 0x32, 0x55, 0x7C, 0x4F, 0x4D, 0xFB, 0x30, 0x1A, 0xDF, 0x51, 0xF8, 0x2C,
-    0x83, 0x0B, 0x6F, 0xE0, 0xB7, 0x87, 0xA6, 0x0F, 0xF7, 0x0D, 0x1F, 0xA4, 0x80, 0xBF, 0x45, 0x72,
-    0x75, 0x4C, 0xF6, 0x67, 0xB8, 0xF7, 0x51, 0x8E, 0x39, 0x21, 0xE4, 0x53, 0x58, 0xDC, 0x8D, 0x08,
-    0x9B, 0x4A, 0x68, 0x02, 0xCB, 0x49, 0x6F, 0xA4, 0x47, 0xC7, 0x04, 0xD8, 0x2C, 0x56, 0x03, 0xB1,
-    0x8C, 0xD1, 0xB5, 0xEE, 0x6C, 0x96, 0xAC, 0xB6, 0x4F, 0x49, 0xD6, 0x04, 0xDC, 0x76, 0x2D, 0xB1,
-    0x01, 0x06, 0x64, 0x9A, 0xD5, 0x26, 0xB1, 0x59, 0xBD, 0xBF, 0x89, 0x03, 0x7F, 0xA9, 0xCD, 0x27,
-    0x9E, 0xF0, 0xD1, 0x3E, 0xF1, 0x22, 0xE6, 0x36, 0x1A, 0x3C, 0x5D, 0x1A, 0x7D, 0x89, 0x7B, 0x39,
-    0xEE, 0x52, 0xD4, 0xBF, 0xE8, 0x10, 0x4E, 0x3A, 0xB3, 0x44, 0x54, 0x83, 0x7A, 0xC7, 0xCA, 0x99,
-    0x9A, 0xA9, 0x8A, 0xB0, 0x0A, 0xFC, 0x27, 0x04, 0x32, 0x2A, 0xC3, 0x35, 0xF9, 0xDF, 0xE5, 0x16,
-    0x54, 0xDA, 0xC9, 0x5D, 0xCA, 0xDB, 0x0C, 0xA4, 0xDD, 0x86, 0x1D, 0xC4, 0x7D, 0xE9, 0xC9, 0x18,
-    0x20, 0xC5, 0x48, 0x96, 0x89, 0x15, 0xC7, 0x62, 0x7E, 0xA5, 0x1D, 0xF6, 0xE0, 0xE4, 0xE6, 0x1E,
-    0x13, 0x25, 0xFB, 0x10, 0xF5, 0x38, 0xEC, 0xA5, 0x8C, 0xDF, 0x9E, 0xB1, 0xBA, 0x71, 0x3B, 0x39,
-    0xC9, 0xAA, 0x5A, 0xB0, 0xE6, 0x16, 0x2D, 0x9E, 0x14, 0x71, 0x27, 0x29, 0xDB, 0x71, 0xB5, 0xA1,
-    0xBC, 0xFF, 0xA3, 0x6A, 0x84, 0xD0, 0x1A, 0xC8, 0x1E, 0x6C, 0xD9, 0x8E, 0x05, 0x3B, 0x26, 0x6C,
-    0xD3, 0x93, 0x06, 0x27, 0x71, 0x69, 0xF0, 0xC5, 0xFC, 0xE9, 0x6A, 0x57, 0x79, 0x4E, 0xCC, 0xBE,
-    0xDD, 0xBB, 0x4D, 0x61, 0x54, 0xC2, 0xE6, 0xC3, 0x9E, 0xBD, 0xD1, 0x76, 0x74, 0xD3, 0x55, 0x4D,
-    0x5C, 0xED, 0x8D, 0x84, 0xED, 0xB8, 0xD9, 0x44, 0x04, 0xC5, 0x9F, 0x42, 0x76, 0x26, 0xDD, 0x9E,
-    0xDB, 0xA1, 0xD2, 0x6D, 0x3A, 0x59, 0x64, 0xF3, 0x39, 0xD6, 0xA3, 0xC9, 0x0B, 0x54, 0xF6, 0xA1,
-    0x0E, 0x15, 0x7C, 0x82, 0xC3, 0x55, 0x56, 0xCA, 0x53, 0x14, 0x8D, 0x91, 0xFF, 0xE1, 0x26, 0x01,
-    0xA4, 0x00, 0x55, 0x75, 0x5B, 0x97, 0x6D, 0x5D, 0x71, 0x74, 0xD0, 0x90, 0xAE, 0x51, 0x12, 0x22,
-    0x64, 0x70, 0x91, 0x7C, 0x97, 0x7C, 0x38, 0x6D, 0x0F, 0x1F, 0x24, 0x6C, 0x33, 0xB8, 0x28, 0x43,
-    0xA3, 0x8D, 0x30, 0x15, 0x43, 0xE2, 0x98, 0xA0, 0xEC, 0x1D, 0x9C, 0x0F, 0x63, 0x91, 0x26, 0xC7,
-    0x3E, 0xD1, 0xF6, 0x0D, 0x85, 0xE6, 0x9C, 0x53, 0x8E, 0xA3, 0x5C, 0x47, 0xF9, 0xDF, 0x81, 0xFB,
-    0xB4, 0x6B, 0x54, 0xAF, 0xD1, 0xE9, 0x31, 0xA0, 0x32, 0x82, 0x64, 0x87, 0x82, 0x65, 0xAA, 0x78,
-    0xF4, 0xE2, 0xEB, 0x18, 0x84, 0x63, 0x31, 0xFB, 0xDA, 0x3C, 0xB9, 0xE0, 0x27, 0xD5, 0x55, 0x35,
-    0xE1, 0x0B, 0xE5, 0xF8, 0x23, 0x64, 0xFF, 0xD3, 0x69, 0xB2, 0x60, 0x6F, 0xCE, 0x8F, 0xCB, 0xE4,
-    0xF9, 0x45, 0x1A, 0xF5, 0x05, 0x4D, 0x57, 0x6F, 0x68, 0xAF, 0x3D, 0xB5, 0x34, 0x3C, 0x8E, 0x70,
-    0xDD, 0xA1, 0x53, 0xA7, 0x8B, 0xD7, 0x96, 0x82, 0x38, 0xBC, 0xD1, 0xF5, 0x29, 0xF6, 0xED, 0xD8,
-    0x17, 0xB1, 0x5F, 0x8E, 0x05, 0x4E, 0x4D, 0xB1, 0x47, 0x57, 0x57, 0xBB, 0xCE, 0x59, 0xE5, 0xAC,
-    0x2A, 0xEA, 0x99, 0x05, 0x1F, 0xDC, 0x2D, 0xFC, 0x58, 0x07, 0x9E, 0xF2, 0x8F, 0x93, 0x7F, 0x86,
-    0x04, 0xE2, 0x5D, 0x85, 0x7C, 0x9F, 0x82, 0x57, 0x64, 0xF8, 0x71, 0x84, 0x4D, 0xB9, 0xEB, 0xD8,
-    0x91, 0xB4, 0xCF, 0x49, 0x07, 0xCD, 0x91, 0xAE, 0x23, 0x3F, 0xF4, 0x66, 0x17, 0x4A, 0x49, 0x55,
-    0x56, 0x41, 0x13, 0x96, 0xC8, 0xD7, 0xBF, 0xA2, 0xC2, 0x83, 0xF7, 0xA9, 0xF0, 0x67, 0x23, 0x54,
-    0xA8, 0x42, 0x4E, 0x41, 0x9E, 0x1B, 0xA1, 0xAA, 0x6A, 0xC9, 0x70, 0xB5, 0x1B, 0x58, 0x30, 0x5E,
-    0x9E, 0x48, 0xA4, 0x71, 0xFE, 0xE1, 0xA5, 0x36, 0xBE, 0xB7, 0x37, 0xC1, 0xBE, 0x14, 0x14, 0x5E,
-    0xB6, 0xA3, 0x69, 0x2B, 0x2A, 0x5B, 0x11, 0x3E, 0x97, 0x8C, 0xF2, 0x01, 0x38, 0x62, 0x6E, 0xAB,
-    0xF3, 0x8E, 0x86, 0xA5, 0xBE, 0xD5, 0xA2, 0xCB, 0xEB, 0xDA, 0xB7, 0xA3, 0x02, 0xC5, 0x79, 0xB3,
-    0x35, 0xC6, 0x11, 0x9B, 0x1C, 0xCD, 0xD1, 0x26, 0x24, 0xC3, 0x85, 0xDD, 0x21, 0xD1, 0xA2, 0x8A,
-    0x60, 0x5F, 0x80, 0x86, 0xA7, 0x77, 0x28, 0x39, 0x4C, 0xF5, 0xCC, 0x23, 0x5D, 0x7B, 0xA0, 0xC7,
-    0x62, 0x49, 0x30, 0x27, 0xD3, 0xD8, 0x9F, 0xBB, 0xD4, 0x7A, 0x27, 0x99, 0xB4, 0xA3, 0xA2, 0xA3,
-    0x41, 0xBD, 0x3C, 0x8F, 0x9C, 0x1F, 0x91, 0xFD, 0x2B, 0xA2, 0x8E, 0xF1, 0xF9, 0x98, 0xC1, 0xE1,
-    0x0B, 0x22, 0x84, 0x62, 0x82, 0xB3, 0xFD, 0x29, 0xD1, 0x08, 0x37, 0x3B, 0x8D, 0xC4, 0xF7, 0x96,
-    0x2A, 0x23, 0xA3, 0xE5, 0x11, 0x51, 0x1F, 0x11, 0xE5, 0x11, 0xBF, 0x32, 0x52, 0x0C, 0xBE, 0xB7,
-    0x68, 0xA7, 0xB3, 0x59, 0x07, 0x20, 0x12, 0x01, 0x42, 0x6F, 0x26, 0x13, 0x30, 0xF1, 0x57, 0xCC,
-    0x80, 0x09, 0xD9, 0x08, 0x49, 0x82, 0x26, 0xBC, 0xA8, 0x75, 0x31, 0x09, 0xEF, 0x74, 0x84, 0x85,
-    0x08, 0xB6, 0xAB, 0x05, 0xDF, 0x7E, 0xC8, 0xAC, 0x2D, 0x1F, 0xE2, 0x38, 0x93, 0xA2, 0x20, 0x1E,
-    0x77, 0x25, 0xDA, 0x08, 0xEC, 0xD0, 0x93, 0x2E, 0x7C, 0xCD, 0x35, 0xAD, 0x1A, 0x57, 0x6F, 0x7E,
-    0x9A, 0x08, 0xF7, 0xED, 0xC8, 0x77, 0xCF, 0xEA, 0xBD, 0x22, 0x5E, 0x7F, 0x17, 0x7E, 0x99, 0xB6,
-    0xAB, 0x37, 0x7F, 0x91, 0xEC, 0xF7, 0x7B, 0xDE, 0x07, 0x20, 0x62, 0x90, 0x81, 0xA1, 0xE3, 0x0C,
-    0xE4, 0x79, 0x63, 0x31, 0x5D, 0xAA, 0x25, 0x54, 0x83, 0x82, 0x36, 0x24, 0xC1, 0x14, 0xE3, 0x1A,
-    0x9A, 0xF5, 0x3F, 0x89, 0x9B, 0x32, 0x44, 0x86, 0x3A, 0xD4, 0x01, 0xE2, 0x93, 0x8F, 0xB7, 0xF8,
-    0x63, 0x48, 0x8A, 0x4F, 0xEE, 0xAB, 0xE4, 0x3B, 0xAF, 0x92, 0xB8, 0x28, 0x64, 0xD8, 0xAD, 0x6A,
-    0x33, 0x8A, 0x46, 0x27, 0x86, 0x71, 0xF1, 0x01, 0xFA, 0x64, 0x6E, 0x24, 0xC5, 0x45, 0xCA, 0xDC,
-    0x08, 0xA4, 0x7B, 0xEA, 0x36, 0x0D, 0xA3, 0x87, 0x40, 0x18, 0x21, 0xEB, 0x5B, 0x74, 0xDA, 0xA7,
-    0x6B, 0x4B, 0x14, 0xC4, 0x14, 0xAE, 0xF4, 0x28, 0x70, 0x7F, 0xA8, 0x05, 0xAB, 0xE7, 0x43, 0x18,
-    0xC0, 0x26, 0x04, 0x07, 0x6E, 0xFE, 0x7E, 0xF9, 0x5D, 0xC5, 0xBF, 0xDB, 0xA9, 0xC6, 0x50, 0x45,
-    0x9F, 0x0D, 0xD6, 0xED, 0xC1, 0x59, 0xE0, 0x2B, 0x34, 0x2A, 0x64, 0xB9, 0xAA, 0x8F, 0x61, 0x70,
-    0x69, 0x10, 0xFD, 0x12, 0x1D, 0xEE, 0x76, 0x78, 0x89, 0x51, 0xF2, 0x8B, 0x94, 0xBD, 0x0E, 0xE9,
-    0x79, 0xCD, 0x6C, 0xA4, 0xD5, 0xE5, 0xAB, 0xDF, 0x22, 0xF1, 0x05, 0x5B, 0xA2, 0x6F, 0x45, 0xEC,
-    0x58, 0xA6, 0x05, 0x32, 0x6A, 0x81, 0x39, 0x62, 0x56, 0xD0, 0xEA, 0xCB, 0x84, 0x80, 0x08, 0x9F,
-    0x5F, 0xA0, 0x98, 0x83, 0xCA, 0xE3, 0x88, 0x01, 0x17, 0x08, 0x1A, 0x54, 0xB6, 0xE9, 0xC5, 0x5B,
-    0x8C, 0x61, 0x67, 0x76, 0xCC, 0x54, 0x8A, 0x7F, 0x92, 0x34, 0x4F, 0x5F, 0xA5, 0x13, 0x91, 0x6C,
-    0x46, 0xB5, 0x5F, 0x27, 0x2D, 0xF5, 0x8C, 0xD1, 0x35, 0xBF, 0xDE, 0xA0, 0x51, 0xA3, 0xF5, 0xEC,
-    0x1D, 0x48, 0xD0, 0x08, 0xAA, 0x4C, 0x97, 0x99, 0xD5, 0xD3, 0x09, 0xE5, 0x2A, 0xA7, 0xFF, 0x76,
-    0xA3, 0x52, 0xDB, 0x42, 0xBC, 0xCD, 0x88, 0x79, 0x20, 0x4F, 0x48, 0x67, 0xD7, 0xDB, 0x45, 0xF4,
-    0x99, 0xC0, 0xFA, 0xE0, 0x9A, 0x74, 0x0C, 0x51, 0x14, 0x7E, 0x4E, 0xF6, 0x39, 0xE8, 0xF1, 0xDC,
-    0x7B, 0xC0, 0xAF, 0xB3, 0xDA, 0x85, 0x7C, 0xE8, 0xBD, 0xA7, 0x16, 0x4A, 0xF0, 0x9B, 0x5F, 0x40,
-    0x2F, 0x76, 0x4C, 0xD8, 0x2E, 0x89, 0xD7, 0xFE, 0x1D, 0xF7, 0xA4, 0xBC, 0xF5, 0x04, 0xD2, 0x14,
-    0x67, 0xFF, 0x23, 0x0A, 0xEF, 0xA4, 0x72, 0x97, 0x7E, 0x42, 0x29, 0xD6, 0xB5, 0xC8, 0xF4, 0xB3,
-    0xD5, 0x82, 0xB3, 0x0F, 0x5B, 0x77, 0xBA, 0x4C, 0xBA, 0x8B, 0xC6, 0xD8, 0xCC, 0xD1, 0x1C, 0x02,
-    0x3F, 0xA4, 0xC8, 0xE2, 0x5C, 0x8B, 0xE8, 0xEB, 0x4F, 0xC0, 0xB0, 0xC2, 0x10, 0x09, 0x9F, 0x1C,
-    0x83, 0xDC, 0x03, 0xFA, 0x71, 0x78, 0xA7, 0x8B, 0x0D, 0xED, 0xF1, 0x3C, 0x31, 0x67, 0x3C, 0xAF,
-    0x6C, 0xFC, 0xE0, 0x79, 0x3E, 0x0A, 0x60, 0x43, 0x2B, 0x4D, 0x6E, 0x25, 0xB5, 0xD9, 0x64, 0x8C,
-    0x47, 0x48, 0x6F, 0x11, 0x52, 0xAE, 0x64, 0xD4, 0xB0, 0x82, 0x51, 0x6B, 0x63, 0x09, 0xE9, 0x99,
-    0xAB, 0x39, 0x63, 0xC2, 0xC8, 0x88, 0x81, 0x6F, 0xAE, 0xD2, 0x6F, 0xAF, 0xC0, 0x32, 0x95, 0xBD,
-    0x1E, 0xDB, 0x3A, 0x41, 0x73, 0xD7, 0x81, 0xA3, 0x72, 0x9B, 0xEE, 0x4D, 0x80, 0x0D, 0x65, 0x74,
-    0x0F, 0x94, 0x4E, 0x4E, 0xCD, 0x35, 0x0C, 0xDD, 0xAB, 0xEC, 0xA1, 0x7B, 0xDB, 0x00, 0x69, 0xC1,
-    0x85, 0x0D, 0x40, 0xDA, 0x39, 0x40, 0x02, 0x74, 0x64, 0x89, 0xA6, 0xC0, 0x79, 0x99, 0xEB, 0x37,
-    0x61, 0x6C, 0x91, 0x61, 0x5C, 0xF6, 0xC7, 0x30, 0x77, 0x26, 0xEE, 0xFF, 0x9B, 0x67, 0x33, 0x93,
-    0x19, 0xF3, 0x6A, 0x29, 0x28, 0x24, 0x29, 0xC2, 0xEF, 0x3C, 0x66, 0xC4, 0xCE, 0xFB, 0x64, 0xFF,
-    0x92, 0xF7, 0xC5, 0xDB, 0x39, 0x90, 0x6C, 0x07, 0x39, 0xD9, 0xFE, 0x57, 0x90, 0xED, 0x6F, 0x65,
-    0x64, 0xBB, 0x9E, 0x93, 0x6D, 0x65, 0xC8, 0xB6, 0x32, 0x24, 0xD6, 0xB8, 0x98, 0x83, 0x39, 0x1D,
-    0xDA, 0x1B, 0x6E, 0x2C, 0x73, 0x54, 0x43, 0x7C, 0x54, 0xFE, 0x8E, 0xA3, 0x32, 0x4B, 0x82, 0x76,
-    0xC7, 0xFA, 0x8C, 0xA2, 0x95, 0x1C, 0xC6, 0x28, 0xAE, 0x52, 0x8E, 0xED, 0xE8, 0x96, 0x7D, 0x00,
-    0x14, 0xF8, 0x97, 0xA9, 0xE0, 0x72, 0x1B, 0xBD, 0x4C, 0x2D, 0x73, 0xEA, 0x39, 0xDD, 0xB5, 0x0C,
-    0xDD, 0xFD, 0xBD, 0xC8, 0x0B, 0x0C, 0xDD, 0x7D, 0x57, 0x7A, 0x96, 0xEA, 0xD3, 0xDD, 0xBD, 0xE1,
-    0xE3, 0x4C, 0x5C, 0xF0, 0x4D, 0xF8, 0x48, 0xA9, 0x60, 0xA9, 0x7E, 0xF8, 0x30, 0x2F, 0x10, 0x58,
-    0xCD, 0x29, 0xDA, 0x9C, 0x7A, 0x3C, 0x39, 0xDB, 0x45, 0xA1, 0x89, 0x8E, 0xD1, 0x50, 0xD8, 0x0B,
-    0x48, 0x6C, 0xBF, 0xCF, 0x57, 0x93, 0x3D, 0xE9, 0x1D, 0x16, 0xF9, 0xF8, 0xBD, 0x5B, 0x98, 0x10,
-    0x26, 0xD9, 0x7D, 0x00, 0xF3, 0xED, 0xBB, 0x64, 0x9E, 0xB0, 0xBD, 0x0E, 0x85, 0x80, 0xA9, 0x4D,
-    0x7B, 0x54, 0x16, 0xAA, 0x1C, 0x22, 0x5B, 0xC1, 0xB9, 0xC1, 0xE2, 0xAE, 0x31, 0x3C, 0x09, 0x87,
-    0x84, 0x85, 0x3B, 0x99, 0xA2, 0x88, 0x97, 0xD9, 0xDF, 0x00, 0x8F, 0x55, 0x64, 0xD4, 0x96, 0x81,
-    0x21, 0x40, 0xE0, 0x6D, 0xDA, 0x95, 0xE0, 0x61, 0xC1, 0x0F, 0x38, 0xC1, 0xFB, 0x3E, 0xA7, 0x75,
-    0x26, 0xC1, 0xBB, 0x72, 0x9F, 0x13, 0xBC, 0xBB, 0xDB, 0x09, 0xDE, 0xF4, 0x8E, 0x04, 0x8F, 0x32,
-    0x66, 0x6C, 0x4E, 0x39, 0xE7, 0xC6, 0x87, 0xF0, 0x94, 0x53, 0x5B, 0x3C, 0x25, 0xCA, 0xE9, 0x29,
-    0xCB, 0x40, 0x49, 0x22, 0x70, 0xD2, 0xAA, 0x99, 0xFA, 0x13, 0x07, 0x85, 0xBD, 0x1C, 0x87, 0xF4,
-    0xB3, 0x5A, 0xC8, 0x7D, 0x12, 0xBB, 0x0B, 0x5B, 0x89, 0x9D, 0x9D, 0x25, 0x76, 0x53, 0x1C, 0x48,
-    0x68, 0xC8, 0xD4, 0x8B, 0x0E, 0x01, 0x96, 0x2C, 0xEE, 0xDF, 0x22, 0x3A, 0x5F, 0x8D, 0x2B, 0x30,
-    0xC2, 0x25, 0x1C, 0x09, 0x94, 0xF5, 0x82, 0x22, 0xEF, 0x9B, 0xAC, 0x74, 0xC8, 0x1F, 0xC0, 0x32,
-    0xBF, 0x89, 0xEF, 0x7E, 0x2B, 0xC6, 0x6F, 0x80, 0x48, 0x39, 0x49, 0x61, 0x1C, 0x50, 0x78, 0x3D,
-    0x0A, 0x9C, 0x59, 0xFF, 0x8F, 0xC8, 0x7F, 0x9F, 0x29, 0x83, 0xFF, 0x9F, 0xE4, 0xBF, 0x43, 0xE2,
-    0x9C, 0x0E, 0x57, 0x92, 0xFE, 0xF2, 0xC2, 0xCF, 0x0F, 0xCC, 0x3B, 0xB7, 0x6D, 0xF9, 0x8E, 0x2A,
-    0xF8, 0xB2, 0x50, 0x26, 0xBF, 0xC9, 0x6B, 0x2B, 0x4C, 0x83, 0x37, 0x21, 0x72, 0x51, 0xEB, 0x86,
-    0x0E, 0x7B, 0xAE, 0x9A, 0xE9, 0x08, 0x95, 0xD5, 0x6B, 0xE0, 0x9E, 0xF5, 0xC8, 0x84, 0x51, 0xAA,
-    0x63, 0xCD, 0x75, 0x60, 0x61, 0x1D, 0x61, 0xA2, 0x3E, 0x0A, 0x0C, 0xF3, 0x94, 0xD3, 0xB3, 0xE3,
-    0xB0, 0x5D, 0xBF, 0x72, 0xF7, 0xE1, 0x95, 0x55, 0x69, 0xFD, 0x33, 0x59, 0x3D, 0xB2, 0xEE, 0x48,
-    0x6B, 0x55, 0x03, 0x99, 0xBD, 0xF6, 0xF4, 0x11, 0x53, 0x52, 0xD6, 0x7E, 0xBC, 0xE3, 0xE4, 0xE8,
-    0x60, 0xFE, 0xB6, 0x69, 0x76, 0x01, 0x66, 0x72, 0x1C, 0x73, 0xA4, 0x98, 0xA3, 0x81, 0x71, 0x86,
-    0x20, 0xCF, 0x3E, 0x29, 0xED, 0x0D, 0x57, 0x61, 0xE2, 0xD6, 0x23, 0x60, 0xC8, 0x67, 0x90, 0x07,
-    0x92, 0x83, 0x0F, 0x46, 0xCD, 0xE4, 0xA5, 0x36, 0xCF, 0xC9, 0xA9, 0xAE, 0xA4, 0x60, 0xEE, 0x36,
-    0x19, 0x5C, 0xDC, 0x75, 0xA9, 0xB2, 0x1F, 0x4D, 0x5E, 0xC6, 0x96, 0x2A, 0x60, 0x54, 0x54, 0xE1,
-    0x72, 0x17, 0x80, 0x51, 0xA8, 0xAB, 0xB6, 0x46, 0x96, 0x78, 0x8E, 0xED, 0x94, 0x6B, 0x87, 0x6C,
-    0x07, 0x4C, 0xB4, 0xF0, 0x92, 0xA6, 0x04, 0x26, 0xAC, 0xAD, 0x79, 0xD6, 0xB1, 0x8B, 0x5E, 0x17,
-    0x9F, 0x41, 0x10, 0x63, 0xE0, 0x5A, 0xEC, 0x57, 0x57, 0x3B, 0x1C, 0xFE, 0xC1, 0xB5, 0x78, 0x12,
-    0x8E, 0x37, 0x5E, 0xC4, 0xD1, 0xDE, 0x81, 0xA9, 0x8A, 0xEB, 0x1D, 0x9A, 0x70, 0x53, 0xB0, 0x49,
-    0x38, 0x60, 0xD1, 0x95, 0x2C, 0x15, 0x00, 0xCF, 0x24, 0xE2, 0x4D, 0xE0, 0xFC, 0x0D, 0x79, 0xEB,
-    0x1B, 0xB3, 0x56, 0xAB, 0xA1, 0x38, 0x36, 0x06, 0xEA, 0xE4, 0x4C, 0x74, 0xA6, 0x19, 0xD7, 0xE3,
-    0xF8, 0x4C, 0x33, 0xAA, 0xFC, 0xBE, 0x0E, 0xC2, 0xBF, 0x70, 0x1F, 0x25, 0x7B, 0xB2, 0xEC, 0xCA,
-    0xEE, 0x2C, 0x5B, 0xAC, 0x35, 0xAD, 0x8C, 0x2E, 0x8E, 0x33, 0x28, 0xEF, 0xE1, 0xAE, 0xE5, 0x9D,
-    0x4C, 0xE5, 0x16, 0x3D, 0x1B, 0x33, 0xB5, 0x18, 0x24, 0x25, 0x67, 0x72, 0xE8, 0x30, 0x2C, 0x1F,
-    0xC8, 0x78, 0xFB, 0x67, 0xF8, 0x1C, 0xA5, 0xAB, 0x9B, 0x25, 0x5A, 0xC0, 0x0A, 0x9D, 0xB7, 0xB5,
-    0xBD, 0x2A, 0x39, 0xBD, 0x7E, 0x6B, 0x6B, 0x89, 0x15, 0x86, 0x60, 0x27, 0x55, 0xBB, 0xC2, 0xEA,
-    0x2B, 0x79, 0x58, 0xCD, 0xA3, 0x48, 0xD3, 0xB4, 0x36, 0x39, 0xDD, 0x6C, 0xA8, 0x36, 0x86, 0x72,
-    0xAF, 0x6B, 0x0E, 0x07, 0x9F, 0xF3, 0x7A, 0xDC, 0x34, 0x3A, 0x68, 0x28, 0xB7, 0x1F, 0xA1, 0xDB,
-    0xC6, 0xF3, 0x76, 0x0C, 0xB5, 0x2B, 0xEB, 0xFF, 0x37, 0x9C, 0x6C, 0xBA, 0x23, 0xEB, 0x5F, 0x07,
-    0x84, 0xAC, 0xEE, 0xCE, 0xFA, 0x0D, 0xB2, 0x92, 0xCB, 0x16, 0xC0, 0x68, 0x45, 0xE1, 0xCD, 0x78,
-    0x02, 0x68, 0xF1, 0x2A, 0x87, 0xBB, 0x8C, 0x76, 0xBB, 0x82, 0x46, 0xDD, 0xD9, 0x56, 0x90, 0x2D,
-    0x19, 0x00, 0x70, 0x29, 0x4C, 0x6F, 0x76, 0x66, 0x1E, 0x9D, 0x8B, 0xAF, 0xDC, 0x3F, 0xAB, 0x7F,
-    0xF7, 0x9E, 0x0D, 0xC7, 0xD9, 0x5F, 0xEC, 0x8D, 0xF9, 0x87, 0xE0, 0x3C, 0xDD, 0xDC, 0x44, 0x4E,
-    0xE6, 0x82, 0x74, 0x34, 0x94, 0x3F, 0xF8, 0x97, 0x71, 0xFA, 0xEE, 0xCF, 0xC7, 0x01, 0x69, 0x7B,
-    0xE5, 0x14, 0xF3, 0xA4, 0xAD, 0xEA, 0x02, 0xAC, 0xD2, 0x92, 0x03, 0x54, 0x16, 0x7A, 0x86, 0x46,
-    0x65, 0x47, 0xF3, 0xCC, 0xC1, 0xC4, 0x3F, 0xDB, 0x03, 0xF0, 0x61, 0x6C, 0xEF, 0x98, 0x27, 0x13,
-    0xAF, 0x67, 0xC6, 0x3C, 0x99, 0xD0, 0x57, 0xF3, 0x6A, 0xC5, 0xF6, 0x38, 0x2F, 0x4B, 0xFF, 0x3D,
-    0x33, 0xCE, 0xBB, 0x5B, 0x09, 0xC4, 0xCE, 0xCC, 0xBE, 0xA5, 0xBC, 0x75, 0x04, 0x9C, 0x05, 0x8F,
-    0xEA, 0x59, 0x13, 0x6A, 0x31, 0xBC, 0xD7, 0x7B, 0x83, 0x79, 0xA7, 0xE1, 0x75, 0x7D, 0x6A, 0x67,
-    0xED, 0x47, 0xED, 0xBC, 0xAC, 0x9E, 0x3F, 0x9C, 0xB8, 0xFA, 0xCD, 0xC8, 0xD1, 0xFF, 0xA0, 0x1D,
-    0xCE, 0x2D, 0xF4, 0xD7, 0xD6, 0xE6, 0xA4, 0xD1, 0x01, 0x60, 0xC5, 0xE2, 0x98, 0xD9, 0x9A, 0x57,
-    0x74, 0x02, 0x06, 0x18, 0x2A, 0xEB, 0x51, 0xF4, 0x5D, 0x95, 0xFC, 0xEC, 0x2F, 0x11, 0x30, 0x13,
-    0x36, 0x59, 0x1C, 0xEB, 0xC6, 0x2D, 0x50, 0x96, 0xAD, 0xA1, 0x08, 0x43, 0xBD, 0xF0, 0xA4, 0xA1,
-    0x02, 0x0C, 0x65, 0xE9, 0x4C, 0x28, 0x0F, 0xE0, 0x07, 0x0E, 0xAD, 0xB7, 0xA0, 0xEB, 0xE0, 0xF2,
-    0xFE, 0x08, 0x53, 0xED, 0x62, 0x31, 0x4B, 0x07, 0xB2, 0xD7, 0x97, 0x29, 0x93, 0x52, 0x04, 0x53,
-    0x8B, 0xE1, 0x78, 0xD5, 0x27, 0x45, 0xD0, 0xED, 0x4C, 0x1F, 0x91, 0x29, 0x90, 0x5D, 0x0E, 0x1E,
-    0x58, 0xD5, 0x88, 0x61, 0x02, 0xF3, 0x19, 0x13, 0x40, 0x6E, 0x52, 0xD9, 0xC5, 0x04, 0x96, 0x29,
-    0x7C, 0x5B, 0xFB, 0x08, 0x75, 0x23, 0x26, 0xD4, 0x81, 0x09, 0x9C, 0x50, 0xBE, 0x03, 0x9E, 0xA3,
-    0xAB, 0x1F, 0x1B, 0x5A, 0x8A, 0x9D, 0x07, 0xCC, 0x80, 0x07, 0x29, 0x7B, 0x9A, 0x23, 0x1E, 0x31,
-    0xD6, 0x3D, 0xBC, 0x7F, 0xFA, 0xEF, 0x22, 0x21, 0x30, 0x54, 0x9A, 0x39, 0x92, 0x1A, 0x3C, 0xC6,
-    0x80, 0xE7, 0xC4, 0x8C, 0xCA, 0xA7, 0x10, 0xA1, 0xE1, 0x47, 0x5E, 0xBC, 0x7F, 0x7C, 0x09, 0x64,
-    0x1C, 0xEA, 0x38, 0xA7, 0xEA, 0xD0, 0xDD, 0x35, 0x3A, 0x72, 0x65, 0xD5, 0xD8, 0x01, 0xFB, 0x5B,
-    0x8E, 0x03, 0x07, 0x97, 0x21, 0xFA, 0x64, 0x74, 0x90, 0x8A, 0x1F, 0xC7, 0x14, 0x3F, 0xE3, 0x16,
-    0x87, 0x25, 0xE4, 0xFD, 0xEC, 0x61, 0xBF, 0x0A, 0xB2, 0x5F, 0x7E, 0x53, 0x17, 0xC6, 0xFF, 0x2A,
-    0xAF, 0x20, 0xEB, 0x5D, 0x15, 0xE4, 0x3C, 0x03, 0x87, 0x4B, 0x33, 0x34, 0x91, 0x1C, 0xA0, 0xC4,
-    0xA2, 0xB2, 0xC7, 0x2E, 0x43, 0xE6, 0x51, 0x46, 0x4B, 0x97, 0x76, 0x64, 0x86, 0x3B, 0x32, 0x44,
-    0xED, 0x5C, 0x87, 0x11, 0x70, 0x76, 0xD0, 0xDA, 0xB2, 0xE6, 0xA3, 0x3D, 0xF3, 0x18, 0x39, 0x4E,
-    0xC5, 0x71, 0xF3, 0x88, 0xCC, 0x78, 0xC4, 0xC1, 0xD5, 0x35, 0xA8, 0xFC, 0x3E, 0x86, 0x5A, 0xD5,
-    0x4F, 0x35, 0x0D, 0x7A, 0x8D, 0x56, 0x78, 0xA6, 0x7E, 0x2A, 0x7E, 0xE0, 0x4C, 0xFC, 0x04, 0x0D,
-    0x54, 0xB2, 0x81, 0x09, 0xA7, 0x91, 0xEB, 0x0F, 0xB1, 0xE2, 0x8E, 0xF3, 0xE5, 0x79, 0xAE, 0x7D,
-    0xCE, 0x2C, 0x7F, 0x80, 0x23, 0xEA, 0x30, 0x6F, 0x45, 0x7E, 0xED, 0xC8, 0x32, 0x68, 0xB2, 0xBC,
-    0xD6, 0xA0, 0xEA, 0x3D, 0x98, 0x8D, 0xDB, 0x5E, 0xA6, 0x52, 0xEB, 0x0B, 0x35, 0x1E, 0x00, 0x47,
-    0xFC, 0xAF, 0xE9, 0x63, 0x40, 0x95, 0x89, 0x0B, 0xD0, 0xBD, 0xE0, 0xA2, 0xE9, 0x9A, 0x0E, 0xEE,
-    0x22, 0x71, 0x40, 0x8C, 0x73, 0xA5, 0xBD, 0x39, 0xE8, 0xC3, 0xCD, 0xE3, 0x05, 0xAE, 0x20, 0x64,
-    0x60, 0x71, 0x48, 0x05, 0x01, 0xDC, 0x37, 0x68, 0x20, 0x97, 0x4B, 0x0C, 0xC9, 0x28, 0x7F, 0x63,
-    0x6E, 0xA9, 0x9A, 0x76, 0xCA, 0x34, 0x5D, 0xA6, 0x85, 0x8A, 0x95, 0x04, 0x0D, 0x8D, 0x6D, 0xE6,
-    0x35, 0x11, 0x61, 0xD8, 0x4E, 0x4A, 0x33, 0x0D, 0x5E, 0x18, 0xBE, 0xC9, 0xB5, 0xFF, 0x8E, 0x74,
-    0x7E, 0xC8, 0x8A, 0x1A, 0x64, 0x28, 0x76, 0xB6, 0x0A, 0x8D, 0x57, 0x72, 0x7D, 0x1E, 0x3E, 0x32,
-    0x97, 0x08, 0xE0, 0x9A, 0xDB, 0x95, 0x90, 0x2F, 0x85, 0x78, 0xFC, 0xFA, 0x2F, 0x78, 0x71, 0x12,
-    0xD1, 0xD6, 0x6B, 0x10, 0xD4, 0x63, 0xE2, 0x16, 0x70, 0x2A, 0xCF, 0xCB, 0x1D, 0x24, 0x6F, 0xA0,
-    0xCA, 0x74, 0xA5, 0xBC, 0x7F, 0xD6, 0x80, 0x5C, 0x6A, 0x6A, 0x5E, 0x9D, 0xF1, 0x69, 0xB8, 0x6C,
-    0xC2, 0x3F, 0xDF, 0x2F, 0x39, 0x14, 0x3B, 0xBA, 0xE6, 0x2A, 0x58, 0xC3, 0x89, 0x0E, 0x55, 0x7B,
-    0x33, 0xCB, 0x97, 0xCA, 0xE0, 0x3D, 0xCA, 0x8B, 0x8F, 0x75, 0xC1, 0x24, 0xE0, 0x31, 0x97, 0x8A,
-    0xCB, 0xDD, 0x52, 0x44, 0xBF, 0x73, 0x1E, 0xEE, 0x12, 0x3F, 0xD5, 0x23, 0x28, 0xEB, 0x35, 0xC3,
-    0xC0, 0xE8, 0x09, 0x45, 0x0B, 0xF3, 0x7B, 0xC2, 0x71, 0x3C, 0x79, 0xAA, 0x69, 0xD8, 0xDB, 0xEE,
-    0x98, 0x9C, 0x7B, 0x90, 0x99, 0xAC, 0xFF, 0xC6, 0x0D, 0x0F, 0xF2, 0xE3, 0x38, 0xE2, 0xB3, 0x27,
-    0x3E, 0x16, 0xC1, 0xC5, 0xB5, 0xEC, 0x75, 0x48, 0xF1, 0xF6, 0xFF, 0xB1, 0xCC, 0x71, 0xF0, 0xA2,
-    0x07, 0x1B, 0xFA, 0xC0, 0x45, 0xEF, 0x37, 0x13, 0x7A, 0xE6, 0x56, 0x37, 0xC0, 0x03, 0x0C, 0x36,
-    0x3B, 0xF8, 0x55, 0xF9, 0x31, 0xBF, 0x7A, 0xAC, 0x8A, 0x49, 0xAF, 0x49, 0xD8, 0xB9, 0x7E, 0xAA,
-    0x07, 0xDB, 0xCF, 0xBE, 0x66, 0x38, 0x3A, 0x1D, 0xA1, 0xA6, 0x65, 0xF6, 0x09, 0xA6, 0x6C, 0xDD,
-    0x7B, 0xBA, 0x29, 0xB3, 0x5A, 0xA8, 0xF0, 0x8F, 0x38, 0xEB, 0x33, 0xCF, 0x60, 0x24, 0x0C, 0xB5,
-    0xD8, 0x26, 0xEB, 0xBA, 0x7A, 0xBA, 0x99, 0x57, 0xC9, 0xFA, 0x44, 0x3A, 0x3F, 0x26, 0xFB, 0xB9,
-    0xA3, 0xED, 0xB7, 0xEF, 0x01, 0x03, 0x45, 0xF0, 0x6C, 0x7F, 0x5B, 0x08, 0x77, 0x58, 0x55, 0x7D,
-    0x90, 0xFF, 0x65, 0x92, 0x51, 0xF0, 0x4B, 0xFB, 0x3C, 0x10, 0x92, 0xF8, 0x39, 0x46, 0x14, 0x3F,
-    0x9F, 0xCF, 0x34, 0x09, 0x0C, 0xCE, 0x71, 0xF8, 0x69, 0x1E, 0xBE, 0x6D, 0xC3, 0x69, 0xDC, 0xFF,
-    0x73, 0xD0, 0x0A, 0xFC, 0x93, 0x0B, 0x51, 0x1D, 0xF3, 0x28, 0x63, 0x91, 0x90, 0xC2, 0x3E, 0x56,
-    0x91, 0x4A, 0xE8, 0xB4, 0x55, 0x73, 0x22, 0xA4, 0x62, 0x81, 0x5A, 0x44, 0x22, 0xC6, 0x4F, 0x5F,
-    0x1F, 0x99, 0x2C, 0x0C, 0x49, 0xD8, 0xA7, 0xD2, 0xB9, 0x81, 0x31, 0x93, 0x09, 0x5A, 0x4C, 0x55,
-    0xC5, 0x9C, 0xE9, 0x34, 0xB9, 0x31, 0xE7, 0x5D, 0xEE, 0xEE, 0xBC, 0xCB, 0x47, 0xDE, 0x25, 0x5B,
-    0x5C, 0x45, 0xDA, 0x62, 0x76, 0x50, 0x11, 0xA7, 0x77, 0x2A, 0x4B, 0xEF, 0x8C, 0x69, 0xFC, 0x0C,
-    0xCB, 0x49, 0xDB, 0x86, 0xA4, 0x58, 0x9F, 0x3C, 0xFE, 0x50, 0x17, 0xC3, 0x96, 0x5C, 0x85, 0x1D,
-    0x5A, 0xBF, 0xA4, 0x20, 0x95, 0xF6, 0xDF, 0x65, 0xE9, 0x9C, 0x42, 0x3A, 0xF7, 0x1B, 0xA5, 0x57,
-    0x4B, 0x6B, 0x24, 0x55, 0x14, 0xFE, 0xAA, 0x6E, 0x92, 0xDB, 0x49, 0xF5, 0x74, 0xB9, 0x37, 0xDD,
-    0x9D, 0x85, 0x8B, 0x19, 0x30, 0xD3, 0x59, 0x64, 0xD1, 0x62, 0x27, 0x29, 0x19, 0x9F, 0x88, 0x22,
-    0xBA, 0x14, 0x24, 0xB8, 0x71, 0x13, 0x9D, 0x61, 0x98, 0x45, 0xC0, 0xC4, 0x94, 0x8A, 0x20, 0x04,
-    0x31, 0x3F, 0x40, 0x21, 0xE0, 0x2E, 0x2E, 0x92, 0x45, 0x23, 0x91, 0x4C, 0xA6, 0x6F, 0x26, 0xC8,
-    0xAC, 0x84, 0x82, 0x59, 0xB8, 0x2D, 0x44, 0x46, 0x09, 0x93, 0xD0, 0x60, 0xC0, 0xA8, 0xE9, 0xF4,
-    0x7C, 0xF7, 0x56, 0x65, 0xF2, 0x20, 0x33, 0xF5, 0xE8, 0xAA, 0x3A, 0x54, 0x51, 0x5D, 0xF7, 0x7C,
-    0xE7, 0xF1, 0x9D, 0x73, 0x6E, 0xA3, 0x0C, 0x60, 0x8A, 0xF2, 0x29, 0xE5, 0x07, 0x1F, 0xD8, 0x56,
-    0xB0, 0xB7, 0x02, 0x88, 0x9D, 0x10, 0xB2, 0xDB, 0x46, 0x09, 0xB7, 0x50, 0x46, 0x03, 0x13, 0x98,
-    0x47, 0xF7, 0xA5, 0xAE, 0x07, 0x7D, 0x34, 0x62, 0xE1, 0x21, 0x0F, 0x50, 0xDB, 0xC4, 0x65, 0x6A,
-    0x29, 0x61, 0xE0, 0x08, 0x13, 0x1F, 0xA0, 0x5E, 0xC2, 0x64, 0xCB, 0xAF, 0xFE, 0x46, 0x5D, 0xB0,
-    0x42, 0x7D, 0x1D, 0x1F, 0x5D, 0xCA, 0x3D, 0x6A, 0x70, 0x78, 0x9F, 0xA0, 0x3C, 0x17, 0xBF, 0xCF,
-    0x6E, 0x82, 0x6C, 0x63, 0xB0, 0x0E, 0xBE, 0xB7, 0x09, 0xE0, 0x27, 0xDA, 0x31, 0xC2, 0x0F, 0x6E,
-    0x00, 0xA3, 0x4B, 0x40, 0x8B, 0x46, 0xDD, 0xF5, 0xF3, 0xE2, 0x42, 0xF8, 0x90, 0xC0, 0x1B, 0x10,
-    0x6D, 0x38, 0xB3, 0x18, 0x2E, 0x26, 0x41, 0xDB, 0xFC, 0xDD, 0x56, 0x84, 0xF6, 0x7B, 0x83, 0x7E,
-    0xC6, 0x38, 0xC0, 0x98, 0xBF, 0x9E, 0x1A, 0xDA, 0x1C, 0x07, 0xC4, 0xFC, 0x8E, 0xF7, 0xCB, 0x34,
-    0x61, 0x1A, 0xD8, 0xF0, 0x7A, 0xF2, 0xBE, 0xAA, 0x70, 0x85, 0x5F, 0xF9, 0xF6, 0x03, 0xC8, 0x75,
-    0x94, 0x87, 0xD3, 0x98, 0xF0, 0x1F, 0x6F, 0xDF, 0x46, 0xB4, 0xC1, 0x28, 0x7A, 0x8A, 0x82, 0x05,
-    0xB8, 0x0F, 0x51, 0x68, 0xEA, 0xA5, 0x4C, 0xBC, 0xBC, 0x8D, 0x72, 0xAA, 0x28, 0x68, 0xAE, 0x69,
-    0xCF, 0xB7, 0x54, 0x6E, 0xCF, 0x4F, 0x53, 0x1E, 0xBE, 0xC9, 0x41, 0x1D, 0xC5, 0x62, 0xD6, 0x0A,
-    0x18, 0xA2, 0x70, 0x91, 0xE5, 0xF9, 0xB0, 0xFE, 0xE4, 0xCF, 0x77, 0x72, 0x56, 0xC0, 0x18, 0xB0,
-    0x06, 0x28, 0x14, 0x0A, 0x70, 0x67, 0x20, 0xC3, 0x34, 0x51, 0x18, 0xA7, 0x30, 0x63, 0xD6, 0xCB,
-    0xBD, 0x61, 0x93, 0xD1, 0x42, 0xE9, 0x18, 0x64, 0xC1, 0x9E, 0xA4, 0x7C, 0x44, 0x19, 0x88, 0x6C,
-    0x40, 0x9F, 0xD7, 0x9B, 0xFF, 0xD0, 0x19, 0x90, 0xE3, 0xA6, 0x28, 0xB2, 0x45, 0xE1, 0x5F, 0xDE,
-    0x16, 0x63, 0x3A, 0xEA, 0x2C, 0x3C, 0xA0, 0x2F, 0x9F, 0x21, 0x37, 0x1D, 0xFF, 0xD2, 0x74, 0xEC,
-    0x2B, 0xA0, 0x32, 0x07, 0x27, 0x09, 0xBF, 0xE7, 0xAC, 0x9F, 0xE3, 0x61, 0x7A, 0xB7, 0x1F, 0x93,
-    0x70, 0xAA, 0x1B, 0x56, 0x57, 0x42, 0x07, 0xCB, 0x8E, 0xE9, 0xC2, 0x4E, 0xD7, 0x77, 0x56, 0x3C,
-    0xF3, 0x3C, 0xE2, 0xE0, 0x86, 0xBB, 0xD2, 0xE6, 0x07, 0xFA, 0xBB, 0x5B, 0xC0, 0x7A, 0xAC, 0xB6,
-    0x7A, 0x07, 0x0D, 0x07, 0x2F, 0xBC, 0x8F, 0x85, 0xAE, 0x7E, 0x4D, 0xEC, 0xDA, 0x8F, 0x90, 0x1D,
-    0x63, 0xC1, 0x29, 0x6E, 0x5B, 0x1D, 0xD8, 0x6F, 0x1B, 0x97, 0xD6, 0xA3, 0x7E, 0x9B, 0x16, 0x4B,
-    0xEC, 0x43, 0x3E, 0x0F, 0xCC, 0x6A, 0x6D, 0x50, 0x09, 0xA0, 0xE2, 0x3E, 0xE4, 0x06, 0xEC, 0xAB,
-    0x69, 0xF5, 0xCB, 0xAF, 0x51, 0xDA, 0x45, 0xA1, 0x91, 0xE8, 0xCB, 0x3B, 0x1A, 0xFE, 0x67, 0xCF,
-    0xDA, 0x85, 0x78, 0x2D, 0x4B, 0xA0, 0xD8, 0xDB, 0x85, 0x87, 0x57, 0x61, 0xD3, 0x8B, 0x19, 0x5C,
-    0x1A, 0x4C, 0x02, 0xEA, 0x87, 0x9E, 0x1F, 0x39, 0x80, 0xEA, 0xA6, 0x70, 0x5E, 0x81, 0xDD, 0x36,
-    0x40, 0x97, 0x52, 0x64, 0x87, 0x25, 0x22, 0xC6, 0x74, 0x89, 0xAC, 0x2B, 0x6B, 0x2F, 0x23, 0x9C,
-    0xAB, 0x30, 0x1C, 0xC0, 0x52, 0xD6, 0xDF, 0x10, 0x87, 0x28, 0xA5, 0x80, 0x13, 0xFF, 0xC4, 0x79,
-    0x21, 0x01, 0x32, 0x79, 0x17, 0x77, 0x75, 0xC3, 0x37, 0xAB, 0x6D, 0xE0, 0x06, 0x53, 0x78, 0x47,
-    0x14, 0x3A, 0x75, 0x2D, 0x0F, 0xAB, 0xB1, 0xA4, 0xF3, 0x25, 0x66, 0x50, 0x2A, 0x66, 0x22, 0x79,
-    0x4D, 0x8D, 0x07, 0x76, 0xE0, 0x78, 0xFD, 0x1A, 0x33, 0xAC, 0x12, 0xE2, 0xEC, 0xE9, 0xFA, 0x0B,
-    0xFC, 0x72, 0xCA, 0xBF, 0xA9, 0x84, 0x72, 0x75, 0x9F, 0xC7, 0x27, 0xA8, 0xB0, 0x20, 0x8F, 0xCF,
-    0xAA, 0xD7, 0x0A, 0x9E, 0xBC, 0x8E, 0x77, 0x96, 0x78, 0x1F, 0xAA, 0xFC, 0x12, 0x17, 0xAE, 0x65,
-    0xA0, 0x78, 0xEA, 0x19, 0x1A, 0x40, 0xEE, 0x1C, 0xF2, 0x79, 0x92, 0x23, 0xD5, 0xA5, 0xB9, 0x8E,
-    0x77, 0x4A, 0xD8, 0x30, 0x5C, 0x6A, 0x99, 0x80, 0xB3, 0x73, 0x00, 0xAB, 0x15, 0xCF, 0xDA, 0x4A,
-    0x2C, 0x9A, 0xB4, 0x1D, 0xB8, 0xAB, 0x7E, 0x43, 0xA8, 0xBA, 0x1D, 0xCC, 0x5A, 0x41, 0xDD, 0x0A,
-    0xF8, 0x5C, 0x5B, 0xF5, 0x18, 0x88, 0x38, 0x4C, 0xCD, 0xC7, 0x13, 0x6B, 0x81, 0x36, 0x7D, 0xC8,
-    0xB2, 0x94, 0x7E, 0xB4, 0xBC, 0x18, 0xBF, 0xCF, 0x6E, 0x82, 0x7D, 0x08, 0xC1, 0xF6, 0xC0, 0x5A,
-    0xDF, 0xD7, 0x19, 0x48, 0xB2, 0xA3, 0x10, 0x91, 0xBE, 0x32, 0xA2, 0x23, 0x0A, 0x2C, 0xAB, 0x9C,
-    0xB8, 0xB4, 0x3F, 0xD0, 0x65, 0xFA, 0x1E, 0xAC, 0x03, 0x88, 0xEF, 0x31, 0x34, 0x90, 0x08, 0xAD,
-    0x97, 0x31, 0xD8, 0x95, 0xE9, 0x1E, 0xA1, 0x8D, 0xB3, 0x2C, 0x9D, 0x77, 0xD3, 0x43, 0xEB, 0xE3,
-    0x36, 0xE5, 0xD7, 0x28, 0xD4, 0x95, 0xB1, 0xC8, 0x84, 0x30, 0xBF, 0x09, 0x1C, 0x4B, 0xC5, 0x35,
-    0x58, 0x01, 0x7E, 0xF2, 0x44, 0x07, 0xCE, 0x50, 0x1A, 0x13, 0x36, 0x09, 0xB7, 0xA8, 0x4E, 0x78,
-    0xD3, 0x83, 0x09, 0x96, 0x07, 0xB9, 0x8B, 0xFE, 0x39, 0xB3, 0xB6, 0x09, 0xB1, 0x07, 0x47, 0xA6,
-    0x31, 0xA1, 0x4A, 0x79, 0x91, 0x90, 0x61, 0x90, 0xDB, 0xF3, 0xD3, 0x94, 0xC7, 0xB4, 0xDE, 0x0B,
-    0x33, 0x07, 0x72, 0x28, 0x4B, 0x05, 0x58, 0xB4, 0xC0, 0xA1, 0x5C, 0xD1, 0x0F, 0x94, 0xD6, 0x7D,
-    0x5F, 0xEE, 0x1C, 0xA5, 0xB7, 0xA2, 0x68, 0x28, 0x40, 0x75, 0x4B, 0xDC, 0xAE, 0xAD, 0xD9, 0x9D,
-    0xD0, 0x5D, 0x55, 0x17, 0xA3, 0x2E, 0xC5, 0x89, 0x7F, 0x36, 0x1F, 0x92, 0x6D, 0x2A, 0x54, 0x37,
-    0xAA, 0xB1, 0x24, 0xA4, 0x0B, 0xAB, 0x3A, 0xA7, 0x7F, 0xE7, 0xAB, 0x3A, 0x09, 0xBB, 0xC9, 0x35,
-    0x7B, 0xCC, 0xE8, 0xBD, 0xCF, 0x73, 0xE1, 0x89, 0x5F, 0xE0, 0x1C, 0xA1, 0x7F, 0x34, 0xD1, 0xC5,
-    0xDC, 0xEE, 0x9C, 0x25, 0x0D, 0x52, 0xC4, 0xB2, 0x6D, 0x2E, 0x12, 0x54, 0xB5, 0x54, 0x0D, 0x57,
-    0xD9, 0xAA, 0xCB, 0x17, 0x8A, 0xCB, 0xF9, 0xED, 0x12, 0x56, 0xEE, 0xEC, 0x13, 0x6C, 0x29, 0xD2,
-    0x5F, 0x8A, 0x99, 0xCE, 0x63, 0xDE, 0x51, 0x1F, 0x4B, 0x55, 0xB6, 0x4F, 0xAE, 0x0A, 0xA7, 0xC8,
-    0xEA, 0x1F, 0x72, 0xFF, 0xE0, 0xCC, 0xEC, 0x42, 0x5C, 0x8F, 0x37, 0x75, 0xFA, 0x54, 0xA4, 0x22,
-    0x6E, 0xCA, 0x39, 0x4C, 0xD0, 0xE9, 0x7B, 0xCB, 0x6C, 0xDB, 0x9A, 0x66, 0x13, 0xF4, 0x74, 0x3B,
-    0x4E, 0xCA, 0x81, 0x39, 0xB4, 0x02, 0xE2, 0xF9, 0x35, 0x46, 0x36, 0x35, 0x5E, 0xD1, 0xFC, 0x05,
-    0x64, 0x57, 0x9F, 0xE6, 0x84, 0x6D, 0xCC, 0x3B, 0xED, 0x27, 0x22, 0x2D, 0xC7, 0xE5, 0xE0, 0xE4,
-    0x43, 0x8A, 0xFE, 0xA4, 0x98, 0x72, 0x88, 0xF6, 0xCB, 0x4F, 0x05, 0xBB, 0x30, 0xA4, 0x39, 0x5D,
-    0x3C, 0x1F, 0xD2, 0x24, 0xEC, 0xD9, 0xB8, 0x22, 0xBE, 0xDC, 0xCA, 0x85, 0x27, 0xEE, 0x9A, 0x0D,
-    0xF1, 0x68, 0xA2, 0x8B, 0xB9, 0xDD, 0x39, 0x43, 0xD2, 0x54, 0xB1, 0x3C, 0xA6, 0xAA, 0xED, 0xEB,
-    0xDD, 0xAA, 0x6E, 0x0D, 0x40, 0x77, 0xBB, 0x53, 0x43, 0xD3, 0x45, 0x28, 0xBE, 0x50, 0xF6, 0xB6,
-    0x87, 0xFF, 0x81, 0xB9, 0x48, 0x99, 0xB9, 0xE6, 0x21, 0xBA, 0x7E, 0xD4, 0xC3, 0xEC, 0xC0, 0x34,
-    0x6B, 0xB2, 0x79, 0xB1, 0x3D, 0x61, 0x07, 0x65, 0x6A, 0x16, 0x9E, 0xF3, 0x26, 0xC4, 0x37, 0xB0,
-    0x1F, 0xEA, 0x41, 0xAA, 0xCB, 0x2D, 0xD4, 0x13, 0xFD, 0xBA, 0x87, 0xCD, 0x74, 0x9A, 0xE3, 0x0D,
-    0xF4, 0x5C, 0x0A, 0xB5, 0xDB, 0xEA, 0xFA, 0x35, 0xB5, 0x19, 0xF9, 0x7A, 0x04, 0x6B, 0xD1, 0xB8,
-    0x5E, 0x8F, 0x78, 0x94, 0x16, 0x4B, 0x70, 0xD2, 0x0C, 0x1B, 0xC7, 0xDB, 0xD1, 0x66, 0x22, 0xAD,
-    0x2F, 0xF6, 0xEF, 0x10, 0x1B, 0x9E, 0x5D, 0x4D, 0x8B, 0x25, 0xBF, 0x82, 0xBB, 0x87, 0xC1, 0x46,
-    0x06, 0x88, 0x47, 0x85, 0x52, 0x3D, 0x6F, 0x13, 0x41, 0x10, 0x7D, 0x77, 0xC6, 0x76, 0x3E, 0x7C,
-    0x76, 0x8A, 0x04, 0x45, 0x8A, 0x95, 0x18, 0x14, 0x90, 0x8B, 0x4D, 0xBC, 0x48, 0x87, 0xB4, 0xC5,
-    0x25, 0xDE, 0x1F, 0x40, 0xE1, 0xC6, 0xD4, 0xAE, 0x40, 0x4A, 0x01, 0x5B, 0x5C, 0x61, 0x05, 0x48,
-    0x56, 0x69, 0x68, 0x53, 0x80, 0x44, 0x41, 0xE1, 0x16, 0xAA, 0x8D, 0xE4, 0x02, 0xD1, 0x78, 0x13,
-    0x0A, 0x0A, 0x1A, 0x97, 0x90, 0xEA, 0xC4, 0x1F, 0xC8, 0x09, 0xA5, 0x08, 0x4A, 0x71, 0xCC, 0xDA,
-    0x21, 0x89, 0x84, 0x51, 0xE6, 0xDD, 0x3E, 0xCD, 0xCD, 0xCC, 0x8E, 0x66, 0xDF, 0x6E, 0xAB, 0x75,
-    0xCD, 0xD0, 0xAE, 0xBF, 0x9A, 0xBF, 0x32, 0xF8, 0x80, 0xFE, 0x98, 0x68, 0xBD, 0x07, 0x3D, 0x01,
-    0x12, 0x53, 0x58, 0xC5, 0xE7, 0x5E, 0xAD, 0x36, 0x55, 0xC3, 0x24, 0xCC, 0x35, 0x93, 0x05, 0xE9,
-    0xD6, 0x20, 0x43, 0xBB, 0x8D, 0x2C, 0xD3, 0x23, 0xCE, 0x32, 0xDB, 0x26, 0x93, 0x57, 0x5E, 0x9C,
-    0xDE, 0x84, 0xBF, 0x7B, 0x1D, 0x23, 0x60, 0x42, 0x44, 0x11, 0x63, 0x82, 0x63, 0xCC, 0x88, 0x84,
-    0x60, 0x01, 0x25, 0x16, 0x19, 0x17, 0x46, 0xA4, 0x51, 0x1C, 0xC5, 0x4C, 0xB0, 0x50, 0x28, 0x3E,
-    0xA4, 0xE4, 0x35, 0xDF, 0xFD, 0x89, 0x54, 0x18, 0xC6, 0x83, 0x45, 0xDF, 0xFA, 0xD6, 0xB3, 0xDB,
-    0x27, 0x5B, 0xC7, 0x9E, 0x75, 0xF0, 0x2F, 0xE1, 0xD9, 0x17, 0x27, 0x4F, 0x8E, 0xC7, 0xFE, 0xD6,
-    0xF1, 0xEE, 0xC9, 0x38, 0x77, 0x0B, 0x4D, 0xC2, 0x3A, 0x62, 0x0C, 0xE4, 0x20, 0x25, 0xC8, 0x18,
-    0xFD, 0x53, 0x6A, 0xB9, 0xB1, 0x1E, 0xAD, 0xB9, 0xD6, 0x2F, 0x67, 0xF5, 0xA9, 0x28, 0xCA, 0x94,
-    0x82, 0x4E, 0xB9, 0xBD, 0x1B, 0x94, 0xFB, 0x54, 0xFB, 0xBF, 0x72, 0x79, 0x54, 0x70, 0x4F, 0xE7,
-    0x31, 0x19, 0x40, 0xBE, 0xE5, 0xBD, 0xD9, 0xFA, 0xD1, 0x7A, 0xF7, 0xB8, 0xD3, 0xC2, 0xBF, 0x90,
-    0x94, 0xBF, 0x2D, 0x9F, 0x7E, 0xB8, 0x9F, 0x9F, 0x7E, 0x3B, 0xB1, 0x81, 0xB7, 0xA2, 0x4B, 0xD4,
-    0x65, 0x7B, 0x58, 0x25, 0xEE, 0x25, 0x21, 0xF1, 0xD0, 0xF4, 0x46, 0xFC, 0xCD, 0x36, 0x90, 0xFC,
-    0x7C, 0x96, 0x9E, 0xDB, 0xED, 0xAF, 0x61, 0x78, 0x68, 0x1B, 0x8F, 0xD4, 0x43, 0x3B, 0x44, 0x7D,
-    0xC4, 0x9C, 0x3F, 0x38, 0xB4, 0x18, 0x6E, 0xA6, 0xE7, 0xDA, 0xB3, 0x15, 0xBD, 0x09, 0x5F, 0xBA,
-    0x83, 0xCF, 0x94, 0xDD, 0x2D, 0xCC, 0x54, 0xCB, 0x11, 0xDD, 0x8C, 0xE1, 0x96, 0x22, 0x55, 0x5E,
-    0x76, 0xBA, 0xA7, 0xE2, 0xC0, 0xF2, 0x23, 0x4D, 0x35, 0xBC, 0x1B, 0x05, 0x05, 0xF0, 0x4E, 0xD7,
-    0x44, 0x22, 0xA8, 0x16, 0xA6, 0x29, 0xD2, 0xD9, 0xEF, 0x9A, 0x34, 0x12, 0x71, 0x50, 0x65, 0x85,
-    0x69, 0x37, 0x8F, 0xA7, 0x8B, 0x86, 0x55, 0x73, 0x72, 0x19, 0x5D, 0xC2, 0x32, 0x72, 0x32, 0x44,
-    0x19, 0x45, 0x5D, 0xD4, 0x65, 0x84, 0xA4, 0x5B, 0x8D, 0xAB, 0x5E, 0xE9, 0xAE, 0xCE, 0x15, 0x30,
-    0xF7, 0x5D, 0x0A, 0x95, 0x78, 0xEF, 0x41, 0x7E, 0xE9, 0x8E, 0xA6, 0x38, 0x65, 0x63, 0xD6, 0x8F,
-    0x4C, 0x64, 0x84, 0x83, 0x12, 0xAA, 0xCE, 0x57, 0xDD, 0x70, 0xDD, 0x8D, 0x98, 0x8D, 0x1F, 0x4E,
-    0x53, 0x2E, 0xC0, 0x4D, 0x9C, 0x03, 0x75, 0x05, 0x1D, 0x9D, 0xCE, 0xDD, 0x01, 0x2C, 0x7C, 0xED,
-    0x62, 0xC1, 0xB5, 0xD8, 0x0E, 0xCE, 0x30, 0x38, 0xCA, 0x24, 0x8C, 0x6F, 0xA1, 0x60, 0x97, 0xD2,
-    0xE7, 0xB6, 0xA9, 0x33, 0x08, 0x18, 0xCC, 0xBB, 0x82, 0x0B, 0x5B, 0xA3, 0x39, 0xD7, 0xE8, 0x45,
-    0xD0, 0xBE, 0x1D, 0xF4, 0x07, 0xD6, 0xC0, 0x18, 0x28, 0xB5, 0x94, 0xAA, 0xA6, 0x56, 0x02, 0x6A,
-    0x1E, 0xFC, 0xB2, 0x90, 0x3E, 0x2A, 0xEC, 0x37, 0xB4, 0x69, 0xA6, 0x06, 0xB1, 0x41, 0xDD, 0xCC,
-    0x9E, 0xA9, 0x4A, 0xA2, 0x02, 0xF0, 0xD2, 0x45, 0xBF, 0x6E, 0x05, 0x71, 0x05, 0x9E, 0x9C, 0x5B,
-    0xF9, 0x9D, 0x84, 0x0D, 0xA7, 0x1B, 0x29, 0xB9, 0x4F, 0x52, 0x26, 0x4C, 0xFC, 0xB2, 0xE2, 0xE0,
-    0x8B, 0xE6, 0x47, 0xAF, 0x47, 0x95, 0x7F, 0x00, 0xB5, 0x8E, 0x31, 0x0A, 0xC2, 0x40, 0x14, 0x05,
-    0x5F, 0x92, 0x22, 0x60, 0xD0, 0x94, 0x82, 0xE6, 0x00, 0x29, 0x12, 0xB6, 0xD9, 0x22, 0x4D, 0xC8,
-    0x1E, 0xC9, 0x22, 0x42, 0x50, 0x34, 0x7B, 0x04, 0x8F, 0xB0, 0x78, 0x02, 0x05, 0xD3, 0x19, 0xFD,
-    0x47, 0xF8, 0x47, 0xF8, 0x1E, 0xC1, 0x5E, 0xD0, 0xC5, 0xD2, 0x5E, 0xA6, 0x1D, 0x98, 0x49, 0xA4,
-    0xEC, 0x74, 0xB1, 0xF2, 0xB4, 0x79, 0xDD, 0xA6, 0x0C, 0x17, 0x4A, 0x2C, 0x99, 0xAB, 0x5C, 0xF3,
-    0x82, 0x83, 0x6B, 0x48, 0xA3, 0x82, 0xB2, 0x01, 0x05, 0xB4, 0xB4, 0x23, 0x62, 0x2E, 0xD1, 0xE2,
-    0x6D, 0x1F, 0x2C, 0x32, 0xB0, 0xB2, 0xBD, 0x38, 0x0E, 0x29, 0x42, 0x82, 0x29, 0x32, 0x8F, 0xB2,
-    0x6B, 0x3E, 0x51, 0x63, 0xB6, 0xC4, 0xF2, 0xE4, 0xC6, 0x28, 0x73, 0xF6, 0xE6, 0x45, 0x94, 0xB7,
-    0x12, 0x33, 0x62, 0x23, 0x75, 0x9B, 0xEB, 0x5C, 0x17, 0x7A, 0x77, 0x4D, 0x7E, 0xDA, 0x0B, 0xEC,
-    0x31, 0xF9, 0x92, 0xA2, 0x27, 0x65, 0x07, 0x3E, 0x70, 0x64, 0x67, 0xE8, 0x70, 0x17, 0x65, 0x8E,
-    0x14, 0x91, 0x32, 0xFE, 0x83, 0xE7, 0x74, 0xC3, 0xBF, 0x3F, 0x3F, 0x1D, 0xCE, 0xB1, 0x0D, 0xC2,
-    0x30, 0x10, 0x05, 0xD0, 0x1F, 0xBB, 0x48, 0x61, 0x29, 0x9E, 0x20, 0x78, 0x03, 0x18, 0x81, 0x9B,
-    0x03, 0x86, 0x60, 0x03, 0x6C, 0x89, 0x82, 0x35, 0xE8, 0x90, 0xA0, 0x60, 0x83, 0xF8, 0xD8, 0x80,
-    0x11, 0x28, 0x10, 0x0D, 0x05, 0x51, 0x44, 0x43, 0x48, 0x30, 0x67, 0xAE, 0x78, 0xFA, 0x3A, 0xDD,
-    0x9D, 0xCE, 0x27, 0x76, 0x47, 0xB6, 0x05, 0x5B, 0xC0, 0x2E, 0x60, 0x13, 0x24, 0xF8, 0x36, 0xEB,
-    0x28, 0x07, 0x78, 0x2A, 0x3E, 0xAC, 0xCE, 0xAC, 0x03, 0x69, 0xC2, 0x7C, 0x84, 0x91, 0xDE, 0x80,
-    0x0A, 0x58, 0x1F, 0x82, 0x4F, 0x21, 0xBE, 0x21, 0xD5, 0x9C, 0x48, 0xAC, 0xF5, 0xE6, 0xEF, 0x36,
-    0x5B, 0xAE, 0x5E, 0x0D, 0x5C, 0x9C, 0x75, 0x0F, 0xB8, 0x9B, 0x51, 0x77, 0xD4, 0xB2, 0xFA, 0xCD,
-    0xAA, 0x25, 0xA6, 0x64, 0xF6, 0x4F, 0x24, 0xD6, 0xDD, 0x20, 0xE7, 0x2E, 0xAA, 0x6F, 0x0D, 0xED,
-    0x2A, 0x90, 0x1F, 0x65, 0x00, 0x71, 0xC0, 0x04, 0xF9, 0x87, 0xB2, 0xBF, 0x22, 0x86, 0x1F, 0x55,
-    0x8F, 0x31, 0x6E, 0xC2, 0x40, 0x10, 0x45, 0x9F, 0xC7, 0x82, 0x95, 0x82, 0x62, 0x1A, 0x4A, 0x4B,
-    0x94, 0xD9, 0x22, 0x12, 0x2E, 0x10, 0xA4, 0x89, 0xB2, 0x77, 0xE0, 0x22, 0x5B, 0xB8, 0xC7, 0x47,
-    0xC8, 0x11, 0x1C, 0x4E, 0x40, 0x91, 0x3E, 0x73, 0x04, 0x8E, 0xE0, 0x23, 0xA4, 0xA0, 0x48, 0x81,
-    0xB4, 0x8C, 0x4D, 0xA2, 0x18, 0xCD, 0xE8, 0x17, 0x6F, 0xFF, 0xFC, 0x99, 0x15, 0x78, 0x00, 0x0F,
-    0xFB, 0x74, 0x36, 0x2D, 0x40, 0xC0, 0x31, 0xD7, 0x6D, 0xDC, 0x2D, 0x72, 0xC6, 0xD5, 0xBF, 0x48,
-    0x03, 0xAD, 0x59, 0x4D, 0x11, 0x35, 0x72, 0x6F, 0xD9, 0x2D, 0xB6, 0x71, 0xAE, 0x0E, 0x11, 0x0A,
-    0xD1, 0x17, 0x8E, 0x66, 0x35, 0x7D, 0x14, 0x35, 0xE2, 0xC2, 0x38, 0xF5, 0xD7, 0x1A, 0xC6, 0xF4,
-    0x8F, 0xA5, 0x0B, 0xCF, 0x56, 0x1E, 0x3F, 0xF5, 0xA5, 0x5F, 0xFB, 0xF4, 0x53, 0x53, 0x32, 0xA5,
-    0x1B, 0xAA, 0xE5, 0x10, 0x3E, 0xF4, 0x3D, 0x7E, 0x5D, 0xA8, 0x39, 0x49, 0xB0, 0x43, 0x26, 0x99,
-    0x96, 0x99, 0xC6, 0x4C, 0x53, 0xD2, 0x88, 0x79, 0x99, 0xD8, 0xAD, 0x81, 0x19, 0xAC, 0xD2, 0xB9,
-    0x1A, 0x74, 0x36, 0x90, 0xEC, 0x84, 0xFB, 0x64, 0xF9, 0xCA, 0xD3, 0x86, 0xBC, 0xEA, 0xDB, 0xAD,
-    0xFF, 0xDB, 0x76, 0x90, 0x37, 0xFB, 0xD4, 0x41, 0xD5, 0x6B, 0xDE, 0x18, 0x19, 0x1B, 0x6E, 0x23,
-    0x36, 0x6B, 0x09, 0xAE, 0xEE, 0xD3, 0x6E, 0x5F, 0x7D, 0x4B, 0xDF, 0x2D, 0x7E, 0x95, 0xBA, 0x42,
-    0x1A, 0x23, 0x57, 0x95, 0x54, 0xBF, 0x6F, 0x23, 0x45, 0x14, 0xFE, 0x66, 0x57, 0xB0, 0x90, 0x75,
-    0xEC, 0x43, 0x22, 0xD5, 0xE5, 0xCE, 0x57, 0x50, 0x98, 0xC8, 0xCA, 0x5A, 0xC2, 0x48, 0x8E, 0x64,
-    0xC7, 0x23, 0xA5, 0x05, 0x29, 0x05, 0x6E, 0x40, 0x42, 0xA9, 0x8D, 0x74, 0x31, 0x92, 0x0B, 0xEB,
-    0x08, 0xE7, 0x81, 0x86, 0x82, 0xC6, 0x12, 0xA2, 0xA3, 0x70, 0xE1, 0xE2, 0xF0, 0x15, 0x59, 0xE9,
-    0x5C, 0x9C, 0xA2, 0x04, 0xAF, 0x68, 0x11, 0xB0, 0xFF, 0x00, 0xD1, 0x82, 0x40, 0x82, 0x04, 0xC4,
-    0x16, 0x2E, 0x4C, 0x94, 0x64, 0xF8, 0x66, 0x9C, 0xF3, 0x9D, 0x2C, 0xEE, 0x80, 0xF5, 0xDB, 0xF5,
-    0x7B, 0xDF, 0x7C, 0xEF, 0xCD, 0xAF, 0xF7, 0x5E, 0x15, 0x39, 0xDC, 0xC0, 0x32, 0xBF, 0x45, 0xF8,
-    0xA8, 0xC0, 0xD3, 0x29, 0xDC, 0x93, 0x04, 0x22, 0x8A, 0x81, 0x1F, 0x23, 0xE0, 0x81, 0x04, 0x3E,
-    0x00, 0xB0, 0xC9, 0xB7, 0x08, 0x78, 0x53, 0x64, 0x6F, 0x83, 0x74, 0x78, 0x70, 0xB4, 0xCC, 0xED,
-    0xA2, 0xEA, 0xA1, 0xED, 0x23, 0xCC, 0x22, 0x5C, 0x46, 0x58, 0x44, 0x27, 0x44, 0xA0, 0x50, 0xD7,
-    0x78, 0xF5, 0x1D, 0x30, 0xE2, 0x4C, 0x82, 0x3F, 0xB1, 0xB6, 0xFF, 0xD8, 0xE4, 0x10, 0x09, 0xF6,
-    0x19, 0x7F, 0x26, 0xBD, 0x93, 0x4B, 0xE4, 0x51, 0x43, 0x15, 0x63, 0x54, 0x9C, 0x6F, 0xD0, 0xCE,
-    0x79, 0xB2, 0x5D, 0xF5, 0x64, 0x39, 0xF1, 0x51, 0x57, 0x39, 0x3B, 0x16, 0x9C, 0x4C, 0xF0, 0xFE,
-    0x58, 0xCD, 0x7C, 0x0A, 0xC0, 0x1E, 0xF0, 0x07, 0xC4, 0xF7, 0x70, 0x3E, 0x85, 0xBB, 0xA5, 0x7C,
-    0x37, 0x5A, 0x16, 0xF1, 0x2A, 0x92, 0x0A, 0xD2, 0x8D, 0xC6, 0xA4, 0xAB, 0xA7, 0x63, 0x3D, 0xBD,
-    0xDB, 0x18, 0x55, 0xCD, 0x82, 0x92, 0x9B, 0x22, 0xCA, 0x39, 0x91, 0xBF, 0x25, 0xDD, 0x4F, 0xE0,
-    0x7C, 0x0B, 0xF1, 0x3B, 0x30, 0x05, 0x42, 0x08, 0x7D, 0x9E, 0x3B, 0x19, 0xD4, 0x80, 0xB6, 0xB1,
-    0xA0, 0xF5, 0xF4, 0x6C, 0x78, 0x2F, 0xB4, 0x26, 0x41, 0x0E, 0x91, 0x00, 0xC4, 0x86, 0x76, 0xFA,
-    0x73, 0xCD, 0x95, 0x6D, 0x0F, 0xE1, 0x92, 0xA1, 0x1D, 0x7C, 0x75, 0x2F, 0x2C, 0xA0, 0x5D, 0x46,
-    0xAD, 0x85, 0xDC, 0x99, 0xA1, 0x89, 0x88, 0x07, 0x77, 0x1E, 0x0C, 0x07, 0x1D, 0x60, 0xD4, 0xD8,
-    0xD6, 0x7A, 0x12, 0x62, 0x9B, 0x3A, 0x11, 0xE2, 0xFA, 0x02, 0xCD, 0xFD, 0x08, 0x22, 0xB5, 0xB1,
-    0x2B, 0x63, 0x7D, 0x3E, 0x1C, 0x1E, 0x52, 0x31, 0xA6, 0x48, 0x39, 0x44, 0xC2, 0x2A, 0x17, 0x70,
-    0x81, 0xDD, 0xFD, 0xC8, 0x13, 0x29, 0xA7, 0x72, 0x94, 0xA5, 0x9D, 0x1D, 0x9A, 0x3D, 0xB5, 0xDA,
-    0x78, 0x3D, 0x6D, 0x8E, 0x0D, 0x8D, 0x37, 0xA5, 0xB5, 0x6C, 0xDE, 0x4F, 0x38, 0xCF, 0xCA, 0x5B,
-    0x9D, 0xAE, 0x3E, 0x7F, 0xD9, 0xC4, 0x19, 0x11, 0x21, 0x5E, 0xD7, 0x3A, 0xCA, 0x7F, 0x7E, 0x9B,
-    0x27, 0x7C, 0xE3, 0x3F, 0xBF, 0x39, 0x15, 0xC8, 0x6E, 0xA2, 0xA3, 0xBA, 0x4E, 0x36, 0x87, 0x69,
-    0x1E, 0x2D, 0x5F, 0x5D, 0x73, 0x79, 0xF7, 0x5C, 0x6C, 0xC7, 0x4A, 0x0A, 0x87, 0xBB, 0x93, 0xBC,
-    0xF2, 0x5B, 0x45, 0xB4, 0xEE, 0x0E, 0xD3, 0xAE, 0xE6, 0xEC, 0xBC, 0xC0, 0x95, 0x06, 0x57, 0xB3,
-    0xCA, 0xE9, 0x4B, 0x3C, 0xBE, 0xD8, 0x89, 0x5C, 0xE9, 0x21, 0x4B, 0xA0, 0x80, 0x32, 0x81, 0x32,
-    0xB3, 0x25, 0x43, 0xDB, 0x83, 0x2B, 0x19, 0x20, 0x26, 0x54, 0x22, 0x77, 0x55, 0x44, 0x22, 0xDA,
-    0x38, 0xF6, 0x27, 0xFE, 0x64, 0xE3, 0xF8, 0x25, 0xEA, 0xF9, 0xA8, 0x1C, 0xB6, 0x4A, 0xED, 0x7E,
-    0x5E, 0x8D, 0x26, 0x0C, 0x5B, 0xB6, 0x77, 0xC1, 0x09, 0x62, 0xA6, 0xA0, 0x99, 0xD9, 0x55, 0x17,
-    0x1E, 0xDE, 0xF5, 0xE1, 0x33, 0xD4, 0x9B, 0x70, 0xBF, 0x80, 0xF3, 0x2B, 0xC4, 0xC4, 0xAE, 0x2F,
-    0x45, 0xB0, 0x85, 0x3B, 0x3F, 0xA0, 0x3F, 0x42, 0xBF, 0x6D, 0x94, 0xC0, 0x43, 0xDE, 0x8B, 0xEF,
-    0x1C, 0x87, 0xFD, 0x51, 0x99, 0x42, 0x25, 0xF0, 0xE2, 0xD0, 0x46, 0x7C, 0x9A, 0x1C, 0x0C, 0x07,
-    0xCC, 0x15, 0xE0, 0x96, 0xB1, 0x9C, 0x18, 0x9E, 0x32, 0xB9, 0x5D, 0xE5, 0x91, 0x42, 0x24, 0x70,
-    0x23, 0x63, 0x05, 0xC3, 0x2F, 0xBB, 0xFA, 0x32, 0x5C, 0x7C, 0x2A, 0xC9, 0xBF, 0xFD, 0xCC, 0x75,
-    0x1F, 0xDA, 0x4C, 0xFD, 0x0E, 0xAE, 0xC9, 0x54, 0xC9, 0x4C, 0xCD, 0x8A, 0x88, 0x99, 0x5A, 0x44,
-    0x58, 0x46, 0x3B, 0x44, 0x85, 0x42, 0x85, 0x26, 0x41, 0x0E, 0x91, 0x40, 0x1A, 0xC9, 0x74, 0xA1,
-    0xA3, 0x71, 0xEF, 0xC0, 0x61, 0x81, 0xDC, 0x8F, 0xAB, 0x48, 0x2B, 0xC6, 0xAB, 0xF5, 0xBF, 0x84,
-    0x2E, 0x74, 0xA4, 0x3B, 0x83, 0x20, 0x17, 0x61, 0x93, 0xAB, 0x92, 0x68, 0x3D, 0xF3, 0x50, 0xAC,
-    0x90, 0x98, 0x57, 0x36, 0x03, 0x1E, 0x62, 0xE1, 0xE9, 0x60, 0xF4, 0xD0, 0xA2, 0x73, 0x65, 0x61,
-    0xF8, 0x0A, 0xDB, 0xEB, 0xCC, 0xBE, 0xFF, 0x48, 0x9B, 0x83, 0x42, 0x5E, 0xCB, 0xFF, 0x95, 0x94,
-    0x03, 0xB5, 0xA0, 0xDB, 0x24, 0x4B, 0x57, 0x1A, 0xDB, 0x73, 0xE5, 0x39, 0x81, 0xFA, 0x29, 0x76,
-    0x8E, 0x30, 0x57, 0xF8, 0xFC, 0xF6, 0x76, 0xB4, 0x7B, 0x29, 0x67, 0x7C, 0x2A, 0x34, 0xAF, 0xBA,
-    0x04, 0x33, 0xF4, 0x17, 0x47, 0xD5, 0xF5, 0xCD, 0xC6, 0x0B, 0x2C, 0x9A, 0xA8, 0xD1, 0x30, 0xA4,
-    0x45, 0xE5, 0x45, 0x7C, 0xE8, 0xC5, 0x35, 0x76, 0x37, 0x2F, 0xC6, 0x11, 0xAD, 0xAB, 0xCC, 0x2E,
-    0x23, 0x90, 0x4E, 0x82, 0x75, 0xAC, 0x3B, 0x49, 0x20, 0x5F, 0xC1, 0x23, 0x1C, 0x4B, 0xE8, 0xE3,
-    0xC8, 0x8F, 0x7D, 0x75, 0x84, 0x1A, 0xCB, 0xE4, 0x7A, 0x8F, 0x6B, 0xA0, 0x6D, 0xF0, 0x82, 0xA3,
-    0x90, 0xFF, 0x68, 0x0A, 0x31, 0xBD, 0x4E, 0x45, 0xA4, 0xFC, 0xEF, 0x19, 0xDB, 0xE0, 0xF3, 0xA2,
-    0xB5, 0x65, 0x5F, 0xC5, 0x13, 0x45, 0x3B, 0xCF, 0x73, 0xD3, 0x41, 0xF6, 0x07, 0x1D, 0xDB, 0x48,
-    0xD3, 0x55, 0x84, 0x15, 0x74, 0x4A, 0x08, 0xCE, 0x06, 0xCF, 0xB3, 0x0D, 0xCD, 0xAA, 0x81, 0xA7,
-    0x92, 0x35, 0x2D, 0x80, 0x45, 0xA6, 0x2F, 0x65, 0x73, 0x9C, 0xA0, 0xC5, 0xD4, 0xAF, 0x20, 0xAE,
-    0x8A, 0xA8, 0xE2, 0xA8, 0xD1, 0x7B, 0xA7, 0x26, 0xA0, 0x6F, 0x29, 0x19, 0x3C, 0x6E, 0x49, 0xA1,
-    0x2D, 0x97, 0xD0, 0xDE, 0xCC, 0xAC, 0x25, 0x71, 0x3B, 0x6B, 0xC3, 0x01, 0xDB, 0xC7, 0xB3, 0x16,
-    0x06, 0x34, 0x87, 0x7D, 0xF6, 0x32, 0x31, 0xEE, 0xC1, 0x7F, 0xA3, 0x83, 0x42, 0x66, 0x09, 0xA5,
-    0x8C, 0x8B, 0x9D, 0x8C, 0x23, 0xC7, 0x5A, 0xAB, 0x7E, 0xC6, 0x51, 0x46, 0x37, 0x58, 0x31, 0x93,
-    0xB5, 0x1C, 0xC3, 0xB5, 0x7C, 0x49, 0x3E, 0x4F, 0xA5, 0x04, 0xF2, 0x71, 0xC5, 0xE7, 0x0E, 0x76,
-    0xD8, 0x0E, 0x0C, 0x56, 0xE4, 0x4E, 0x0C, 0xE7, 0x49, 0x3E, 0x4F, 0x1B, 0xAF, 0xA9, 0x07, 0xD8,
-    0xF9, 0xE9, 0x63, 0xD9, 0xDB, 0x14, 0xAA, 0xB7, 0x2E, 0x94, 0xD1, 0x0D, 0x66, 0xC6, 0x16, 0xF9,
-    0x05, 0x62, 0x25, 0x90, 0xEF, 0x7C, 0x2D, 0x7B, 0x4B, 0xE4, 0x17, 0xC8, 0x4F, 0x1C, 0xF2, 0x5D,
-    0x8E, 0x2C, 0xCD, 0xF9, 0xA6, 0x0C, 0x9F, 0x2E, 0x6B, 0x07, 0xFD, 0xAE, 0x9E, 0xB0, 0xF9, 0x54,
-    0x3D, 0x15, 0xEE, 0xF9, 0xCA, 0x74, 0x21, 0xFC, 0x0D, 0x8D, 0x90, 0x31, 0x4A, 0x44, 0x31, 0x10,
-    0x86, 0xBF, 0x25, 0x76, 0x11, 0x73, 0x81, 0xC0, 0xDE, 0x40, 0x2D, 0x53, 0x49, 0xD6, 0xD6, 0xC6,
-    0x6A, 0xDB, 0x77, 0x01, 0x0B, 0x0B, 0xAD, 0x93, 0x9B, 0xE8, 0x05, 0x04, 0x5B, 0x41, 0xC9, 0xEB,
-    0xB7, 0x99, 0x23, 0xAC, 0xA0, 0x6E, 0xB1, 0x4D, 0x04, 0x15, 0x94, 0xAC, 0xCF, 0x64, 0x6D, 0x04,
-    0x5D, 0x10, 0xE6, 0x9F, 0x66, 0x66, 0xBE, 0xF9, 0x67, 0x48, 0x17, 0xA2, 0x16, 0xEF, 0x59, 0x33,
-    0xC7, 0x54, 0x85, 0x61, 0xF0, 0xDD, 0xF4, 0x91, 0x1D, 0xE4, 0x97, 0xCC, 0xE4, 0x81, 0x30, 0x5B,
-    0x41, 0x8A, 0x6A, 0x29, 0x9A, 0xDE, 0x50, 0xFB, 0xA5, 0x9B, 0x4A, 0xAD, 0xFE, 0x0C, 0x33, 0x99,
-    0x87, 0x59, 0x21, 0x88, 0x7A, 0x12, 0xED, 0xC5, 0x20, 0x21, 0x4B, 0x77, 0xBC, 0xA1, 0x2D, 0x75,
-    0x2F, 0xA8, 0xC5, 0xEA, 0x16, 0x4D, 0xDE, 0x5E, 0x9B, 0x68, 0x2E, 0x0A, 0xD5, 0xC6, 0x49, 0xDB,
-    0x6B, 0xFF, 0x4C, 0x75, 0x78, 0xB7, 0xBA, 0x29, 0x43, 0x24, 0x1D, 0x15, 0xD4, 0xF2, 0x73, 0x0D,
-    0xB0, 0x0D, 0x60, 0x1B, 0xC0, 0x36, 0x80, 0xFD, 0x07, 0xA0, 0x1F, 0x15, 0x50, 0x57, 0xA0, 0xB7,
-    0xBE, 0xEF, 0xDC, 0xFC, 0x83, 0xFA, 0x23, 0xFF, 0x11, 0x43, 0x1F, 0x3C, 0x21, 0xC2, 0x5B, 0x66,
-    0xD4, 0x9F, 0x55, 0x39, 0xC6, 0xF7, 0x83, 0x9C, 0x3F, 0xDF, 0xF8, 0xEB, 0x7D, 0xC7, 0x1D, 0x8E,
-    0x3D, 0x71, 0x1C, 0x66, 0x87, 0x9C, 0x3A, 0x5E, 0xF3, 0xC1, 0x65, 0x8A, 0x63, 0xF9, 0x02, 0x63,
-    0x60, 0x68, 0x60, 0x60, 0x60, 0x60, 0xFE, 0x00, 0x24, 0xF8, 0xFF, 0x00, 0x09, 0x0B, 0x79, 0x20,
-    0xF1, 0x85, 0xF9, 0x00, 0x03, 0xF3, 0xFF, 0x8F, 0x1F, 0x18, 0xF8, 0xFF, 0xFF, 0xF8, 0xC3, 0x60,
-    0xFF, 0xFF, 0xC1, 0x7F, 0x06, 0xFB, 0x3F, 0x4C, 0xFF, 0x81, 0x2A, 0xF4, 0xFF, 0x30, 0x30, 0xFF,
-    0xA9, 0x07, 0xAA, 0xFE, 0xFF, 0xFF, 0x00, 0x03, 0x83, 0x9D, 0x3D, 0x50, 0x31, 0x9F, 0x0D, 0xCC,
-    0x00, 0x90, 0x51, 0x00,
+    0x11, 0x40, 0xDE, 0x2D, 0x0B, 0x16, 0x0E, 0x40, 0xF2, 0x58, 0xB0, 0xD8, 0x24, 0x4B, 0xEE, 0xD8,
+    0x4D, 0xD2, 0x89, 0x85, 0x5D, 0x05, 0x30, 0xA8, 0x2A, 0x95, 0xA4, 0x43, 0x70, 0x85, 0x20, 0x51,
+    0xBA, 0x55, 0x52, 0xA4, 0x30, 0x10, 0xB0, 0x77, 0x61, 0x01, 0x11, 0x10, 0x84, 0x2A, 0xEE, 0x6C,
+    0xD0, 0x80, 0x0C, 0x53, 0xBC, 0xB1, 0x55, 0xA4, 0x50, 0xB3, 0x52, 0x0A, 0x17, 0x69, 0x36, 0x89,
+    0x2A, 0x06, 0x48, 0xD6, 0xC0, 0xC5, 0x38, 0x48, 0xC7, 0x5B, 0xBF, 0x3F, 0xBB, 0x47, 0x91, 0x00,
+    0x23, 0x52, 0x94, 0x6E, 0x67, 0x3E, 0x56, 0xA3, 0xD9, 0xFF, 0x67, 0xFE, 0xFC, 0xFF, 0xFE, 0x1B,
+    0x12, 0x95, 0x3F, 0xF1, 0x4B, 0x05, 0x69, 0xFD, 0xC7, 0xFC, 0xE3, 0x7A, 0x39, 0xD8, 0xC8, 0x95,
+    0x97, 0x67, 0x8D, 0xFB, 0x99, 0xBB, 0x99, 0x49, 0xDA, 0x9E, 0x16, 0x5A, 0xD2, 0xC2, 0x84, 0x54,
+    0x92, 0x3C, 0xAA, 0x13, 0xCB, 0xD0, 0xC8, 0x2D, 0x48, 0xD7, 0x4A, 0x21, 0xE7, 0x85, 0x9E, 0x91,
+    0xB4, 0xEE, 0xD1, 0xA2, 0xF7, 0x69, 0xD6, 0xD8, 0xCC, 0xA2, 0x5C, 0xF9, 0x79, 0x46, 0xFB, 0x3F,
+    0x8B, 0x85, 0x3C, 0xCF, 0x9A, 0xC5, 0x80, 0xA0, 0x99, 0x32, 0x7C, 0xB5, 0xCD, 0x83, 0xB4, 0xE0,
+    0xE7, 0xAC, 0xB9, 0xDE, 0x61, 0x79, 0xB1, 0x66, 0x34, 0x07, 0xAC, 0xD9, 0xCC, 0x81, 0x66, 0x8C,
+    0xAF, 0x4B, 0x4B, 0xB3, 0xE6, 0xFB, 0x31, 0x34, 0x43, 0xC9, 0xBE, 0x62, 0xB5, 0x4A, 0x32, 0xFE,
+    0x5C, 0xD3, 0x54, 0x1C, 0x29, 0x12, 0xB1, 0x87, 0x1D, 0xC5, 0x44, 0x76, 0x7E, 0x27, 0xCF, 0xBC,
+    0xCE, 0x9D, 0xDD, 0x2C, 0x14, 0xBF, 0xBB, 0x93, 0x04, 0x22, 0x76, 0x54, 0x4B, 0xC4, 0x2E, 0xE1,
+    0x2D, 0xA4, 0x50, 0xC4, 0xD9, 0x7B, 0x8D, 0xCE, 0xD3, 0xDD, 0x2D, 0xF9, 0xC3, 0x0F, 0x79, 0xDF,
+    0xE8, 0x89, 0x52, 0x91, 0x93, 0xAF, 0xAC, 0x01, 0x4C, 0x52, 0xEB, 0x55, 0x62, 0x91, 0x45, 0xB3,
+    0x45, 0xDE, 0x66, 0xD6, 0xA2, 0x76, 0x9E, 0x76, 0xF9, 0x73, 0xDE, 0xAA, 0xC5, 0xC2, 0xD3, 0x2C,
+    0xCC, 0xFA, 0x14, 0x0F, 0x45, 0xA9, 0x95, 0xFA, 0x8A, 0xB7, 0xC9, 0xBD, 0x92, 0x4A, 0xB2, 0xD0,
+    0xE9, 0x40, 0x5F, 0x44, 0x6F, 0xA6, 0xD0, 0x96, 0x42, 0x59, 0x8A, 0x69, 0xE8, 0x56, 0x42, 0xE4,
+    0x40, 0x53, 0x9D, 0xD5, 0x5C, 0x15, 0x1A, 0xCD, 0x25, 0xE2, 0x26, 0xB5, 0xEB, 0x68, 0xD7, 0x3E,
+    0xD4, 0xFC, 0x0F, 0x74, 0xEF, 0x5B, 0x4D, 0x42, 0xF3, 0xDE, 0x7D, 0xC2, 0xE1, 0x44, 0x2A, 0xFA,
+    0x6E, 0xE4, 0x6B, 0xFF, 0xFD, 0xBE, 0x84, 0xF6, 0xEC, 0xDC, 0x16, 0x8B, 0x90, 0x85, 0xCF, 0x42,
+    0x7E, 0x02, 0x21, 0x1E, 0x43, 0xD0, 0x0B, 0x16, 0x6D, 0xCA, 0x3C, 0xD5, 0xA0, 0xAC, 0x9D, 0xB8,
+    0x66, 0x27, 0xBC, 0x04, 0x12, 0x58, 0x03, 0xF9, 0xBC, 0x9D, 0x3A, 0x95, 0xDB, 0xC1, 0x18, 0x34,
+    0x3F, 0x4D, 0xA0, 0x59, 0x11, 0x6B, 0x26, 0x68, 0x96, 0x09, 0x34, 0x57, 0x12, 0x68, 0xB6, 0x12,
+    0x68, 0x86, 0x10, 0x8F, 0x21, 0xE8, 0x05, 0x8B, 0xB6, 0x95, 0x40, 0xB3, 0x95, 0x40, 0x33, 0xEF,
+    0x89, 0x2C, 0xD6, 0x27, 0x58, 0x48, 0xD6, 0xB7, 0xCC, 0x8A, 0xAB, 0xC4, 0x4B, 0x2E, 0xBA, 0xF9,
+    0x5D, 0x69, 0xAB, 0x6D, 0xFF, 0xDF, 0xC9, 0xBA, 0x67, 0xA5, 0xA1, 0x4B, 0x87, 0x3B, 0xB6, 0x14,
+    0xB6, 0x1F, 0x0D, 0xC7, 0xF3, 0xAF, 0x17, 0x6E, 0x77, 0x62, 0x5E, 0x9F, 0xF8, 0x3D, 0x14, 0xE7,
+    0x07, 0x34, 0xD5, 0xF8, 0x60, 0xD1, 0x6F, 0xA2, 0xFF, 0x09, 0x53, 0x1E, 0x69, 0xB2, 0xBF, 0x49,
+    0x48, 0xEC, 0xA6, 0xE4, 0x20, 0x3A, 0x5D, 0x9C, 0x67, 0x0D, 0x93, 0x97, 0xE9, 0x16, 0xE5, 0xEF,
+    0xE7, 0x6A, 0x62, 0x82, 0xCE, 0x23, 0xF0, 0x32, 0xB2, 0x79, 0x81, 0xE4, 0x20, 0x50, 0x1F, 0xD2,
+    0x7B, 0x35, 0x76, 0x7C, 0x65, 0x44, 0xCB, 0x1F, 0x53, 0xE0, 0xD2, 0x4A, 0x2F, 0xF6, 0xBF, 0x8B,
+    0xA9, 0xDA, 0xED, 0x46, 0xDA, 0x33, 0x71, 0xE3, 0x23, 0x3C, 0x0F, 0x3F, 0x5E, 0xDC, 0x4E, 0xAB,
+    0xD5, 0xA0, 0xE9, 0x26, 0xBC, 0xAE, 0xA9, 0xD8, 0x89, 0xC5, 0xFE, 0xE3, 0x24, 0x0D, 0x13, 0x70,
+    0xD6, 0x13, 0xB8, 0xE3, 0x6B, 0xF8, 0x60, 0xBE, 0x5C, 0x6B, 0x2F, 0x21, 0x67, 0x77, 0x88, 0xD0,
+    0x5F, 0xC1, 0x90, 0x49, 0x30, 0x75, 0xA0, 0x63, 0x8D, 0x1E, 0x8E, 0x76, 0x99, 0xE4, 0xEE, 0x80,
+    0xAC, 0x5E, 0xCC, 0x19, 0x85, 0x74, 0x42, 0x2E, 0x15, 0x07, 0x66, 0xEF, 0x91, 0xD7, 0x89, 0x43,
+    0xA1, 0x03, 0x3B, 0xB9, 0x6E, 0x25, 0x81, 0x95, 0xE0, 0xBD, 0xD1, 0x51, 0xD8, 0x83, 0xF9, 0x8D,
+    0xAD, 0xD5, 0x4B, 0x63, 0xBA, 0xA7, 0x1B, 0xB4, 0x80, 0x8D, 0xD5, 0x8E, 0xEC, 0x1E, 0x4D, 0x23,
+    0x88, 0x43, 0xAC, 0xA8, 0x0F, 0x6B, 0x1B, 0x6C, 0xCD, 0x71, 0xC9, 0x1E, 0x96, 0xD6, 0x6E, 0x49,
+    0x7D, 0xC5, 0xD1, 0x35, 0xFB, 0x65, 0xAB, 0x0B, 0xED, 0x75, 0x9E, 0x39, 0xFD, 0x01, 0x7D, 0x04,
+    0x2B, 0x79, 0x52, 0x98, 0xF9, 0x1E, 0x71, 0xF4, 0x8F, 0xE4, 0x54, 0x16, 0xAD, 0x8F, 0x70, 0x44,
+    0xA5, 0x6B, 0xE4, 0x25, 0x72, 0x2E, 0x95, 0xEF, 0xAF, 0x32, 0x6D, 0xFC, 0x0A, 0x73, 0xE7, 0xD4,
+    0x1B, 0x9B, 0xE7, 0x9F, 0x67, 0x0E, 0x67, 0xE6, 0x75, 0x56, 0x70, 0x17, 0x81, 0x73, 0x13, 0x87,
+    0xE3, 0xD3, 0xDB, 0x58, 0x81, 0x94, 0x24, 0xC6, 0x2E, 0x3F, 0xE9, 0x0A, 0x78, 0xEB, 0x1C, 0x60,
+    0x73, 0x6F, 0x65, 0x05, 0x8E, 0x32, 0xC9, 0xBA, 0xF6, 0x1A, 0x2B, 0x90, 0x7D, 0x5A, 0x79, 0x48,
+    0x55, 0x8F, 0xE1, 0x2E, 0xCA, 0xE9, 0x46, 0x87, 0x02, 0x8F, 0x47, 0x30, 0xCE, 0xB1, 0x61, 0xE7,
+    0xB1, 0xD1, 0x60, 0xFF, 0x0D, 0xB9, 0xF8, 0x28, 0x3E, 0x55, 0x9E, 0x9E, 0xF9, 0x90, 0xFC, 0x61,
+    0xB9, 0x92, 0x7A, 0x48, 0xB5, 0xF1, 0x5E, 0x5F, 0x95, 0xB0, 0x07, 0x4C, 0x1F, 0x02, 0x9B, 0x37,
+    0x30, 0x6D, 0x27, 0xDC, 0x8E, 0x37, 0x4D, 0xEF, 0xAE, 0xB2, 0x91, 0xFE, 0x78, 0x6A, 0x3E, 0xC2,
+    0xB7, 0xA3, 0x0E, 0x70, 0xF0, 0x7A, 0x05, 0xC1, 0x1A, 0x60, 0x6C, 0x92, 0xC5, 0x6C, 0x84, 0x10,
+    0xBE, 0xB1, 0x73, 0x0F, 0xF9, 0x83, 0x17, 0x1B, 0xA9, 0x4C, 0x42, 0x05, 0x02, 0x67, 0x72, 0xBB,
+    0x43, 0xD1, 0xD3, 0x3C, 0x2F, 0x34, 0xB5, 0x5F, 0x96, 0x55, 0xA7, 0xBF, 0x43, 0x8D, 0xDE, 0x7F,
+    0xE3, 0x39, 0x1F, 0xA7, 0xE4, 0xFE, 0x44, 0x57, 0xF2, 0x5C, 0x2F, 0x7C, 0x4C, 0xEC, 0x71, 0x18,
+    0xDF, 0xD5, 0xFE, 0x13, 0x54, 0xCA, 0x76, 0x9F, 0xC4, 0xF3, 0x07, 0xA6, 0xA6, 0xCE, 0xD3, 0xAC,
+    0xD9, 0x38, 0x5B, 0x0B, 0xC4, 0x88, 0x42, 0x6B, 0x9D, 0x42, 0x1B, 0x05, 0xD5, 0xBA, 0x05, 0x60,
+    0xD9, 0xC6, 0xA9, 0x3F, 0x23, 0x6B, 0x34, 0x70, 0x3E, 0x4D, 0x50, 0x6E, 0xD1, 0x9C, 0xBF, 0x6B,
+    0xCC, 0x02, 0xCC, 0xCB, 0x4D, 0x25, 0xF2, 0x0C, 0xCE, 0xE8, 0xE5, 0x7B, 0xF5, 0xCD, 0xD4, 0x19,
+    0x8D, 0x41, 0xE5, 0xA6, 0x2A, 0x21, 0xA5, 0xDD, 0x87, 0x11, 0xD8, 0x80, 0x89, 0xD0, 0x18, 0x80,
+    0x7E, 0xA8, 0x47, 0xB1, 0x6D, 0x50, 0x08, 0xDD, 0x50, 0x0D, 0x78, 0x75, 0xA7, 0x49, 0x6C, 0xA1,
+    0x02, 0x9A, 0xC5, 0xBF, 0x48, 0xEB, 0xD7, 0xD4, 0x9C, 0x43, 0x68, 0xFE, 0x35, 0xF2, 0x06, 0x1C,
+    0xB3, 0x0B, 0x7F, 0x21, 0x3F, 0xD7, 0x4B, 0x56, 0xD2, 0xB5, 0xF5, 0xED, 0x8E, 0xF2, 0xCB, 0xA4,
+    0xFE, 0xE6, 0x30, 0x58, 0x46, 0xFF, 0xE4, 0x5A, 0xFD, 0x80, 0x24, 0x73, 0x0F, 0x14, 0x12, 0x89,
+    0x2F, 0x01, 0xDB, 0x24, 0x31, 0x5D, 0xAE, 0xA0, 0x7B, 0x31, 0x49, 0x91, 0x02, 0x88, 0xF7, 0xA8,
+    0x9D, 0x36, 0xA8, 0x5A, 0xA5, 0xA5, 0x2E, 0x2D, 0xE8, 0xA2, 0xE8, 0x00, 0x91, 0xB9, 0x89, 0xA2,
+    0xFD, 0x61, 0x80, 0xB2, 0x21, 0xFE, 0xC8, 0x50, 0x8A, 0x64, 0x13, 0x9F, 0x91, 0xF8, 0x44, 0x3B,
+    0xDF, 0x66, 0x8D, 0x74, 0xFD, 0xE4, 0x90, 0xCC, 0xF9, 0xA2, 0x8B, 0x1A, 0x7F, 0xBE, 0x2C, 0xFF,
+    0x4E, 0x72, 0x34, 0x26, 0xFB, 0xC0, 0xE4, 0xA1, 0x29, 0xB0, 0xF8, 0xE0, 0x19, 0x31, 0x05, 0x32,
+    0x88, 0xA9, 0x5F, 0xB3, 0x0A, 0x1C, 0x6D, 0x12, 0xA8, 0x29, 0x47, 0xE3, 0xF0, 0x3C, 0xA1, 0x79,
+    0x84, 0xAC, 0xFB, 0xB2, 0x90, 0x44, 0xB9, 0x5E, 0xB9, 0x1F, 0x2F, 0xB9, 0x54, 0x0D, 0x78, 0xC4,
+    0x86, 0xB6, 0x6B, 0x06, 0x04, 0x84, 0x6E, 0x3A, 0x31, 0x02, 0x71, 0x0A, 0x33, 0x27, 0xA6, 0x03,
+    0x99, 0x31, 0x30, 0x44, 0xA3, 0x1B, 0x3B, 0x6B, 0x01, 0xA5, 0x22, 0x96, 0x69, 0x65, 0x68, 0xB0,
+    0xC5, 0x5D, 0xAB, 0xED, 0x0C, 0x1B, 0x49, 0xB5, 0xBA, 0xD4, 0xAD, 0x6B, 0xF6, 0xF7, 0x94, 0x6A,
+    0x28, 0x71, 0xE8, 0x71, 0x50, 0x31, 0x17, 0x40, 0x1E, 0xDF, 0x2E, 0xCD, 0x2C, 0x58, 0x21, 0x53,
+    0x4B, 0x7A, 0x1B, 0xD4, 0x52, 0xC6, 0x45, 0xA4, 0x14, 0x84, 0xF2, 0x94, 0xAC, 0x92, 0xF9, 0x8E,
+    0xD4, 0xF4, 0xD3, 0x93, 0xA6, 0x08, 0x5D, 0x34, 0xC8, 0xD4, 0x35, 0xC7, 0x73, 0xF2, 0x14, 0xB9,
+    0x4B, 0x54, 0x6E, 0xB8, 0x48, 0x0F, 0x15, 0x19, 0x8A, 0xC6, 0x0C, 0x8D, 0xA9, 0x1F, 0x33, 0x3F,
+    0x26, 0x7E, 0xCC, 0xFB, 0x98, 0xF6, 0x31, 0xEB, 0x63, 0xD2, 0xC7, 0x9C, 0x8F, 0x29, 0x1F, 0xC5,
+    0x64, 0x23, 0x22, 0xB6, 0x88, 0xCD, 0x1B, 0xFA, 0x05, 0xF6, 0x05, 0xF2, 0x05, 0xBE, 0xB5, 0xDF,
+    0xC0, 0xBB, 0x40, 0xBB, 0x0A, 0xD4, 0x61, 0x37, 0xA3, 0xDF, 0x2B, 0x3D, 0x85, 0x84, 0xA3, 0x3F,
+    0xC3, 0x6D, 0xFF, 0x2A, 0xA1, 0xF4, 0x17, 0x0C, 0xA5, 0xAA, 0x84, 0x52, 0x7D, 0x04, 0x94, 0xDE,
+    0x36, 0x50, 0x0A, 0xDE, 0x07, 0xEA, 0xE6, 0x18, 0x4C, 0x86, 0x79, 0xD9, 0xA2, 0x77, 0x66, 0x59,
+    0x8A, 0xF4, 0x58, 0x40, 0xA5, 0x26, 0x7F, 0xC3, 0x07, 0x3D, 0x2E, 0xF5, 0x6F, 0x84, 0xAA, 0xEC,
+    0x6C, 0x46, 0x72, 0x3E, 0xE3, 0xCA, 0x6B, 0x20, 0x2B, 0x93, 0x59, 0x9C, 0x6E, 0x79, 0xBC, 0x48,
+    0xDE, 0x27, 0xB1, 0xB3, 0x9B, 0x97, 0xC9, 0xDB, 0x03, 0xB2, 0x3E, 0x56, 0x21, 0xE0, 0x29, 0x9C,
+    0x43, 0xEF, 0x7A, 0x14, 0xC5, 0x45, 0xF2, 0x46, 0xA0, 0x70, 0x97, 0x99, 0xC2, 0x4D, 0x9A, 0x32,
+    0xDD, 0x22, 0xDA, 0x28, 0xF2, 0x75, 0xC3, 0xEB, 0xE8, 0x50, 0xEA, 0x60, 0x3E, 0x69, 0x7D, 0x9E,
+    0xFC, 0xFC, 0x4E, 0xB2, 0x22, 0x74, 0xD4, 0x51, 0xBF, 0x29, 0x30, 0x70, 0x0E, 0x71, 0xE1, 0x5D,
+    0x62, 0x2C, 0x3C, 0x5D, 0xD1, 0x9C, 0xD1, 0x14, 0xA4, 0x34, 0xDD, 0x64, 0x2F, 0x1F, 0xE3, 0xDF,
+    0x0B, 0xB0, 0x82, 0x5A, 0x69, 0x7F, 0x70, 0x3A, 0x4B, 0xD6, 0x2A, 0x47, 0xEA, 0xD9, 0xE9, 0x63,
+    0xCC, 0x80, 0xF6, 0xB7, 0x5A, 0xB4, 0x30, 0x4F, 0xC2, 0x29, 0x80, 0x27, 0xF5, 0x37, 0x11, 0xB0,
+    0x77, 0xA5, 0x89, 0x63, 0x99, 0xC7, 0x28, 0x3A, 0xE6, 0x1D, 0x19, 0xDF, 0xF4, 0x38, 0xD7, 0xD3,
+    0x0B, 0x1B, 0x34, 0x07, 0x7B, 0x4B, 0x64, 0x5F, 0x2C, 0x95, 0xFB, 0x3B, 0x48, 0x1D, 0xFA, 0xD9,
+    0xAF, 0x71, 0x11, 0x63, 0x47, 0x86, 0x0C, 0x00, 0xE4, 0xEC, 0x11, 0x7D, 0x48, 0xB8, 0xCF, 0x55,
+    0x4E, 0xAC, 0x99, 0x70, 0x8D, 0x1C, 0xD2, 0xD9, 0xC9, 0xE3, 0xD4, 0x52, 0xAB, 0x3B, 0xBF, 0xEC,
+    0x40, 0xAD, 0x18, 0x59, 0x7D, 0xE4, 0xE9, 0xE1, 0x67, 0xE0, 0x8C, 0x2E, 0xAB, 0x2F, 0x74, 0x90,
+    0x9E, 0x9D, 0x39, 0x8A, 0xF7, 0x9F, 0x51, 0x51, 0xBA, 0xB6, 0xF6, 0xFF, 0xEF, 0x0C, 0x67, 0x40,
+    0xD1, 0x62, 0xC4, 0xE1, 0x55, 0xA0, 0x9F, 0xBB, 0xFF, 0xF8, 0xAA, 0x97, 0xA0, 0x74, 0x92, 0x8B,
+    0x42, 0xEB, 0x3C, 0x86, 0xFB, 0x37, 0xE2, 0x53, 0xDD, 0x18, 0xB0, 0xA6, 0x1A, 0xAE, 0xAE, 0x21,
+    0xD9, 0x93, 0xC7, 0xDD, 0x18, 0xDE, 0x35, 0x6C, 0x11, 0x79, 0xA1, 0x4F, 0x77, 0x37, 0x59, 0x65,
+    0x5F, 0xBD, 0x73, 0xEE, 0xF8, 0x8B, 0x49, 0x37, 0xA3, 0x65, 0x10, 0x4E, 0x33, 0xB3, 0x31, 0xA2,
+    0x46, 0x47, 0x4B, 0x1B, 0xDC, 0x23, 0x65, 0xD9, 0x89, 0x71, 0x22, 0x12, 0x98, 0xED, 0x29, 0x29,
+    0x70, 0x8B, 0x1C, 0xB4, 0xD3, 0xE5, 0xCB, 0xF1, 0x6F, 0xE1, 0xDD, 0x49, 0x78, 0xF7, 0xCA, 0x7C,
+    0x7D, 0xCF, 0x43, 0x42, 0x95, 0x3E, 0x5A, 0xED, 0x65, 0x07, 0xAD, 0x9E, 0x44, 0x97, 0xA5, 0xFC,
+    0xFE, 0xEC, 0xEC, 0x91, 0x9A, 0x26, 0x4C, 0x4D, 0x24, 0xE7, 0xAF, 0xD8, 0xCB, 0xDD, 0x8D, 0x53,
+    0x91, 0xE7, 0xC9, 0x45, 0x8E, 0x53, 0x10, 0x13, 0xFB, 0x57, 0xC7, 0x51, 0xF6, 0x33, 0x63, 0x6F,
+    0x9F, 0x92, 0xA6, 0x23, 0xD4, 0x47, 0x54, 0xA9, 0x1C, 0x63, 0x06, 0x95, 0xDC, 0xEB, 0x70, 0x21,
+    0x09, 0x05, 0xF1, 0xED, 0x1D, 0x05, 0x6A, 0x07, 0x34, 0x5D, 0x2D, 0x3A, 0x2A, 0x90, 0x6A, 0x65,
+    0x87, 0xFC, 0xA2, 0x64, 0xA5, 0x86, 0x08, 0xA4, 0x7C, 0x9F, 0x6E, 0xA4, 0x5F, 0x66, 0xDD, 0xC5,
+    0x5B, 0x34, 0x95, 0xA8, 0x6E, 0xD2, 0xFC, 0x5F, 0xC6, 0x47, 0x2B, 0x01, 0xFF, 0x12, 0x0E, 0x6A,
+    0xE7, 0xC3, 0x1B, 0x3B, 0xDB, 0xCD, 0x60, 0x7A, 0x26, 0xB8, 0x60, 0x6A, 0xD9, 0xE1, 0xF6, 0x10,
+    0xE9, 0x67, 0xA0, 0x39, 0x30, 0xD9, 0xB3, 0xC4, 0xB7, 0xFC, 0xF3, 0x58, 0x7C, 0xAF, 0x7F, 0x75,
+    0xB5, 0x46, 0xE3, 0xC7, 0xBB, 0xC7, 0xAC, 0xCD, 0xD6, 0x96, 0x46, 0x87, 0xB9, 0xE7, 0x83, 0x34,
+    0xD4, 0x73, 0xA0, 0xA5, 0x7D, 0x7F, 0x00, 0x60, 0x70, 0x91, 0x07, 0xF3, 0xF4, 0xA0, 0x93, 0xEE,
+    0x28, 0x99, 0xAD, 0x6C, 0x37, 0xE7, 0x66, 0xE6, 0xA8, 0x65, 0xF7, 0x01, 0x28, 0x7C, 0x52, 0xF8,
+    0x9F, 0xA9, 0xF4, 0xB6, 0x32, 0x7F, 0x3F, 0x48, 0xA1, 0x26, 0xD2, 0xE6, 0xCA, 0x56, 0xFC, 0x31,
+    0xA7, 0x9D, 0xF8, 0xCA, 0x37, 0x44, 0x62, 0xBF, 0x03, 0xE9, 0xE5, 0x66, 0x87, 0x0E, 0x8E, 0x79,
+    0xB1, 0xAF, 0xDA, 0x98, 0xFB, 0x2A, 0x7E, 0xF8, 0x59, 0x22, 0x9E, 0x83, 0xEB, 0xA0, 0xCE, 0xBF,
+    0x6C, 0x4E, 0xF2, 0x55, 0xE3, 0xFB, 0xFC, 0x47, 0x25, 0xCE, 0x3F, 0x0A, 0xC2, 0x30, 0x18, 0x87,
+    0xE1, 0x1F, 0xFE, 0x29, 0x08, 0x85, 0x76, 0x11, 0x1C, 0x2C, 0xAD, 0x9B, 0x43, 0xC4, 0x0A, 0x41,
+    0x2A, 0x44, 0x9B, 0x23, 0x14, 0xC4, 0xDD, 0x23, 0x64, 0xA8, 0xE0, 0x20, 0x98, 0x23, 0xF4, 0x08,
+    0x3D, 0x42, 0x04, 0x17, 0x27, 0xBF, 0x23, 0xE4, 0x08, 0x99, 0x75, 0xC9, 0x11, 0xB4, 0x74, 0x79,
+    0xC7, 0x87, 0x37, 0xBB, 0xAE, 0x82, 0x50, 0xD4, 0x4D, 0x80, 0x54, 0xEF, 0xAC, 0x6A, 0x45, 0xF5,
+    0x76, 0x47, 0x9A, 0xFE, 0x5B, 0x65, 0x2F, 0xBB, 0xD6, 0x10, 0x02, 0xF0, 0xDE, 0x38, 0xA0, 0xA4,
+    0x0D, 0x0D, 0x28, 0x92, 0x13, 0xA4, 0x72, 0x4B, 0x39, 0xED, 0x28, 0x95, 0x93, 0x2C, 0xA9, 0x85,
+    0xCB, 0x49, 0xC6, 0x0F, 0x5B, 0xEA, 0x08, 0x0B, 0x7D, 0xB1, 0xCC, 0x87, 0xF9, 0x18, 0x77, 0xDB,
+    0x34, 0xA3, 0x25, 0xAF, 0x85, 0x29, 0xB8, 0x6A, 0x0A, 0xA3, 0xF8, 0x0C, 0xCA, 0xB4, 0x9A, 0x31,
+    0xDE, 0x99, 0xC6, 0x79, 0x0F, 0xEC, 0xBF, 0x9F, 0x9B, 0x60, 0x45, 0x2C, 0x92, 0x39, 0x07, 0x37,
+    0xCF, 0x83, 0x52, 0x2A, 0x8E, 0xB0, 0x26, 0xD5, 0x9E, 0xCF, 0x77, 0x3B, 0x46, 0xBF, 0xF3, 0x76,
+    0x27, 0xD9, 0x8B, 0xD0, 0x03, 0x1A, 0xCA, 0x00, 0xDD, 0x93, 0x77, 0xCE, 0x5D, 0x7F, 0x85, 0x52,
+    0x3D, 0x6F, 0x13, 0x41, 0x10, 0x7D, 0x77, 0xC6, 0x76, 0x3E, 0x7C, 0x76, 0x8A, 0x04, 0x45, 0x8A,
+    0x95, 0x18, 0x14, 0x90, 0x8B, 0x4D, 0xBC, 0x48, 0x87, 0xB4, 0xC5, 0x25, 0xDE, 0x1F, 0x40, 0xE1,
+    0xC6, 0xD4, 0xAE, 0x40, 0x4A, 0x01, 0x5B, 0x5C, 0x61, 0x05, 0x48, 0x56, 0x69, 0x68, 0x53, 0x80,
+    0x44, 0x41, 0xE1, 0x16, 0xAA, 0x8D, 0xE4, 0x02, 0xD1, 0x78, 0x13, 0x0A, 0x0A, 0x1A, 0x97, 0x90,
+    0xEA, 0xC4, 0x1F, 0xC8, 0x09, 0xA5, 0x08, 0x4A, 0x71, 0xCC, 0xDA, 0x21, 0x89, 0x84, 0x51, 0xE6,
+    0xDD, 0x3E, 0xCD, 0xCD, 0xCC, 0x8E, 0x66, 0xDF, 0x6E, 0xAB, 0x75, 0xCD, 0xD0, 0xAE, 0xBF, 0x9A,
+    0xBF, 0x32, 0xF8, 0x80, 0xFE, 0x98, 0x68, 0xBD, 0x07, 0x3D, 0x01, 0x12, 0x53, 0x58, 0xC5, 0xE7,
+    0x5E, 0xAD, 0x36, 0x55, 0xC3, 0x24, 0xCC, 0x35, 0x93, 0x05, 0xE9, 0xD6, 0x20, 0x43, 0xBB, 0x8D,
+    0x2C, 0xD3, 0x23, 0xCE, 0x32, 0xDB, 0x26, 0x93, 0x57, 0x5E, 0x9C, 0xDE, 0x84, 0xBF, 0x7B, 0x1D,
+    0x23, 0x60, 0x42, 0x44, 0x11, 0x63, 0x82, 0x63, 0xCC, 0x88, 0x84, 0x60, 0x01, 0x25, 0x16, 0x19,
+    0x17, 0x46, 0xA4, 0x51, 0x1C, 0xC5, 0x4C, 0xB0, 0x50, 0x28, 0x3E, 0xA4, 0xE4, 0x35, 0xDF, 0xFD,
+    0x89, 0x54, 0x18, 0xC6, 0x83, 0x45, 0xDF, 0xFA, 0xD6, 0xB3, 0xDB, 0x27, 0x5B, 0xC7, 0x9E, 0x75,
+    0xF0, 0x2F, 0xE1, 0xD9, 0x17, 0x27, 0x4F, 0x8E, 0xC7, 0xFE, 0xD6, 0xF1, 0xEE, 0xC9, 0x38, 0x77,
+    0x0B, 0x4D, 0xC2, 0x3A, 0x62, 0x0C, 0xE4, 0x20, 0x25, 0xC8, 0x18, 0xFD, 0x53, 0x6A, 0xB9, 0xB1,
+    0x1E, 0xAD, 0xB9, 0xD6, 0x2F, 0x67, 0xF5, 0xA9, 0x28, 0xCA, 0x94, 0x82, 0x4E, 0xB9, 0xBD, 0x1B,
+    0x94, 0xFB, 0x54, 0xFB, 0xBF, 0x72, 0x79, 0x54, 0x70, 0x4F, 0xE7, 0x31, 0x19, 0x40, 0xBE, 0xE5,
+    0xBD, 0xD9, 0xFA, 0xD1, 0x7A, 0xF7, 0xB8, 0xD3, 0xC2, 0xBF, 0x90, 0x94, 0xBF, 0x2D, 0x9F, 0x7E,
+    0xB8, 0x9F, 0x9F, 0x7E, 0x3B, 0xB1, 0x81, 0xB7, 0xA2, 0x4B, 0xD4, 0x65, 0x7B, 0x58, 0x25, 0xEE,
+    0x25, 0x21, 0xF1, 0xD0, 0xF4, 0x46, 0xFC, 0xCD, 0x36, 0x90, 0xFC, 0x7C, 0x96, 0x9E, 0xDB, 0xED,
+    0xAF, 0x61, 0x78, 0x68, 0x1B, 0x8F, 0xD4, 0x43, 0x3B, 0x44, 0x7D, 0xC4, 0x9C, 0x3F, 0x38, 0xB4,
+    0x18, 0x6E, 0xA6, 0xE7, 0xDA, 0xB3, 0x15, 0xBD, 0x09, 0x5F, 0xBA, 0x83, 0xCF, 0x94, 0xDD, 0x2D,
+    0xCC, 0x54, 0xCB, 0x11, 0xDD, 0x8C, 0xE1, 0x96, 0x22, 0x55, 0x5E, 0x76, 0xBA, 0xA7, 0xE2, 0xC0,
+    0xF2, 0x23, 0x4D, 0x35, 0xBC, 0x1B, 0x05, 0x05, 0xF0, 0x4E, 0xD7, 0x44, 0x22, 0xA8, 0x16, 0xA6,
+    0x29, 0xD2, 0xD9, 0xEF, 0x9A, 0x34, 0x12, 0x71, 0x50, 0x65, 0x85, 0x69, 0x37, 0x8F, 0xA7, 0x8B,
+    0x86, 0x55, 0x73, 0x72, 0x19, 0x5D, 0xC2, 0x32, 0x72, 0x32, 0x44, 0x19, 0x45, 0x5D, 0xD4, 0x65,
+    0x84, 0xA4, 0x5B, 0x8D, 0xAB, 0x5E, 0xE9, 0xAE, 0xCE, 0x15, 0x30, 0xF7, 0x5D, 0x0A, 0x95, 0x78,
+    0xEF, 0x41, 0x7E, 0xE9, 0x8E, 0xA6, 0x38, 0x65, 0x63, 0xD6, 0x8F, 0x4C, 0x64, 0x84, 0x83, 0x12,
+    0xAA, 0xCE, 0x57, 0xDD, 0x70, 0xDD, 0x8D, 0x98, 0x8D, 0x1F, 0x4E, 0x53, 0x2E, 0xC0, 0x4D, 0x9C,
+    0x03, 0x75, 0x05, 0x1D, 0x9D, 0xCE, 0xDD, 0x01, 0x2C, 0x7C, 0xED, 0x62, 0xC1, 0xB5, 0xD8, 0x0E,
+    0xCE, 0x30, 0x38, 0xCA, 0x24, 0x8C, 0x6F, 0xA1, 0x60, 0x97, 0xD2, 0xE7, 0xB6, 0xA9, 0x33, 0x08,
+    0x18, 0xCC, 0xBB, 0x82, 0x0B, 0x5B, 0xA3, 0x39, 0xD7, 0xE8, 0x45, 0xD0, 0xBE, 0x1D, 0xF4, 0x07,
+    0xD6, 0xC0, 0x18, 0x28, 0xB5, 0x94, 0xAA, 0xA6, 0x56, 0x02, 0x6A, 0x1E, 0xFC, 0xB2, 0x90, 0x3E,
+    0x2A, 0xEC, 0x37, 0xB4, 0x69, 0xA6, 0x06, 0xB1, 0x41, 0xDD, 0xCC, 0x9E, 0xA9, 0x4A, 0xA2, 0x02,
+    0xF0, 0xD2, 0x45, 0xBF, 0x6E, 0x05, 0x71, 0x05, 0x9E, 0x9C, 0x5B, 0xF9, 0x9D, 0x84, 0x0D, 0xA7,
+    0x1B, 0x29, 0xB9, 0x4F, 0x52, 0x26, 0x4C, 0xFC, 0xB2, 0xE2, 0xE0, 0x8B, 0xE6, 0x47, 0xAF, 0x47,
+    0x95, 0x7F, 0x00, 0xB5, 0x8E, 0x31, 0x0A, 0xC2, 0x40, 0x14, 0x05, 0x5F, 0x92, 0x22, 0x60, 0xD0,
+    0x94, 0x82, 0xE6, 0x00, 0x29, 0x12, 0xB6, 0xD9, 0x22, 0x4D, 0xC8, 0x1E, 0xC9, 0x22, 0x42, 0x50,
+    0x34, 0x7B, 0x04, 0x8F, 0xB0, 0x78, 0x02, 0x05, 0xD3, 0x19, 0xFD, 0x47, 0xF8, 0x47, 0xF8, 0x1E,
+    0xC1, 0x5E, 0xD0, 0xC5, 0xD2, 0x5E, 0xA6, 0x1D, 0x98, 0x49, 0xA4, 0xEC, 0x74, 0xB1, 0xF2, 0xB4,
+    0x79, 0xDD, 0xA6, 0x0C, 0x17, 0x4A, 0x2C, 0x99, 0xAB, 0x5C, 0xF3, 0x82, 0x83, 0x6B, 0x48, 0xA3,
+    0x82, 0xB2, 0x01, 0x05, 0xB4, 0xB4, 0x23, 0x62, 0x2E, 0xD1, 0xE2, 0x6D, 0x1F, 0x2C, 0x32, 0xB0,
+    0xB2, 0xBD, 0x38, 0x0E, 0x29, 0x42, 0x82, 0x29, 0x32, 0x8F, 0xB2, 0x6B, 0x3E, 0x51, 0x63, 0xB6,
+    0xC4, 0xF2, 0xE4, 0xC6, 0x28, 0x73, 0xF6, 0xE6, 0x45, 0x94, 0xB7, 0x12, 0x33, 0x62, 0x23, 0x75,
+    0x9B, 0xEB, 0x5C, 0x17, 0x7A, 0x77, 0x4D, 0x7E, 0xDA, 0x0B, 0xEC, 0x31, 0xF9, 0x92, 0xA2, 0x27,
+    0x65, 0x07, 0x3E, 0x70, 0x64, 0x67, 0xE8, 0x70, 0x17, 0x65, 0x8E, 0x14, 0x91, 0x32, 0xFE, 0x83,
+    0xE7, 0x74, 0xC3, 0xBF, 0x3F, 0x3F, 0x1D, 0xCE, 0xB1, 0x0D, 0xC2, 0x30, 0x10, 0x05, 0xD0, 0x1F,
+    0xBB, 0x48, 0x61, 0x29, 0x9E, 0x20, 0x78, 0x03, 0x18, 0x81, 0x9B, 0x03, 0x86, 0x60, 0x03, 0x6C,
+    0x89, 0x82, 0x35, 0xE8, 0x90, 0xA0, 0x60, 0x83, 0xF8, 0xD8, 0x80, 0x11, 0x28, 0x10, 0x0D, 0x05,
+    0x51, 0x44, 0x43, 0x48, 0x30, 0x67, 0xAE, 0x78, 0xFA, 0x3A, 0xDD, 0x9D, 0xCE, 0x27, 0x76, 0x47,
+    0xB6, 0x05, 0x5B, 0xC0, 0x2E, 0x60, 0x13, 0x24, 0xF8, 0x36, 0xEB, 0x28, 0x07, 0x78, 0x2A, 0x3E,
+    0xAC, 0xCE, 0xAC, 0x03, 0x69, 0xC2, 0x7C, 0x84, 0x91, 0xDE, 0x80, 0x0A, 0x58, 0x1F, 0x82, 0x4F,
+    0x21, 0xBE, 0x21, 0xD5, 0x9C, 0x48, 0xAC, 0xF5, 0xE6, 0xEF, 0x36, 0x5B, 0xAE, 0x5E, 0x0D, 0x5C,
+    0x9C, 0x75, 0x0F, 0xB8, 0x9B, 0x51, 0x77, 0xD4, 0xB2, 0xFA, 0xCD, 0xAA, 0x25, 0xA6, 0x64, 0xF6,
+    0x4F, 0x24, 0xD6, 0xDD, 0x20, 0xE7, 0x2E, 0xAA, 0x6F, 0x0D, 0xED, 0x2A, 0x90, 0x1F, 0x65, 0x00,
+    0x71, 0xC0, 0x04, 0xF9, 0x87, 0xB2, 0xBF, 0x22, 0x86, 0x1F, 0x55, 0x8F, 0x31, 0x6E, 0xC2, 0x40,
+    0x10, 0x45, 0x9F, 0xC7, 0x82, 0x95, 0x82, 0x62, 0x1A, 0x4A, 0x4B, 0x94, 0xD9, 0x22, 0x12, 0x2E,
+    0x10, 0xA4, 0x89, 0xB2, 0x77, 0xE0, 0x22, 0x5B, 0xB8, 0xC7, 0x47, 0xC8, 0x11, 0x1C, 0x4E, 0x40,
+    0x91, 0x3E, 0x73, 0x04, 0x8E, 0xE0, 0x23, 0xA4, 0xA0, 0x48, 0x81, 0xB4, 0x8C, 0x4D, 0xA2, 0x18,
+    0xCD, 0xE8, 0x17, 0x6F, 0xFF, 0xFC, 0x99, 0x15, 0x78, 0x00, 0x0F, 0xFB, 0x74, 0x36, 0x2D, 0x40,
+    0xC0, 0x31, 0xD7, 0x6D, 0xDC, 0x2D, 0x72, 0xC6, 0xD5, 0xBF, 0x48, 0x03, 0xAD, 0x59, 0x4D, 0x11,
+    0x35, 0x72, 0x6F, 0xD9, 0x2D, 0xB6, 0x71, 0xAE, 0x0E, 0x11, 0x0A, 0xD1, 0x17, 0x8E, 0x66, 0x35,
+    0x7D, 0x14, 0x35, 0xE2, 0xC2, 0x38, 0xF5, 0xD7, 0x1A, 0xC6, 0xF4, 0x8F, 0xA5, 0x0B, 0xCF, 0x56,
+    0x1E, 0x3F, 0xF5, 0xA5, 0x5F, 0xFB, 0xF4, 0x53, 0x53, 0x32, 0xA5, 0x1B, 0xAA, 0xE5, 0x10, 0x3E,
+    0xF4, 0x3D, 0x7E, 0x5D, 0xA8, 0x39, 0x49, 0xB0, 0x43, 0x26, 0x99, 0x96, 0x99, 0xC6, 0x4C, 0x53,
+    0xD2, 0x88, 0x79, 0x99, 0xD8, 0xAD, 0x81, 0x19, 0xAC, 0xD2, 0xB9, 0x1A, 0x74, 0x36, 0x90, 0xEC,
+    0x84, 0xFB, 0x64, 0xF9, 0xCA, 0xD3, 0x86, 0xBC, 0xEA, 0xDB, 0xAD, 0xFF, 0xDB, 0x76, 0x90, 0x37,
+    0xFB, 0xD4, 0x41, 0xD5, 0x6B, 0xDE, 0x18, 0x19, 0x1B, 0x6E, 0x23, 0x36, 0x6B, 0x09, 0xAE, 0xEE,
+    0xD3, 0x6E, 0x5F, 0x7D, 0x4B, 0xDF, 0x2D, 0x7E, 0x95, 0xBA, 0x42, 0x1A, 0x23, 0x57, 0x95, 0x54,
+    0xBF, 0x6F, 0x23, 0x45, 0x14, 0xFE, 0x66, 0x57, 0xB0, 0x90, 0x75, 0xEC, 0x43, 0x22, 0xD5, 0xE5,
+    0xCE, 0x57, 0x50, 0x98, 0xC8, 0xCA, 0x5A, 0xC2, 0x48, 0x8E, 0x64, 0xC7, 0x23, 0xA5, 0x05, 0x29,
+    0x05, 0x6E, 0x40, 0x42, 0xA9, 0x8D, 0x74, 0x31, 0x92, 0x0B, 0xEB, 0x08, 0xE7, 0x81, 0x86, 0x82,
+    0xC6, 0x12, 0xA2, 0xA3, 0x70, 0xE1, 0xE2, 0xF0, 0x15, 0x59, 0xE9, 0x5C, 0x9C, 0xA2, 0x04, 0xAF,
+    0x68, 0x11, 0xB0, 0xFF, 0x00, 0xD1, 0x82, 0x40, 0x82, 0x04, 0xC4, 0x16, 0x2E, 0x4C, 0x94, 0x64,
+    0xF8, 0x66, 0x9C, 0xF3, 0x9D, 0x2C, 0xEE, 0x80, 0xF5, 0xDB, 0xF5, 0x7B, 0xDF, 0x7C, 0xEF, 0xCD,
+    0xAF, 0xF7, 0x5E, 0x15, 0x39, 0xDC, 0xC0, 0x32, 0xBF, 0x45, 0xF8, 0xA8, 0xC0, 0xD3, 0x29, 0xDC,
+    0x93, 0x04, 0x22, 0x8A, 0x81, 0x1F, 0x23, 0xE0, 0x81, 0x04, 0x3E, 0x00, 0xB0, 0xC9, 0xB7, 0x08,
+    0x78, 0x53, 0x64, 0x6F, 0x83, 0x74, 0x78, 0x70, 0xB4, 0xCC, 0xED, 0xA2, 0xEA, 0xA1, 0xED, 0x23,
+    0xCC, 0x22, 0x5C, 0x46, 0x58, 0x44, 0x27, 0x44, 0xA0, 0x50, 0xD7, 0x78, 0xF5, 0x1D, 0x30, 0xE2,
+    0x4C, 0x82, 0x3F, 0xB1, 0xB6, 0xFF, 0xD8, 0xE4, 0x10, 0x09, 0xF6, 0x19, 0x7F, 0x26, 0xBD, 0x93,
+    0x4B, 0xE4, 0x51, 0x43, 0x15, 0x63, 0x54, 0x9C, 0x6F, 0xD0, 0xCE, 0x79, 0xB2, 0x5D, 0xF5, 0x64,
+    0x39, 0xF1, 0x51, 0x57, 0x39, 0x3B, 0x16, 0x9C, 0x4C, 0xF0, 0xFE, 0x58, 0xCD, 0x7C, 0x0A, 0xC0,
+    0x1E, 0xF0, 0x07, 0xC4, 0xF7, 0x70, 0x3E, 0x85, 0xBB, 0xA5, 0x7C, 0x37, 0x5A, 0x16, 0xF1, 0x2A,
+    0x92, 0x0A, 0xD2, 0x8D, 0xC6, 0xA4, 0xAB, 0xA7, 0x63, 0x3D, 0xBD, 0xDB, 0x18, 0x55, 0xCD, 0x82,
+    0x92, 0x9B, 0x22, 0xCA, 0x39, 0x91, 0xBF, 0x25, 0xDD, 0x4F, 0xE0, 0x7C, 0x0B, 0xF1, 0x3B, 0x30,
+    0x05, 0x42, 0x08, 0x7D, 0x9E, 0x3B, 0x19, 0xD4, 0x80, 0xB6, 0xB1, 0xA0, 0xF5, 0xF4, 0x6C, 0x78,
+    0x2F, 0xB4, 0x26, 0x41, 0x0E, 0x91, 0x00, 0xC4, 0x86, 0x76, 0xFA, 0x73, 0xCD, 0x95, 0x6D, 0x0F,
+    0xE1, 0x92, 0xA1, 0x1D, 0x7C, 0x75, 0x2F, 0x2C, 0xA0, 0x5D, 0x46, 0xAD, 0x85, 0xDC, 0x99, 0xA1,
+    0x89, 0x88, 0x07, 0x77, 0x1E, 0x0C, 0x07, 0x1D, 0x60, 0xD4, 0xD8, 0xD6, 0x7A, 0x12, 0x62, 0x9B,
+    0x3A, 0x11, 0xE2, 0xFA, 0x02, 0xCD, 0xFD, 0x08, 0x22, 0xB5, 0xB1, 0x2B, 0x63, 0x7D, 0x3E, 0x1C,
+    0x1E, 0x52, 0x31, 0xA6, 0x48, 0x39, 0x44, 0xC2, 0x2A, 0x17, 0x70, 0x81, 0xDD, 0xFD, 0xC8, 0x13,
+    0x29, 0xA7, 0x72, 0x94, 0xA5, 0x9D, 0x1D, 0x9A, 0x3D, 0xB5, 0xDA, 0x78, 0x3D, 0x6D, 0x8E, 0x0D,
+    0x8D, 0x37, 0xA5, 0xB5, 0x6C, 0xDE, 0x4F, 0x38, 0xCF, 0xCA, 0x5B, 0x9D, 0xAE, 0x3E, 0x7F, 0xD9,
+    0xC4, 0x19, 0x11, 0x21, 0x5E, 0xD7, 0x3A, 0xCA, 0x7F, 0x7E, 0x9B, 0x27, 0x7C, 0xE3, 0x3F, 0xBF,
+    0x39, 0x15, 0xC8, 0x6E, 0xA2, 0xA3, 0xBA, 0x4E, 0x36, 0x87, 0x69, 0x1E, 0x2D, 0x5F, 0x5D, 0x73,
+    0x79, 0xF7, 0x5C, 0x6C, 0xC7, 0x4A, 0x0A, 0x87, 0xBB, 0x93, 0xBC, 0xF2, 0x5B, 0x45, 0xB4, 0xEE,
+    0x0E, 0xD3, 0xAE, 0xE6, 0xEC, 0xBC, 0xC0, 0x95, 0x06, 0x57, 0xB3, 0xCA, 0xE9, 0x4B, 0x3C, 0xBE,
+    0xD8, 0x89, 0x5C, 0xE9, 0x21, 0x4B, 0xA0, 0x80, 0x32, 0x81, 0x32, 0xB3, 0x25, 0x43, 0xDB, 0x83,
+    0x2B, 0x19, 0x20, 0x26, 0x54, 0x22, 0x77, 0x55, 0x44, 0x22, 0xDA, 0x38, 0xF6, 0x27, 0xFE, 0x64,
+    0xE3, 0xF8, 0x25, 0xEA, 0xF9, 0xA8, 0x1C, 0xB6, 0x4A, 0xED, 0x7E, 0x5E, 0x8D, 0x26, 0x0C, 0x5B,
+    0xB6, 0x77, 0xC1, 0x09, 0x62, 0xA6, 0xA0, 0x99, 0xD9, 0x55, 0x17, 0x1E, 0xDE, 0xF5, 0xE1, 0x33,
+    0xD4, 0x9B, 0x70, 0xBF, 0x80, 0xF3, 0x2B, 0xC4, 0xC4, 0xAE, 0x2F, 0x45, 0xB0, 0x85, 0x3B, 0x3F,
+    0xA0, 0x3F, 0x42, 0xBF, 0x6D, 0x94, 0xC0, 0x43, 0xDE, 0x8B, 0xEF, 0x1C, 0x87, 0xFD, 0x51, 0x99,
+    0x42, 0x25, 0xF0, 0xE2, 0xD0, 0x46, 0x7C, 0x9A, 0x1C, 0x0C, 0x07, 0xCC, 0x15, 0xE0, 0x96, 0xB1,
+    0x9C, 0x18, 0x9E, 0x32, 0xB9, 0x5D, 0xE5, 0x91, 0x42, 0x24, 0x70, 0x23, 0x63, 0x05, 0xC3, 0x2F,
+    0xBB, 0xFA, 0x32, 0x5C, 0x7C, 0x2A, 0xC9, 0xBF, 0xFD, 0xCC, 0x75, 0x1F, 0xDA, 0x4C, 0xFD, 0x0E,
+    0xAE, 0xC9, 0x54, 0xC9, 0x4C, 0xCD, 0x8A, 0x88, 0x99, 0x5A, 0x44, 0x58, 0x46, 0x3B, 0x44, 0x85,
+    0x42, 0x85, 0x26, 0x41, 0x0E, 0x91, 0x40, 0x1A, 0xC9, 0x74, 0xA1, 0xA3, 0x71, 0xEF, 0xC0, 0x61,
+    0x81, 0xDC, 0x8F, 0xAB, 0x48, 0x2B, 0xC6, 0xAB, 0xF5, 0xBF, 0x84, 0x2E, 0x74, 0xA4, 0x3B, 0x83,
+    0x20, 0x17, 0x61, 0x93, 0xAB, 0x92, 0x68, 0x3D, 0xF3, 0x50, 0xAC, 0x90, 0x98, 0x57, 0x36, 0x03,
+    0x1E, 0x62, 0xE1, 0xE9, 0x60, 0xF4, 0xD0, 0xA2, 0x73, 0x65, 0x61, 0xF8, 0x0A, 0xDB, 0xEB, 0xCC,
+    0xBE, 0xFF, 0x48, 0x9B, 0x83, 0x42, 0x5E, 0xCB, 0xFF, 0x95, 0x94, 0x03, 0xB5, 0xA0, 0xDB, 0x24,
+    0x4B, 0x57, 0x1A, 0xDB, 0x73, 0xE5, 0x39, 0x81, 0xFA, 0x29, 0x76, 0x8E, 0x30, 0x57, 0xF8, 0xFC,
+    0xF6, 0x76, 0xB4, 0x7B, 0x29, 0x67, 0x7C, 0x2A, 0x34, 0xAF, 0xBA, 0x04, 0x33, 0xF4, 0x17, 0x47,
+    0xD5, 0xF5, 0xCD, 0xC6, 0x0B, 0x2C, 0x9A, 0xA8, 0xD1, 0x30, 0xA4, 0x45, 0xE5, 0x45, 0x7C, 0xE8,
+    0xC5, 0x35, 0x76, 0x37, 0x2F, 0xC6, 0x11, 0xAD, 0xAB, 0xCC, 0x2E, 0x23, 0x90, 0x4E, 0x82, 0x75,
+    0xAC, 0x3B, 0x49, 0x20, 0x5F, 0xC1, 0x23, 0x1C, 0x4B, 0xE8, 0xE3, 0xC8, 0x8F, 0x7D, 0x75, 0x84,
+    0x1A, 0xCB, 0xE4, 0x7A, 0x8F, 0x6B, 0xA0, 0x6D, 0xF0, 0x82, 0xA3, 0x90, 0xFF, 0x68, 0x0A, 0x31,
+    0xBD, 0x4E, 0x45, 0xA4, 0xFC, 0xEF, 0x19, 0xDB, 0xE0, 0xF3, 0xA2, 0xB5, 0x65, 0x5F, 0xC5, 0x13,
+    0x45, 0x3B, 0xCF, 0x73, 0xD3, 0x41, 0xF6, 0x07, 0x1D, 0xDB, 0x48, 0xD3, 0x55, 0x84, 0x15, 0x74,
+    0x4A, 0x08, 0xCE, 0x06, 0xCF, 0xB3, 0x0D, 0xCD, 0xAA, 0x81, 0xA7, 0x92, 0x35, 0x2D, 0x80, 0x45,
+    0xA6, 0x2F, 0x65, 0x73, 0x9C, 0xA0, 0xC5, 0xD4, 0xAF, 0x20, 0xAE, 0x8A, 0xA8, 0xE2, 0xA8, 0xD1,
+    0x7B, 0xA7, 0x26, 0xA0, 0x6F, 0x29, 0x19, 0x3C, 0x6E, 0x49, 0xA1, 0x2D, 0x97, 0xD0, 0xDE, 0xCC,
+    0xAC, 0x25, 0x71, 0x3B, 0x6B, 0xC3, 0x01, 0xDB, 0xC7, 0xB3, 0x16, 0x06, 0x34, 0x87, 0x7D, 0xF6,
+    0x32, 0x31, 0xEE, 0xC1, 0x7F, 0xA3, 0x83, 0x42, 0x66, 0x09, 0xA5, 0x8C, 0x8B, 0x9D, 0x8C, 0x23,
+    0xC7, 0x5A, 0xAB, 0x7E, 0xC6, 0x51, 0x46, 0x37, 0x58, 0x31, 0x93, 0xB5, 0x1C, 0xC3, 0xB5, 0x7C,
+    0x49, 0x3E, 0x4F, 0xA5, 0x04, 0xF2, 0x71, 0xC5, 0xE7, 0x0E, 0x76, 0xD8, 0x0E, 0x0C, 0x56, 0xE4,
+    0x4E, 0x0C, 0xE7, 0x49, 0x3E, 0x4F, 0x1B, 0xAF, 0xA9, 0x07, 0xD8, 0xF9, 0xE9, 0x63, 0xD9, 0xDB,
+    0x14, 0xAA, 0xB7, 0x2E, 0x94, 0xD1, 0x0D, 0x66, 0xC6, 0x16, 0xF9, 0x05, 0x62, 0x25, 0x90, 0xEF,
+    0x7C, 0x2D, 0x7B, 0x4B, 0xE4, 0x17, 0xC8, 0x4F, 0x1C, 0xF2, 0x5D, 0x8E, 0x2C, 0xCD, 0xF9, 0xA6,
+    0x0C, 0x9F, 0x2E, 0x6B, 0x07, 0xFD, 0xAE, 0x9E, 0xB0, 0xF9, 0x54, 0x3D, 0x15, 0xEE, 0xF9, 0xCA,
+    0x74, 0x21, 0xFC, 0x0D, 0x8D, 0x90, 0x31, 0x4A, 0x44, 0x31, 0x10, 0x86, 0xBF, 0x25, 0x76, 0x11,
+    0x73, 0x81, 0xC0, 0xDE, 0x40, 0x2D, 0x53, 0x49, 0xD6, 0xD6, 0xC6, 0x6A, 0xDB, 0x77, 0x01, 0x0B,
+    0x0B, 0xAD, 0x93, 0x9B, 0xE8, 0x05, 0x04, 0x5B, 0x41, 0xC9, 0xEB, 0xB7, 0x99, 0x23, 0xAC, 0xA0,
+    0x6E, 0xB1, 0x4D, 0x04, 0x15, 0x94, 0xAC, 0xCF, 0x64, 0x6D, 0x04, 0x5D, 0x10, 0xE6, 0x9F, 0x66,
+    0x66, 0xBE, 0xF9, 0x67, 0x48, 0x17, 0xA2, 0x16, 0xEF, 0x59, 0x33, 0xC7, 0x54, 0x85, 0x61, 0xF0,
+    0xDD, 0xF4, 0x91, 0x1D, 0xE4, 0x97, 0xCC, 0xE4, 0x81, 0x30, 0x5B, 0x41, 0x8A, 0x6A, 0x29, 0x9A,
+    0xDE, 0x50, 0xFB, 0xA5, 0x9B, 0x4A, 0xAD, 0xFE, 0x0C, 0x33, 0x99, 0x87, 0x59, 0x21, 0x88, 0x7A,
+    0x12, 0xED, 0xC5, 0x20, 0x21, 0x4B, 0x77, 0xBC, 0xA1, 0x2D, 0x75, 0x2F, 0xA8, 0xC5, 0xEA, 0x16,
+    0x4D, 0xDE, 0x5E, 0x9B, 0x68, 0x2E, 0x0A, 0xD5, 0xC6, 0x49, 0xDB, 0x6B, 0xFF, 0x4C, 0x75, 0x78,
+    0xB7, 0xBA, 0x29, 0x43, 0x24, 0x1D, 0x15, 0xD4, 0xF2, 0x73, 0x0D, 0xB0, 0x0D, 0x60, 0x1B, 0xC0,
+    0x36, 0x80, 0xFD, 0x07, 0xA0, 0x1F, 0x15, 0x50, 0x57, 0xA0, 0xB7, 0xBE, 0xEF, 0xDC, 0xFC, 0x83,
+    0xFA, 0x23, 0xFF, 0x11, 0x43, 0x1F, 0x3C, 0x21, 0xC2, 0x5B, 0x66, 0xD4, 0x9F, 0x55, 0x39, 0xC6,
+    0xF7, 0x83, 0x9C, 0x3F, 0xDF, 0xF8, 0xEB, 0x7D, 0xC7, 0x1D, 0x8E, 0x3D, 0x71, 0x1C, 0x66, 0x87,
+    0x9C, 0x3A, 0x5E, 0xF3, 0xC1, 0x65, 0x8A, 0x63, 0xF9, 0x02, 0x63, 0x60, 0x68, 0x60, 0x60, 0x60,
+    0x60, 0xFE, 0x00, 0x24, 0xF8, 0xFF, 0x00, 0x09, 0x0B, 0x79, 0x20, 0xF1, 0x85, 0xF9, 0x00, 0x03,
+    0xF3, 0xFF, 0x8F, 0x1F, 0x18, 0xF8, 0xFF, 0xFF, 0xF8, 0xC3, 0x60, 0xFF, 0xFF, 0xC1, 0x7F, 0x06,
+    0xFB, 0x3F, 0x4C, 0xFF, 0x81, 0x2A, 0xF4, 0xFF, 0x30, 0x30, 0xFF, 0xA9, 0x07, 0xAA, 0xFE, 0xFF,
+    0xFF, 0x00, 0x03, 0x83, 0x9D, 0x3D, 0x50, 0x31, 0x9F, 0x0D, 0xCC, 0x00, 0x90, 0x51, 0x00,
 };
 
 static const EpdGlyph bookerly_8_regularGlyphs[] = {
@@ -1285,100 +963,96 @@ static const EpdGlyph bookerly_8_regularGlyphs[] = {
     { 10, 18, 158, 0, 17, 45, 4963 }, // U+017D
     { 9, 15, 134, 0, 14, 34, 5008 }, // U+017E
     { 9, 13, 108, 0, 13, 30, 5042 }, // U+017F
-    { 14, 14, 208, 0, 14, 49, 0 }, // U+01A0
-    { 11, 11, 159, 0, 11, 31, 49 }, // U+01A1
-    { 14, 14, 206, 0, 14, 49, 80 }, // U+01AF
-    { 11, 11, 173, 0, 11, 31, 129 }, // U+01B0
-    { 23, 18, 358, 0, 17, 104, 160 }, // U+01C4
-    { 21, 15, 334, 0, 14, 79, 264 }, // U+01C5
-    { 19, 15, 300, 0, 14, 72, 343 }, // U+01C6
-    { 17, 16, 257, 0, 12, 68, 415 }, // U+01C7
-    { 14, 18, 237, 0, 14, 63, 483 }, // U+01C8
-    { 10, 18, 163, 0, 14, 45, 546 }, // U+01C9
-    { 20, 16, 314, 0, 12, 80, 591 }, // U+01CA
-    { 18, 18, 294, 0, 14, 81, 671 }, // U+01CB
-    { 16, 18, 256, 0, 14, 72, 752 }, // U+01CC
-    { 13, 17, 198, 0, 17, 56, 824 }, // U+01CD
-    { 10, 14, 146, 0, 14, 35, 880 }, // U+01CE
-    { 7, 17, 101, 0, 17, 30, 915 }, // U+01CF
-    { 7, 14, 88, -1, 14, 25, 945 }, // U+01D0
-    { 13, 17, 208, 0, 17, 56, 970 }, // U+01D1
-    { 10, 14, 159, 0, 14, 35, 1026 }, // U+01D2
-    { 13, 17, 206, 0, 17, 56, 1061 }, // U+01D3
-    { 11, 14, 173, 0, 14, 39, 1117 }, // U+01D4
-    { 13, 18, 206, 0, 18, 59, 1156 }, // U+01D5
-    { 11, 17, 173, 0, 17, 47, 1215 }, // U+01D6
-    { 13, 19, 206, 0, 19, 62, 1262 }, // U+01D7
-    { 11, 18, 173, 0, 18, 50, 1324 }, // U+01D8
-    { 13, 19, 206, 0, 19, 62, 1374 }, // U+01D9
-    { 11, 18, 173, 0, 18, 50, 1436 }, // U+01DA
-    { 13, 19, 206, 0, 19, 62, 1486 }, // U+01DB
-    { 11, 18, 173, 0, 18, 50, 1548 }, // U+01DC
-    { 9, 9, 139, 0, 9, 21, 1598 }, // U+01DD
-    { 13, 18, 198, 0, 18, 59, 1619 }, // U+01DE
-    { 10, 17, 146, 0, 17, 43, 1678 }, // U+01DF
-    { 13, 18, 198, 0, 18, 59, 1721 }, // U+01E0
-    { 10, 17, 146, 0, 17, 43, 1780 }, // U+01E1
-    { 17, 15, 248, -1, 15, 64, 1823 }, // U+01E2
-    { 14, 13, 217, 0, 13, 46, 1887 }, // U+01E3
-    { 13, 12, 194, 0, 12, 39, 1933 }, // U+01E4
-    { 12, 13, 155, -1, 9, 39, 1972 }, // U+01E5
-    { 12, 17, 194, 0, 17, 51, 2011 }, // U+01E6
-    { 10, 18, 155, 0, 14, 45, 2062 }, // U+01E7
-    { 13, 17, 194, 0, 17, 56, 2107 }, // U+01E8
-    { 12, 18, 161, -1, 18, 54, 2163 }, // U+01E9
-    { 13, 16, 208, 0, 12, 52, 2217 }, // U+01EA
-    { 10, 13, 159, 0, 9, 33, 2269 }, // U+01EB
-    { 13, 19, 208, 0, 15, 62, 2302 }, // U+01EC
-    { 10, 17, 159, 0, 13, 43, 2364 }, // U+01ED
-    { 10, 17, 153, 0, 17, 43, 2407 }, // U+01EE
-    { 8, 18, 134, 0, 14, 36, 2450 }, // U+01EF
-    { 7, 18, 77, -1, 14, 32, 2486 }, // U+01F0
-    { 23, 13, 358, 0, 12, 75, 2518 }, // U+01F1
-    { 21, 13, 334, 0, 12, 69, 2593 }, // U+01F2
-    { 19, 14, 300, 0, 13, 67, 2662 }, // U+01F3
-    { 12, 16, 194, 0, 16, 48, 2729 }, // U+01F4
-    { 10, 18, 155, 0, 14, 45, 2777 }, // U+01F5
-    { 14, 16, 217, 0, 16, 56, 2822 }, // U+01F8
-    { 12, 14, 179, 0, 14, 42, 2878 }, // U+01F9
-    { 13, 19, 198, 0, 19, 62, 2920 }, // U+01FA
-    { 10, 19, 146, 0, 19, 48, 2982 }, // U+01FB
-    { 17, 16, 248, -1, 16, 68, 3030 }, // U+01FC
-    { 14, 14, 217, 0, 14, 49, 3098 }, // U+01FD
-    { 13, 16, 208, 0, 16, 52, 3147 }, // U+01FE
-    { 10, 14, 159, 0, 14, 35, 3199 }, // U+01FF
-    { 13, 17, 198, 0, 17, 56, 3234 }, // U+0200
-    { 10, 14, 146, 0, 14, 35, 3290 }, // U+0201
-    { 13, 16, 198, 0, 16, 52, 3325 }, // U+0202
-    { 10, 13, 146, 0, 13, 33, 3377 }, // U+0203
-    { 11, 17, 168, 0, 17, 47, 3410 }, // U+0204
-    { 9, 14, 139, 0, 14, 32, 3457 }, // U+0205
-    { 11, 16, 168, 0, 16, 44, 3489 }, // U+0206
-    { 9, 13, 139, 0, 13, 30, 3533 }, // U+0207
-    { 8, 17, 101, -2, 17, 34, 3563 }, // U+0208
-    { 7, 14, 88, -1, 14, 25, 3597 }, // U+0209
-    { 6, 16, 101, 0, 16, 24, 3622 }, // U+020A
-    { 6, 13, 88, 0, 13, 20, 3646 }, // U+020B
-    { 13, 17, 208, 0, 17, 56, 3666 }, // U+020C
-    { 10, 14, 159, 0, 14, 35, 3722 }, // U+020D
-    { 13, 16, 208, 0, 16, 52, 3757 }, // U+020E
-    { 10, 13, 159, 0, 13, 33, 3809 }, // U+020F
-    { 12, 17, 181, 0, 17, 51, 3842 }, // U+0210
-    { 8, 14, 123, 0, 14, 28, 3893 }, // U+0211
-    { 12, 16, 181, 0, 16, 48, 3921 }, // U+0212
-    { 8, 13, 123, 0, 13, 26, 3969 }, // U+0213
-    { 13, 17, 206, 0, 17, 56, 3995 }, // U+0214
-    { 11, 14, 173, 0, 14, 39, 4051 }, // U+0215
-    { 13, 16, 206, 0, 16, 52, 4090 }, // U+0216
-    { 11, 13, 173, 0, 13, 36, 4142 }, // U+0217
-    { 9, 17, 147, 0, 12, 39, 4178 }, // U+0218
-    { 7, 14, 128, 1, 9, 25, 4217 }, // U+0219
-    { 11, 17, 183, 0, 12, 47, 4242 }, // U+021A
-    { 7, 16, 109, 0, 11, 28, 4289 }, // U+021B
-    { 8, 14, 153, 1, 12, 28, 4317 }, // U+021C
-    { 8, 13, 124, 0, 9, 26, 4345 }, // U+021D
-    { 14, 17, 223, 0, 17, 60, 4371 }, // U+021E
-    { 12, 18, 176, -1, 18, 54, 4431 }, // U+021F
+    { 23, 18, 358, 0, 17, 104, 0 }, // U+01C4
+    { 21, 15, 334, 0, 14, 79, 104 }, // U+01C5
+    { 19, 15, 300, 0, 14, 72, 183 }, // U+01C6
+    { 17, 16, 257, 0, 12, 68, 255 }, // U+01C7
+    { 14, 18, 237, 0, 14, 63, 323 }, // U+01C8
+    { 10, 18, 163, 0, 14, 45, 386 }, // U+01C9
+    { 20, 16, 314, 0, 12, 80, 431 }, // U+01CA
+    { 18, 18, 294, 0, 14, 81, 511 }, // U+01CB
+    { 16, 18, 256, 0, 14, 72, 592 }, // U+01CC
+    { 13, 17, 198, 0, 17, 56, 664 }, // U+01CD
+    { 10, 14, 146, 0, 14, 35, 720 }, // U+01CE
+    { 7, 17, 101, 0, 17, 30, 755 }, // U+01CF
+    { 7, 14, 88, -1, 14, 25, 785 }, // U+01D0
+    { 13, 17, 208, 0, 17, 56, 810 }, // U+01D1
+    { 10, 14, 159, 0, 14, 35, 866 }, // U+01D2
+    { 13, 17, 206, 0, 17, 56, 901 }, // U+01D3
+    { 11, 14, 173, 0, 14, 39, 957 }, // U+01D4
+    { 13, 18, 206, 0, 18, 59, 996 }, // U+01D5
+    { 11, 17, 173, 0, 17, 47, 1055 }, // U+01D6
+    { 13, 19, 206, 0, 19, 62, 1102 }, // U+01D7
+    { 11, 18, 173, 0, 18, 50, 1164 }, // U+01D8
+    { 13, 19, 206, 0, 19, 62, 1214 }, // U+01D9
+    { 11, 18, 173, 0, 18, 50, 1276 }, // U+01DA
+    { 13, 19, 206, 0, 19, 62, 1326 }, // U+01DB
+    { 11, 18, 173, 0, 18, 50, 1388 }, // U+01DC
+    { 9, 9, 139, 0, 9, 21, 1438 }, // U+01DD
+    { 13, 18, 198, 0, 18, 59, 1459 }, // U+01DE
+    { 10, 17, 146, 0, 17, 43, 1518 }, // U+01DF
+    { 13, 18, 198, 0, 18, 59, 1561 }, // U+01E0
+    { 10, 17, 146, 0, 17, 43, 1620 }, // U+01E1
+    { 17, 15, 248, -1, 15, 64, 1663 }, // U+01E2
+    { 14, 13, 217, 0, 13, 46, 1727 }, // U+01E3
+    { 13, 12, 194, 0, 12, 39, 1773 }, // U+01E4
+    { 12, 13, 155, -1, 9, 39, 1812 }, // U+01E5
+    { 12, 17, 194, 0, 17, 51, 1851 }, // U+01E6
+    { 10, 18, 155, 0, 14, 45, 1902 }, // U+01E7
+    { 13, 17, 194, 0, 17, 56, 1947 }, // U+01E8
+    { 12, 18, 161, -1, 18, 54, 2003 }, // U+01E9
+    { 13, 16, 208, 0, 12, 52, 2057 }, // U+01EA
+    { 10, 13, 159, 0, 9, 33, 2109 }, // U+01EB
+    { 13, 19, 208, 0, 15, 62, 2142 }, // U+01EC
+    { 10, 17, 159, 0, 13, 43, 2204 }, // U+01ED
+    { 10, 17, 153, 0, 17, 43, 2247 }, // U+01EE
+    { 8, 18, 134, 0, 14, 36, 2290 }, // U+01EF
+    { 7, 18, 77, -1, 14, 32, 2326 }, // U+01F0
+    { 23, 13, 358, 0, 12, 75, 2358 }, // U+01F1
+    { 21, 13, 334, 0, 12, 69, 2433 }, // U+01F2
+    { 19, 14, 300, 0, 13, 67, 2502 }, // U+01F3
+    { 12, 16, 194, 0, 16, 48, 2569 }, // U+01F4
+    { 10, 18, 155, 0, 14, 45, 2617 }, // U+01F5
+    { 14, 16, 217, 0, 16, 56, 2662 }, // U+01F8
+    { 12, 14, 179, 0, 14, 42, 2718 }, // U+01F9
+    { 13, 19, 198, 0, 19, 62, 2760 }, // U+01FA
+    { 10, 19, 146, 0, 19, 48, 2822 }, // U+01FB
+    { 17, 16, 248, -1, 16, 68, 2870 }, // U+01FC
+    { 14, 14, 217, 0, 14, 49, 2938 }, // U+01FD
+    { 13, 16, 208, 0, 16, 52, 2987 }, // U+01FE
+    { 10, 14, 159, 0, 14, 35, 3039 }, // U+01FF
+    { 13, 17, 198, 0, 17, 56, 3074 }, // U+0200
+    { 10, 14, 146, 0, 14, 35, 3130 }, // U+0201
+    { 13, 16, 198, 0, 16, 52, 3165 }, // U+0202
+    { 10, 13, 146, 0, 13, 33, 3217 }, // U+0203
+    { 11, 17, 168, 0, 17, 47, 3250 }, // U+0204
+    { 9, 14, 139, 0, 14, 32, 3297 }, // U+0205
+    { 11, 16, 168, 0, 16, 44, 3329 }, // U+0206
+    { 9, 13, 139, 0, 13, 30, 3373 }, // U+0207
+    { 8, 17, 101, -2, 17, 34, 3403 }, // U+0208
+    { 7, 14, 88, -1, 14, 25, 3437 }, // U+0209
+    { 6, 16, 101, 0, 16, 24, 3462 }, // U+020A
+    { 6, 13, 88, 0, 13, 20, 3486 }, // U+020B
+    { 13, 17, 208, 0, 17, 56, 3506 }, // U+020C
+    { 10, 14, 159, 0, 14, 35, 3562 }, // U+020D
+    { 13, 16, 208, 0, 16, 52, 3597 }, // U+020E
+    { 10, 13, 159, 0, 13, 33, 3649 }, // U+020F
+    { 12, 17, 181, 0, 17, 51, 3682 }, // U+0210
+    { 8, 14, 123, 0, 14, 28, 3733 }, // U+0211
+    { 12, 16, 181, 0, 16, 48, 3761 }, // U+0212
+    { 8, 13, 123, 0, 13, 26, 3809 }, // U+0213
+    { 13, 17, 206, 0, 17, 56, 3835 }, // U+0214
+    { 11, 14, 173, 0, 14, 39, 3891 }, // U+0215
+    { 13, 16, 206, 0, 16, 52, 3930 }, // U+0216
+    { 11, 13, 173, 0, 13, 36, 3982 }, // U+0217
+    { 9, 17, 147, 0, 12, 39, 4018 }, // U+0218
+    { 7, 14, 128, 1, 9, 25, 4057 }, // U+0219
+    { 11, 17, 183, 0, 12, 47, 4082 }, // U+021A
+    { 7, 16, 109, 0, 11, 28, 4129 }, // U+021B
+    { 8, 14, 153, 1, 12, 28, 4157 }, // U+021C
+    { 8, 13, 124, 0, 9, 26, 4185 }, // U+021D
+    { 14, 17, 223, 0, 17, 60, 4211 }, // U+021E
+    { 12, 18, 176, -1, 18, 54, 4271 }, // U+021F
     { 4, 4, 0, -3, 14, 4, 0 }, // U+0300
     { 4, 4, 0, -1, 14, 4, 4 }, // U+0301
     { 6, 4, 0, -3, 14, 6, 8 }, // U+0302
@@ -1412,316 +1086,6 @@ static const EpdGlyph bookerly_8_regularGlyphs[] = {
     { 6, 3, 0, -3, 13, 5, 143 }, // U+0342
     { 6, 7, 0, -3, 18, 11, 148 }, // U+0344
     { 3, 3, 0, -1, -1, 3, 159 }, // U+0345
-    { 11, 16, 168, 0, 16, 44, 0 }, // U+0400
-    { 11, 16, 168, 0, 16, 44, 44 }, // U+0401
-    { 14, 15, 216, 0, 12, 53, 88 }, // U+0402
-    { 10, 16, 156, 0, 16, 40, 141 }, // U+0403
-    { 11, 12, 178, 0, 12, 33, 181 }, // U+0404
-    { 9, 12, 147, 0, 12, 27, 214 }, // U+0405
-    { 6, 12, 101, 0, 12, 18, 241 }, // U+0406
-    { 7, 16, 101, 0, 16, 28, 259 }, // U+0407
-    { 7, 16, 97, -1, 12, 28, 287 }, // U+0408
-    { 16, 12, 259, 0, 12, 48, 315 }, // U+0409
-    { 17, 12, 273, 0, 12, 51, 363 }, // U+040A
-    { 15, 12, 229, 0, 12, 45, 414 }, // U+040B
-    { 12, 16, 190, 0, 16, 48, 459 }, // U+040C
-    { 14, 16, 221, 0, 16, 56, 507 }, // U+040D
-    { 13, 16, 193, 0, 16, 52, 563 }, // U+040E
-    { 13, 16, 213, 0, 12, 52, 615 }, // U+040F
-    { 13, 12, 198, 0, 12, 39, 667 }, // U+0410
-    { 11, 12, 169, 0, 12, 33, 706 }, // U+0411
-    { 10, 12, 165, 0, 12, 30, 739 }, // U+0412
-    { 10, 12, 156, 0, 12, 30, 769 }, // U+0413
-    { 13, 16, 198, 0, 12, 52, 799 }, // U+0414
-    { 11, 12, 168, 0, 12, 33, 851 }, // U+0415
-    { 17, 12, 270, 0, 12, 51, 884 }, // U+0416
-    { 10, 12, 155, 0, 12, 30, 935 }, // U+0417
-    { 14, 12, 221, 0, 12, 42, 965 }, // U+0418
-    { 14, 16, 221, 0, 16, 56, 1007 }, // U+0419
-    { 12, 12, 190, 0, 12, 36, 1063 }, // U+041A
-    { 12, 12, 198, 0, 12, 36, 1099 }, // U+041B
-    { 16, 12, 238, 0, 12, 48, 1135 }, // U+041C
-    { 14, 12, 223, 0, 12, 42, 1183 }, // U+041D
-    { 13, 12, 208, 0, 12, 39, 1225 }, // U+041E
-    { 14, 12, 216, 0, 12, 42, 1264 }, // U+041F
-    { 10, 12, 158, 0, 12, 30, 1306 }, // U+0420
-    { 11, 12, 171, 0, 12, 33, 1336 }, // U+0421
-    { 11, 12, 183, 0, 12, 33, 1369 }, // U+0422
-    { 13, 12, 193, 0, 12, 39, 1402 }, // U+0423
-    { 13, 12, 212, 0, 12, 39, 1441 }, // U+0424
-    { 13, 12, 194, 0, 12, 39, 1480 }, // U+0425
-    { 14, 16, 213, 0, 12, 56, 1519 }, // U+0426
-    { 12, 12, 190, 0, 12, 36, 1575 }, // U+0427
-    { 18, 12, 284, 0, 12, 54, 1611 }, // U+0428
-    { 18, 15, 284, 0, 12, 68, 1665 }, // U+0429
-    { 13, 13, 205, 0, 12, 43, 1733 }, // U+042A
-    { 16, 13, 251, 0, 12, 52, 1776 }, // U+042B
-    { 11, 13, 169, 0, 12, 36, 1828 }, // U+042C
-    { 11, 12, 178, 0, 12, 33, 1864 }, // U+042D
-    { 18, 12, 282, 0, 12, 54, 1897 }, // U+042E
-    { 12, 12, 178, -1, 12, 36, 1951 }, // U+042F
-    { 10, 9, 146, 0, 9, 23, 1987 }, // U+0430
-    { 10, 13, 156, 0, 13, 33, 2010 }, // U+0431
-    { 9, 11, 145, 0, 10, 25, 2043 }, // U+0432
-    { 8, 9, 133, 0, 9, 18, 2068 }, // U+0433
-    { 11, 13, 171, 0, 9, 36, 2086 }, // U+0434
-    { 9, 9, 139, 0, 9, 21, 2122 }, // U+0435
-    { 14, 9, 215, 0, 9, 32, 2143 }, // U+0436
-    { 8, 9, 127, 0, 9, 18, 2175 }, // U+0437
-    { 12, 9, 185, 0, 9, 27, 2193 }, // U+0438
-    { 12, 13, 185, 0, 13, 39, 2220 }, // U+0439
-    { 10, 9, 157, 0, 9, 23, 2259 }, // U+043A
-    { 10, 9, 165, 0, 9, 23, 2282 }, // U+043B
-    { 13, 9, 207, 0, 9, 30, 2305 }, // U+043C
-    { 12, 9, 185, 0, 9, 27, 2335 }, // U+043D
-    { 10, 9, 159, 0, 9, 23, 2362 }, // U+043E
-    { 12, 9, 183, 0, 9, 27, 2385 }, // U+043F
-    { 10, 13, 164, 0, 9, 33, 2412 }, // U+0440
-    { 9, 9, 135, 0, 9, 21, 2445 }, // U+0441
-    { 9, 9, 150, 0, 9, 21, 2466 }, // U+0442
-    { 11, 13, 160, 0, 9, 36, 2487 }, // U+0443
-    { 12, 17, 197, 0, 13, 51, 2523 }, // U+0444
-    { 10, 9, 158, 0, 9, 23, 2574 }, // U+0445
-    { 12, 13, 184, 0, 9, 39, 2597 }, // U+0446
-    { 10, 9, 163, 0, 9, 23, 2636 }, // U+0447
-    { 15, 9, 236, 0, 9, 34, 2659 }, // U+0448
-    { 15, 13, 236, 0, 9, 49, 2693 }, // U+0449
-    { 11, 10, 171, 0, 9, 28, 2742 }, // U+044A
-    { 14, 10, 217, 0, 9, 35, 2770 }, // U+044B
-    { 9, 10, 143, 0, 9, 23, 2805 }, // U+044C
-    { 9, 9, 137, 0, 9, 21, 2828 }, // U+044D
-    { 14, 9, 225, 0, 9, 32, 2849 }, // U+044E
-    { 10, 9, 154, 0, 9, 23, 2881 }, // U+044F
-    { 9, 14, 139, 0, 14, 32, 2904 }, // U+0450
-    { 9, 14, 139, 0, 14, 32, 2936 }, // U+0451
-    { 10, 17, 167, 0, 13, 43, 2968 }, // U+0452
-    { 8, 14, 133, 0, 14, 28, 3011 }, // U+0453
-    { 9, 9, 138, 0, 9, 21, 3039 }, // U+0454
-    { 7, 9, 128, 1, 9, 16, 3060 }, // U+0455
-    { 6, 14, 88, 0, 14, 21, 3076 }, // U+0456
-    { 7, 14, 88, -1, 14, 25, 3097 }, // U+0457
-    { 5, 18, 77, -1, 14, 23, 3122 }, // U+0458
-    { 13, 9, 213, 0, 9, 30, 3145 }, // U+0459
-    { 14, 9, 228, 0, 9, 32, 3175 }, // U+045A
-    { 11, 13, 176, 0, 13, 36, 3207 }, // U+045B
-    { 10, 14, 157, 0, 14, 35, 3243 }, // U+045C
-    { 12, 14, 185, 0, 14, 42, 3278 }, // U+045D
-    { 11, 17, 160, 0, 13, 47, 3320 }, // U+045E
-    { 11, 12, 181, 0, 9, 33, 3367 }, // U+045F
-    { 12, 13, 195, 0, 13, 39, 3400 }, // U+0462
-    { 10, 12, 164, 0, 12, 30, 3439 }, // U+0463
-    { 13, 12, 208, 0, 12, 39, 3469 }, // U+0472
-    { 10, 9, 159, 0, 9, 23, 3508 }, // U+0473
-    { 13, 12, 200, 0, 12, 39, 3531 }, // U+0474
-    { 11, 9, 162, 0, 9, 25, 3570 }, // U+0475
-    { 14, 19, 222, 0, 16, 67, 3595 }, // U+048A
-    { 12, 16, 185, 0, 13, 48, 3662 }, // U+048B
-    { 11, 13, 169, 0, 12, 36, 3710 }, // U+048C
-    { 9, 13, 139, 0, 12, 30, 3746 }, // U+048D
-    { 10, 12, 158, 0, 12, 30, 3776 }, // U+048E
-    { 10, 13, 164, 0, 9, 33, 3806 }, // U+048F
-    { 10, 15, 150, 0, 15, 38, 3839 }, // U+0490
-    { 8, 12, 127, 0, 12, 24, 3877 }, // U+0491
-    { 10, 12, 156, 0, 12, 30, 3901 }, // U+0492
-    { 8, 9, 133, 0, 9, 18, 3931 }, // U+0493
-    { 11, 15, 178, 0, 12, 42, 3949 }, // U+0494
-    { 10, 13, 163, 0, 9, 33, 3991 }, // U+0495
-    { 17, 16, 270, 0, 12, 68, 4024 }, // U+0496
-    { 14, 12, 215, 0, 9, 42, 4092 }, // U+0497
-    { 10, 16, 155, 0, 12, 40, 4134 }, // U+0498
-    { 8, 12, 127, 0, 9, 24, 4174 }, // U+0499
-    { 12, 16, 190, 0, 12, 48, 4198 }, // U+049A
-    { 10, 12, 157, 0, 9, 30, 4246 }, // U+049B
-    { 13, 12, 198, 0, 12, 39, 4276 }, // U+049C
-    { 11, 9, 163, 0, 9, 25, 4315 }, // U+049D
-    { 12, 12, 190, 0, 12, 36, 4340 }, // U+049E
-    { 10, 12, 150, 0, 12, 30, 4376 }, // U+049F
-    { 14, 12, 223, 0, 12, 42, 4406 }, // U+04A0
-    { 12, 9, 178, 0, 9, 27, 4448 }, // U+04A1
-    { 14, 16, 223, 0, 12, 56, 4475 }, // U+04A2
-    { 12, 12, 188, 0, 9, 36, 4531 }, // U+04A3
-    { 16, 12, 259, 0, 12, 48, 4567 }, // U+04A4
-    { 13, 9, 210, 0, 9, 30, 4615 }, // U+04A5
-    { 18, 16, 280, 0, 12, 72, 4645 }, // U+04A6
-    { 16, 13, 257, 0, 9, 52, 4717 }, // U+04A7
-    { 14, 12, 220, 0, 12, 42, 4769 }, // U+04A8
-    { 11, 9, 172, 0, 9, 25, 4811 }, // U+04A9
-    { 11, 15, 171, 0, 12, 42, 4836 }, // U+04AA
-    { 9, 12, 135, 0, 9, 27, 4878 }, // U+04AB
-    { 11, 15, 183, 0, 12, 42, 4905 }, // U+04AC
-    { 9, 12, 149, 0, 9, 27, 4947 }, // U+04AD
-    { 12, 12, 182, 0, 12, 36, 4974 }, // U+04AE
-    { 11, 13, 160, 0, 9, 36, 5010 }, // U+04AF
-    { 12, 12, 182, 0, 12, 36, 5046 }, // U+04B0
-    { 11, 13, 160, 0, 9, 36, 5082 }, // U+04B1
-    { 13, 16, 194, 0, 12, 52, 5118 }, // U+04B2
-    { 10, 12, 160, 0, 9, 30, 5170 }, // U+04B3
-    { 15, 16, 243, 0, 12, 60, 5200 }, // U+04B4
-    { 13, 12, 211, 0, 9, 39, 5260 }, // U+04B5
-    { 12, 16, 190, 0, 12, 48, 5299 }, // U+04B6
-    { 11, 12, 165, 0, 9, 33, 5347 }, // U+04B7
-    { 12, 12, 190, 0, 12, 36, 5380 }, // U+04B8
-    { 10, 9, 163, 0, 9, 23, 5416 }, // U+04B9
-    { 12, 12, 192, 0, 12, 36, 5439 }, // U+04BA
-    { 11, 13, 176, 0, 13, 36, 5475 }, // U+04BB
-    { 14, 12, 218, 0, 12, 42, 5511 }, // U+04BC
-    { 11, 9, 168, 0, 9, 25, 5553 }, // U+04BD
-    { 14, 16, 218, 0, 12, 56, 5578 }, // U+04BE
-    { 11, 12, 168, 0, 9, 33, 5634 }, // U+04BF
-    { 6, 12, 101, 0, 12, 18, 5667 }, // U+04C0
-    { 17, 16, 270, 0, 16, 68, 5685 }, // U+04C1
-    { 14, 13, 215, 0, 13, 46, 5753 }, // U+04C2
-    { 12, 15, 184, 0, 12, 45, 5799 }, // U+04C3
-    { 10, 13, 158, 0, 9, 33, 5844 }, // U+04C4
-    { 12, 16, 198, 0, 12, 48, 5877 }, // U+04C5
-    { 11, 12, 165, 0, 9, 33, 5925 }, // U+04C6
-    { 14, 15, 218, 0, 12, 53, 5958 }, // U+04C7
-    { 12, 13, 185, 0, 9, 39, 6011 }, // U+04C8
-    { 14, 16, 223, 0, 12, 56, 6050 }, // U+04C9
-    { 12, 12, 185, 0, 9, 36, 6106 }, // U+04CA
-    { 12, 16, 190, 0, 12, 48, 6142 }, // U+04CB
-    { 10, 12, 163, 0, 9, 30, 6190 }, // U+04CC
-    { 16, 16, 238, 0, 12, 64, 6220 }, // U+04CD
-    { 13, 12, 207, 0, 9, 39, 6284 }, // U+04CE
-    { 6, 13, 87, 0, 13, 20, 6323 }, // U+04CF
-    { 13, 16, 198, 0, 16, 52, 6343 }, // U+04D0
-    { 10, 13, 146, 0, 13, 33, 6395 }, // U+04D1
-    { 13, 16, 198, 0, 16, 52, 6428 }, // U+04D2
-    { 10, 14, 146, 0, 14, 35, 6480 }, // U+04D3
-    { 17, 12, 248, -1, 12, 51, 6515 }, // U+04D4
-    { 14, 9, 217, 0, 9, 32, 6566 }, // U+04D5
-    { 11, 16, 168, 0, 16, 44, 6598 }, // U+04D6
-    { 9, 13, 139, 0, 13, 30, 6642 }, // U+04D7
-    { 11, 12, 182, 0, 12, 33, 6672 }, // U+04D8
-    { 9, 9, 139, 0, 9, 21, 6705 }, // U+04D9
-    { 11, 16, 182, 0, 16, 44, 6726 }, // U+04DA
-    { 9, 14, 139, 0, 14, 32, 6770 }, // U+04DB
-    { 17, 16, 270, 0, 16, 68, 6802 }, // U+04DC
-    { 14, 14, 215, 0, 14, 49, 6870 }, // U+04DD
-    { 10, 16, 155, 0, 16, 40, 6919 }, // U+04DE
-    { 8, 14, 127, 0, 14, 28, 6959 }, // U+04DF
-    { 10, 12, 153, 0, 12, 30, 6987 }, // U+04E0
-    { 8, 13, 134, 0, 9, 26, 7017 }, // U+04E1
-    { 14, 15, 221, 0, 15, 53, 7043 }, // U+04E2
-    { 12, 13, 185, 0, 13, 39, 7096 }, // U+04E3
-    { 14, 16, 221, 0, 16, 56, 7135 }, // U+04E4
-    { 12, 14, 185, 0, 14, 42, 7191 }, // U+04E5
-    { 13, 16, 208, 0, 16, 52, 7233 }, // U+04E6
-    { 10, 14, 159, 0, 14, 35, 7285 }, // U+04E7
-    { 13, 12, 208, 0, 12, 39, 7320 }, // U+04E8
-    { 10, 9, 159, 0, 9, 23, 7359 }, // U+04E9
-    { 13, 16, 222, 0, 16, 52, 7382 }, // U+04EA
-    { 10, 14, 159, 0, 14, 35, 7434 }, // U+04EB
-    { 11, 16, 178, 0, 16, 44, 7469 }, // U+04EC
-    { 9, 14, 137, 0, 14, 32, 7513 }, // U+04ED
-    { 13, 15, 193, 0, 15, 49, 7545 }, // U+04EE
-    { 11, 17, 160, 0, 13, 47, 7594 }, // U+04EF
-    { 13, 16, 193, 0, 16, 52, 7641 }, // U+04F0
-    { 11, 18, 160, 0, 14, 50, 7693 }, // U+04F1
-    { 13, 17, 193, 0, 17, 56, 7743 }, // U+04F2
-    { 11, 18, 160, 0, 14, 50, 7799 }, // U+04F3
-    { 12, 16, 190, 0, 16, 48, 7849 }, // U+04F4
-    { 10, 14, 166, 0, 14, 35, 7897 }, // U+04F5
-    { 10, 16, 156, 0, 12, 40, 7932 }, // U+04F6
-    { 8, 13, 133, 0, 9, 26, 7972 }, // U+04F7
-    { 16, 17, 260, 0, 16, 68, 7998 }, // U+04F8
-    { 14, 15, 217, 0, 14, 53, 8066 }, // U+04F9
-    { 10, 15, 156, 0, 12, 38, 8119 }, // U+04FA
-    { 8, 12, 133, 0, 9, 24, 8157 }, // U+04FB
-    { 12, 15, 188, 0, 12, 45, 8181 }, // U+04FC
-    { 10, 13, 157, 0, 9, 33, 8226 }, // U+04FD
-    { 13, 12, 194, 0, 12, 39, 8259 }, // U+04FE
-    { 10, 9, 158, 0, 9, 23, 8298 }, // U+04FF
-    { 13, 16, 198, 0, 12, 52, 0 }, // U+1EA0
-    { 10, 13, 146, 0, 9, 33, 52 }, // U+1EA1
-    { 13, 19, 198, 0, 19, 62, 85 }, // U+1EA2
-    { 10, 16, 146, 0, 16, 40, 147 }, // U+1EA3
-    { 13, 18, 198, 0, 18, 59, 187 }, // U+1EA4
-    { 10, 17, 146, 0, 17, 43, 246 }, // U+1EA5
-    { 13, 18, 198, 0, 18, 59, 289 }, // U+1EA6
-    { 10, 17, 146, 0, 17, 43, 348 }, // U+1EA7
-    { 13, 20, 198, 0, 20, 65, 391 }, // U+1EA8
-    { 10, 17, 146, 0, 17, 43, 456 }, // U+1EA9
-    { 13, 20, 198, 0, 20, 65, 499 }, // U+1EAA
-    { 10, 17, 146, 0, 17, 43, 564 }, // U+1EAB
-    { 13, 21, 198, 0, 17, 69, 607 }, // U+1EAC
-    { 10, 18, 146, 0, 14, 45, 676 }, // U+1EAD
-    { 13, 19, 198, 0, 19, 62, 721 }, // U+1EAE
-    { 10, 16, 146, 0, 16, 40, 783 }, // U+1EAF
-    { 13, 19, 198, 0, 19, 62, 823 }, // U+1EB0
-    { 10, 16, 146, 0, 16, 40, 885 }, // U+1EB1
-    { 13, 21, 198, 0, 21, 69, 925 }, // U+1EB2
-    { 10, 18, 146, 0, 18, 45, 994 }, // U+1EB3
-    { 13, 20, 198, 0, 20, 65, 1039 }, // U+1EB4
-    { 10, 16, 146, 0, 16, 40, 1104 }, // U+1EB5
-    { 13, 20, 198, 0, 16, 65, 1144 }, // U+1EB6
-    { 10, 17, 146, 0, 13, 43, 1209 }, // U+1EB7
-    { 11, 16, 168, 0, 12, 44, 1252 }, // U+1EB8
-    { 9, 13, 139, 0, 9, 30, 1296 }, // U+1EB9
-    { 11, 19, 168, 0, 19, 53, 1326 }, // U+1EBA
-    { 9, 16, 139, 0, 16, 36, 1379 }, // U+1EBB
-    { 11, 16, 168, 0, 16, 44, 1415 }, // U+1EBC
-    { 9, 13, 139, 0, 13, 30, 1459 }, // U+1EBD
-    { 11, 18, 168, 0, 18, 50, 1489 }, // U+1EBE
-    { 10, 17, 139, 0, 17, 43, 1539 }, // U+1EBF
-    { 11, 18, 168, 0, 18, 50, 1582 }, // U+1EC0
-    { 9, 17, 139, 0, 17, 39, 1632 }, // U+1EC1
-    { 11, 20, 170, 0, 20, 55, 1671 }, // U+1EC2
-    { 10, 17, 139, 0, 17, 43, 1726 }, // U+1EC3
-    { 11, 20, 168, 0, 20, 55, 1769 }, // U+1EC4
-    { 9, 17, 139, 0, 17, 39, 1824 }, // U+1EC5
-    { 11, 21, 168, 0, 17, 58, 1863 }, // U+1EC6
-    { 9, 18, 139, 0, 14, 41, 1921 }, // U+1EC7
-    { 6, 19, 101, 0, 19, 29, 1962 }, // U+1EC8
-    { 6, 16, 88, 0, 16, 24, 1991 }, // U+1EC9
-    { 6, 16, 101, 0, 12, 24, 2015 }, // U+1ECA
-    { 6, 18, 88, 0, 14, 27, 2039 }, // U+1ECB
-    { 13, 16, 208, 0, 12, 52, 2066 }, // U+1ECC
-    { 10, 13, 159, 0, 9, 33, 2118 }, // U+1ECD
-    { 13, 19, 208, 0, 19, 62, 2151 }, // U+1ECE
-    { 10, 16, 159, 0, 16, 40, 2213 }, // U+1ECF
-    { 13, 18, 208, 0, 18, 59, 2253 }, // U+1ED0
-    { 10, 17, 159, 0, 17, 43, 2312 }, // U+1ED1
-    { 13, 18, 208, 0, 18, 59, 2355 }, // U+1ED2
-    { 10, 17, 159, 0, 17, 43, 2414 }, // U+1ED3
-    { 13, 20, 208, 0, 20, 65, 2457 }, // U+1ED4
-    { 10, 17, 159, 0, 17, 43, 2522 }, // U+1ED5
-    { 13, 20, 208, 0, 20, 65, 2565 }, // U+1ED6
-    { 10, 17, 159, 0, 17, 43, 2630 }, // U+1ED7
-    { 13, 21, 208, 0, 17, 69, 2673 }, // U+1ED8
-    { 10, 18, 159, 0, 14, 45, 2742 }, // U+1ED9
-    { 14, 16, 208, 0, 16, 56, 2787 }, // U+1EDA
-    { 11, 14, 159, 0, 14, 39, 2843 }, // U+1EDB
-    { 14, 16, 208, 0, 16, 56, 2882 }, // U+1EDC
-    { 11, 14, 159, 0, 14, 39, 2938 }, // U+1EDD
-    { 14, 19, 208, 0, 19, 67, 2977 }, // U+1EDE
-    { 11, 16, 159, 0, 16, 44, 3044 }, // U+1EDF
-    { 14, 16, 208, 0, 16, 56, 3088 }, // U+1EE0
-    { 11, 13, 159, 0, 13, 36, 3144 }, // U+1EE1
-    { 14, 18, 208, 0, 14, 63, 3180 }, // U+1EE2
-    { 11, 15, 159, 0, 11, 42, 3243 }, // U+1EE3
-    { 13, 16, 206, 0, 12, 52, 3285 }, // U+1EE4
-    { 11, 13, 173, 0, 9, 36, 3337 }, // U+1EE5
-    { 13, 19, 206, 0, 19, 62, 3373 }, // U+1EE6
-    { 11, 16, 173, 0, 16, 44, 3435 }, // U+1EE7
-    { 14, 16, 206, 0, 16, 56, 3479 }, // U+1EE8
-    { 11, 14, 173, 0, 14, 39, 3535 }, // U+1EE9
-    { 14, 16, 206, 0, 16, 56, 3574 }, // U+1EEA
-    { 11, 15, 173, 0, 15, 42, 3630 }, // U+1EEB
-    { 14, 19, 206, 0, 19, 67, 3672 }, // U+1EEC
-    { 11, 16, 173, 0, 16, 44, 3739 }, // U+1EED
-    { 14, 16, 206, 0, 16, 56, 3783 }, // U+1EEE
-    { 11, 13, 173, 0, 13, 36, 3839 }, // U+1EEF
-    { 14, 18, 206, 0, 14, 63, 3875 }, // U+1EF0
-    { 11, 15, 173, 0, 11, 42, 3938 }, // U+1EF1
-    { 12, 16, 182, 0, 16, 48, 3980 }, // U+1EF2
-    { 11, 18, 160, 0, 14, 50, 4028 }, // U+1EF3
-    { 12, 16, 182, 0, 12, 48, 4078 }, // U+1EF4
-    { 11, 13, 160, 0, 9, 36, 4126 }, // U+1EF5
-    { 12, 19, 182, 0, 19, 57, 4162 }, // U+1EF6
-    { 11, 20, 160, 0, 16, 55, 4219 }, // U+1EF7
-    { 12, 16, 182, 0, 16, 48, 4274 }, // U+1EF8
-    { 11, 17, 160, 0, 13, 47, 4322 }, // U+1EF9
     { 0, 0, 133, 0, 0, 0, 0 }, // U+2000
     { 0, 0, 267, 0, 0, 0, 0 }, // U+2001
     { 0, 0, 133, 0, 0, 0, 0 }, // U+2002
@@ -1909,86 +1273,77 @@ static const EpdUnicodeInterval bookerly_8_regularIntervals[] = {
     { 0x20, 0x7E, 0x5 },
     { 0xA0, 0xFF, 0x64 },
     { 0x100, 0x17F, 0xC4 },
-    { 0x1A0, 0x1A1, 0x144 },
-    { 0x1AF, 0x1B0, 0x146 },
-    { 0x1C4, 0x1F5, 0x148 },
-    { 0x1F8, 0x21F, 0x17A },
-    { 0x300, 0x304, 0x1A2 },
-    { 0x306, 0x30C, 0x1A7 },
-    { 0x30F, 0x30F, 0x1AE },
-    { 0x311, 0x315, 0x1AF },
-    { 0x31B, 0x31B, 0x1B4 },
-    { 0x323, 0x329, 0x1B5 },
-    { 0x32D, 0x32E, 0x1BC },
-    { 0x330, 0x331, 0x1BE },
-    { 0x342, 0x342, 0x1C0 },
-    { 0x344, 0x345, 0x1C1 },
-    { 0x400, 0x45F, 0x1C3 },
-    { 0x462, 0x463, 0x223 },
-    { 0x472, 0x475, 0x225 },
-    { 0x48A, 0x4FF, 0x229 },
-    { 0x1EA0, 0x1EF9, 0x29F },
-    { 0x2000, 0x2030, 0x2F9 },
-    { 0x2032, 0x203C, 0x32A },
-    { 0x203E, 0x203E, 0x335 },
-    { 0x2043, 0x2044, 0x336 },
-    { 0x2047, 0x2049, 0x338 },
-    { 0x2053, 0x2053, 0x33B },
-    { 0x2057, 0x2057, 0x33C },
-    { 0x205F, 0x2064, 0x33D },
-    { 0x2070, 0x2070, 0x343 },
-    { 0x2074, 0x2079, 0x344 },
-    { 0x207F, 0x2089, 0x34A },
-    { 0x20A3, 0x20A4, 0x355 },
-    { 0x20A7, 0x20A7, 0x357 },
-    { 0x20AC, 0x20AC, 0x358 },
-    { 0x2190, 0x2195, 0x359 },
-    { 0x21A8, 0x21A8, 0x35F },
-    { 0x21B2, 0x21B3, 0x360 },
-    { 0x21B5, 0x21B5, 0x362 },
-    { 0x21D0, 0x21D4, 0x363 },
-    { 0x2200, 0x2200, 0x368 },
-    { 0x2202, 0x2203, 0x369 },
-    { 0x2205, 0x220D, 0x36B },
-    { 0x220F, 0x220F, 0x374 },
-    { 0x2211, 0x2212, 0x375 },
-    { 0x2215, 0x221A, 0x377 },
-    { 0x221D, 0x2220, 0x37D },
-    { 0x2223, 0x2223, 0x381 },
-    { 0x2225, 0x2225, 0x382 },
-    { 0x2227, 0x222B, 0x383 },
-    { 0x2234, 0x2237, 0x388 },
-    { 0x223C, 0x223C, 0x38C },
-    { 0x2245, 0x2245, 0x38D },
-    { 0x2248, 0x2248, 0x38E },
-    { 0x224D, 0x224D, 0x38F },
-    { 0x2260, 0x2261, 0x390 },
-    { 0x2264, 0x2265, 0x392 },
-    { 0x226A, 0x226B, 0x394 },
-    { 0x2283, 0x2287, 0x396 },
-    { 0x2295, 0x2298, 0x39B },
-    { 0x22A5, 0x22A5, 0x39F },
-    { 0x22C5, 0x22C5, 0x3A0 },
-    { 0x22EF, 0x22EF, 0x3A1 },
-    { 0xFB00, 0xFB06, 0x3A2 },
-    { 0xFFFD, 0xFFFD, 0x3A9 },
+    { 0x1C4, 0x1F5, 0x144 },
+    { 0x1F8, 0x21F, 0x176 },
+    { 0x300, 0x304, 0x19E },
+    { 0x306, 0x30C, 0x1A3 },
+    { 0x30F, 0x30F, 0x1AA },
+    { 0x311, 0x315, 0x1AB },
+    { 0x31B, 0x31B, 0x1B0 },
+    { 0x323, 0x329, 0x1B1 },
+    { 0x32D, 0x32E, 0x1B8 },
+    { 0x330, 0x331, 0x1BA },
+    { 0x342, 0x342, 0x1BC },
+    { 0x344, 0x345, 0x1BD },
+    { 0x2000, 0x2030, 0x1BF },
+    { 0x2032, 0x203C, 0x1F0 },
+    { 0x203E, 0x203E, 0x1FB },
+    { 0x2043, 0x2044, 0x1FC },
+    { 0x2047, 0x2049, 0x1FE },
+    { 0x2053, 0x2053, 0x201 },
+    { 0x2057, 0x2057, 0x202 },
+    { 0x205F, 0x2064, 0x203 },
+    { 0x2070, 0x2070, 0x209 },
+    { 0x2074, 0x2079, 0x20A },
+    { 0x207F, 0x2089, 0x210 },
+    { 0x20A3, 0x20A4, 0x21B },
+    { 0x20A7, 0x20A7, 0x21D },
+    { 0x20AC, 0x20AC, 0x21E },
+    { 0x2190, 0x2195, 0x21F },
+    { 0x21A8, 0x21A8, 0x225 },
+    { 0x21B2, 0x21B3, 0x226 },
+    { 0x21B5, 0x21B5, 0x228 },
+    { 0x21D0, 0x21D4, 0x229 },
+    { 0x2200, 0x2200, 0x22E },
+    { 0x2202, 0x2203, 0x22F },
+    { 0x2205, 0x220D, 0x231 },
+    { 0x220F, 0x220F, 0x23A },
+    { 0x2211, 0x2212, 0x23B },
+    { 0x2215, 0x221A, 0x23D },
+    { 0x221D, 0x2220, 0x243 },
+    { 0x2223, 0x2223, 0x247 },
+    { 0x2225, 0x2225, 0x248 },
+    { 0x2227, 0x222B, 0x249 },
+    { 0x2234, 0x2237, 0x24E },
+    { 0x223C, 0x223C, 0x252 },
+    { 0x2245, 0x2245, 0x253 },
+    { 0x2248, 0x2248, 0x254 },
+    { 0x224D, 0x224D, 0x255 },
+    { 0x2260, 0x2261, 0x256 },
+    { 0x2264, 0x2265, 0x258 },
+    { 0x226A, 0x226B, 0x25A },
+    { 0x2283, 0x2287, 0x25C },
+    { 0x2295, 0x2298, 0x261 },
+    { 0x22A5, 0x22A5, 0x265 },
+    { 0x22C5, 0x22C5, 0x266 },
+    { 0x22EF, 0x22EF, 0x267 },
+    { 0xFB00, 0xFB06, 0x268 },
+    { 0xFFFD, 0xFFFD, 0x26F },
 };
 
 static const EpdFontGroup bookerly_8_regularGroups[] = {
     { 0, 1802, 2895, 100, 0 },
     { 1802, 1604, 3721, 96, 100 },
     { 3406, 2129, 5780, 128, 196 },
-    { 5535, 1985, 5110, 94, 324 },
-    { 7520, 182, 192, 33, 418 },
-    { 7702, 3912, 9404, 220, 451 },
-    { 11614, 1189, 5104, 90, 671 },
-    { 12803, 565, 953, 74, 761 },
-    { 13368, 163, 280, 18, 835 },
-    { 13531, 148, 165, 4, 853 },
-    { 13679, 212, 342, 15, 857 },
-    { 13891, 998, 1815, 58, 872 },
-    { 14889, 214, 364, 7, 930 },
-    { 15103, 69, 80, 1, 937 },
+    { 5535, 1945, 4932, 90, 324 },
+    { 7480, 182, 192, 33, 414 },
+    { 7662, 565, 953, 74, 447 },
+    { 8227, 163, 280, 18, 521 },
+    { 8390, 148, 165, 4, 539 },
+    { 8538, 212, 342, 15, 543 },
+    { 8750, 998, 1815, 58, 558 },
+    { 9748, 214, 364, 7, 616 },
+    { 9962, 69, 80, 1, 623 },
 };
 
 static const EpdKernClassEntry bookerly_8_regularKernLeftClasses[] = {
@@ -2265,10 +1620,6 @@ static const EpdKernClassEntry bookerly_8_regularKernLeftClasses[] = {
     { 0x017C, 62 }, // U+017C
     { 0x017D, 40 }, // U+017D
     { 0x017E, 62 }, // U+017E
-    { 0x01A0, 85 }, // U+01A0
-    { 0x01A1, 86 }, // U+01A1
-    { 0x01AF, 87 }, // U+01AF
-    { 0x01B0, 88 }, // U+01B0
     { 0x01C4, 40 }, // U+01C4
     { 0x01C5, 62 }, // U+01C5
     { 0x01C6, 62 }, // U+01C6
@@ -2302,7 +1653,7 @@ static const EpdKernClassEntry bookerly_8_regularKernLeftClasses[] = {
     { 0x01E2, 22 }, // U+01E2
     { 0x01E3, 47 }, // U+01E3
     { 0x01E4, 24 }, // U+01E4
-    { 0x01E5, 89 }, // U+01E5
+    { 0x01E5, 85 }, // U+01E5
     { 0x01E6, 24 }, // U+01E6
     { 0x01E7, 49 }, // U+01E7
     { 0x01E8, 27 }, // U+01E8
@@ -2311,7 +1662,7 @@ static const EpdKernClassEntry bookerly_8_regularKernLeftClasses[] = {
     { 0x01EB, 44 }, // U+01EB
     { 0x01EC, 21 }, // U+01EC
     { 0x01ED, 44 }, // U+01ED
-    { 0x01EF, 90 }, // U+01EF
+    { 0x01EF, 86 }, // U+01EF
     { 0x01F0, 81 }, // U+01F0
     { 0x01F1, 40 }, // U+01F1
     { 0x01F2, 62 }, // U+01F2
@@ -2324,7 +1675,7 @@ static const EpdKernClassEntry bookerly_8_regularKernLeftClasses[] = {
     { 0x01FB, 43 }, // U+01FB
     { 0x01FC, 22 }, // U+01FC
     { 0x01FD, 47 }, // U+01FD
-    { 0x01FE, 91 }, // U+01FE
+    { 0x01FE, 87 }, // U+01FE
     { 0x01FF, 44 }, // U+01FF
     { 0x0200, 18 }, // U+0200
     { 0x0201, 43 }, // U+0201
@@ -2355,325 +1706,22 @@ static const EpdKernClassEntry bookerly_8_regularKernLeftClasses[] = {
     { 0x021A, 35 }, // U+021A
     { 0x021B, 58 }, // U+021B
     { 0x021C, 19 }, // U+021C
-    { 0x021D, 92 }, // U+021D
+    { 0x021D, 88 }, // U+021D
     { 0x021E, 25 }, // U+021E
     { 0x021F, 50 }, // U+021F
-    { 0x0400, 93 }, // U+0400
-    { 0x0401, 93 }, // U+0401
-    { 0x0402, 94 }, // U+0402
-    { 0x0404, 95 }, // U+0404
-    { 0x0405, 96 }, // U+0405
-    { 0x0406, 97 }, // U+0406
-    { 0x0407, 97 }, // U+0407
-    { 0x0408, 98 }, // U+0408
-    { 0x0409, 99 }, // U+0409
-    { 0x040A, 99 }, // U+040A
-    { 0x040B, 100 }, // U+040B
-    { 0x040C, 101 }, // U+040C
-    { 0x040D, 97 }, // U+040D
-    { 0x040E, 102 }, // U+040E
-    { 0x040F, 97 }, // U+040F
-    { 0x0410, 103 }, // U+0410
-    { 0x0411, 104 }, // U+0411
-    { 0x0412, 105 }, // U+0412
-    { 0x0413, 106 }, // U+0413
-    { 0x0414, 107 }, // U+0414
-    { 0x0415, 93 }, // U+0415
-    { 0x0416, 101 }, // U+0416
-    { 0x0417, 105 }, // U+0417
-    { 0x0418, 97 }, // U+0418
-    { 0x0419, 97 }, // U+0419
-    { 0x041A, 101 }, // U+041A
-    { 0x041B, 97 }, // U+041B
-    { 0x041C, 108 }, // U+041C
-    { 0x041D, 97 }, // U+041D
-    { 0x041E, 109 }, // U+041E
-    { 0x041F, 97 }, // U+041F
-    { 0x0420, 110 }, // U+0420
-    { 0x0421, 111 }, // U+0421
-    { 0x0422, 106 }, // U+0422
-    { 0x0423, 102 }, // U+0423
-    { 0x0424, 112 }, // U+0424
-    { 0x0425, 113 }, // U+0425
-    { 0x0426, 107 }, // U+0426
-    { 0x0427, 97 }, // U+0427
-    { 0x0428, 97 }, // U+0428
-    { 0x0429, 107 }, // U+0429
-    { 0x042A, 99 }, // U+042A
-    { 0x042B, 97 }, // U+042B
-    { 0x042C, 99 }, // U+042C
-    { 0x042D, 109 }, // U+042D
-    { 0x042E, 109 }, // U+042E
-    { 0x042F, 97 }, // U+042F
-    { 0x0430, 114 }, // U+0430
-    { 0x0431, 115 }, // U+0431
-    { 0x0432, 116 }, // U+0432
-    { 0x0433, 117 }, // U+0433
-    { 0x0434, 118 }, // U+0434
-    { 0x0435, 119 }, // U+0435
-    { 0x0436, 120 }, // U+0436
-    { 0x0437, 121 }, // U+0437
-    { 0x0438, 122 }, // U+0438
-    { 0x0439, 122 }, // U+0439
-    { 0x043A, 120 }, // U+043A
-    { 0x043B, 122 }, // U+043B
-    { 0x043C, 122 }, // U+043C
-    { 0x043D, 122 }, // U+043D
-    { 0x043E, 115 }, // U+043E
-    { 0x043F, 122 }, // U+043F
-    { 0x0440, 115 }, // U+0440
-    { 0x0441, 123 }, // U+0441
-    { 0x0442, 117 }, // U+0442
-    { 0x0443, 124 }, // U+0443
-    { 0x0444, 115 }, // U+0444
-    { 0x0445, 125 }, // U+0445
-    { 0x0446, 118 }, // U+0446
-    { 0x0447, 122 }, // U+0447
-    { 0x0448, 122 }, // U+0448
-    { 0x0449, 118 }, // U+0449
-    { 0x044A, 126 }, // U+044A
-    { 0x044B, 122 }, // U+044B
-    { 0x044C, 126 }, // U+044C
-    { 0x044D, 115 }, // U+044D
-    { 0x044E, 115 }, // U+044E
-    { 0x044F, 122 }, // U+044F
-    { 0x0450, 119 }, // U+0450
-    { 0x0451, 119 }, // U+0451
-    { 0x0452, 127 }, // U+0452
-    { 0x0453, 117 }, // U+0453
-    { 0x0454, 128 }, // U+0454
-    { 0x0455, 129 }, // U+0455
-    { 0x0456, 130 }, // U+0456
-    { 0x0457, 131 }, // U+0457
-    { 0x0458, 132 }, // U+0458
-    { 0x0459, 126 }, // U+0459
-    { 0x045A, 126 }, // U+045A
-    { 0x045B, 133 }, // U+045B
-    { 0x045C, 120 }, // U+045C
-    { 0x045D, 122 }, // U+045D
-    { 0x045E, 124 }, // U+045E
-    { 0x045F, 122 }, // U+045F
-    { 0x0462, 134 }, // U+0462
-    { 0x0463, 135 }, // U+0463
-    { 0x0472, 109 }, // U+0472
-    { 0x0473, 115 }, // U+0473
-    { 0x0474, 136 }, // U+0474
-    { 0x0475, 137 }, // U+0475
-    { 0x048A, 107 }, // U+048A
-    { 0x048B, 118 }, // U+048B
-    { 0x048C, 99 }, // U+048C
-    { 0x048D, 126 }, // U+048D
-    { 0x048E, 110 }, // U+048E
-    { 0x048F, 115 }, // U+048F
-    { 0x0490, 138 }, // U+0490
-    { 0x0491, 139 }, // U+0491
-    { 0x0492, 140 }, // U+0492
-    { 0x0493, 117 }, // U+0493
-    { 0x0496, 141 }, // U+0496
-    { 0x0497, 142 }, // U+0497
-    { 0x0498, 105 }, // U+0498
-    { 0x0499, 121 }, // U+0499
-    { 0x049A, 141 }, // U+049A
-    { 0x049B, 142 }, // U+049B
-    { 0x049C, 101 }, // U+049C
-    { 0x049D, 120 }, // U+049D
-    { 0x049E, 101 }, // U+049E
-    { 0x049F, 120 }, // U+049F
-    { 0x04A0, 101 }, // U+04A0
-    { 0x04A1, 120 }, // U+04A1
-    { 0x04A2, 107 }, // U+04A2
-    { 0x04A3, 118 }, // U+04A3
-    { 0x04A8, 143 }, // U+04A8
-    { 0x04A9, 144 }, // U+04A9
-    { 0x04AA, 111 }, // U+04AA
-    { 0x04AB, 123 }, // U+04AB
-    { 0x04AC, 106 }, // U+04AC
-    { 0x04AD, 117 }, // U+04AD
-    { 0x04AE, 145 }, // U+04AE
-    { 0x04AF, 124 }, // U+04AF
-    { 0x04B0, 145 }, // U+04B0
-    { 0x04B1, 124 }, // U+04B1
-    { 0x04B2, 146 }, // U+04B2
-    { 0x04B3, 147 }, // U+04B3
-    { 0x04B4, 107 }, // U+04B4
-    { 0x04B5, 118 }, // U+04B5
-    { 0x04B6, 107 }, // U+04B6
-    { 0x04B7, 118 }, // U+04B7
-    { 0x04B8, 97 }, // U+04B8
-    { 0x04B9, 122 }, // U+04B9
-    { 0x04BA, 148 }, // U+04BA
-    { 0x04BB, 133 }, // U+04BB
-    { 0x04BC, 149 }, // U+04BC
-    { 0x04BD, 119 }, // U+04BD
-    { 0x04BE, 149 }, // U+04BE
-    { 0x04BF, 119 }, // U+04BF
-    { 0x04C0, 97 }, // U+04C0
-    { 0x04C1, 101 }, // U+04C1
-    { 0x04C2, 120 }, // U+04C2
-    { 0x04C3, 150 }, // U+04C3
-    { 0x04C4, 151 }, // U+04C4
-    { 0x04C5, 107 }, // U+04C5
-    { 0x04C6, 118 }, // U+04C6
-    { 0x04C7, 98 }, // U+04C7
-    { 0x04C8, 152 }, // U+04C8
-    { 0x04C9, 107 }, // U+04C9
-    { 0x04CA, 118 }, // U+04CA
-    { 0x04CB, 97 }, // U+04CB
-    { 0x04CC, 122 }, // U+04CC
-    { 0x04CD, 107 }, // U+04CD
-    { 0x04CE, 118 }, // U+04CE
-    { 0x04CF, 153 }, // U+04CF
-    { 0x04D0, 103 }, // U+04D0
-    { 0x04D1, 114 }, // U+04D1
-    { 0x04D2, 103 }, // U+04D2
-    { 0x04D3, 114 }, // U+04D3
-    { 0x04D4, 93 }, // U+04D4
-    { 0x04D5, 119 }, // U+04D5
-    { 0x04D6, 93 }, // U+04D6
-    { 0x04D7, 119 }, // U+04D7
-    { 0x04D8, 109 }, // U+04D8
-    { 0x04D9, 115 }, // U+04D9
-    { 0x04DA, 109 }, // U+04DA
-    { 0x04DB, 115 }, // U+04DB
-    { 0x04DC, 101 }, // U+04DC
-    { 0x04DD, 120 }, // U+04DD
-    { 0x04DE, 105 }, // U+04DE
-    { 0x04DF, 121 }, // U+04DF
-    { 0x04E0, 154 }, // U+04E0
-    { 0x04E1, 155 }, // U+04E1
-    { 0x04E2, 97 }, // U+04E2
-    { 0x04E3, 122 }, // U+04E3
-    { 0x04E4, 97 }, // U+04E4
-    { 0x04E5, 122 }, // U+04E5
-    { 0x04E6, 109 }, // U+04E6
-    { 0x04E7, 115 }, // U+04E7
-    { 0x04E8, 109 }, // U+04E8
-    { 0x04E9, 115 }, // U+04E9
-    { 0x04EA, 109 }, // U+04EA
-    { 0x04EB, 115 }, // U+04EB
-    { 0x04EC, 109 }, // U+04EC
-    { 0x04ED, 115 }, // U+04ED
-    { 0x04EE, 102 }, // U+04EE
-    { 0x04EF, 124 }, // U+04EF
-    { 0x04F0, 102 }, // U+04F0
-    { 0x04F1, 124 }, // U+04F1
-    { 0x04F2, 102 }, // U+04F2
-    { 0x04F3, 124 }, // U+04F3
-    { 0x04F4, 97 }, // U+04F4
-    { 0x04F5, 122 }, // U+04F5
-    { 0x04F6, 106 }, // U+04F6
-    { 0x04F7, 117 }, // U+04F7
-    { 0x04F8, 97 }, // U+04F8
-    { 0x04F9, 122 }, // U+04F9
-    { 0x04FA, 140 }, // U+04FA
-    { 0x04FB, 117 }, // U+04FB
-    { 0x04FC, 156 }, // U+04FC
-    { 0x04FD, 125 }, // U+04FD
-    { 0x04FE, 113 }, // U+04FE
-    { 0x04FF, 125 }, // U+04FF
-    { 0x1EA0, 18 }, // U+1EA0
-    { 0x1EA1, 43 }, // U+1EA1
-    { 0x1EA2, 18 }, // U+1EA2
-    { 0x1EA3, 43 }, // U+1EA3
-    { 0x1EA4, 18 }, // U+1EA4
-    { 0x1EA5, 43 }, // U+1EA5
-    { 0x1EA6, 18 }, // U+1EA6
-    { 0x1EA7, 43 }, // U+1EA7
-    { 0x1EA8, 18 }, // U+1EA8
-    { 0x1EA9, 43 }, // U+1EA9
-    { 0x1EAA, 18 }, // U+1EAA
-    { 0x1EAB, 43 }, // U+1EAB
-    { 0x1EAC, 18 }, // U+1EAC
-    { 0x1EAD, 43 }, // U+1EAD
-    { 0x1EAE, 18 }, // U+1EAE
-    { 0x1EAF, 43 }, // U+1EAF
-    { 0x1EB0, 18 }, // U+1EB0
-    { 0x1EB1, 43 }, // U+1EB1
-    { 0x1EB2, 18 }, // U+1EB2
-    { 0x1EB3, 43 }, // U+1EB3
-    { 0x1EB4, 18 }, // U+1EB4
-    { 0x1EB5, 43 }, // U+1EB5
-    { 0x1EB6, 18 }, // U+1EB6
-    { 0x1EB7, 43 }, // U+1EB7
-    { 0x1EB8, 22 }, // U+1EB8
-    { 0x1EB9, 47 }, // U+1EB9
-    { 0x1EBA, 22 }, // U+1EBA
-    { 0x1EBB, 47 }, // U+1EBB
-    { 0x1EBC, 22 }, // U+1EBC
-    { 0x1EBD, 47 }, // U+1EBD
-    { 0x1EBE, 22 }, // U+1EBE
-    { 0x1EBF, 47 }, // U+1EBF
-    { 0x1EC0, 22 }, // U+1EC0
-    { 0x1EC1, 47 }, // U+1EC1
-    { 0x1EC2, 22 }, // U+1EC2
-    { 0x1EC3, 47 }, // U+1EC3
-    { 0x1EC4, 22 }, // U+1EC4
-    { 0x1EC5, 47 }, // U+1EC5
-    { 0x1EC6, 22 }, // U+1EC6
-    { 0x1EC7, 47 }, // U+1EC7
-    { 0x1EC8, 25 }, // U+1EC8
-    { 0x1EC9, 71 }, // U+1EC9
-    { 0x1ECA, 25 }, // U+1ECA
-    { 0x1ECB, 51 }, // U+1ECB
-    { 0x1ECC, 21 }, // U+1ECC
-    { 0x1ECD, 44 }, // U+1ECD
-    { 0x1ECE, 21 }, // U+1ECE
-    { 0x1ECF, 44 }, // U+1ECF
-    { 0x1ED0, 21 }, // U+1ED0
-    { 0x1ED1, 44 }, // U+1ED1
-    { 0x1ED2, 21 }, // U+1ED2
-    { 0x1ED3, 44 }, // U+1ED3
-    { 0x1ED4, 21 }, // U+1ED4
-    { 0x1ED5, 44 }, // U+1ED5
-    { 0x1ED6, 21 }, // U+1ED6
-    { 0x1ED7, 44 }, // U+1ED7
-    { 0x1ED8, 21 }, // U+1ED8
-    { 0x1ED9, 44 }, // U+1ED9
-    { 0x1EDA, 85 }, // U+1EDA
-    { 0x1EDB, 86 }, // U+1EDB
-    { 0x1EDC, 85 }, // U+1EDC
-    { 0x1EDD, 86 }, // U+1EDD
-    { 0x1EDE, 85 }, // U+1EDE
-    { 0x1EDF, 86 }, // U+1EDF
-    { 0x1EE0, 85 }, // U+1EE0
-    { 0x1EE1, 86 }, // U+1EE1
-    { 0x1EE2, 85 }, // U+1EE2
-    { 0x1EE3, 86 }, // U+1EE3
-    { 0x1EE4, 36 }, // U+1EE4
-    { 0x1EE5, 59 }, // U+1EE5
-    { 0x1EE6, 36 }, // U+1EE6
-    { 0x1EE7, 59 }, // U+1EE7
-    { 0x1EE8, 87 }, // U+1EE8
-    { 0x1EE9, 88 }, // U+1EE9
-    { 0x1EEA, 87 }, // U+1EEA
-    { 0x1EEB, 88 }, // U+1EEB
-    { 0x1EEC, 87 }, // U+1EEC
-    { 0x1EED, 88 }, // U+1EED
-    { 0x1EEE, 87 }, // U+1EEE
-    { 0x1EEF, 88 }, // U+1EEF
-    { 0x1EF0, 87 }, // U+1EF0
-    { 0x1EF1, 88 }, // U+1EF1
-    { 0x1EF2, 39 }, // U+1EF2
-    { 0x1EF3, 60 }, // U+1EF3
-    { 0x1EF4, 39 }, // U+1EF4
-    { 0x1EF5, 60 }, // U+1EF5
-    { 0x1EF6, 39 }, // U+1EF6
-    { 0x1EF7, 60 }, // U+1EF7
-    { 0x1EF8, 39 }, // U+1EF8
-    { 0x1EF9, 60 }, // U+1EF9
     { 0x2010, 6 }, // U+2010
     { 0x2011, 6 }, // U+2011
     { 0x2013, 6 }, // U+2013
     { 0x2014, 6 }, // U+2014
     { 0x2015, 6 }, // U+2015
-    { 0x2018, 157 }, // U+2018
-    { 0x2019, 158 }, // U+2019
+    { 0x2018, 89 }, // U+2018
+    { 0x2019, 90 }, // U+2019
     { 0x201A, 5 }, // U+201A
-    { 0x201B, 157 }, // U+201B
-    { 0x201C, 157 }, // U+201C
-    { 0x201D, 158 }, // U+201D
+    { 0x201B, 89 }, // U+201B
+    { 0x201C, 89 }, // U+201C
+    { 0x201D, 90 }, // U+201D
     { 0x201E, 5 }, // U+201E
-    { 0x201F, 157 }, // U+201F
+    { 0x201F, 89 }, // U+201F
     { 0x2025, 5 }, // U+2025
     { 0x2026, 5 }, // U+2026
     { 0x2039, 65 }, // U+2039
@@ -2970,10 +2018,6 @@ static const EpdKernClassEntry bookerly_8_regularKernRightClasses[] = {
     { 0x017D, 33 }, // U+017D
     { 0x017E, 77 }, // U+017E
     { 0x017F, 60 }, // U+017F
-    { 0x01A0, 24 }, // U+01A0
-    { 0x01A1, 38 }, // U+01A1
-    { 0x01AF, 29 }, // U+01AF
-    { 0x01B0, 48 }, // U+01B0
     { 0x01C4, 23 }, // U+01C4
     { 0x01C5, 23 }, // U+01C5
     { 0x01C6, 38 }, // U+01C6
@@ -3063,322 +2107,19 @@ static const EpdKernClassEntry bookerly_8_regularKernRightClasses[] = {
     { 0x021D, 84 }, // U+021D
     { 0x021E, 23 }, // U+021E
     { 0x021F, 41 }, // U+021F
-    { 0x0400, 85 }, // U+0400
-    { 0x0401, 85 }, // U+0401
-    { 0x0402, 86 }, // U+0402
-    { 0x0403, 85 }, // U+0403
-    { 0x0404, 87 }, // U+0404
-    { 0x0405, 88 }, // U+0405
-    { 0x0406, 85 }, // U+0406
-    { 0x0407, 85 }, // U+0407
-    { 0x0408, 89 }, // U+0408
-    { 0x0409, 90 }, // U+0409
-    { 0x040A, 85 }, // U+040A
-    { 0x040B, 86 }, // U+040B
-    { 0x040C, 85 }, // U+040C
-    { 0x040D, 85 }, // U+040D
-    { 0x040E, 91 }, // U+040E
-    { 0x040F, 85 }, // U+040F
-    { 0x0410, 92 }, // U+0410
-    { 0x0411, 85 }, // U+0411
-    { 0x0412, 85 }, // U+0412
-    { 0x0413, 85 }, // U+0413
-    { 0x0414, 93 }, // U+0414
-    { 0x0415, 85 }, // U+0415
-    { 0x0416, 94 }, // U+0416
-    { 0x0417, 95 }, // U+0417
-    { 0x0418, 85 }, // U+0418
-    { 0x0419, 85 }, // U+0419
-    { 0x041A, 85 }, // U+041A
-    { 0x041B, 90 }, // U+041B
-    { 0x041C, 96 }, // U+041C
-    { 0x041D, 85 }, // U+041D
-    { 0x041E, 87 }, // U+041E
-    { 0x041F, 85 }, // U+041F
-    { 0x0420, 85 }, // U+0420
-    { 0x0421, 87 }, // U+0421
-    { 0x0422, 86 }, // U+0422
-    { 0x0423, 91 }, // U+0423
-    { 0x0424, 97 }, // U+0424
-    { 0x0425, 98 }, // U+0425
-    { 0x0426, 85 }, // U+0426
-    { 0x0427, 99 }, // U+0427
-    { 0x0428, 85 }, // U+0428
-    { 0x0429, 85 }, // U+0429
-    { 0x042A, 86 }, // U+042A
-    { 0x042B, 85 }, // U+042B
-    { 0x042C, 85 }, // U+042C
-    { 0x042D, 100 }, // U+042D
-    { 0x042E, 85 }, // U+042E
-    { 0x042F, 101 }, // U+042F
-    { 0x0430, 102 }, // U+0430
-    { 0x0431, 103 }, // U+0431
-    { 0x0432, 104 }, // U+0432
-    { 0x0433, 104 }, // U+0433
-    { 0x0434, 105 }, // U+0434
-    { 0x0435, 106 }, // U+0435
-    { 0x0436, 107 }, // U+0436
-    { 0x0437, 108 }, // U+0437
-    { 0x0438, 104 }, // U+0438
-    { 0x0439, 104 }, // U+0439
-    { 0x043A, 104 }, // U+043A
-    { 0x043B, 109 }, // U+043B
-    { 0x043C, 104 }, // U+043C
-    { 0x043D, 104 }, // U+043D
-    { 0x043E, 106 }, // U+043E
-    { 0x043F, 104 }, // U+043F
-    { 0x0440, 110 }, // U+0440
-    { 0x0441, 106 }, // U+0441
-    { 0x0442, 111 }, // U+0442
-    { 0x0443, 112 }, // U+0443
-    { 0x0444, 106 }, // U+0444
-    { 0x0445, 113 }, // U+0445
-    { 0x0446, 104 }, // U+0446
-    { 0x0447, 114 }, // U+0447
-    { 0x0448, 104 }, // U+0448
-    { 0x0449, 104 }, // U+0449
-    { 0x044A, 111 }, // U+044A
-    { 0x044B, 104 }, // U+044B
-    { 0x044C, 104 }, // U+044C
-    { 0x044D, 108 }, // U+044D
-    { 0x044E, 104 }, // U+044E
-    { 0x044F, 115 }, // U+044F
-    { 0x0450, 106 }, // U+0450
-    { 0x0451, 106 }, // U+0451
-    { 0x0452, 116 }, // U+0452
-    { 0x0453, 104 }, // U+0453
-    { 0x0454, 106 }, // U+0454
-    { 0x0455, 117 }, // U+0455
-    { 0x0456, 118 }, // U+0456
-    { 0x0457, 119 }, // U+0457
-    { 0x0458, 120 }, // U+0458
-    { 0x0459, 109 }, // U+0459
-    { 0x045A, 104 }, // U+045A
-    { 0x045B, 116 }, // U+045B
-    { 0x045C, 104 }, // U+045C
-    { 0x045D, 104 }, // U+045D
-    { 0x045E, 121 }, // U+045E
-    { 0x045F, 104 }, // U+045F
-    { 0x0462, 86 }, // U+0462
-    { 0x0463, 111 }, // U+0463
-    { 0x0472, 87 }, // U+0472
-    { 0x0473, 106 }, // U+0473
-    { 0x0474, 122 }, // U+0474
-    { 0x0475, 112 }, // U+0475
-    { 0x048A, 85 }, // U+048A
-    { 0x048B, 104 }, // U+048B
-    { 0x048C, 123 }, // U+048C
-    { 0x048D, 124 }, // U+048D
-    { 0x048E, 85 }, // U+048E
-    { 0x048F, 110 }, // U+048F
-    { 0x0490, 85 }, // U+0490
-    { 0x0491, 104 }, // U+0491
-    { 0x0492, 85 }, // U+0492
-    { 0x0493, 104 }, // U+0493
-    { 0x0494, 85 }, // U+0494
-    { 0x0495, 104 }, // U+0495
-    { 0x0496, 94 }, // U+0496
-    { 0x0497, 107 }, // U+0497
-    { 0x0498, 95 }, // U+0498
-    { 0x0499, 108 }, // U+0499
-    { 0x049A, 85 }, // U+049A
-    { 0x049B, 104 }, // U+049B
-    { 0x049C, 85 }, // U+049C
-    { 0x049D, 104 }, // U+049D
-    { 0x04A0, 86 }, // U+04A0
-    { 0x04A1, 111 }, // U+04A1
-    { 0x04A2, 85 }, // U+04A2
-    { 0x04A3, 104 }, // U+04A3
-    { 0x04A4, 85 }, // U+04A4
-    { 0x04A5, 104 }, // U+04A5
-    { 0x04A6, 85 }, // U+04A6
-    { 0x04A7, 104 }, // U+04A7
-    { 0x04A8, 87 }, // U+04A8
-    { 0x04A9, 106 }, // U+04A9
-    { 0x04AA, 87 }, // U+04AA
-    { 0x04AB, 106 }, // U+04AB
-    { 0x04AC, 86 }, // U+04AC
-    { 0x04AD, 111 }, // U+04AD
-    { 0x04AE, 125 }, // U+04AE
-    { 0x04AF, 112 }, // U+04AF
-    { 0x04B0, 125 }, // U+04B0
-    { 0x04B1, 112 }, // U+04B1
-    { 0x04B2, 98 }, // U+04B2
-    { 0x04B3, 113 }, // U+04B3
-    { 0x04B5, 111 }, // U+04B5
-    { 0x04B6, 99 }, // U+04B6
-    { 0x04B7, 114 }, // U+04B7
-    { 0x04B8, 99 }, // U+04B8
-    { 0x04B9, 114 }, // U+04B9
-    { 0x04BA, 85 }, // U+04BA
-    { 0x04BB, 116 }, // U+04BB
-    { 0x04BC, 126 }, // U+04BC
-    { 0x04BD, 127 }, // U+04BD
-    { 0x04BE, 126 }, // U+04BE
-    { 0x04BF, 127 }, // U+04BF
-    { 0x04C0, 85 }, // U+04C0
-    { 0x04C1, 94 }, // U+04C1
-    { 0x04C2, 107 }, // U+04C2
-    { 0x04C3, 85 }, // U+04C3
-    { 0x04C4, 104 }, // U+04C4
-    { 0x04C5, 90 }, // U+04C5
-    { 0x04C6, 109 }, // U+04C6
-    { 0x04C7, 85 }, // U+04C7
-    { 0x04C8, 104 }, // U+04C8
-    { 0x04C9, 85 }, // U+04C9
-    { 0x04CA, 104 }, // U+04CA
-    { 0x04CB, 99 }, // U+04CB
-    { 0x04CC, 114 }, // U+04CC
-    { 0x04CE, 104 }, // U+04CE
-    { 0x04CF, 116 }, // U+04CF
-    { 0x04D0, 92 }, // U+04D0
-    { 0x04D1, 102 }, // U+04D1
-    { 0x04D2, 92 }, // U+04D2
-    { 0x04D3, 102 }, // U+04D3
-    { 0x04D4, 128 }, // U+04D4
-    { 0x04D5, 102 }, // U+04D5
-    { 0x04D6, 85 }, // U+04D6
-    { 0x04D7, 106 }, // U+04D7
-    { 0x04D8, 129 }, // U+04D8
-    { 0x04D9, 130 }, // U+04D9
-    { 0x04DB, 130 }, // U+04DB
-    { 0x04DC, 94 }, // U+04DC
-    { 0x04DD, 107 }, // U+04DD
-    { 0x04DE, 95 }, // U+04DE
-    { 0x04DF, 108 }, // U+04DF
-    { 0x04E0, 131 }, // U+04E0
-    { 0x04E1, 132 }, // U+04E1
-    { 0x04E2, 85 }, // U+04E2
-    { 0x04E3, 104 }, // U+04E3
-    { 0x04E4, 85 }, // U+04E4
-    { 0x04E5, 104 }, // U+04E5
-    { 0x04E6, 87 }, // U+04E6
-    { 0x04E7, 106 }, // U+04E7
-    { 0x04E8, 87 }, // U+04E8
-    { 0x04E9, 106 }, // U+04E9
-    { 0x04EA, 87 }, // U+04EA
-    { 0x04EB, 106 }, // U+04EB
-    { 0x04ED, 108 }, // U+04ED
-    { 0x04EE, 91 }, // U+04EE
-    { 0x04EF, 121 }, // U+04EF
-    { 0x04F0, 91 }, // U+04F0
-    { 0x04F1, 121 }, // U+04F1
-    { 0x04F2, 91 }, // U+04F2
-    { 0x04F3, 121 }, // U+04F3
-    { 0x04F5, 114 }, // U+04F5
-    { 0x04F6, 85 }, // U+04F6
-    { 0x04F7, 104 }, // U+04F7
-    { 0x04F8, 85 }, // U+04F8
-    { 0x04F9, 104 }, // U+04F9
-    { 0x04FA, 85 }, // U+04FA
-    { 0x04FB, 104 }, // U+04FB
-    { 0x04FC, 98 }, // U+04FC
-    { 0x04FD, 113 }, // U+04FD
-    { 0x04FE, 98 }, // U+04FE
-    { 0x04FF, 113 }, // U+04FF
-    { 0x1EA0, 22 }, // U+1EA0
-    { 0x1EA1, 36 }, // U+1EA1
-    { 0x1EA2, 22 }, // U+1EA2
-    { 0x1EA3, 36 }, // U+1EA3
-    { 0x1EA4, 22 }, // U+1EA4
-    { 0x1EA5, 36 }, // U+1EA5
-    { 0x1EA6, 22 }, // U+1EA6
-    { 0x1EA7, 36 }, // U+1EA7
-    { 0x1EA8, 22 }, // U+1EA8
-    { 0x1EA9, 36 }, // U+1EA9
-    { 0x1EAA, 22 }, // U+1EAA
-    { 0x1EAB, 36 }, // U+1EAB
-    { 0x1EAC, 22 }, // U+1EAC
-    { 0x1EAD, 36 }, // U+1EAD
-    { 0x1EAE, 22 }, // U+1EAE
-    { 0x1EAF, 36 }, // U+1EAF
-    { 0x1EB0, 22 }, // U+1EB0
-    { 0x1EB1, 36 }, // U+1EB1
-    { 0x1EB2, 22 }, // U+1EB2
-    { 0x1EB3, 36 }, // U+1EB3
-    { 0x1EB4, 22 }, // U+1EB4
-    { 0x1EB5, 36 }, // U+1EB5
-    { 0x1EB6, 22 }, // U+1EB6
-    { 0x1EB7, 36 }, // U+1EB7
-    { 0x1EB8, 23 }, // U+1EB8
-    { 0x1EB9, 38 }, // U+1EB9
-    { 0x1EBA, 23 }, // U+1EBA
-    { 0x1EBB, 38 }, // U+1EBB
-    { 0x1EBC, 23 }, // U+1EBC
-    { 0x1EBD, 38 }, // U+1EBD
-    { 0x1EBE, 23 }, // U+1EBE
-    { 0x1EBF, 38 }, // U+1EBF
-    { 0x1EC0, 23 }, // U+1EC0
-    { 0x1EC1, 38 }, // U+1EC1
-    { 0x1EC2, 23 }, // U+1EC2
-    { 0x1EC3, 38 }, // U+1EC3
-    { 0x1EC4, 23 }, // U+1EC4
-    { 0x1EC5, 38 }, // U+1EC5
-    { 0x1EC6, 23 }, // U+1EC6
-    { 0x1EC7, 38 }, // U+1EC7
-    { 0x1EC8, 23 }, // U+1EC8
-    { 0x1EC9, 66 }, // U+1EC9
-    { 0x1ECA, 23 }, // U+1ECA
-    { 0x1ECB, 42 }, // U+1ECB
-    { 0x1ECC, 24 }, // U+1ECC
-    { 0x1ECD, 38 }, // U+1ECD
-    { 0x1ECE, 24 }, // U+1ECE
-    { 0x1ECF, 38 }, // U+1ECF
-    { 0x1ED0, 24 }, // U+1ED0
-    { 0x1ED1, 38 }, // U+1ED1
-    { 0x1ED2, 24 }, // U+1ED2
-    { 0x1ED3, 38 }, // U+1ED3
-    { 0x1ED4, 24 }, // U+1ED4
-    { 0x1ED5, 38 }, // U+1ED5
-    { 0x1ED6, 24 }, // U+1ED6
-    { 0x1ED7, 38 }, // U+1ED7
-    { 0x1ED8, 24 }, // U+1ED8
-    { 0x1ED9, 38 }, // U+1ED9
-    { 0x1EDA, 24 }, // U+1EDA
-    { 0x1EDB, 38 }, // U+1EDB
-    { 0x1EDC, 24 }, // U+1EDC
-    { 0x1EDD, 38 }, // U+1EDD
-    { 0x1EDE, 24 }, // U+1EDE
-    { 0x1EDF, 38 }, // U+1EDF
-    { 0x1EE0, 24 }, // U+1EE0
-    { 0x1EE1, 38 }, // U+1EE1
-    { 0x1EE2, 24 }, // U+1EE2
-    { 0x1EE3, 38 }, // U+1EE3
-    { 0x1EE4, 29 }, // U+1EE4
-    { 0x1EE5, 48 }, // U+1EE5
-    { 0x1EE6, 29 }, // U+1EE6
-    { 0x1EE7, 48 }, // U+1EE7
-    { 0x1EE8, 29 }, // U+1EE8
-    { 0x1EE9, 48 }, // U+1EE9
-    { 0x1EEA, 29 }, // U+1EEA
-    { 0x1EEB, 48 }, // U+1EEB
-    { 0x1EEC, 29 }, // U+1EEC
-    { 0x1EED, 48 }, // U+1EED
-    { 0x1EEE, 29 }, // U+1EEE
-    { 0x1EEF, 48 }, // U+1EEF
-    { 0x1EF0, 29 }, // U+1EF0
-    { 0x1EF1, 48 }, // U+1EF1
-    { 0x1EF2, 32 }, // U+1EF2
-    { 0x1EF3, 51 }, // U+1EF3
-    { 0x1EF4, 32 }, // U+1EF4
-    { 0x1EF5, 49 }, // U+1EF5
-    { 0x1EF6, 32 }, // U+1EF6
-    { 0x1EF7, 51 }, // U+1EF7
-    { 0x1EF8, 32 }, // U+1EF8
-    { 0x1EF9, 51 }, // U+1EF9
     { 0x2010, 7 }, // U+2010
     { 0x2011, 7 }, // U+2011
     { 0x2013, 7 }, // U+2013
     { 0x2014, 7 }, // U+2014
     { 0x2015, 7 }, // U+2015
-    { 0x2018, 133 }, // U+2018
-    { 0x2019, 134 }, // U+2019
+    { 0x2018, 85 }, // U+2018
+    { 0x2019, 86 }, // U+2019
     { 0x201A, 8 }, // U+201A
-    { 0x201B, 133 }, // U+201B
-    { 0x201C, 133 }, // U+201C
-    { 0x201D, 134 }, // U+201D
+    { 0x201B, 85 }, // U+201B
+    { 0x201C, 85 }, // U+201C
+    { 0x201D, 86 }, // U+201D
     { 0x201E, 8 }, // U+201E
-    { 0x201F, 133 }, // U+201F
+    { 0x201F, 85 }, // U+201F
     { 0x2025, 8 }, // U+2025
     { 0x2026, 8 }, // U+2026
     { 0x2039, 54 }, // U+2039
@@ -3401,164 +2142,96 @@ static const EpdKernClassEntry bookerly_8_regularKernRightClasses[] = {
 };
 
 static const int8_t bookerly_8_regularKernMatrix[] = {
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,    5,    0,    5,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -5,   -5,   -5,    0,    5,    5,   -5,    0,   -5,   -5,   -5,    0,   14,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,   -8,    0,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    5,   14,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -22,    0,    0,    0,    0,    0,    0,    0,   11,   11,    0,    0,    0,    0,    0,    0,   -5,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -36,    0,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -21,    0,  -22,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,  -36,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -5,   -8,   -8,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,   -5,  -11,    0,    0,    0,    0,    8,    0,  -11,    8,    0,    0,  -19,  -11,  -24,    0,  -21,    0,    0,    0,    0,   -4,   -4,    0,    0,    0,    0,    0,   -3,   -4,    0,   -8,  -10,  -16,    0,  -16,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,   -5,    0,   -3,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,  -19,  -11,    0,    8,    0,  -19,    8,    5,    0,    0,    0,   -8,    0,  -27,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,   -4,  -13,  -11,    5,  -16,    0,    0,    0,    0,    0,    0,  -11,  -24,    0,    0,  -21,  -19,  -11,    0,    0,    0,    0,    0,  -21,  -11,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,   -5,    0,    0,  -11,    0,  -13,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,   -4,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,  -11,    0,    0,   -5,    0,    0,   -8,   -5,    0,    0,    0,    5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,   -4,  -13,    0,    0,  -13,    0,    0,   -8,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,  -24,   -7,  -13,    0,   -8,    0,    0,    0,  -27,    0,  -11,    0,    0,   -8,    0,    0,    0,    0,    0,   -5,    0,    0,  -27,    0,  -24,  -11,  -21,    0,    0,    0,  -13,  -13,  -24,    0,   -8,   -5,  -11,   -5,  -11,    0,    0,    0,    0,    0,  -37,  -11,    0,  -27,  -27,  -24,    0,   11,   11,  -24,    0,  -27,  -27,  -24,    0,    0,    0,  -13,  -24,  -11,    0,  -21,    0,   -8,  -11,    0,  -19,    0,    0,  -11,   -8,    0,  -19,    0,  -27,  -19,    0,    0,    0,  -11,    0,    0,    0,    0,  -27,    0,   -5,  -28,  -24,  -13,  -13,  -17,  -13,   -8,   -5,  -11,    0,  -24,    0,  -24,    0,   11,    0,   -5,    0,    0,    0,    0,    0,   -5,  -37,    0,    0,    0,   -8,    0,    0,
-       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
-       0,    0,    0,    0,   -8,  -19,    0,  -19,  -24,    0,    8,    0,    0,  -13,    0,   -5,    0,   -5,   -5,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -11,    0,  -11,  -11,    0,    0,   -3,    0,   -5,   -5,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,  -13,    0,  -22,    0,    0,   -8,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -15,    7,    0,   -5,    0,    5,    0,  -27,  -16,  -29,    5,  -28,    3,  -27,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -5,  -17,    5,  -17,    0,    0,   -8,    0,    0,    0,    8,   -1,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -1,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,  -19,
-       0,    0,    0,    0,    0,   -4,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,   -4,    0,   -7,   -4,   -5,    0,  -11,    0,    0,    0,    7,    0,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    7,    0,    0,    0,    7,    0,    0,    0,    7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -6,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,   -4,    0,   -4,    0,    0,    0,    0,    0,   -5,    0,   -3,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,   -6,    0,   -4,   -4,   -4,    0,    0,    0,   -4,    0,   -4,   -4,   -4,    0,    0,    0,    0,   -5,    0,    0,   -4,    0,    0,   -6,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,   -8,    0,    0,  -11,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -4,    0,   -5,   -3,    0,    0,   -4,   -5,   -8,  -11,   -3,   -8,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -19,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    3,
-       0,    0,    0,   11,    0,  -24,    0,  -24,  -23,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    3,   -5,    0,  -11,    3,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,  -31,    0,    0,   -8,   -8,   -5,    0,   11,   11,   -5,    3,   -8,   -8,   -5,    3,   11,    3,    0,   -8,   -5,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -8,    0,   -8,    0,    0,   -5,    0,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    5,    5,   -4,    0,    0,    0,   -4,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -13,   -5,  -13,  -10,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -8,    0,  -11,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,   -7,    0,   -3,   -4,   -5,   -4,   -4,    0,    0,    0,    0,    0,  -13,   -3,    0,   -8,   -8,   -5,    0,    8,    8,   -5,    0,   -8,   -8,   -5,    0,    0,    0,    0,   -7,   -4,    0,   -5,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    7,    0,  -11,    0,    5,    0,    0,    0,    0,    3,    0,    0,    0,    0,   -4,    0,   -6,    0,    0,    0,    0,    0,    0,   -3,   -3,   -8,   -9,  -16,    0,  -16,    0,    0,    0,    0,    0,    0,    3,  -11,    0,   -4,   -4,   -6,    0,    8,    8,   -6,    0,   -4,   -4,   -6,    0,    8,    0,    0,   -3,    0,    0,    0,    0,    0,  -11,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,  -13,   -7,  -21,    3,  -21,    0,  -29,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,   -5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,   -3,    0,    0,    0,   -7,   -4,   -4,    8,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -4,    0,   -4,    0,    0,    0,    0,    0,    0,    5,   -3,    0,    0,    0,    0,    0,   11,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
-       0,    0,    0,    0,    0,  -12,   -5,  -12,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -10,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -6,    0,   -4,    0,   -8,    0,    0,    0,    0,    0,   -7,    0,    0,   -4,   -3,   -4,   -3,    0,    0,    0,    0,    0,  -11,   -4,    0,   -6,   -6,   -4,    0,   11,   11,   -4,    0,   -6,   -6,   -4,    0,    0,    0,    0,   -7,   -3,    0,   -8,    0,    0,   -4,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    5,    0,   10,    0,  -27,    0,  -27,  -26,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -27,   -4,    0,    0,   -4,    0,    8,    0,    0,   -3,    0,    0,    0,    0,   -4,    0,   -4,    0,   -7,    0,    0,    8,    0,    0,   -5,    5,    7,    8,    0,    8,    0,    0,    0,    0,    0,    0,  -36,    0,    0,   -4,   -4,   -4,    0,    5,    5,   -4,    0,   -4,   -4,   -4,    0,   13,    0,    0,   -5,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    8,
-       0,    0,    5,    0,    0,   -3,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,    0,   -8,   -4,    0,   20,   -3,    0,    0,   -4,   -5,   -8,  -11,   -3,   -8,   13,    0,    0,    0,    0,    3,    0,    0,   24,    0,    0,    0,    8,    0,    0,    0,   15,    0,   19,    0,    0,    0,    0,  -19,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   24,    0,    0,    0,    0,    0,   12,   -3,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,   -8,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   11,    0,   -8,    0,    8,    0,  -13,   -9,  -17,    8,  -19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -5,   -8,    5,   -8,    0,    0,    0,    0,    0,    0,    8,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,  -11,
-       0,    0,    0,    0,    0,   -5,    0,   -5,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,   -3,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -3,   -5,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -24,  -11,  -24,  -33,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,  -11,    0,  -29,    0,   -8,    0,   -7,   -4,    0,    0,    0,    0,    0,   -3,    0,    0,  -15,    0,  -16,    0,  -17,    0,    0,    0,    0,    0,  -19,    0,    0,    0,    0,    0,   -5,    0,  -13,    0,   -5,    0,  -27,   -8,    0,  -15,  -15,  -16,    0,   11,   11,  -16,    0,  -15,  -15,  -16,    0,    0,    0,    0,  -19,   -5,   -5,  -17,    0,    0,   -8,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    5,
-       0,    0,    0,    0,    0,  -11,    0,  -11,  -15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -19,    0,   -4,    0,   -4,   -4,    0,    0,    0,    0,    0,   -3,    0,    0,   -5,    0,   -4,    0,  -11,    0,    0,    0,    0,    0,   -7,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,   -5,    0,  -19,   -4,   -8,   -5,   -5,   -4,    0,   11,   11,   -4,    0,   -5,   -5,   -4,    0,    0,    0,    0,   -7,   -5,    0,  -11,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,   11,    0,  -27,  -13,  -27,  -36,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -5,    0,  -31,    0,  -11,    0,   -4,   -7,    0,    0,    8,    0,    5,    0,    0,    0,  -17,    7,  -19,   -5,  -24,    7,    0,    0,   -7,   -5,  -17,    0,   -5,   -5,   -8,   -5,   -9,    0,  -11,    0,   -8,    0,  -37,  -11,    0,  -28,  -25,  -19,    0,   16,   16,  -19,    7,  -28,  -17,  -19,    7,   16,    7,   -7,  -17,   -9,    0,  -24,    0,    0,  -11,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,
-       0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,   -8,    0,    7,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    5,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,   -8,  -12,    5,  -12,    0,    0,    0,    0,    0,    0,    8,   -3,    0,    0,    0,    0,    0,   13,   13,    0,    5,    0,    0,    0,    5,   13,    5,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -21,  -13,  -21,  -28,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -8,    0,  -27,    0,  -13,    0,   -4,   -7,    0,    0,    7,    0,    7,    0,    0,    0,  -18,    5,  -21,   -5,  -17,    5,    0,    0,   -8,   -5,  -21,    0,   -8,   -8,   -9,   -8,   -8,    0,  -13,    0,  -11,    0,  -29,  -13,    0,  -18,  -26,  -21,    0,   29,   19,  -21,    5,  -26,  -26,  -21,    5,   14,    5,   -8,  -21,   -8,  -11,  -17,    0,   -5,  -13,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    5,    5,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    5,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,    0,    5,   11,   14,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,  -16,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,  -21,  -13,  -27,    0,  -21,    0,    0,    0,    0,    0,   -5,    0,    5,    0,    0,    0,    0,    0,    0,   -5,   -8,   -8,    0,   -8,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    5,    0,    0,   -8,    0,    0,    0,  -21,   -8,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,  -27,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,   -8,   -8,    0,   -8,    0,    0,    0,    0,    0,    0,   -8,  -27,    0,    0,  -21,  -17,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -27,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -9,    0,   -9,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,   -8,
-       0,    0,   -5,   -5,    0,   -4,    0,   -4,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,   -3,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    3,    0,   -3,   -4,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,   -3,    0,   10,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,   -5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,   -3,   -3,    0,    0,   -4,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,   -3,   -3,   -3,    0,   -3,    0,   -3,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    3,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
-      16,   27,   27,   27,    0,   -5,    0,   -5,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   22,   22,   -3,    0,   -4,    0,   -3,    0,    5,    8,    0,    0,   -5,    0,    0,    5,    0,    5,    0,   27,    0,    0,    0,    0,    0,    0,    0,    2,   10,    3,   32,   56,   35,   -4,    0,    4,    1,   -1,   25,   27,    0,   11,    3,    8,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   21,   25,
-       0,    8,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -4,    0,   -3,    0,    0,    0,    0,    7,    0,    4,    0,    7,    0,    3,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -4,   -3,    0,    0,    0,   -3,    0,   -4,   -4,   -3,    0,    7,    0,    0,    0,    0,    0,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    4,   11,
-       0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,  -15,    0,  -15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,   -8,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -9,    0,   -9,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,
-       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,   -4,   -5,   -5,    0,    0,    0,    0,    3,    0,    0,   -4,    0,    0,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -4,   -5,    0,    0,    0,   -3,    0,   -4,   -4,   -5,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,   18,    0,    3,    0,    0,    0,   -5,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   18,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,
-       0,    0,    0,    5,    0,  -16,   -5,  -16,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,   -4,   -5,    0,   -9,   -4,    0,    0,    0,    0,   -6,    4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,   -7,   -5,    0,    0,    0,   -5,   -4,   -7,   -7,   -5,   -4,    0,   -4,    0,   -6,    0,    0,   -9,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,    8,
-       0,    0,    0,    0,    0,   -4,    0,   -4,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -4,    0,    0,    0,    0,    0,    0,   -4,   -4,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    4,    5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    5,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -5,
-       0,    0,    0,   13,    0,  -21,   -4,  -21,  -15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -7,   -5,    7,  -12,   -7,    3,    6,    3,    5,   -9,    8,   11,    4,    4,    4,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,   -5,    3,    0,    0,   -5,   -7,   -3,   -3,   -5,   -7,   11,   -7,    3,   -9,    0,    0,  -12,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,   13,
-       0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    8,    0,    5,    0,    4,    3,    4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,   13,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,   15,    0,   15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    5,    0,    0,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   15,    0,    0,    0,    0,    0,    0,    5,   14,   15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,   -8,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,   -8,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -5,   -8,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -5,    0,    0,    0,    0,   -8,    0,  -11,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -8,    0,    0,    0,    0,   -5,   -8,   -5,   -8,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,  -13,    0,    0,  -13,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -7,    8,    0,    0,  -11,   -8,  -20,    0,  -14,    0,    0,    0,   -8,   -8,   -8,   -5,    0,   -8,    0,    0,   -5,    0,  -11,   -5,   -5,   -8,   -8,   -8,   -8,    0,    0,    0,    0,    0,    0,   -7,   -8,   -8,   -8,   -8,    0,    0,    0,   -8,   -8,   -8,   -8,   -8,   -8,    0,   -8,   -5,  -11,   -8,    0,    0,    0,    0,   -7,    0,    0,   -5,  -11,   -7,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,   -8,    0,    0,    0,    0,    0,   -8,   -8,    0,    0,   -8,  -11,    0,    0,    0,   -8,  -16,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,   -8,    0,    0,  -11,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -4,    0,   -5,   -3,    0,    0,   -4,   -3,   -5,   -8,   -3,   -8,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -19,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,   -8,    0,    0,  -21,    0,  -21,  -27,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,  -27,  -12,    0,  -11,  -12,   -5,   -8,   -9,  -17,  -19,  -20,    0,  -21,   -8,   -4,   -5,    0,    0,   -5,   -5,    0,    0,    0,    0,   -4,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,  -29,    0,    0,   -4,   -4,    0,    0,    0,    0,    0,   -5,   -4,   -4,    0,   -5,    0,   -5,    0,   -4,    0,    0,   -5,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,   -5,    0,   -4,    0,   -4,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -4,    0,    0,   -5,  -11,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,   -8,
-       0,    0,    5,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    5,    0,   13,    0,    0,    0,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   13,   13,    0,   13,    0,    0,    0,   13,    0,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,
-       0,    0,   -5,   -5,    0,   -4,    0,   -4,  -27,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,    0,    0,   -3,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    3,    0,   -3,   -4,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,   -3,    0,   10,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -21,   -5,
-       0,    0,   -5,   -5,    0,   -4,    0,   -4,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,   -3,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    3,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,   -3,    0,   10,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,   -5,
-       0,  -13,    0,  -22,    0,    0,   -8,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -15,    7,    0,   -5,    5,    5,    0,  -27,  -16,  -29,    5,  -28,    3,  -27,    0,    0,   -4,    0,    0,    0,    0,    0,   11,    0,    0,    0,   -4,   -5,  -17,    5,  -17,    0,    0,   -8,    0,    0,    0,    8,   -1,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,   -1,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,  -19,
-       0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -27,    0,    0,   -3,    0,    0,    0,    0,    0,   24,    0,    0,    0,    0,   -3,   -9,    0,   -9,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,   24,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,   -8,
-       8,    0,   24,   19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   16,   16,    0,   28,    0,   11,    0,   28,   11,   16,    0,    0,    0,   11,    8,    8,    0,    8,    0,   21,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,   11,    0,    0,    0,   28,    0,    0,    0,   28,   24,   28,   13,   13,    9,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   16,   21,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    3,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,   -3,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    8,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    8,    0,    0,    0,    0,   -3,   -8,    0,   -8,    0,    0,   -5,    0,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    5,    5,   -4,    0,    0,    0,   -4,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   19,    0,    0,    0,    0,    0,   -9,    0,   -9,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,
-       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,   -5,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,   11,    0,   11,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,   11,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,   11,   13,   11,   13,    0,   11,   11,    8,    8,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,    0,    0,    0,    0,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    4,    5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,   19,    0,    0,    0,    0,    0,   -5,    5,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -5,
-       0,    0,   11,    0,    0,  -11,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    4,    0,    0,    0,    0,    5,    8,   11,    3,   11,    3,    8,    5,    0,   16,    0,    0,   -3,   16,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,  -19,    0,    0,    0,    0,    0,    0,    0,    0,    0,   16,    0,    0,    0,   16,    0,   16,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,
-       0,    8,    0,   11,    0,   -4,    0,   -4,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,    0,    5,    0,    8,    0,    0,    5,    8,    0,    8,    5,   11,    5,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    8,    0,    8,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   16,   11,
-       0,    0,   13,    8,    0,  -11,    0,  -11,  -15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -17,    3,   -4,    0,    0,   -4,    0,    8,   11,    0,   11,    0,    9,    5,   -5,   13,   -4,    0,  -11,   13,    0,    0,    0,    0,   -7,    0,    0,    0,   -5,    0,   -5,   11,    0,    0,   -5,    0,  -19,   -4,    0,   -5,   -5,   -4,    0,   21,   21,   -4,   13,   -5,   -5,   -4,   13,    0,   13,    0,   -7,   -5,    0,  -11,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,
-       0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,    5,    5,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    8,
-       0,    8,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -4,    0,   -3,    0,   19,    0,    0,    7,    0,    4,    0,    7,    0,    3,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -4,   -3,    0,    0,    0,   -3,    0,   -4,   -4,   -3,    0,    7,    0,    0,    0,    0,    0,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    4,   11,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,   -8,    0,    0,  -11,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -4,    0,   -5,   -3,    0,    0,   -4,   -5,   -5,  -11,   -3,   -8,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -19,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,    0,    0,    5,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    3,
-       0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -8,    0,    0,    0,    0,    0,    0,   -8,  -19,    0,    0,  -16,   -8,    0,    0,    0,    0,    0,    0,   -8,   -5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,   -5,    0,   -5,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,   -3,    0,    0,   -5,    0,    0,    0,  -11,    0,   -8,    0,    0,    0,    0,   -5,   -3,    0,   -5,    0,    0,    0,    0,    0,   -5,   -3,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,   -8,   -5,    0,   -8,    0,    0,    0,    0,    5,    0,   -5,    0,    0,    0,    0,  -13,  -16,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -13,   -5,  -13,  -10,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,  -11,    0,  -11,   -8,    0,    0,    0,   -8,    0,    0,    0,   -5,   -5,    0,   -5,   -5,   -5,   -4,   -5,   -5,    0,    0,   -4,   -5,    0,  -11,    0,   -7,    0,    8,    0,   -4,    0,    0,    0,    0,  -11,  -11,  -13,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,  -13,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -17,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,  -16,    0,    0,   -8,    0,  -19,    0,   -8,   -8,    0,    0,    0,   -3,  -21,    0,   -5,    5,    5,   -3,   -5,    5,   -7,    0,    0,    0,   -5,   -9,    0,   -5,   -5,    0,    0,    0,    0,    0,   -9,  -19,    0,    0,  -24,   -5,    0,    0,    0,    0,    0,    0,  -11,   -5,
-       0,    0,    0,  -21,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -32,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,   -5,    0,    0,    0,  -19,    0,    0,    0,    0,    0,   -5,    0,  -29,    0,    0,    0,   -5,    0,    0,   -3,    0,    0,    0,    0,  -11,  -19,    0,  -19,    0,    0,    0,    0,    0,    0,  -19,  -24,    0,    0,  -17,  -19,  -12,    0,    0,    0,    0,    0,   -8,  -13,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,  -11,    0,    0,    0,   -8,    4,    0,    0,   -3,    0,  -19,    0,   -8,    0,    0,    0,   -8,    0,    0,   -8,    0,    0,    0,    0,  -19,  -13,    0,  -21,    0,    0,    0,    0,    0,    0,  -13,   -8,    0,    0,   -7,  -20,  -24,    0,   -5,   -5,    0,   -5,  -11,    0,
-       0,    0,    0,    0,    0,  -33,  -13,  -33,  -31,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -21,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -21,   -7,    0,  -27,    5,  -43,  -29,   -5,   -5,   -8,  -19,    0,    0,   -5,  -23,  -27,   -3,  -21,  -35,  -29,  -16,  -24,  -27,   -8,  -13,  -11,  -11,  -13,  -40,    0,  -24,    0,   19,    0,  -11,    7,    0,    0,   11,   -8,  -29,  -45,   -5,  -16,    0,   -8,    0,    5,
-       0,  -13,    0,  -22,    0,    0,   -8,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -27,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -27,   -5,    0,    0,    5,  -19,    7,    5,    4,    0,    5,  -13,    5,  -35,    0,    3,    0,   -3,    0,    4,    0,    0,    0,    8,    0,  -16,   -9,    5,  -19,    0,    0,    0,    0,    0,    0,   -9,  -29,    0,    0,  -24,  -24,  -13,    8,    0,    0,    0,    0,  -24,  -19,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,   -3,   -5,    0,   -8,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -9,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,   -4,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,   -7,   -3,   -4,   -3,    0,    0,    0,   -4,   -7,    0,    0,    0,    5,    0,   -4,    7,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    5,    0,   -7,    0,    0,   -5,    0,    0,   -7,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -24,  -11,  -24,  -33,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -4,    0,  -21,    0,  -29,  -21,   -5,    0,   -7,   -8,    0,    0,    0,  -17,  -15,    0,    0,  -21,  -16,    0,   -5,  -24,    0,    0,    0,    0,    0,  -29,    0,  -19,    0,   11,    0,    0,    0,    0,    0,    0,   -5,  -27,  -27,    0,   -5,    0,    0,    5,    5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,   11,    0,    0,    5,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,   -8,    5,    0,   -8,    0,    0,    0,    0,    0,   11,    5,    0,    0,    0,    0,  -13,  -16,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,   -3,    0,    0,    5,    0,    5,    0,    0,    0,    0,   -8,    8,   -3,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,   -8,    0,    0,    0,    0,   11,    0,   -4,   -4,    0,    0,   -5,   -5,   -8,    5,    0,    0,    0,    0,   -5,    0,
-       0,    0,   -8,    0,    0,  -11,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,   -5,   -3,   -5,   -8,  -11,  -11,    0,   -3,    0,   -8,   -8,    0,   -8,    0,    0,    0,  -11,    0,    0,    0,  -11,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,   -5,    0,    0,  -11,    0,    0,  -19,    0,    0,   -3,    0,    0,    0,
-       0,    5,    0,   10,    0,  -27,    0,  -27,  -26,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    8,    0,    0,    0,  -21,    0,  -27,  -21,   -8,    0,   -4,    0,   -3,    0,    0,   -7,   -4,    0,    0,  -15,   -4,    0,    0,  -12,    0,    0,    8,    0,    0,  -13,    0,   -5,    0,    5,    8,    8,    0,    0,    0,    0,    0,    0,  -36,    0,    0,    0,    0,    5,    8,
-       0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -6,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,   -4,    0,    0,    0,   -4,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,   -5,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -13,    5,  -13,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -3,    0,    0,    0,  -11,  -11,  -17,  -21,  -19,    0,   -8,    0,  -13,   -5,   -5,  -11,    0,    0,    0,  -11,    0,    0,    0,   -8,    0,    0,    0,    0,    0,   -6,    0,    0,    0,    0,    0,    0,   -8,    0,    0,   -8,    0,    0,  -19,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    5,    0,    5,    5,    0,    0,    7,  -13,    8,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    8,    0,  -16,  -12,    5,  -16,    0,    5,    0,    0,   13,    0,  -12,    0,    0,    0,    0,  -19,  -16,    8,   -3,    0,    0,    0,    0,    0,
-       0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -27,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,   -8,   -8,    0,  -11,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,   -5,  -11,   -8,
-       0,    0,   -5,   -5,    0,   -4,    0,   -4,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -5,    0,   -3,   -3,   -5,    0,    0,   -3,   -4,    0,   -7,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,   -5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -4,    0,   -5,    0,    0,    0,   -3,   -5,   -4,    0,   -5,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -19,    0,  -19,  -19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    3,    0,  -13,   -4,    0,    0,  -13,    5,    0,    0,    0,    0,  -11,   -3,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,
-       0,    0,    0,    0,    0,    3,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    8,   13,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -6,   -3,    0,    0,   -8,    0,   -3,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,   -3,    0,    0,    0,    0,    0,   -3,    0,    0,   -3,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,
-       0,    0,    0,   13,    0,  -21,   -4,  -21,  -15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,  -13,   -5,    0,    0,  -16,    8,    0,    8,    4,   11,  -15,   -3,   -5,    5,    0,   11,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,   13,
-       0,    0,    0,    5,    0,    3,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,   -4,    0,    0,    0,    8,    0,    4,    3,    0,    0,    0,    0,    0,    0,    0,    4,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,   11,   13,
-       0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -32,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,   -3,    0,    0,   -5,  -11,  -20,   -5,  -13,   -5,    0,    0,    0,    0,    0,  -20,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,   -3,   -8,   -8,
-       0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,  -12,    0,  -13,   -8,    0,    0,    0,    0,    0,  -12,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,  -13,   -8,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,
-       0,    0,    0,    0,    0,   -4,    0,   -4,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,   -3,   -4,    0,   -3,    0,    0,    0,    0,   -3,   -3,    0,   -5,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,   -7,    0,   -8,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,   -8,    0,
-       0,    0,    5,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   13,    0,    0,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,
-       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,  -12,    0,  -13,    0,    0,    0,    0,    0,    0,  -12,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,  -13,   -8,
-       0,    0,    0,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,  -13,    0,    0,   -5,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,  -16,   -8,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -8,    0,  -11,   -5,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
-       0,    0,    0,    0,    0,  -19,  -13,  -19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,  -21,    5,  -35,  -25,   -5,   -3,    0,  -11,    0,    0,    0,  -13,  -15,    0,  -11,  -27,  -21,  -13,  -19,  -24,    0,   -8,   -3,   -5,   -5,  -29,    0,  -19,    0,    0,    0,   -3,    0,    0,    0,   11,  -13,  -24,  -43,    0,  -13,    0,  -11,    5,    5,
-       0,    0,    0,    0,    0,  -19,    0,  -19,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,  -11,   11,    0,   11,    0,    8,   -8,    0,    0,    0,    0,   11,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,    9,
-       0,    0,    0,    5,    0,  -19,   -8,  -19,  -31,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,  -11,    0,  -16,    0,  -29,  -24,   -5,    0,    0,  -13,    0,    0,    0,  -13,  -21,    0,  -16,  -24,  -19,  -13,  -16,  -20,  -13,  -13,   -8,  -11,  -16,  -24,    0,  -21,    0,    0,    0,   -8,    0,    0,    0,    0,  -24,  -29,  -35,    0,  -13,    0,  -11,    5,    0,
-       0,    0,    0,    8,    0,  -16,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,   -5,    0,    0,  -13,    0,    0,    0,    0,    0,  -13,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,
-       0,    0,    0,   11,    0,  -16,    0,  -16,  -23,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -19,    0,  -19,  -21,    0,    0,   -5,    0,    0,    0,    0,   -7,   -8,    0,    0,  -16,   -5,    0,    0,  -13,    0,    0,    0,    0,    0,  -16,    3,   -8,    0,   11,    0,    0,    0,    0,    0,    0,   -5,   -5,  -31,    0,    0,    0,    0,    5,    5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,  -11,    0,   13,    0,   -8,    5,    0,    0,   -3,    0,  -19,    8,   -8,    0,    0,    0,   -5,    0,    0,   -8,    0,    0,    0,    0,  -19,    5,    0,  -21,    0,    0,    0,    0,    0,   11,    5,   -8,    0,    0,   -8,  -20,  -24,    8,   -4,   -5,    0,    0,   -5,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,   -5,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,   13,    8,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -17,    0,    0,  -16,  -11,    0,    0,    0,    0,    0,    0,   -5,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -27,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -8,    0,   -8,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,
-       0,    0,    0,    0,    0,  -21,  -13,  -21,  -28,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,   -7,    0,  -19,    8,  -23,  -13,   -7,    0,   -4,   -8,    0,    0,    0,  -16,  -16,    0,   -8,  -19,  -14,  -13,  -13,  -19,   -5,  -13,   -8,   -9,   -8,  -27,    5,  -15,    0,   19,    0,   -8,    8,    0,    0,    7,  -13,  -19,  -27,    0,  -11,    0,   -5,    0,    5,
-       0,    0,    0,    8,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   16,    5,    0,    5,    5,    5,    0,    7,  -13,    8,    0,    0,   11,    0,    0,    0,    8,    0,   11,    0,    8,    0,  -16,    0,    5,  -16,    5,    5,    0,    5,   13,   16,    0,    0,    0,    5,    0,  -19,  -16,    8,   -3,    0,    0,    0,    0,    0,
-       0,    0,    0,    5,    0,    3,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,   -4,    0,    0,    0,    8,    0,    4,    3,    0,    0,    0,    0,    0,    0,   19,    4,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,   11,   13,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -33,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,   -5,    0,    0,    0,  -21,    0,    0,    0,    0,    0,   -8,    0,  -29,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,  -13,    0,  -13,    0,    0,    0,    0,    0,    0,  -13,  -27,    0,    0,  -27,  -13,  -11,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -8,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -19,    0,  -19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,  -13,   -5,   -3,   -3,  -11,    0,    0,    0,    0,    0,  -13,   -8,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,   -8,   -5,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -19,    0,    0,    3,    0,    3,    5,    0,    0,    7,  -29,    8,    0,    0,    0,  -11,   -8,    0,    8,   -5,    0,   -5,    8,    0,  -16,  -21,    5,  -16,    0,    5,   -5,    0,   13,    0,  -21,    0,    0,    0,    0,  -19,  -43,    8,   -3,   -5,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -21,    0,  -21,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,  -19,    0,    0,    0,    0,    0,   11,    0,    5,    0,    5,    0,    0,    0,    0,    5,   -8,    0,   -8,    5,    0,    3,    0,    0,   -8,    0,    0,    3,    0,    3,    0,    0,    0,    0,    0,  -29,  -32,    0,    0,    0,    0,   -8,    0,   13,   13,   -8,    5,    0,    0,   -8,    5,   13,    5,    0,   -8,    0,    0,   -8,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,  -15,    5,  -19,  -17,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,   -8,   -8,    0,    0,  -11,    0,    0,    3,    0,    0,  -13,    5,   -8,    0,   13,    3,    3,    5,    5,    0,    5,    0,    0,  -32,    0,    0,    0,    0,    0,    0,
-       0,    0,    0,    0,    0,  -21,    0,  -21,    0,    0,    0,    0,    0,  -19,   -8,  -11,    0,    0,    0,    0,    0,  -27,    0,  -11,    0,    0,   -5,    0,    0,    5,    0,    5,    0,    0,    0,  -11,    3,  -13,    0,  -23,    3,    0,    0,    0,    0,  -21,    3,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,  -44,  -11,    0,  -11,  -11,  -13,    0,    5,    5,  -13,    3,  -11,  -11,  -13,    3,   11,    3,    0,  -21,   -5,    0,  -23,    0,    0,  -11,    0,    0,    0,    0,  -11,   -5,    0,  -20,    0,  -27,  -20,   -5,    0,    0,    0,    0,    0,    0,  -11,  -11,    0,    0,  -19,  -13,    0,    0,  -19,    0,    0,    0,    0,    0,  -21,    3,  -21,    0,    5,    0,    0,    5,    0,    0,    5,    0,  -13,  -44,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,    5,    0,    5,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -5,   -5,   -5,    0,    5,    5,   -5,    0,   -5,   -5,   -5,    0,   14,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -22,    0,    0,    0,    0,    0,    0,    0,   11,   11,    0,    0,    0,    0,    0,    0,   -5,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -36,    0,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -5,   -8,   -8,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,   -5,  -11,    0,    0,    0,    0,    8,    0,  -11,    8,    0,    0,  -19,  -11,  -24,    0,  -21,    0,    0,    0,    0,   -4,   -4,    0,    0,    0,    0,    0,   -3,   -4,    0,   -8,  -10,  -16,    0,  -16,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,   -5,    0,   -3,    0,    0,    0,    0,    0,    0,  -11,    0,    0,  -21,  -11,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,   -5,    0,    0,  -11,    0,  -13,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,   -4,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,  -24,   -7,  -13,    0,   -8,    0,    0,    0,  -27,    0,  -11,    0,    0,   -8,    0,    0,    0,    0,    0,   -5,    0,    0,  -27,    0,  -24,  -11,  -21,    0,    0,    0,  -13,  -13,  -24,    0,   -8,   -5,  -11,   -5,  -11,    0,    0,    0,    0,    0,  -37,  -11,    0,  -27,  -27,  -24,    0,   11,   11,  -24,    0,  -27,  -27,  -24,    0,    0,    0,  -13,  -24,  -11,    0,  -21,    0,   -8,  -11,    0,  -19,    0,    0,
+       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
+       0,    0,    0,    0,   -8,  -19,    0,  -19,  -24,    0,    8,    0,    0,  -13,    0,   -5,    0,   -5,   -5,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,  -11,    0,  -11,  -11,    0,    0,   -3,    0,   -5,   -5,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,
+       0,  -13,    0,  -22,    0,    0,   -8,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -15,    7,    0,   -5,    0,    5,    0,  -27,  -16,  -29,    5,  -28,    3,  -27,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -5,  -17,    5,  -17,    0,    0,   -8,    0,    0,    0,    8,   -1,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -1,    0,    0,  -24,  -19,
+       0,    0,    0,    0,    0,   -4,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,   -4,    0,   -7,   -4,   -5,    0,  -11,    0,    0,    0,    7,    0,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    7,    0,    0,    0,    7,    0,    0,    0,    7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -6,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,   -4,    0,   -4,    0,    0,    0,    0,    0,   -5,    0,   -3,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,   -6,    0,   -4,   -4,   -4,    0,    0,    0,   -4,    0,   -4,   -4,   -4,    0,    0,    0,    0,   -5,    0,    0,   -4,    0,    0,   -6,    0,    0,    0,    0,
+       0,    0,   -8,    0,    0,  -11,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -4,    0,   -5,   -3,    0,    0,   -4,   -5,   -8,  -11,   -3,   -8,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -19,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    3,
+       0,    0,    0,   11,    0,  -24,    0,  -24,  -23,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    3,   -5,    0,  -11,    3,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,  -31,    0,    0,   -8,   -8,   -5,    0,   11,   11,   -5,    3,   -8,   -8,   -5,    3,   11,    3,    0,   -8,   -5,    0,  -11,    0,    0,    0,    0,    0,    5,    5,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -8,    0,   -8,    0,    0,   -5,    0,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    5,    5,   -4,    0,    0,    0,   -4,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,  -13,   -5,  -13,  -10,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -8,    0,  -11,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,   -7,    0,   -3,   -4,   -5,   -4,   -4,    0,    0,    0,    0,    0,  -13,   -3,    0,   -8,   -8,   -5,    0,    8,    8,   -5,    0,   -8,   -8,   -5,    0,    0,    0,    0,   -7,   -4,    0,   -5,    0,    0,   -3,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    7,    0,  -11,    0,    5,    0,    0,    0,    0,    3,    0,    0,    0,    0,   -4,    0,   -6,    0,    0,    0,    0,    0,    0,   -3,   -3,   -8,   -9,  -16,    0,  -16,    0,    0,    0,    0,    0,    0,    3,  -11,    0,   -4,   -4,   -6,    0,    8,    8,   -6,    0,   -4,   -4,   -6,    0,    8,    0,    0,   -3,    0,    0,    0,    0,    0,  -11,    0,   -5,    0,    0,
+       0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,  -13,   -7,  -21,    3,  -21,    0,  -29,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,   -5,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,   -3,    0,    0,    0,   -7,   -4,   -4,    8,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -4,    0,   -4,    0,    0,    0,    0,    0,    0,    5,   -3,    0,    0,    0,    0,    0,   11,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,   -5,    0,
+       0,    0,    0,    0,    0,  -12,   -5,  -12,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -10,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -6,    0,   -4,    0,   -8,    0,    0,    0,    0,    0,   -7,    0,    0,   -4,   -3,   -4,   -3,    0,    0,    0,    0,    0,  -11,   -4,    0,   -6,   -6,   -4,    0,   11,   11,   -4,    0,   -6,   -6,   -4,    0,    0,    0,    0,   -7,   -3,    0,   -8,    0,    0,   -4,    0,   -8,    0,    0,
+       0,    5,    0,   10,    0,  -27,    0,  -27,  -26,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -27,   -4,    0,    0,   -4,    0,    8,    0,    0,   -3,    0,    0,    0,    0,   -4,    0,   -4,    0,   -7,    0,    0,    8,    0,    0,   -5,    5,    7,    8,    0,    8,    0,    0,    0,    0,    0,    0,  -36,    0,    0,   -4,   -4,   -4,    0,    5,    5,   -4,    0,   -4,   -4,   -4,    0,   13,    0,    0,   -5,    0,    0,   -7,    0,    0,    0,    0,    0,    5,    8,
+       0,    0,    5,    0,    0,   -3,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,    0,   -8,   -4,    0,   20,   -3,    0,    0,   -4,   -5,   -8,  -11,   -3,   -8,   13,    0,    0,    0,    0,    3,    0,    0,   24,    0,    0,    0,    8,    0,    0,    0,   15,    0,   19,    0,    0,    0,    0,  -19,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   24,    0,    0,    0,    0,    0,   12,   -3,    5,    0,    0,    0,    0,    0,
+       0,    0,    0,   -8,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   11,    0,   -8,    0,    8,    0,  -13,   -9,  -17,    8,  -19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -5,   -8,    5,   -8,    0,    0,    0,    0,    0,    0,    8,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -5,    0,  -16,  -11,
+       0,    0,    0,    0,    0,   -5,    0,   -5,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,   -3,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -3,   -5,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,   -5,    0,    0,
+       0,    0,    0,    0,    0,  -24,  -11,  -24,  -33,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,  -11,    0,  -29,    0,   -8,    0,   -7,   -4,    0,    0,    0,    0,    0,   -3,    0,    0,  -15,    0,  -16,    0,  -17,    0,    0,    0,    0,    0,  -19,    0,    0,    0,    0,    0,   -5,    0,  -13,    0,   -5,    0,  -27,   -8,    0,  -15,  -15,  -16,    0,   11,   11,  -16,    0,  -15,  -15,  -16,    0,    0,    0,    0,  -19,   -5,   -5,  -17,    0,    0,   -8,    0,   -5,    5,    5,
+       0,    0,    0,    0,    0,  -11,    0,  -11,  -15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -19,    0,   -4,    0,   -4,   -4,    0,    0,    0,    0,    0,   -3,    0,    0,   -5,    0,   -4,    0,  -11,    0,    0,    0,    0,    0,   -7,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,   -5,    0,  -19,   -4,   -8,   -5,   -5,   -4,    0,   11,   11,   -4,    0,   -5,   -5,   -4,    0,    0,    0,    0,   -7,   -5,    0,  -11,    0,    0,   -4,    0,    0,    0,    0,
+       0,    0,    0,   11,    0,  -27,  -13,  -27,  -36,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -5,    0,  -31,    0,  -11,    0,   -4,   -7,    0,    0,    8,    0,    5,    0,    0,    0,  -17,    7,  -19,   -5,  -24,    7,    0,    0,   -7,   -5,  -17,    0,   -5,   -5,   -8,   -5,   -9,    0,  -11,    0,   -8,    0,  -37,  -11,    0,  -28,  -25,  -19,    0,   16,   16,  -19,    7,  -28,  -17,  -19,    7,   16,    7,   -7,  -17,   -9,    0,  -24,    0,    0,  -11,    0,  -11,    0,    5,
+       0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,   -8,    0,    7,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    5,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,   -8,  -12,    5,  -12,    0,    0,    0,    0,    0,    0,    8,   -3,    0,    0,    0,    0,    0,   13,   13,    0,    5,    0,    0,    0,    5,   13,    5,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,  -21,  -13,  -21,  -28,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -8,    0,  -27,    0,  -13,    0,   -4,   -7,    0,    0,    7,    0,    7,    0,    0,    0,  -18,    5,  -21,   -5,  -17,    5,    0,    0,   -8,   -5,  -21,    0,   -8,   -8,   -9,   -8,   -8,    0,  -13,    0,  -11,    0,  -29,  -13,    0,  -18,  -26,  -21,    0,   29,   19,  -21,    5,  -26,  -26,  -21,    5,   14,    5,   -8,  -21,   -8,  -11,  -17,    0,   -5,  -13,    0,  -11,    0,    5,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    5,    5,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    5,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,  -16,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,  -21,  -13,  -27,    0,  -21,    0,    0,    0,    0,    0,   -5,    0,    5,    0,    0,    0,    0,    0,    0,   -5,   -8,   -8,    0,   -8,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    5,    0,    0,   -8,    0,    0,    0,    0,
+       0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -27,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -9,    0,   -9,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,  -11,   -8,
+       0,    0,   -5,   -5,    0,   -4,    0,   -4,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,   -3,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    3,    0,   -3,   -4,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,   -3,    0,   10,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,   -5,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,   -3,   -3,    0,    0,   -4,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,   -3,   -3,   -3,    0,   -3,    0,   -3,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    5,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    3,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
+      16,   27,   27,   27,    0,   -5,    0,   -5,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   22,   22,   -3,    0,   -4,    0,   -3,    0,    5,    8,    0,    0,   -5,    0,    0,    5,    0,    5,    0,   27,    0,    0,    0,    0,    0,    0,    0,    2,   10,    3,   32,   56,   35,   -4,    0,    4,    1,   -1,   25,   27,    0,   11,    3,    8,    0,   -3,    0,    0,    0,    0,    0,   21,   25,
+       0,    8,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -4,    0,   -3,    0,    0,    0,    0,    7,    0,    4,    0,    7,    0,    3,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -4,   -3,    0,    0,    0,   -3,    0,   -4,   -4,   -3,    0,    7,    0,    0,    0,    0,    0,   13,    0,    0,    0,    0,    0,    4,   11,
+       0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,  -15,    0,  -15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,   -8,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -9,    0,   -9,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,
+       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,   -4,   -5,   -5,    0,    0,    0,    0,    3,    0,    0,   -4,    0,    0,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -4,   -5,    0,    0,    0,   -3,    0,   -4,   -4,   -5,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -5,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,   18,    0,    3,    0,    0,    0,   -5,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   18,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,
+       0,    0,    0,    5,    0,  -16,   -5,  -16,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,   -4,   -5,    0,   -9,   -4,    0,    0,    0,    0,   -6,    4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,   -7,   -5,    0,    0,    0,   -5,   -4,   -7,   -7,   -5,   -4,    0,   -4,    0,   -6,    0,    0,   -9,    0,    0,    0,    0,    0,    8,    8,
+       0,    0,    0,    0,    0,   -4,    0,   -4,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -4,    0,    0,    0,    0,    0,    0,   -4,   -4,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,   -5,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    4,    5,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    5,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -5,
+       0,    0,    0,   13,    0,  -21,   -4,  -21,  -15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -7,   -5,    7,  -12,   -7,    3,    6,    3,    5,   -9,    8,   11,    4,    4,    4,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,   -5,    3,    0,    0,   -5,   -7,   -3,   -3,   -5,   -7,   11,   -7,    3,   -9,    0,    0,  -12,    0,    0,    0,    0,    0,   11,   13,
+       0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    8,    0,    5,    0,    4,    3,    4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,   13,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   16,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,   15,    0,   15,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    5,    0,    0,    0,    0,    0,    0,   14,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,   -8,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -5,   -8,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -5,    0,    0,    0,    0,   -8,    0,  -11,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -7,    8,    0,    0,  -11,   -8,  -20,    0,  -14,    0,    0,    0,   -8,   -8,   -8,   -5,    0,   -8,    0,    0,   -5,    0,  -11,   -5,   -5,   -8,   -8,   -8,   -8,    0,    0,    0,    0,    0,    0,   -7,   -8,   -8,   -8,   -8,    0,    0,    0,   -8,   -8,   -8,   -8,   -8,   -8,    0,   -8,   -5,  -11,   -8,    0,    0,    0,    0,   -7,    0,    0,    0,    0,
+       0,    0,   -8,    0,    0,  -11,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -4,    0,   -5,   -3,    0,    0,   -4,   -3,   -5,   -8,   -3,   -8,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -19,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,    0,
+       0,    0,   -8,    0,    0,  -21,    0,  -21,  -27,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,  -27,  -12,    0,  -11,  -12,   -5,   -8,   -9,  -17,  -19,  -20,    0,  -21,   -8,   -4,   -5,    0,    0,   -5,   -5,    0,    0,    0,    0,   -4,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    0,  -29,    0,    0,   -4,   -4,    0,    0,    0,    0,    0,   -5,   -4,   -4,    0,   -5,    0,   -5,    0,   -4,    0,    0,   -5,  -11,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,   -5,    0,   -4,    0,   -4,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -4,    0,    0,   -5,  -11,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,   -8,
+       0,    0,    5,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    5,    0,   13,    0,    0,    0,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   13,   13,    0,   13,    0,    0,    0,   13,    0,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,
+       0,    0,   -5,   -5,    0,   -4,    0,   -4,  -27,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -24,    0,    0,   -3,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    3,    0,   -3,   -4,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,   -3,    0,   10,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -21,   -5,
+       0,    0,   -5,   -5,    0,   -4,    0,   -4,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,   -3,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    3,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,   -3,    0,   10,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,   -5,
+       0,  -13,    0,  -22,    0,    0,   -8,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -15,    7,    0,   -5,    5,    5,    0,  -27,  -16,  -29,    5,  -28,    3,  -27,    0,    0,   -4,    0,    0,    0,    0,    0,   11,    0,    0,    0,   -4,   -5,  -17,    5,  -17,    0,    0,   -8,    0,    0,    0,    8,   -1,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,   -1,    0,    0,  -24,  -19,
+       0,    0,    0,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -27,    0,    0,   -3,    0,    0,    0,    0,    0,   24,    0,    0,    0,    0,   -3,   -9,    0,   -9,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,   24,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,  -11,   -8,
+       8,    0,   24,   19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   13,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   16,   16,    0,   28,    0,   11,    0,   28,   11,   16,    0,    0,    0,   11,    8,    8,    0,    8,    0,   21,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,   11,    0,    0,    0,   28,    0,    0,    0,   28,   24,   28,   13,   13,    9,    0,    0,    0,    0,    0,    0,    0,   16,   21,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    3,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -11,    0,   -3,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    8,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    8,    0,    0,    0,    0,   -3,   -8,    0,   -8,    0,    0,   -5,    0,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    5,    5,   -4,    0,    0,    0,   -4,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   19,    0,    0,    0,    0,    0,   -9,    0,   -9,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,
+       0,    0,    0,    0,    0,   -5,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,   -5,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,   11,    0,   11,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,   11,   11,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,   11,   13,   11,   13,    0,   11,   11,    8,    8,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   11,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -5,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,    0,    0,    0,    0,   -3,    0,   -3,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    4,    5,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -7,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -16,    0,    0,    0,    0,    0,    0,    0,    0,   19,    0,    0,    0,    0,    0,   -5,    5,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   19,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -5,   -5,
+       0,    8,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,    0,   -4,    0,   -3,    0,   19,    0,    0,    7,    0,    4,    0,    7,    0,    3,    0,    3,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,   -4,   -3,    0,    0,    0,   -3,    0,   -4,   -4,   -3,    0,    7,    0,    0,    0,    0,    0,   13,    0,    0,    0,    0,    0,    4,   11,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,   -4,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,   -8,    0,    0,  -11,    0,  -11,  -11,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -8,   -4,    0,   -5,   -3,    0,    0,   -4,   -5,   -5,  -11,   -3,   -8,    0,    0,    0,    0,    0,   -3,    0,    0,    0,    0,    0,    0,    8,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -19,    0,   -5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   -3,   -3,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    5,    0,    0,    0,    5,    0,    0,    0,    5,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,  -21,    0,  -21,    0,    0,    0,    0,    0,  -13,    0,    0,    0,    0,    0,    0,    0,  -19,    0,    0,    0,    0,    0,   11,    0,    5,    0,    5,    0,    0,    0,    0,    5,   -8,    0,   -8,    5,    0,    3,    0,    0,   -8,    0,    0,    3,    0,    3,    0,    0,    0,    0,    0,  -29,  -32,    0,    0,    0,    0,   -8,    0,   13,   13,   -8,    5,    0,    0,   -8,    5,   13,    5,    0,   -8,    0,    0,   -8,    0,    0,    0,    0,    0,    0,    0,
+       0,    0,    0,    0,    0,  -21,    0,  -21,    0,    0,    0,    0,    0,  -19,   -8,  -11,    0,    0,    0,    0,    0,  -27,    0,  -11,    0,    0,   -5,    0,    0,    5,    0,    5,    0,    0,    0,  -11,    3,  -13,    0,  -23,    3,    0,    0,    0,    0,  -21,    3,    0,    0,    0,    0,   -5,    0,    0,    0,    0,    0,  -44,  -11,    0,  -11,  -11,  -13,    0,    5,    5,  -13,    3,  -11,  -11,  -13,    3,   11,    3,    0,  -21,   -5,    0,  -23,    0,    0,  -11,    0,    0,    0,    0,
 };
 
 static const EpdLigaturePair bookerly_8_regularLigaturePairs[] = {
@@ -3573,21 +2246,21 @@ static const EpdFontData bookerly_8_regular = {
     bookerly_8_regularBitmaps,
     bookerly_8_regularGlyphs,
     bookerly_8_regularIntervals,
-    70,
+    63,
     22,
     18,
     -5,
     true,
     bookerly_8_regularGroups,
-    14,
+    12,
     nullptr,
     bookerly_8_regularKernLeftClasses,
     bookerly_8_regularKernRightClasses,
     bookerly_8_regularKernMatrix,
-    697,
-    706,
-    158,
-    134,
+    390,
+    399,
+    90,
+    86,
     bookerly_8_regularLigaturePairs,
     5,
 };
