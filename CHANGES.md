@@ -6,6 +6,31 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ## Unreleased
 
+### Reader Controls: Sleep and Mark Finished retired
+
+Two bindable reader actions are gone from **Settings → Reader Controls**. **Sleep** (8) was redundant — a long press of **Power** is hard-wired to sleep on every board, so binding a second control to it only cost a slot. **Mark Finished** (14) survives as **Mark as Read** in the Book Options popup, which is where the rest of the per-book actions already live.
+
+Enum values 8 and 14 stay **reserved** rather than being renumbered: `settings.json` stores the raw number, so reusing them would silently repoint every existing binding above the gap. `CrossPointSettings::isRetiredReaderAction()` keeps the picker from offering them, and `sanitizeReaderActions()` (run from `JsonSettingsIO::loadSettings`) rewrites any slot still holding one — or any out-of-range value — to `READER_ACTION_NONE`, so a settings file from an older firmware can't leave a button bound to an action that no longer dispatches. The legacy `longPressAction` / `shortPwrBtn` migration now maps its Sleep cases to None for the same reason.
+
+**Files changed**: `src/CrossPointSettings.{h,cpp}`, `src/JsonSettingsIO.cpp`, `src/activities/settings/ReaderControlsActivity.cpp`, `src/activities/reader/{EpubReaderActivity,XtcReaderActivity}.cpp`, `lib/I18n/translations/english.yaml`, `README.md`, `USER_GUIDE.md`.
+
+### Dictionary lookup
+
+Offline **StarDict** word lookup while reading, backported from upstream CrossPoint. Dictionaries live in `/dictionaries/<folder>/` (or the hidden `/.dictionaries/`) on the SD card and are selected in **Settings → Reader → Dictionary**; the row and the reader-menu **Look Up** row both hide themselves when nothing usable is installed. `READER_ACTION_DICTIONARY` (24) makes Look Up bindable to any button, tap zone or hold.
+
+Reads `.idx` + `.dict`/`.dict.dz` with optional `.syn` synonyms, binary-searching lazily built `.qidx`/`.sidx` sampled-offset sidecars so no index is held in RAM. A miss retries dictionary synonyms then mini stemming. `sametypesequence=h` dictionaries lay out through `ChapterHtmlSlimParser` for real headings/bold/italics/lists, falling back to `htmlToPlainText` whenever the heap gate declines.
+
+Three fork-specific decisions:
+
+- **No second word selector.** Upstream ships `DictionaryWordSelectActivity`; we already had a better one in `ClipSelectionActivity` (pooled 14-byte `WordRef`s, cross-page cursor, tap hit-testing). It gained a `singleWordMode` flag that returns a `WordPickResult` instead of running `ClipTextBuilder`, so there is still exactly one word selector to keep working.
+- **No `initWithRing()` backport.** Upstream hands the inflate reader a caller-owned 32KB window. Our `InflateReader::init(true)` already prefers an outstanding `InflateScratchLease` before it mallocs, so `DictionaryLookup::run()` just holds the framebuffer lease across the index build and the lookup — the contiguous window comes from the framebuffer, which fragmentation cannot reach.
+- **Bluetooth and lookups are mutually exclusive on the C3.** The lease covers the inflate window only; the `.dz` chunk table, the definition buffer and the styled page set still compete with the ~50KB the BLE stack holds. `openDictionaryLookup()` refuses up front with "Turn off Bluetooth to look up words" rather than failing after the user has picked a word. Deliberately *not* a `BleMemoryPause` — that would drop a paired page-turner mid-sentence. Fenced by `CROSSPOINT_BLE_EXCLUSIVE`, so the X4 Pro is unaffected.
+
+No cache-format change: nothing here touches `book.bin` or `section.bin`, so existing `.crosspoint` caches survive the update.
+
+**Files added**: `src/util/{DictZip,Dictionary,DictionaryRegistry,DictHtmlPages,DictionaryLookup,HtmlToPlainText}.*`, `src/activities/reader/DictionaryDefinitionActivity.*`, `src/activities/settings/DictionarySelectActivity.*`, `docs/dictionary.md`, `test/html_to_plain_text/` + `test/run_html_to_plain_text_test.sh`.
+**Files changed**: `src/CrossPointSettings.h`, `src/SettingsList.h`, `src/activities/ActivityResult.h`, `src/activities/reader/{ClipSelectionActivity,EpubReaderActivity,EpubReaderMenuActivity}.*`, `src/activities/settings/{SettingsActivity,ReaderControlsActivity}.*`, `src/util/StringUtils.h`, `lib/I18n/translations/english.yaml`.
+
 ### X4 Pro support (experimental)
 
 Initial port to the **Xteink X4 Pro** — an ESP32-S3 board, so it ships as a **separate binary** (`pio run -e x4pro`) rather than as an addition to the C3 image. `freeink-sdk`'s `BoardConfig.h` refuses to link devices from two MCU families, so `[env:x4pro]` unsets `FREEINK_DEVICE_X3`/`FREEINK_DEVICE_X4` and the RISC-V-only `WOLFSSL_SP_RISCV32`, and switches SD to the native SDMMC block-device interface.

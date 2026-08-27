@@ -2946,10 +2946,6 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
       activityManager.goToFileBrowser(epub ? epub->getPath() : "");
       return true;
 
-    case A::READER_ACTION_SLEEP:
-      enterDeepSleepFromReaderAction();
-      return true;
-
     case A::READER_ACTION_SYNC:
       performLongPressSync();
       return false;
@@ -2989,18 +2985,6 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
       requestUpdate();
       return false;
     }
-
-    case A::READER_ACTION_MARK_FINISHED:
-      if (epub) {
-        RECENT_BOOKS.updateProgress(epub->getPath(), 100);
-        RECENT_BOOKS.saveToFile();
-      }
-      if (!bookFinishedRecorded) {
-        bookFinishedRecorded = true;
-        READING_STATS.updateProgress(100, true);
-      }
-      onGoHome();
-      return true;
 
     case A::READER_ACTION_FOOTNOTES:
       if (!currentPageFootnotes.empty()) {

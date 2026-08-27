@@ -154,10 +154,6 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
       activityManager.goToFileBrowser(xtc ? xtc->getPath() : "");
       return true;
 
-    case A::READER_ACTION_SLEEP:
-      enterDeepSleepFromReaderAction();
-      return true;
-
     case A::READER_ACTION_FORCE_REFRESH:
       renderer.displayBuffer(HalDisplay::FULL_REFRESH);
       return false;
@@ -187,15 +183,6 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
                                                        ReadingStatsDetailContext{.allowOpenBook = false}),
           [this](const ActivityResult&) { requestUpdate(); });
       return false;
-
-    case A::READER_ACTION_MARK_FINISHED:
-      if (xtc) {
-        RECENT_BOOKS.updateProgress(xtc->getPath(), 100);
-        RECENT_BOOKS.saveToFile();
-      }
-      READING_STATS.updateProgress(100, true);
-      onGoHome();
-      return true;
 
     default:
       return false;

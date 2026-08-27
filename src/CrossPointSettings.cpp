@@ -79,7 +79,8 @@ void CrossPointSettings::migrateReaderActions(CrossPointSettings& settings) {
       settings.readerLongPressConfirm = READER_ACTION_BOOKMARK;
       break;
     case LONG_PRESS_SLEEP:
-      settings.readerLongPressConfirm = READER_ACTION_SLEEP;
+      // Sleep is no longer a bindable action; the power long-press still sleeps.
+      settings.readerLongPressConfirm = READER_ACTION_NONE;
       break;
     default:  // LONG_PRESS_REFRESH
       settings.readerLongPressConfirm = READER_ACTION_FORCE_REFRESH;
@@ -89,7 +90,9 @@ void CrossPointSettings::migrateReaderActions(CrossPointSettings& settings) {
   // Map legacy shortPwrBtn → readerShortPressPower
   switch (static_cast<SHORT_PWRBTN>(settings.shortPwrBtn)) {
     case SLEEP:
-      settings.readerShortPressPower = READER_ACTION_SLEEP;
+      // See above: the power long-press already sleeps, so the short press is
+      // left unbound rather than duplicating it.
+      settings.readerShortPressPower = READER_ACTION_NONE;
       break;
     case FORCE_REFRESH:
       settings.readerShortPressPower = READER_ACTION_FORCE_REFRESH;
@@ -155,6 +158,30 @@ void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings
         settings.frontButtonRight = FRONT_HW_RIGHT;
         return;
       }
+    }
+  }
+}
+
+void CrossPointSettings::sanitizeReaderActions(CrossPointSettings& settings) {
+  // Static table of the assignable slots. Member pointers are compile-time
+  // constants, so the array lives in flash rather than costing DRAM.
+  static constexpr uint8_t CrossPointSettings::* SLOTS[] = {
+      &CrossPointSettings::readerShortPressBack,     &CrossPointSettings::readerLongPressBack,
+      &CrossPointSettings::readerShortPressConfirm,  &CrossPointSettings::readerLongPressConfirm,
+      &CrossPointSettings::readerShortPressLeft,     &CrossPointSettings::readerLongPressLeft,
+      &CrossPointSettings::readerShortPressRight,    &CrossPointSettings::readerLongPressRight,
+      &CrossPointSettings::readerShortPressSideUp,   &CrossPointSettings::readerLongPressSideUp,
+      &CrossPointSettings::readerShortPressSideDown, &CrossPointSettings::readerLongPressSideDown,
+      &CrossPointSettings::readerShortPressPower,    &CrossPointSettings::readerTapLeft,
+      &CrossPointSettings::readerTapMiddle,          &CrossPointSettings::readerTapRight,
+      &CrossPointSettings::readerHoldLeft,           &CrossPointSettings::readerHoldMiddle,
+      &CrossPointSettings::readerHoldRight,          &CrossPointSettings::readerShortPressHome,
+      &CrossPointSettings::readerLongPressHome,
+  };
+  for (const auto slot : SLOTS) {
+    uint8_t& action = settings.*slot;
+    if (action >= READER_ACTION_COUNT || isRetiredReaderAction(action)) {
+      action = READER_ACTION_NONE;
     }
   }
 }

@@ -20,6 +20,37 @@ bool ImageBlock::imageExists() const { return Storage.exists(imagePath.c_str());
 
 namespace {
 
+// A page render draws each image up to ~13 times (BW double-refresh plus every
+// grayscale band pass). An image the decoder cannot open fails that many times
+// per page, each failure costing an SD open. Remember the failures for the
+// session so the first one is the only one paid for. Hashes, not paths, to keep
+// this off the heap; a bounded array because the count is per-book-session.
+constexpr size_t MAX_SESSION_IMAGE_FAILURES = 16;
+uint64_t failedImageHashes[MAX_SESSION_IMAGE_FAILURES];
+size_t failedImageCount = 0;
+
+uint64_t imagePathHash(const std::string& path) {
+  uint64_t hash = 14695981039346656037ull;  // FNV-1a
+  for (const char c : path) {
+    hash ^= static_cast<uint8_t>(c);
+    hash *= 1099511628211ull;
+  }
+  return hash;
+}
+
+bool imageFailedThisSession(const std::string& path) {
+  const uint64_t hash = imagePathHash(path);
+  for (size_t i = 0; i < failedImageCount; i++) {
+    if (failedImageHashes[i] == hash) return true;
+  }
+  return false;
+}
+
+void markImageFailedThisSession(const std::string& path) {
+  if (failedImageCount == MAX_SESSION_IMAGE_FAILURES || imageFailedThisSession(path)) return;
+  failedImageHashes[failedImageCount++] = imagePathHash(path);
+}
+
 std::string getCachePath(const std::string& imagePath) {
   // Replace extension with .pxc (pixel cache)
   size_t dotPos = imagePath.rfind('.');
@@ -133,6 +164,10 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // apart from the image itself being blank.
   if (renderer.areImagesSuppressed()) return;
 
+  // Already known undecodable this session - the layout still reserves the box,
+  // but don't pay the failing open again on every band pass.
+  if (imageFailedThisSession(imagePath)) return;
+
   LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d)", x, y, imagePath.c_str(), width, height);
 
   const int screenWidth = renderer.getScreenWidth();
@@ -166,6 +201,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   HalFile file;
   if (!Storage.openFileForRead("IMG", imagePath, file)) {
     LOG_ERR("IMG", "Image file not found: %s", imagePath.c_str());
+    markImageFailedThisSession(imagePath);
     return;
   }
   size_t fileSize = file.size();
@@ -173,6 +209,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
 
   if (fileSize == 0) {
     LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
+    markImageFailedThisSession(imagePath);
     return;
   }
 
@@ -192,6 +229,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);
   if (!decoder) {
     LOG_ERR("IMG", "No decoder found for image: %s", imagePath.c_str());
+    markImageFailedThisSession(imagePath);
     return;
   }
 
@@ -200,6 +238,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   bool success = decoder->decodeToFramebuffer(imagePath, renderer, config);
   if (!success) {
     LOG_ERR("IMG", "Failed to decode image: %s", imagePath.c_str());
+    markImageFailedThisSession(imagePath);
     return;
   }
 

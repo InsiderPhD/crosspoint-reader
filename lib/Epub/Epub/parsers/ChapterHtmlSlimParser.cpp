@@ -15,6 +15,7 @@
 #include "../../Epub.h"
 #include "../Page.h"
 #include "../converters/ImageDecoderFactory.h"
+#include "../converters/ImageDimsProbe.h"
 #include "../converters/ImageToFramebufferDecoder.h"
 #include "../htmlEntities.h"
 
@@ -734,10 +735,45 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
             }
 
             if (extractSuccess) {
-              // Get image dimensions
+              // Read the dimensions straight out of the file header rather than
+              // asking a decoder to open it. A decoder open is a much stricter
+              // gate than layout needs: PNGdec rejects interlaced and 16-bit
+              // PNGs outright, and a failure here used to delete the image and
+              // drop it from the layout permanently (the drop is baked into the
+              // section cache, so it never retried). Header probing keeps the
+              // image in the flow with the right box reserved; if the decoder
+              // still can't handle it at render time, that degrades to an empty
+              // box on the page instead of silently vanishing.
               ImageDimensions dims = {0, 0};
-              ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(cachedImagePath);
-              if (decoder && decoder->getDimensions(cachedImagePath, dims)) {
+              ImageDimsProbe headerProbe;
+              {
+                HalFile probeFile;
+                if (Storage.openFileForRead("EHP", cachedImagePath, probeFile)) {
+                  uint8_t probeBuf[256];
+                  int readBytes;
+                  while ((readBytes = probeFile.read(probeBuf, sizeof(probeBuf))) > 0) {
+                    // A short write means the probe has finished (found or failed).
+                    if (headerProbe.write(probeBuf, readBytes) != static_cast<size_t>(readBytes)) break;
+                  }
+                  probeFile.close();
+                }
+              }
+              bool gotDimensions = headerProbe.getDimensions(dims);
+
+              if (!gotDimensions) {
+                // Unrecognised header (rare) - fall back to the decoder. Retried
+                // to absorb SD-card sync latency on slow cards, which otherwise
+                // produced the same permanent silent drop.
+                ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(cachedImagePath);
+                for (int attempt = 0; attempt < 3 && !gotDimensions; attempt++) {
+                  if (attempt > 0) {
+                    delay(50);  // Give a slow SD card time to finish syncing before retrying
+                  }
+                  gotDimensions = decoder && decoder->getDimensions(cachedImagePath, dims);
+                }
+              }
+
+              if (gotDimensions) {
                 LOG_DBG("EHP", "Image dimensions: %dx%d", dims.width, dims.height);
 
                 int displayWidth = 0;
@@ -762,6 +798,17 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                     containerWidth = self->viewportWidth - inset;
                   }
                 }
+                // One line with every input to the sizing decision below, so a serial
+                // capture shows at a glance whether an odd-looking image came from CSS or
+                // from the scale-to-fit branch.
+                LOG_DBG("EHP",
+                        "Image sizing: %s intrinsic %dx%d container %d viewport %d em %.1f class='%s' "
+                        "cssW=%d(%.2f/u%d) cssH=%d(%.2f/u%d)",
+                        cachedImagePath.c_str(), dims.width, dims.height, containerWidth, self->viewportHeight,
+                        static_cast<double>(emSize), classAttr.c_str(), hasCssWidth ? 1 : 0,
+                        static_cast<double>(imgStyle.imageWidth.value), static_cast<int>(imgStyle.imageWidth.unit),
+                        hasCssHeight ? 1 : 0, static_cast<double>(imgStyle.imageHeight.value),
+                        static_cast<int>(imgStyle.imageHeight.unit));
 
                 if (hasCssHeight && hasCssWidth && dims.width > 0 && dims.height > 0) {
                   // Both CSS height and width set: resolve both, then clamp to viewport preserving requested ratio
@@ -836,6 +883,28 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                   displayWidth = (int)(dims.width * scale);
                   displayHeight = (int)(dims.height * scale);
                   LOG_DBG("EHP", "Display size: %dx%d (scale %.2f)", displayWidth, displayHeight, scale);
+                }
+
+                // Never enlarge an image beyond its own pixels. A CSS size is usually a
+                // percentage of a wrapper box we don't model (Unsouled nests its 69x80
+                // scene-break ornament in <div width:11.2em><div width:10.8%>, so the
+                // image's own `width: 100%` means ~27px, not the full column), and an
+                // upscale adds no detail while its interpolation is plainly visible on
+                // e-ink. Scaling down to fit is unchanged; the requested aspect ratio is
+                // preserved rather than snapping back to the intrinsic one.
+                if (dims.width > 0 && dims.height > 0) {
+                  const float capX = (displayWidth > dims.width) ? static_cast<float>(dims.width) / displayWidth : 1.0f;
+                  const float capY =
+                      (displayHeight > dims.height) ? static_cast<float>(dims.height) / displayHeight : 1.0f;
+                  const float cap = (capX < capY) ? capX : capY;
+                  if (cap < 1.0f) {
+                    LOG_DBG("EHP", "Capping %dx%d to intrinsic %dx%d", displayWidth, displayHeight, dims.width,
+                            dims.height);
+                    displayWidth = static_cast<int>(displayWidth * cap + 0.5f);
+                    displayHeight = static_cast<int>(displayHeight * cap + 0.5f);
+                    if (displayWidth < 1) displayWidth = 1;
+                    if (displayHeight < 1) displayHeight = 1;
+                  }
                 }
 
                 // Flush any pending text block so it appears before the image

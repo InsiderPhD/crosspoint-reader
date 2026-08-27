@@ -256,8 +256,6 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
       return tr(STR_HOME);
     case CrossPointSettings::READER_ACTION_FILE_BROWSER:
       return tr(STR_READER_ACTION_FILE_BROWSER);
-    case CrossPointSettings::READER_ACTION_SLEEP:
-      return tr(STR_SLEEP);
     case CrossPointSettings::READER_ACTION_SYNC:
       return tr(STR_READER_ACTION_SYNC);
     case CrossPointSettings::READER_ACTION_BOOKMARK:
@@ -269,8 +267,6 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
       return tr(STR_READER_ACTION_DARK_MODE);
     case CrossPointSettings::READER_ACTION_SCREENSHOT:
       return tr(STR_READER_ACTION_SCREENSHOT);
-    case CrossPointSettings::READER_ACTION_MARK_FINISHED:
-      return tr(STR_READER_ACTION_MARK_FINISHED);
     case CrossPointSettings::READER_ACTION_FOOTNOTES:
       // Short variant; the reader menu keeps the full STR_FOOTNOTES wording.
       return tr(STR_READER_ACTION_FOOTNOTES);
@@ -329,7 +325,9 @@ CrossPointSettings::READER_ACTION ReaderControlsActivity::getActionForRow(const 
     case 12:
       return static_cast<A>(SETTINGS.readerShortPressPower);
     case 13:
-      return CrossPointSettings::READER_ACTION_SLEEP;
+      // Power long press is fixed sleep and isn't a bindable action; the row's
+      // label is special-cased in getRowActionName().
+      return CrossPointSettings::READER_ACTION_NONE;
     case 14:
       return static_cast<A>(SETTINGS.readerTapLeft);
     case 15:
@@ -355,11 +353,13 @@ void ReaderControlsActivity::cycleActionForRow(const uint8_t row) {
   if (row == kFixedRow) return;
   // Screenshot is a developer/testing action — skip it while cycling unless Dev Mode
   // is on (a button already set to it from a prior Dev session still works and cycles past).
+  // Retired values (Sleep, Mark Finished) are never offered.
   const bool dev = SETTINGS.devMode != 0;
   const auto advance = [dev](uint8_t& field) {
     do {
       field = (field + 1) % static_cast<uint8_t>(CrossPointSettings::READER_ACTION_COUNT);
-    } while (!dev && field == CrossPointSettings::READER_ACTION_SCREENSHOT);
+    } while (CrossPointSettings::isRetiredReaderAction(field) ||
+             (!dev && field == CrossPointSettings::READER_ACTION_SCREENSHOT));
   };
   switch (row) {
     case 0:

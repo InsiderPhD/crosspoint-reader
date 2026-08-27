@@ -272,13 +272,14 @@ class CrossPointSettings {
     READER_ACTION_OPEN_MENU = 5,
     READER_ACTION_GO_HOME = 6,
     READER_ACTION_FILE_BROWSER = 7,
-    READER_ACTION_SLEEP = 8,
+    // 8 retired (was Sleep — the power long-press is hard-wired to it anyway).
     READER_ACTION_SYNC = 9,
     READER_ACTION_BOOKMARK = 10,
     READER_ACTION_FORCE_REFRESH = 11,
     READER_ACTION_DARK_MODE = 12,
     READER_ACTION_SCREENSHOT = 13,
-    READER_ACTION_MARK_FINISHED = 14,
+    // 14 retired (was Mark Finished — still available as Mark as Read in the
+    // Book Options popup).
     READER_ACTION_FOOTNOTES = 15,
     READER_ACTION_AUTO_PAGE_TURN = 16,
     READER_ACTION_READING_STATS = 17,
@@ -291,6 +292,12 @@ class CrossPointSettings {
     READER_ACTION_DICTIONARY = 24,
     READER_ACTION_COUNT
   };
+
+  // Values 8 and 14 were dropped from the picker but stay reserved so a
+  // settings.json written by an older firmware keeps its numbering for every
+  // other action. Never reuse them; a stored slot holding one is rewritten to
+  // READER_ACTION_NONE by sanitizeReaderActions() on load.
+  static constexpr bool isRetiredReaderAction(const uint8_t action) { return action == 8 || action == 14; }
 
   // Reader button-hint bar mode. Cycles Off -> Short -> Long -> Front-only Short -> Front-only Long.
   // The FRONT_* modes show only the front-button bar (no side/power hints).
@@ -587,6 +594,11 @@ class CrossPointSettings {
   bool loadFromFile();
 
   static void validateFrontButtonMapping(CrossPointSettings& settings);
+
+  // Rewrites any reader-action slot holding a retired or out-of-range value to
+  // READER_ACTION_NONE, so a settings.json from an older firmware can't leave a
+  // button bound to an action that no longer dispatches.
+  static void sanitizeReaderActions(CrossPointSettings& settings);
 
   // One-time migration: applies legacy per-action settings (longPressAction, shortPwrBtn,
   // longPressChapterSkip, sideButtonLayout) to the new per-button action fields.

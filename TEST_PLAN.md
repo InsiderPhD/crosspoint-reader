@@ -63,6 +63,35 @@ Session log:
 - [ ] Save a clipping; it appears in the clipping list; delete it.
 - [ ] Heap before/after clip selection roughly equal (no leak from the pooled WordRef path).
 
+## Dictionary (new — StarDict lookup)
+- [ ] **Preconditions**: a StarDict folder in `/dictionaries/<name>/` with an
+      **uncompressed** `.idx`. Test with a `.dict.dz` specifically — the plain
+      `.dict` path never inflates and would not exercise the risky allocation.
+- [ ] **Settings → Reader → Dictionary** lists it; the row is *absent* when
+      `/dictionaries/` is empty or missing.
+- [ ] **First lookup** shows "Indexing dictionary..." then a definition. Serial
+      logs `File does not exist: ....qidx` once before this — expected, it is the
+      staleness probe, not a failure.
+- [ ] **Second lookup** is fast (no re-index) and survives a reboot (sidecars kept,
+      `dictionaryName` persisted in `settings.json`).
+- [ ] Word selection: Left/Right by word, side Up/Down by line, Confirm looks up,
+      Back returns to the page.
+- [ ] A miss shows "Not found"; a known synonym (`oxen`) and a stem (`running`)
+      both resolve.
+- [ ] **Bluetooth gate**: with a remote enabled, Look Up refuses with "Turn off
+      Bluetooth to look up words" — *before* the word picker opens. Turn Bluetooth
+      off, look up successfully, turn it back on and confirm the remote still pages.
+- [ ] **Heap**: free heap before Look Up vs after leaving the definition screen is
+      roughly equal — the lease and definition buffer must both come back.
+- [ ] **Framebuffer lease**: the page repaints correctly after a lookup (a lease
+      leak would leave inflate scratch on screen).
+
+## Clippings regression (the dictionary shares this selector)
+- [ ] Save Clipping still opens the range selector with the **two-stage** anchor →
+      Done flow (Confirm anchors, second Confirm finishes) — the dictionary's
+      one-press mode must not have leaked into it.
+- [ ] A saved clipping still contains the full selected range and its context text.
+
 ## UI changes (landed in `86c56619`)
 - [ ] **Status bar per-element positions**: for each element, cycle Hide / Left /
       Middle / Right in settings — layout updates live, nothing overlaps, bookmark
@@ -162,6 +191,35 @@ Session log:
 
 ## Clippings
 - [ ] Clip selection on a long chapter — no OOM reboot; save, list, delete a clipping.
+
+## Dictionary (new — StarDict lookup)
+- [ ] **Preconditions**: a StarDict folder in `/dictionaries/<name>/` with an
+      **uncompressed** `.idx`. Test with a `.dict.dz` specifically — the plain
+      `.dict` path never inflates and would not exercise the risky allocation.
+- [ ] **Settings → Reader → Dictionary** lists it; the row is *absent* when
+      `/dictionaries/` is empty or missing.
+- [ ] **First lookup** shows "Indexing dictionary..." then a definition. Serial
+      logs `File does not exist: ....qidx` once before this — expected, it is the
+      staleness probe, not a failure.
+- [ ] **Second lookup** is fast (no re-index) and survives a reboot (sidecars kept,
+      `dictionaryName` persisted in `settings.json`).
+- [ ] Word selection: Left/Right by word, side Up/Down by line, Confirm looks up,
+      Back returns to the page.
+- [ ] A miss shows "Not found"; a known synonym (`oxen`) and a stem (`running`)
+      both resolve.
+- [ ] **Bluetooth gate**: with a remote enabled, Look Up refuses with "Turn off
+      Bluetooth to look up words" — *before* the word picker opens. Turn Bluetooth
+      off, look up successfully, turn it back on and confirm the remote still pages.
+- [ ] **Heap**: free heap before Look Up vs after leaving the definition screen is
+      roughly equal — the lease and definition buffer must both come back.
+- [ ] **Framebuffer lease**: the page repaints correctly after a lookup (a lease
+      leak would leave inflate scratch on screen).
+
+## Clippings regression (the dictionary shares this selector)
+- [ ] Save Clipping still opens the range selector with the **two-stage** anchor →
+      Done flow (Confirm anchors, second Confirm finishes) — the dictionary's
+      one-press mode must not have leaked into it.
+- [ ] A saved clipping still contains the full selected range and its context text.
 
 ## UI changes
 - [ ] Status bar per-element Hide/L/M/R + bookmark icon.
@@ -272,6 +330,25 @@ Session log:
 - [ ] Auto-sleep fires; short power press wakes from deep sleep.
 - [ ] **Battery-only** sleep paint: FULL_REFRESH, no ghosting (USB unplugged).
 - [ ] Battery percentage plausible.
+
+## Dictionary (new — StarDict lookup)
+- [ ] **Preconditions**: a StarDict folder in `/dictionaries/<name>/` with an
+      **uncompressed** `.idx`, ideally with a `.dict.dz`.
+- [ ] Settings → Reader → Dictionary lists and selects it; first lookup indexes,
+      later lookups are fast.
+- [ ] **No Bluetooth gate here** — this is the difference from the C3 boards. With a
+      remote connected, Look Up must open normally and the remote must still page
+      afterwards. If it refuses, `CROSSPOINT_BLE_EXCLUSIVE` is wrong for this build.
+- [ ] **Touch**: tap a word to move the highlight, tap it again to look it up, and
+      hold on a word to look it up directly.
+- [ ] Definition screen: tap left third = previous page, elsewhere = next page;
+      Back returns to word selection. A tap must not *also* fire Confirm.
+- [ ] Full Touch mode on **and** off — both must behave the same here, since the
+      selector and the viewer hit-test taps themselves.
+
+## Clippings regression (the dictionary shares this selector)
+- [ ] Hold-to-clip still opens the range selector pre-anchored on the held word, and
+      the two-stage anchor → Done flow is unchanged.
 
 ## Bluetooth (X4 Pro had device-specific fixes — test thoroughly)
 - [ ] **Pairing-screen freeze fix**: open Bluetooth settings while a previously

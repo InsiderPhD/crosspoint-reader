@@ -180,6 +180,33 @@ KatiePoint can draw small labels next to each physical button while reading, so 
 
 Automatically turns the page on a timer. Set via the reader menu (**Auto Page Turn**): **Off**, **Auto**, or a fixed interval (60s / 50s / 40s / 35s / 30s / 25s / 20s). **Auto** uses your calibrated reading speed and shows the estimate inline, e.g. `Auto (~45s)`; if no speed has been measured yet, Auto behaves as Off.
 
+### Dictionary Lookup
+
+Look up a word without leaving the page, using an offline **StarDict** dictionary on the SD card. Nothing ships with the firmware — you add the dictionary yourself; see **[docs/dictionary.md](docs/dictionary.md)** for where to get one and the exact folder layout.
+
+Setup, once:
+
+1. Copy a dictionary folder to `/dictionaries/` on the SD card, e.g. `/dictionaries/webster/webster.idx` plus `webster.dict.dz`. (`/.dictionaries/` works too, and stays out of the file browser.)
+2. **Settings → Reader → Dictionary** and pick it. The row only appears once at least one usable dictionary exists.
+
+To look a word up, open the reader menu and choose **Look Up**, or bind **Look Up** to any button, tap zone or hold in **Reader Controls**. One word on the page is highlighted:
+
+| Action | Buttons |
+| ------ | ------- |
+| **Previous / next word** | **Left** / **Right** |
+| **Previous / next line** | side **Up** / **Down** |
+| **Look up the word** | **Confirm** |
+| **Back to reading** | **Back** |
+
+On the X4 Pro you can also tap a word to highlight it, tap it again to look it up, or hold on it to do both at once. In the definition screen, **Left**/**Right** (or side **Up**/**Down**) page through a long entry and **Back** returns to word selection.
+
+Two things that look like faults but are not:
+
+- **The first lookup on a new dictionary shows "Indexing dictionary…"** for a few seconds while it builds small `.qidx`/`.sidx` sidecar files next to the dictionary. Once only. They are safe to delete at any time — they just get rebuilt.
+- **On the X3 and X4, Bluetooth must be off.** A lookup needs a large contiguous block of RAM that the BLE stack is holding, so the reader refuses with *"Turn off Bluetooth to look up words"* rather than failing halfway. Toggle the remote off from the reader menu, look the word up, and turn it back on. The X4 Pro has no such restriction.
+
+If a word is not found as written, the lookup automatically retries the dictionary's own synonyms (`oxen` → `ox`) and then common word endings (`dogs` → `dog`, `running` → `run`) before reporting a miss.
+
 ### Bionic Reading
 
 An optional mode that bolds the leading portion of each word to guide the eye. Toggle it in **Settings → Reader → Bionic Reading**, or bind **Bionic** to a reader button. Changing it re-lays out the text, so cached pages regenerate the first time you open a book afterwards.
@@ -291,6 +318,7 @@ Available actions:
 | **Create Bookmark** | *(hideable)* Bookmark the current page. |
 | **Save Clipping** | *(hideable)* Save a text clipping/highlight from the current page. |
 | **View Clippings** | *(hideable)* Browse saved clippings for this book. |
+| **Look Up** | *(shown when a dictionary is selected)* Look up a word on this page — see **[Dictionary Lookup](#dictionary-lookup)**. |
 | **Take Screenshot** | *(Developer Mode only)* Save the current screen to `screenshots/`. |
 | **Bluetooth Remote** | *(shown when a remote is paired)* Turn the BLE page turner on/off — see **[Bluetooth Page Turner](#11-bluetooth-page-turner)**. |
 | **Show page as QR** | Show the current page as a QR code. |
@@ -302,7 +330,7 @@ Available actions:
 Rows marked *in place* cycle their value without closing the menu. Rows marked *hideable* — along with **Bluetooth Remote** and the sync rows — can be turned off in **Settings → Reader** if you drive those functions from buttons instead.
 
 > [!NOTE]
-> **Reading Speed** and **Mark as Read** are no longer menu rows. Your reading speed is shown in the summary line above; **Mark Finished** is available as a bindable **[Reader Controls](#reader-tab)** action, and as **Mark as Read** in the **Book Options** popup. **Book Info** has likewise moved out of the reader menu — open it from the book's entry in the file browser or Library.
+> **Reading Speed** and **Mark as Read** are no longer menu rows. Your reading speed is shown in the summary line above; marking a book finished is done with **Mark as Read** in the **Book Options** popup. **Book Info** has likewise moved out of the reader menu — open it from the book's entry in the file browser or Library.
 
 ### Book Info panel
 
@@ -583,7 +611,8 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
   <img src="docs/images/user-guide/font-layout-preview.png" alt="Font and Layout preview with a live sample page above the list of font and spacing options" width="300">
 
 - **Customise Status Bar** *(action)* — see below.
-- **Reader Controls** *(action)* — bind a **short-press** and **long-press** action to every reader control. Choose from Next/Previous Page, Chapter Forward/Back, Menu, Home, Files, Sleep, Sync, Bookmark, Force Refresh, Dark Mode, Screenshot, Mark Finished, Footnotes, Auto Page Turn, Reading Stats, Bionic Reading, Button Hints, Rotate Screen, Create Clipping, Bluetooth Remote, Hide Status Bar, or None. Bindings attach to *logical* button roles, so they survive front-button remaps. On the X4 Pro the same screen also binds the **tap** and **hold** zones (left / middle / right) and the **home pad** (short and long). There's a live preview; **Confirm** cycles, **Back** saves.
+- **Dictionary** *(action)* — pick the offline StarDict dictionary used for word lookups, or **None** to disable them. Only listed once at least one usable dictionary folder exists under `/dictionaries/`. See **[Dictionary Lookup](#dictionary-lookup)**.
+- **Reader Controls** *(action)* — bind a **short-press** and **long-press** action to every reader control. Choose from Next/Previous Page, Chapter Forward/Back, Menu, Home, Files, Sync, Bookmark, Force Refresh, Dark Mode, Screenshot, Footnotes, Auto Page Turn, Reading Stats, Bionic Reading, Button Hints, Rotate Screen, Create Clipping, Bluetooth Remote, Hide Status Bar, Look Up, or None. (Sleep isn't in the list — a long press of **Power** always sleeps.) Bindings attach to *logical* button roles, so they survive front-button remaps. On the X4 Pro the same screen also binds the **tap** and **hold** zones (left / middle / right) and the **home pad** (short and long). There's a live preview; **Confirm** cycles, **Back** saves.
 
   <p>
   <img src="docs/images/user-guide/reader-controls.png" alt="Reader Controls screen listing short- and long-press bindings for every reader button" width="300">

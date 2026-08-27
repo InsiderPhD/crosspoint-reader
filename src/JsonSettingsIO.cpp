@@ -273,6 +273,7 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.frontButtonRight =
       clamp(doc["frontButtonRight"] | (uint8_t)S::FRONT_HW_RIGHT, S::FRONT_BUTTON_HARDWARE_COUNT, S::FRONT_HW_RIGHT);
   CrossPointSettings::validateFrontButtonMapping(s);
+  CrossPointSettings::sanitizeReaderActions(s);
   s.readingSpeedSecondsPerPage = doc["readingSpeedSecondsPerPage"] | (uint16_t)0;
 
   // BLE bonded remote — plain char buffers, not in SettingsList (see save side).
