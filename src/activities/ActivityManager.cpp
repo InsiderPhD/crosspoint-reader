@@ -66,7 +66,12 @@ void ActivityManager::renderTaskLoop() {
     // Acquire the lock before reading currentActivity to avoid a TOCTOU race
     // where the main task deletes the activity between the null-check and render().
     RenderLock lock;
-    if (currentActivity) {
+    // isRenderable(): a session that has released the framebuffer (the web
+    // server) keeps its last image on the panel and must not draw again.
+    // Requests that arrive anyway -- USB plug/unplug, a maintenance repaint --
+    // are dropped here rather than at each call site. The waiter notification
+    // below still fires, so requestUpdateAndWait() cannot deadlock.
+    if (currentActivity && renderer.isRenderable()) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
       currentActivity->render(std::move(lock));
     }

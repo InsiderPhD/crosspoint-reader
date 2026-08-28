@@ -53,6 +53,15 @@ class HalDisplay {
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;
 
+  // Hand the framebuffer's ~48KB back to the heap. E-ink is bistable, so the
+  // panel keeps showing its last refreshed image with no buffer behind it —
+  // which makes the memory pure dead weight for any session that paints once
+  // and then stops. No display operation is legal afterwards; there is
+  // deliberately no realloc wrapper, because reallocating relocates the 48KB
+  // and fragments a PSRAM-less heap. The only way back is a reboot, so callers
+  // must be sessions that restart on exit (see CrossPointWebServerActivity).
+  void releaseBuffers();
+
   // Drain any deferred refresh (async fire / split displayStart+displayFinish)
   // so the panel pipeline is no longer reading the framebuffer. No-op when
   // nothing is pending.

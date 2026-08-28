@@ -764,7 +764,7 @@ void loop() {
     if (line.startsWith("CMD:")) {
       String cmd = line.substring(4);
       cmd.trim();
-      if (cmd == "SCREENSHOT") {
+      if (cmd == "SCREENSHOT" && renderer.isRenderable()) {
         const uint32_t bufferSize = display.getBufferSize();
         logSerial.printf("SCREENSHOT_START:%d\n", bufferSize);
         uint8_t* buf = display.getFrameBuffer();
@@ -789,7 +789,10 @@ void loop() {
   static bool screenshotComboActive = false;
   if (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.isPressed(HalGPIO::BTN_DOWN)) {
     screenshotComboActive = true;
-    if (screenshotButtonsReleased) {
+    // Both POWER chords draw straight to the framebuffer rather than going
+    // through the render task, so they need their own isRenderable() gate -- a
+    // session that released the buffer (web server) has nothing to draw into.
+    if (screenshotButtonsReleased && renderer.isRenderable()) {
       screenshotButtonsReleased = false;
       {
         RenderLock lock;
@@ -823,7 +826,7 @@ void loop() {
       gpio.isPressed(HalGPIO::BTN_POWER) && mappedInputManager.isPressed(MappedInputManager::Button::Confirm);
   if (heapReportChordHeld) {
     heapReportComboActive = true;
-    if (heapReportButtonsReleased) {
+    if (heapReportButtonsReleased && renderer.isRenderable()) {
       heapReportButtonsReleased = false;
       {
         RenderLock lock;

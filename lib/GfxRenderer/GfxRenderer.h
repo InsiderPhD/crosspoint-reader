@@ -87,6 +87,22 @@ class GfxRenderer {
 
   // Setup
   void begin();  // must be called right after display.begin()
+
+  // Give the framebuffer's ~48KB back to the heap for a session that has
+  // painted its final screen. The panel holds that image on its own (e-ink is
+  // bistable), so the memory is otherwise idle — on this board that is the
+  // difference between ~20KB and ~68KB free, which is what decides whether
+  // lwIP can get pbufs or every TCP write stalls for tens of seconds.
+  //
+  // One-way: rendering stays unavailable until the device reboots. Callers
+  // must restart on exit, and everything that draws has to check
+  // isRenderable() first.
+  void releaseFrameBuffer();
+
+  // False once releaseFrameBuffer() has run. Every drawing entry point that
+  // can fire from the main loop (activity renders, the POWER chords, the
+  // serial screenshot command) must gate on this.
+  bool isRenderable() const { return frameBuffer != nullptr; }
   void insertFont(int fontId, EpdFontFamily font);
   // Clears both the flash-font map and any SD-font registration for fontId.
   // Coupled to avoid dangling SdCardFont* in sdCardFonts_ when callers free

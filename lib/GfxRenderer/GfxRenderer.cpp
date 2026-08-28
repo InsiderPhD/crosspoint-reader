@@ -68,6 +68,21 @@ void GfxRenderer::begin() {
   bwBufferChunks.assign((frameBufferSize + BW_BUFFER_CHUNK_SIZE - 1) / BW_BUFFER_CHUNK_SIZE, nullptr);
 }
 
+void GfxRenderer::releaseFrameBuffer() {
+  if (!frameBuffer) return;  // already released
+  // Drain any deferred refresh first: the panel pipeline may still be reading
+  // the buffer we are about to free.
+  display.waitRefreshComplete();
+  // Grayscale chunks are separate allocations that only make sense alongside a
+  // framebuffer; drop them too rather than stranding them for the session.
+  cleanupGrayscaleWithFrameBuffer();
+  const uint32_t freed = frameBufferSize;
+  display.releaseBuffers();
+  frameBuffer = nullptr;  // our cached copy would dangle otherwise
+  LOG_INF("GFX", "Framebuffer released: %u bytes returned, free heap now %u", (unsigned)freed,
+          (unsigned)ESP.getFreeHeap());
+}
+
 void GfxRenderer::insertFont(const int fontId, EpdFontFamily font) {
   auto result = fontMap.insert({fontId, font});
   if (!result.second) {
