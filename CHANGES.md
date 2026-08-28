@@ -6,6 +6,56 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ## Unreleased
 
+### Protected library loans (Libby)
+
+Adds a **decrypt-on-read** path for protected EPUBs, and a **Libby** row in **File Transfer** that uses it. Books stay encrypted at rest: entries are decoded in memory, streamed in chunks, and never written back to the card.
+
+The split is the point. Everything scheme-specific — linking an account, listing loans, the fulfilment handshake and all of its crypto — runs as JavaScript in the user's browser (`src/network/html/LibbyPage.html`, `js/libbyCrypto.js`, WebCrypto). The device contributes only the three things a browser page physically cannot do for itself:
+
+- **relay** — make an outbound HTTPS call (the browser is blocked by CORS)
+- **fetch** — stream a URL straight to SD, never through RAM
+- **write** — persist a small credential or rights sidecar to SD
+
+The consequence worth stating: this costs **zero resident RAM**. There is no Libby object, no cached session and no background task. The handlers exist only while the web server does, and the server only exists inside `CrossPointWebServerActivity`, which reboots on the way out.
+
+Three memory decisions carry the feature on a C3:
+
+- **miniz takes its entire inflate state in ONE ~44KB allocation** (the 32KB dictionary the deflate format mandates, plus Huffman tables), and that single request is what fails — opening a 143MB protected comic, free heap was 61,720 bytes while the largest free block was 21,492. Fragmentation, not exhaustion. The SDK's new `InflateAllocator` seam lets the firmware serve it from the region an `InflateScratchLease` already lends (the idle framebuffer, contiguous since boot). uzlib and miniz never inflate at the same time, so they share the one region rather than each claiming the framebuffer.
+- **Only the READ half of the `Crypto` interface is linked** — no `WOLFSSL_KEY_GEN`, no `WC_RC2`, since activation happens in the browser. `NO_WOLFSSL_ESP32_CRYPT_RSA_PRI` forces software RSA: the Espressif wolfSSL port hardcodes `ESP_HW_RSAMAX_BIT` at 4096 while the C3's MPI peripheral stops at 3072 and returns `MP_EXPTMOD_E` rather than falling back. One RSA-1024 private op per book open, so the software path costs nothing measurable.
+- **`HalStorage::readFileToString()` probes the largest free block before resizing**, because `std::string` growth is a bare allocation under `-fno-exceptions`.
+
+A protected book that cannot be opened now **explains itself** instead of bouncing silently back to the browser: expired loan, unset clock (with an offer to go and set it over Wi-Fi), device not authorised, or the crypto layer's own wording for a rights/key failure.
+
+The File Transfer menu's rows are now addressed through a table rather than by index arithmetic — with two conditional rows (BookFusion pre-link, Libby pre-link) the old truncate-the-list approach would put the labels and the selection out of step.
+
+**Files added**: `lib/Epub/ContentProtection.cpp`, `lib/Libby/{LibbyClient,AdeptClient}.*`, `src/activities/settings/LibbyBrowserActivity.*`, `src/network/html/LibbyPage.html`, `src/network/html/js/libbyCrypto.js`, `scripts/test_libby_crypto.mjs`.
+**Files changed**: `platformio.ini`, `lib/Epub/Epub.*`, `lib/InflateReader/InflateReader.*`, `lib/hal/HalStorage.*`, `src/network/CrossPointWebServer.*`, `src/activities/network/{NetworkModeSelectionActivity,CrossPointWebServerActivity}.*`, `src/activities/reader/ReaderActivity.*`, `lib/I18n/translations/english.yaml`. SDK: `libs/book/ContentProtection/` (injectable inflate allocator, PKCS#12 cert fallback).
+
+### A session can hand the 48KB framebuffer back to the heap
+
+E-ink is bistable: once a screen has been refreshed the panel holds that image with no buffer behind it. For a session that paints its final screen and then stops drawing, the framebuffer is 48KB of pure dead weight — on this board the difference between roughly 20KB and 68KB free.
+
+`GfxRenderer::releaseFrameBuffer()` gives it back and `isRenderable()` says whether drawing is still legal. The release is deliberately **one-way**: there is no realloc wrapper, because reallocating relocates the 48KB and progressively fragments a heap with no PSRAM behind it. Callers must therefore be sessions that restart on exit.
+
+The web server is the first (and so far only) caller. Without those 48KB it starts near 20KB free, and a few page-load fetches take it low enough that lwIP cannot get pbufs and a single TCP write inside a response stalls for tens of seconds — long enough to trip the loop watchdog mid-response. It also buys the contiguous block a wolfSSL handshake needs, which is what the Libby page's relay depends on. `CrossPointWebServerActivity` already reboots on the way out, which is what makes a one-way release acceptable.
+
+Everything that can draw from the main loop is gated: the render task drops requests centrally in `ActivityManager` (so the waiter notification still fires and `requestUpdateAndWait()` cannot deadlock), and the two POWER chords plus the serial `SCREENSHOT` command carry their own checks because they write straight to the buffer.
+
+**Files changed**: `lib/GfxRenderer/GfxRenderer.*`, `lib/hal/HalDisplay.*`, `src/activities/ActivityManager.cpp`, `src/main.cpp`, `src/activities/network/CrossPointWebServerActivity.cpp`.
+
+### Pages no longer lose words with a Bluetooth remote connected
+
+With the BLE stack resident, free heap sits near 10KB and the font cache's per-page ~3KB group-decompression buffer stops fitting. The glyphs in the group that missed then paint as blanks — whole words vanishing from an otherwise normal page, only with a page-turner connected.
+
+Two changes, both aimed at that one allocation:
+
+- **The group scratch is now persistent and shared.** `prewarmCache()` used to `malloc`/`free` a temp buffer per group; it now takes the largest group's worth once, up front — largest block first, before the page buffers carve up the heap — and reuses the same grow-only block `getBitmap()`'s fallback path already keeps. `clearPageCache()` releases the per-page glyph buffers between pages but deliberately holds the scratch, because handing back the biggest contiguous block only to ask for it again is exactly what fails here. `clearCache()` still frees everything for the heap-critical paths (section builds, TLS).
+- **The page retries once when it still doesn't fit.** `allocFailures` in the cache stats is ground truth — the prewarm has just reported that this page *will* paint incomplete — so the reader pauses the BLE stack (~50KB), defers its auto-restore so the ~5s retry can't re-enter the same tight heap, and lays the page out again. One retry only; a second failure means the heap is short for another reason and looping would just stall the page turn.
+
+Also fixes a latent out-of-bounds read: `getGroupIndex()` returns a sentinel for glyphs no group owns, which the prewarm then used to index `fontData->groups`.
+
+**Files changed**: `lib/EpdFont/FontDecompressor.*`, `lib/GfxRenderer/FontCacheManager.*`, `lib/hal/BluetoothHIDManager.h`, `src/activities/reader/EpubReaderActivity.cpp`.
+
 ### Reader Controls: Sleep and Mark Finished retired
 
 Two bindable reader actions are gone from **Settings → Reader Controls**. **Sleep** (8) was redundant — a long press of **Power** is hard-wired to sleep on every board, so binding a second control to it only cost a slot. **Mark Finished** (14) survives as **Mark as Read** in the Book Options popup, which is where the rest of the per-book actions already live.
