@@ -3,16 +3,25 @@
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <InflateReader.h>
+#include <WiFi.h>
+
+#include <cstring>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "Epub.h"
 #include "EpubReaderActivity.h"
+#include "SilentRestart.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
 #include "Xtc.h"
 #include "XtcReaderActivity.h"
+#include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/BmpViewerActivity.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
+#include "components/UITheme.h"
+#include "util/WifiTimeSync.h"
 
 bool ReaderActivity::isXtcFile(const std::string& path) { return FsHelpers::hasXtcExtension(path); }
 
@@ -23,7 +32,8 @@ bool ReaderActivity::isTxtFile(const std::string& path) {
 
 bool ReaderActivity::isBmpFile(const std::string& path) { return FsHelpers::hasBmpExtension(path); }
 
-std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) const {
+std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
+  protectionError.clear();
   if (!Storage.exists(path.c_str())) {
     LOG_ERR("READER", "File does not exist: %s", path.c_str());
     return nullptr;
@@ -43,7 +53,9 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) const {
     }
   }
 
-  LOG_ERR("READER", "Failed to load epub");
+  // The book dies with this scope, so carry its refusal reason out.
+  protectionError = epub->getProtectionError();
+  LOG_ERR("READER", "Failed to load epub%s%s", protectionError.empty() ? "" : ": ", protectionError.c_str());
   return nullptr;
 }
 
@@ -133,11 +145,79 @@ void ReaderActivity::onEnter() {
   } else {
     auto epub = loadEpub(initialBookPath);
     if (!epub) {
-      onGoBack();
+      // A protected book that could not be opened explains itself rather than
+      // bouncing silently back to the browser.
+      if (!showProtectionFailure()) onGoBack();
       return;
     }
     onGoToEpubReader(std::move(epub));
   }
+}
+
+// A protected book the device could not open is a user-facing state, not a
+// silent failure: say why, and where the reason is a clock the device never
+// had a chance to set, offer to go and set it. The exact strings compared here
+// are the ones openProtectedBook() produces (lib/Epub/ContentProtection.cpp).
+bool ReaderActivity::showProtectionFailure() {
+  if (protectionError.empty()) return false;
+
+  StrId message = StrId::STR_DRM_PROTECTED_FILE;
+  bool offerSync = false;
+  std::string detail;
+  if (protectionError == "access expired") {
+    message = StrId::STR_LOAN_EXPIRED;
+  } else if (protectionError == "loan date unverified") {
+    message = StrId::STR_LOAN_TIME_UNVERIFIED;
+    offerSync = true;
+  } else if (protectionError == "no content access key on this device") {
+    // The book is fine; this device has never been authorised (or the
+    // credential the plugin writes to /.crosspoint/content.key is gone). Say
+    // that, because it is the one case the reader's user can actually fix.
+    message = StrId::STR_CONTENT_NOT_AUTHORISED;
+  } else if (protectionError.rfind("cannot open protected content: ", 0) == 0) {
+    // Rights/key failure. The tail is the crypto layer's own wording — not
+    // translatable, but it is the difference between "wrong account", "no
+    // rights sidecar" and "corrupt file", so show it rather than making the
+    // reader go and read a serial log.
+    message = StrId::STR_CONTENT_OPEN_FAILED;
+    detail = protectionError.substr(strlen("cannot open protected content: "));
+  }
+
+  std::string body = I18N.get(message);
+  if (!detail.empty()) {
+    body += "\n";
+    body += detail;
+  }
+
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_ERROR_MSG), body),
+                         [this, offerSync](const ActivityResult& result) {
+                           if (offerSync && !result.isCancelled) {
+                             beginLoanTimeSync();
+                             return;
+                           }
+                           onGoBack();
+                         });
+  return true;
+}
+
+void ReaderActivity::beginLoanTimeSync() {
+  startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled || WiFi.status() != WL_CONNECTED) {
+                             onGoBack();
+                             return;
+                           }
+                           GUI.drawPopup(renderer, tr(STR_SYNCING_TIME));
+                           WifiTimeSync::attemptIfStale();
+                           WiFi.disconnect(false);
+                           delay(30);
+                           // Reboot back into this book with a clean heap; the
+                           // Wi-Fi session has fragmented it, and opening a
+                           // protected book needs contiguous blocks.
+                           APP_STATE.openEpubPath = currentBookPath;
+                           APP_STATE.saveToFile();
+                           silentRestartToReader();
+                         });
 }
 
 void ReaderActivity::onGoBack() { finish(); }

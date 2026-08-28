@@ -1,0 +1,1665 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CrossPoint Reader - Libby</title>
+    <style>
+      :root {
+        --font-color: #333;
+        --bg: #f5f5f5;
+        --title-color: #2c3e50;
+        --card-bg: #FFF;
+        --label-color: #7f8c8d;
+        --border-color: #eee;
+        --accent-color: rgb(110, 154, 130);
+        --accent-hover-color: #5a8c73;
+        --danger-color: #e74c3c;
+        --danger-hover: #c0392b;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --font-color: #f5f5f5;
+          --bg: #333;
+          --title-color: #ecf0f1;
+          --card-bg: #444;
+          --label-color: #bdc3c7;
+          --border-color: #555;
+          color-scheme: dark;
+        }
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: var(--bg);
+        color: var(--font-color);
+      }
+      h1 {
+        color: var(--title-color);
+        border-bottom: 2px solid var(--accent-color);
+        padding-bottom: 10px;
+      }
+      h2 { color: var(--title-color); margin-top: 0; }
+      h3 { margin: 0 0 8px 0; }
+      .card {
+        background: var(--card-bg);
+        border-radius: 8px;
+        padding: 20px;
+        margin: 15px 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      .nav-links { margin: 20px 0; display: flex; gap: 10px; }
+      .nav-links a {
+        padding: 10px 20px;
+        color: var(--font-color);
+        text-decoration: none;
+        border-radius: 4px;
+      }
+      .nav-links a.active { background-color: var(--accent-color); color: white; }
+      .nav-links a:not(.active):hover { background-color: var(--accent-hover-color); color: white; }
+      .btn {
+        padding: 6px 16px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9em;
+      }
+      .btn:disabled { opacity: 0.5; cursor: default; }
+      .btn-primary { background: var(--accent-color); color: white; }
+      .btn-primary:hover:not(:disabled) { background: var(--accent-hover-color); }
+      .btn-danger { background: var(--danger-color); color: white; }
+      .btn-danger:hover:not(:disabled) { background: var(--danger-hover); }
+      .btn-plain { background: var(--bg); color: var(--font-color); border: 1px solid var(--border-color); }
+      .row {
+        border-bottom: 1px solid var(--border-color);
+        padding: 12px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .row:last-child { border-bottom: none; }
+      .row-info { flex: 1; min-width: 200px; }
+      .row-meta { color: var(--label-color); font-size: 0.9em; }
+      .row-actions { display: flex; gap: 8px; }
+      label { display: block; margin: 10px 0 4px; font-size: 0.9em; color: var(--label-color); }
+      input[type="text"], input[type="password"], input[type="email"] {
+        padding: 8px 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg);
+        color: var(--font-color);
+        width: 100%;
+        max-width: 320px;
+        box-sizing: border-box;
+      }
+      .muted { color: var(--label-color); font-size: 0.9em; }
+      .state { font-weight: 600; }
+      .state-ok { color: var(--accent-color); }
+      .state-off { color: var(--label-color); }
+      #status {
+        margin: 15px 0;
+        padding: 10px;
+        border-radius: 4px;
+        display: none;
+        white-space: pre-wrap;
+      }
+      .status-ok { background: #d4edda; color: #155724; display: block !important; }
+      .status-err { background: #f8d7da; color: #721c24; display: block !important; }
+      .status-busy { background: #fff3cd; color: #856404; display: block !important; }
+      .setup-code {
+        font-size: 2.2em;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-align: center;
+        padding: 16px;
+        margin: 12px 0;
+        background: var(--bg);
+        border-radius: 6px;
+      }
+      .steps { margin: 8px 0 0 0; padding-left: 20px; line-height: 1.6; }
+      progress { width: 100%; max-width: 320px; height: 14px; }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <h1>Libby</h1>
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a href="/files">File Manager</a>
+      <a href="/fonts">Fonts</a>
+      <a href="/settings">Settings</a>
+      <a href="/libby" class="active">Libby</a>
+    </div>
+
+    <div id="status"></div>
+
+    <div class="card">
+      <h2>1. Reader setup</h2>
+      <p class="muted">
+        Library loans are encrypted. The reader needs a one-time credential before it
+        can open them. This runs entirely in this browser &mdash; the reader only
+        stores the finished credential.
+      </p>
+      <p>Status: <span id="adobeState" class="state state-off">checking&hellip;</span></p>
+      <div id="adobeForm">
+        <label for="adobeUser">ByteBooks email</label>
+        <input type="email" id="adobeUser" autocomplete="username" />
+        <label for="adobePass">ByteBooks password</label>
+        <input type="password" id="adobePass" autocomplete="current-password" />
+        <p class="muted">
+          Used once, to authorise this reader. It is not saved to the card &mdash;
+          only the resulting credential is.
+        </p>
+        <p class="muted">
+          No account? <a href="https://dtsbytebooks.com/register" target="_blank"
+          rel="noopener noreferrer">Sign up at ByteBooks</a>. ByteBooks accounts
+          replace Adobe ID sign-in for Adobe Digital Editions; an existing Adobe ID
+          still works here if you have one, and older software that still says
+          &ldquo;Adobe ID&rdquo; accepts ByteBooks credentials too.
+        </p>
+        <p><button class="btn btn-primary" id="adobeGo">Set up reader</button></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2. Libby account</h2>
+      <p>Status: <span id="libbyState" class="state state-off">checking&hellip;</span></p>
+      <div id="libbyLink">
+        <p class="muted">Linking uses Libby&rsquo;s own &ldquo;copy to another device&rdquo; setup code. No card number or password is entered here.</p>
+        <p><button class="btn btn-primary" id="libbyGo">Link Libby account</button></p>
+      </div>
+      <div id="codeBox" class="hidden">
+        <div class="setup-code" id="setupCode">&mdash;</div>
+        <ol class="steps">
+          <li>Open Libby on your phone or tablet.</li>
+          <li>Go to <strong>&#9776; &rarr; Settings &rarr; Copy To Another Device</strong>.</li>
+          <li>Choose <strong>Enter Setup Code</strong> and type the code above.</li>
+        </ol>
+        <p class="muted" id="codeCountdown"></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>3. Loans</h2>
+      <p><button class="btn btn-plain" id="refreshLoans">Refresh loans</button></p>
+      <div id="loans"><p class="muted">Link your Libby account to see your loans.</p></div>
+    </div>
+
+    <script src="/js/libbyCrypto.js"></script>
+    <script>
+      (function () {
+        'use strict';
+
+        // ====================================================================
+        // Overview
+        // ====================================================================
+        //
+        // This page borrows library books to the reader. It does the whole job
+        // itself -- Libby's API, Adobe's ADEPT activation and fulfilment, and
+        // every cryptographic operation -- and asks the device only for the
+        // three things a browser physically cannot do:
+        //
+        //   POST /api/libby/relay   reach a CORS-blocked origin
+        //   POST /api/libby/fetch   stream a book to the SD card
+        //   POST /api/libby/write   persist a small file to the SD card
+        //
+        // That split is deliberate. The reader has ~380KB of RAM in total, and
+        // the earlier plugin-based version of this feature ran it out. Here the
+        // device holds no session, no keys and no book bytes: it proxies and it
+        // writes. When you leave File Transfer the reader reboots and the RAM
+        // cost of everything on this page returns to zero.
+
+        const C = window.LibbyCrypto;
+
+        const ADEPT_NS = 'http://ns.adobe.com/adept';
+        // Activation service root. Sign-in itself is NOT hardcoded: bootstrap()
+        // reads authURL out of ActivationServiceInfo, so if the service delegates
+        // sign-in elsewhere (ByteBooks accounts are replacing Adobe ID sign-in for
+        // Adobe Digital Editions) this follows it without a change here. The
+        // request still uses method="AdobeID" -- that is the protocol's name for
+        // the field, and ByteBooks credentials go in it unchanged.
+        const ACS = 'https://adeactivate.adobe.com/adept';
+        const ADEPT_CT = 'application/vnd.adobe.adept+xml';
+        const HOBBES = '10.0.4';
+
+        const CREDENTIAL_PATH = '/.crosspoint/content.key';
+        const IDENTITY_PATH = '/.crosspoint/libby.json';
+        const BOOKS_PATH = '/.crosspoint/libby-books.json';
+        // The browser's Adobe session lives beside the credential, not inside it.
+        // content.key is parsed by the reader on every protected book it opens, and
+        // this blob is browser-only convenience state that would otherwise dwarf it.
+        const SESSION_PATH = '/.crosspoint/libby-session.json';
+        const SYNC_PATH = '/.crosspoint/libby-sync.json';
+        const BOOK_DIR = '/Libby';
+
+        const SENTRY = 'https://sentry.libbyapp.com';
+        const CLIENT = 'd:22.1.0';
+        const ADOBE_EPUB_FORMAT = 'ebook-epub-adobe';
+
+        const te = new TextEncoder();
+        const td = new TextDecoder();
+
+        // Adobe session: { salt, device, act }. Persisted inside content.key as
+        // a field the device-side credential parser ignores, so a reload can
+        // fulfil more loans without asking for the password again.
+        let session = null;
+        let identity = null;   // the Libby chip (a JWT)
+        let loans = [];
+        let busy = false;
+
+        // ====================================================================
+        // status line
+        // ====================================================================
+
+        const statusEl = document.getElementById('status');
+        function status(text, kind) {
+          statusEl.textContent = text;
+          statusEl.className = kind ? 'status-' + kind : '';
+          if (!text) statusEl.className = '';
+        }
+        const busyStatus = (t) => status(t, 'busy');
+        const okStatus = (t) => status(t, 'ok');
+        const errStatus = (t) => status(t, 'err');
+
+        // Long synchronous work (RSA key generation) blocks paint, so give the
+        // browser a frame to show the message that explains the pause.
+        const yieldToPaint = () => new Promise((r) => setTimeout(r, 30));
+        const LOGNOTE = (m) => { try { console.log('[libby] ' + m); } catch (e) {} };
+
+        // ====================================================================
+        // device capabilities
+        // ====================================================================
+
+        async function post(path, body) {
+          const r = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const text = await r.text();
+          let parsed;
+          try {
+            parsed = JSON.parse(text);
+          } catch (e) {
+            throw new Error(path + ' returned unparseable JSON (HTTP ' + r.status + ')');
+          }
+          if (!r.ok && parsed && parsed.error) throw new Error(parsed.error);
+          if (!r.ok) throw new Error(path + ' failed (HTTP ' + r.status + ')');
+          return parsed;
+        }
+
+        function relay(method, url, headers, body) {
+          return post('/api/libby/relay', {
+            method: method, url: url, headers: headers || {}, body: body || '',
+          });
+        }
+
+        function responseHeader(response, wantedName) {
+          const wanted = wantedName.toLowerCase();
+          const match = (response.headers || []).find(
+            (pair) => String(pair[0]).toLowerCase() === wanted);
+          return match ? String(match[1]) : '';
+        }
+
+        // The relay is a single hop by design (it has no policy of its own), so
+        // redirect following lives here where the method-rewriting rules can be
+        // applied properly.
+        async function relayFollow(method, url, headers, body) {
+          let m = method, u = url, h = headers, b = body;
+          for (let hop = 0; hop <= 5; hop++) {
+            let response;
+            try {
+              response = await relay(m, u, h, b);
+            } catch (e) {
+              let host = u;
+              try { host = new URL(u).host; } catch (ignored) { /* keep the raw URL */ }
+              throw new Error(e.message + ' while requesting ' + host);
+            }
+            if ([301, 302, 303, 307, 308].indexOf(response.status) === -1) return response;
+            const location = responseHeader(response, 'location');
+            if (!location) return response;
+            if (hop === 5) throw new Error('too many redirects from ' + url);
+            u = new URL(location, u).href;
+            // 303, and 301/302 after a POST, become a GET with no body.
+            if (response.status === 303 ||
+                ((response.status === 301 || response.status === 302) && m === 'POST')) {
+              m = 'GET';
+              h = {};
+              b = '';
+            }
+          }
+          throw new Error('too many redirects from ' + url);
+        }
+
+        async function httpGet(url) {
+          const r = await relayFollow('GET', url, {}, '');
+          if (r.status < 200 || r.status >= 300) throw new Error('HTTP ' + r.status + ' from ' + url);
+          return r;
+        }
+
+        // Upload in bounded pieces. The device makes several full copies of a
+        // request body before a handler ever sees it, so a single large write
+        // fails as an out-of-memory error rather than a transport one. Chunks
+        // are cut on a 3-byte boundary so each piece base64-encodes and decodes
+        // independently.
+        async function writeFile(path, bytes) {
+          const CHUNK = 4098;  // multiple of 3; ~5.4KB once base64-encoded
+          let offset = 0;
+          let last = null;
+          do {
+            const piece = bytes.subarray(offset, offset + CHUNK);
+            last = await post('/api/libby/write', {
+              path: path, offset: offset, data: C.bytesToB64(piece),
+            });
+            if (!last.ok) throw new Error('write failed at byte ' + offset + ' of ' + path);
+            offset += piece.length;
+          } while (offset < bytes.length);
+          return last;
+        }
+
+        function writeText(path, text) {
+          return writeFile(path, te.encode(text));
+        }
+
+        async function readFile(path) {
+          const r = await fetch('/download?path=' + encodeURIComponent(path));
+          if (!r.ok) return null;
+          return r.text();
+        }
+
+        // /delete takes `path` as a request argument, not a JSON body.
+        async function deleteFile(path) {
+          try {
+            await fetch('/delete?path=' + encodeURIComponent(path), { method: 'POST' });
+          } catch (e) { /* best effort: a leftover temp file is not worth failing over */ }
+        }
+
+        // Stream a URL to the card in bounded segments. The device resumes with
+        // a Range request between segments, so a single stalled connection
+        // cannot lose a multi-megabyte transfer.
+        async function fetchToSd(url, dest, headers, onProgress) {
+          const SEGMENT = 1024 * 1024;
+          let offset = 0;
+          let total = 0;
+          for (let i = 0; i < 512; i++) {
+            const r = await post('/api/libby/fetch', {
+              url: url, dest: dest, headers: headers || {}, offset: offset, maxBytes: SEGMENT,
+            });
+            if (r.total) total = r.total;
+            if (r.error) throw new Error(r.error);
+            if (r.complete) {
+              if (onProgress) onProgress(r.bytes, total || r.bytes);
+              return r;
+            }
+            if (!(r.bytes > offset)) throw new Error('download stalled at ' + offset + ' bytes');
+            offset = r.bytes;
+            if (onProgress) onProgress(offset, total);
+          }
+          throw new Error('download did not finish after 512 segments');
+        }
+
+        // ====================================================================
+        // XML model
+        // ====================================================================
+
+        const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+        function decodeEntities(s) {
+          return s.replace(/&(#x?[0-9a-fA-F]+|\w+);/g, function (m, ent) {
+            if (ent[0] === '#') {
+              const code = (ent[1] === 'x' || ent[1] === 'X')
+                ? parseInt(ent.slice(2), 16) : parseInt(ent.slice(1), 10);
+              return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+            }
+            return ENTITIES[ent] || m;
+          });
+        }
+        const escapeText = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const escapeAttr = (s) => escapeText(s).replace(/"/g, '&quot;');
+
+        function el(name, attrs, children) {
+          return { name: name, attrs: attrs || {}, children: children || [] };
+        }
+        function textEl(name, text, attrs) { return el(name, attrs, [text]); }
+
+        function serializeNode(node) {
+          let attrs = '';
+          for (const k of Object.keys(node.attrs)) attrs += ' ' + k + '="' + escapeAttr(node.attrs[k]) + '"';
+          if (node.children.length === 0) return '<' + node.name + attrs + '/>';
+          let inner = '';
+          for (const c of node.children) {
+            inner += (typeof c === 'string') ? escapeText(c) : serializeNode(c);
+          }
+          return '<' + node.name + attrs + '>' + inner + '</' + node.name + '>';
+        }
+        const serialize = (node) => '<?xml version="1.0"?>\n' + serializeNode(node);
+
+        function child(node, name) {
+          return node.children.find(
+            (c) => typeof c !== 'string' && (c.name === name || c.name.endsWith(':' + name)));
+        }
+        function textContent(node) {
+          return node.children.map(
+            (c) => (typeof c === 'string' ? decodeEntities(c) : textContent(c))).join('');
+        }
+        function childText(node, name) {
+          const c = child(node, name);
+          if (!c) return undefined;
+          const t = textContent(c).trim();
+          return t === '' ? undefined : t;
+        }
+        function find(node, name) {
+          if (node.name === name || node.name.endsWith(':' + name)) return node;
+          for (const c of node.children) {
+            if (typeof c !== 'string') {
+              const hit = find(c, name);
+              if (hit) return hit;
+            }
+          }
+          return undefined;
+        }
+        function deepCopy(node) {
+          return {
+            name: node.name,
+            attrs: Object.assign({}, node.attrs),
+            children: node.children.map((c) => (typeof c === 'string' ? c : deepCopy(c))),
+          };
+        }
+        function removeFirst(root, name) {
+          for (let i = 0; i < root.children.length; i++) {
+            const c = root.children[i];
+            if (typeof c !== 'string' && (c.name === name || c.name.endsWith(':' + name))) {
+              root.children.splice(i, 1);
+              return c;
+            }
+          }
+          for (const c of root.children) {
+            if (typeof c !== 'string') {
+              const hit = removeFirst(c, name);
+              if (hit) return hit;
+            }
+          }
+          return undefined;
+        }
+        function required(node, what) {
+          const t = node ? textContent(node).trim() : '';
+          if (!node || t === '') throw new Error('service reply is missing ' + what);
+          return t;
+        }
+
+        function findTagEnd(src, start) {
+          let quote = null;
+          for (let i = start + 1; i < src.length; i++) {
+            const c = src[i];
+            if (quote) { if (c === quote) quote = null; }
+            else if (c === '"' || c === "'") quote = c;
+            else if (c === '>') return i;
+          }
+          throw new Error('malformed XML: unclosed tag');
+        }
+        function parseTag(content) {
+          const nameMatch = /^[^\s/>]+/.exec(content);
+          if (!nameMatch) throw new Error('malformed XML tag');
+          const attrs = {};
+          const attrRe = /([^\s=]+)\s*=\s*"([^"]*)"|([^\s=]+)\s*=\s*'([^']*)'/g;
+          let m;
+          while ((m = attrRe.exec(content)) !== null) {
+            attrs[m[1] || m[3]] = decodeEntities(m[2] || m[4] || '');
+          }
+          return { name: nameMatch[0], attrs: attrs, children: [] };
+        }
+        // A small XML parser rather than DOMParser: the canonicalization below
+        // has to see attributes and text exactly as they arrived, and DOMParser
+        // normalises both.
+        function parseXml(src) {
+          let i = 0;
+          const stack = [];
+          let root = null;
+          const pushText = (raw) => {
+            if (stack.length === 0 || raw === '' || raw.trim() === '') return;
+            stack[stack.length - 1].children.push(decodeEntities(raw));
+          };
+          while (i < src.length) {
+            if (src[i] === '<') {
+              if (src.startsWith('<?', i)) {
+                const end = src.indexOf('?>', i);
+                if (end === -1) throw new Error('malformed XML: unclosed declaration');
+                i = end + 2; continue;
+              }
+              if (src.startsWith('<!--', i)) {
+                const end = src.indexOf('-->', i);
+                if (end === -1) throw new Error('malformed XML: unclosed comment');
+                i = end + 3; continue;
+              }
+              if (src.startsWith('<![CDATA[', i)) {
+                const end = src.indexOf(']]>', i);
+                if (end === -1) throw new Error('malformed XML: unclosed CDATA');
+                if (stack.length > 0) stack[stack.length - 1].children.push(src.slice(i + 9, end));
+                i = end + 3; continue;
+              }
+              if (src.startsWith('<!', i)) {
+                const end = src.indexOf('>', i);
+                if (end === -1) throw new Error('malformed XML: unclosed directive');
+                i = end + 1; continue;
+              }
+              if (src[i + 1] === '/') {
+                const end = src.indexOf('>', i);
+                if (end === -1) throw new Error('malformed XML: unclosed end tag');
+                const closing = src.slice(i + 2, end).trim();
+                const opened = stack.pop();
+                if (!opened || opened.name !== closing) {
+                  throw new Error('malformed XML: mismatched </' + closing + '>');
+                }
+                i = end + 1; continue;
+              }
+              const end = findTagEnd(src, i);
+              let tagContent = src.slice(i + 1, end).trim();
+              const selfClose = tagContent.endsWith('/');
+              if (selfClose) tagContent = tagContent.slice(0, -1).trimEnd();
+              const node = parseTag(tagContent);
+              if (stack.length > 0) stack[stack.length - 1].children.push(node);
+              else if (!root) root = node;
+              else throw new Error('malformed XML: multiple roots');
+              if (!selfClose) stack.push(node);
+              i = end + 1;
+            } else {
+              const end = src.indexOf('<', i);
+              pushText(src.slice(i, end === -1 ? src.length : end));
+              i = end === -1 ? src.length : end;
+            }
+          }
+          if (!root) throw new Error('malformed XML: no root');
+          if (stack.length !== 0) {
+            throw new Error('malformed XML: unclosed <' + stack[stack.length - 1].name + '>');
+          }
+          return root;
+        }
+
+        async function sendAdept(url, doc) {
+          const r = await relayFollow('POST', url, { 'Content-Type': ADEPT_CT }, serialize(doc));
+          let root;
+          try {
+            root = parseXml(r.body);
+          } catch (e) {
+            if (r.status < 200 || r.status >= 300) throw new Error('HTTP ' + r.status + ' from ' + url);
+            throw e;
+          }
+          if (root.name === 'error' || root.name.endsWith(':error')) {
+            throw new Error(root.attrs.data || ('account service error (HTTP ' + r.status + ')'));
+          }
+          if (r.status < 200 || r.status >= 300) throw new Error('HTTP ' + r.status + ' from ' + url);
+          return root;
+        }
+
+        // ====================================================================
+        // request signing
+        // ====================================================================
+        //
+        // ADEPT signs a SHA-1 over its own binary serialization of the request
+        // tree -- namespace prefixes resolved to URIs, attributes sorted, text
+        // trimmed. It has to match byte for byte or the server rejects the
+        // signature, so this is a transcription of that format rather than any
+        // standard canonical XML.
+
+        const ASN_NS_TAG = 0x01, ASN_CHILD = 0x02, ASN_END_TAG = 0x03;
+        const ASN_TEXT = 0x04, ASN_ATTRIBUTE = 0x05;
+
+        function canonBytes(node) {
+          const chunks = [];
+          const pushTag = (t) => chunks.push(new Uint8Array([t]));
+          const pushString = (s) => {
+            const bytes = te.encode(s);
+            const len = new Uint8Array(2);
+            len[0] = (bytes.length >> 8) & 0xff;   // uint16, big endian
+            len[1] = bytes.length & 0xff;
+            chunks.push(len, bytes);
+          };
+          const walk = (n, nsHash) => {
+            for (const k of Object.keys(n.attrs)) {
+              if (k === 'xmlns') nsHash.set('GENERICNS', n.attrs[k]);
+              else if (k.startsWith('xmlns:')) nsHash.set(k.slice('xmlns:'.length), n.attrs[k]);
+            }
+            let name = n.name;
+            const colon = name.indexOf(':');
+            if (colon !== -1) {
+              pushTag(ASN_NS_TAG);
+              pushString(nsHash.get(name.slice(0, colon)) || '');
+              name = name.slice(colon + 1);
+            } else if (nsHash.has('GENERICNS')) {
+              pushTag(ASN_NS_TAG);
+              pushString(nsHash.get('GENERICNS'));
+            }
+            pushString(name);
+            const attrNames = Object.keys(n.attrs)
+              .filter((a) => a.indexOf('xmlns') === -1)
+              .sort();
+            for (const attrName of attrNames) {
+              pushTag(ASN_ATTRIBUTE);
+              pushString('');
+              pushString(attrName);
+              pushString(n.attrs[attrName]);
+            }
+            pushTag(ASN_CHILD);
+            for (const c of n.children) {
+              if (typeof c === 'string') {
+                const trimmed = c.trim();
+                if (trimmed !== '') { pushTag(ASN_TEXT); pushString(trimmed); }
+              } else {
+                walk(c, nsHash);
+              }
+            }
+            pushTag(ASN_END_TAG);
+          };
+          walk(node, new Map());
+          return C.concat(chunks);
+        }
+
+        function signNode(root) {
+          const hash = C.sha1(canonBytes(root));
+          const key = C.decodePkcs8(C.b64ToBytes(session.act.signingKey));
+          const sig = C.rsaSignRawHash(key, hash);
+          root.children.push(textEl('adept:signature', C.bytesToB64(sig)));
+        }
+
+        // The nonce is a 12-byte counter seeded from the clock, matching what
+        // the reference client sends; the server only checks it for replay.
+        function makeNonce() {
+          const now = Date.now();
+          const low = now >>> 0;
+          const high = Math.floor(now / 0x100000000) >>> 0;
+          const buf = new Uint8Array(12);
+          const dv = new DataView(buf.buffer);
+          dv.setUint32(0, (0x6f046000 + low) >>> 0, true);
+          dv.setUint32(4, (0x388a + high) >>> 0, true);
+          dv.setUint32(8, 0, true);
+          return C.bytesToB64(buf);
+        }
+        const makeExpiration = () =>
+          new Date(Date.now() + 10 * 60 * 1000).toISOString().slice(0, 19) + 'Z';
+        function addNonce(root) {
+          root.children.push(textEl('adept:nonce', makeNonce()));
+          root.children.push(textEl('adept:expiration', makeExpiration()));
+        }
+
+        // ====================================================================
+        // device-key wrapping (iv || AES-128-CBC)
+        // ====================================================================
+
+        function deviceKeyEncrypt(saltB64, dataBytes) {
+          const iv = C.randomBytes(16);
+          const ct = C.aesCbcEncrypt(C.b64ToBytes(saltB64), iv, dataBytes);
+          return C.bytesToB64(C.concat([iv, ct]));
+        }
+        function deviceKeyDecrypt(saltB64, wrappedB64) {
+          const wrapped = C.b64ToBytes(wrappedB64);
+          const plain = C.aesCbcDecryptRaw(
+            C.b64ToBytes(saltB64), wrapped.subarray(0, 16), wrapped.subarray(16));
+          return C.bytesToB64(C.stripPkcs7(plain));
+        }
+
+        // ====================================================================
+        // ADEPT: identity, bootstrap, sign-in, activation
+        // ====================================================================
+
+        function makeIdentity() {
+          const salt = C.bytesToB64(C.randomBytes(16));
+          const serial = C.bytesToHex(C.sha1(C.randomBytes(20)));
+          // fingerprint = base64(sha1(utf8(serial) || salt))
+          const fingerprint = C.bytesToB64(
+            C.sha1(C.concat([te.encode(serial), C.b64ToBytes(salt)])));
+          return {
+            salt: salt,
+            device: {
+              serial: serial,
+              fingerprint: fingerprint,
+              deviceClass: 'Desktop',
+              deviceType: 'standalone',
+              deviceName: 'browser',
+              hobbes: HOBBES,
+              clientOS: 'Linux',
+              clientLocale: 'en_US',
+            },
+          };
+        }
+
+        async function bootstrap() {
+          const info = parseXml((await httpGet(ACS + '/ActivationServiceInfo')).body);
+          const authURL = required(find(info, 'authURL'), 'authURL');
+          const userInfoURL = required(find(info, 'userInfoURL'), 'userInfoURL');
+          const certificate = required(find(info, 'certificate'), 'certificate');
+          const authInfo = parseXml((await httpGet(authURL + '/AuthenticationServiceInfo')).body);
+          const authenticationCertificate =
+            required(find(authInfo, 'certificate'), 'authentication certificate');
+          return {
+            acsServer: ACS,
+            authURL: authURL,
+            userInfoURL: userInfoURL,
+            activationURL: ACS,
+            certificate: certificate,
+            authenticationCertificate: authenticationCertificate,
+            operatorUrls: [],
+            licenseServiceCerts: {},
+          };
+        }
+
+        async function signIn(user, pass) {
+          busyStatus('Signing in…');
+          const salt = session.salt;
+          const act = session.act;
+
+          // signInData = RSA(authCert, salt || len(u) || u || len(p) || p)
+          const userBytes = te.encode(user);
+          const passBytes = te.encode(pass);
+          if (userBytes.length > 255 || passBytes.length > 255) {
+            throw new Error('that email address or password is too long');
+          }
+          const cred = C.concat([
+            C.b64ToBytes(salt),
+            new Uint8Array([userBytes.length]), userBytes,
+            new Uint8Array([passBytes.length]), passBytes,
+          ]);
+          const authCertKey = C.publicKeyFromCertificate(
+            C.b64ToBytes(act.authenticationCertificate));
+          const signInData = C.bytesToB64(C.rsaEncryptPkcs1(authCertKey, cred));
+
+          busyStatus('Generating this reader’s keys… (a few seconds)');
+          await yieldToPaint();
+          const authPair = C.rsaGenerateKeyPair(1024);
+          const licPair = C.rsaGenerateKeyPair(1024);
+          const authPub = C.bytesToB64(C.encodeSpki(authPair));
+          const authPriv = C.encodePkcs8(authPair);
+          const licPub = C.bytesToB64(C.encodeSpki(licPair));
+          const licPriv = C.encodePkcs8(licPair);
+
+          busyStatus('Signing in…');
+          const reqDoc = el('adept:signIn', { 'xmlns:adept': ADEPT_NS, method: 'AdobeID' }, [
+            textEl('adept:signInData', signInData),
+            textEl('adept:publicAuthKey', authPub),
+            textEl('adept:encryptedPrivateAuthKey', deviceKeyEncrypt(salt, authPriv)),
+            textEl('adept:publicLicenseKey', licPub),
+            textEl('adept:encryptedPrivateLicenseKey', deviceKeyEncrypt(salt, licPriv)),
+          ]);
+
+          const creds = await sendAdept(act.authURL + '/SignInDirect', reqDoc);
+          if (!creds.name.endsWith('credentials')) {
+            throw new Error('unexpected sign-in reply <' + creds.name + '>');
+          }
+
+          const userUuid = required(find(creds, 'user'), 'user');
+          const pkcs12 = required(find(creds, 'pkcs12'), 'pkcs12');
+          const licenseCertificate = required(find(creds, 'licenseCertificate'), 'licenseCertificate');
+          const encLicenseKey =
+            required(find(creds, 'encryptedPrivateLicenseKey'), 'encryptedPrivateLicenseKey');
+
+          // The signing bundle's passphrase is base64(device salt).
+          const p12 = C.pkcs12Extract(C.b64ToBytes(pkcs12), salt);
+
+          Object.assign(act, {
+            username: user,
+            userUuid: userUuid,
+            licenseCertificate: licenseCertificate,
+            privateLicenseKey: deviceKeyDecrypt(salt, encLicenseKey),
+            signingKey: C.bytesToB64(p12.key),
+            signingCert: C.bytesToB64(p12.cert),
+          });
+        }
+
+        async function activateDevice() {
+          busyStatus('Authorising this reader…');
+          const d = session.device;
+          const act = session.act;
+          const target = el('adept:targetDevice', {}, [
+            textEl('adept:softwareVersion', d.hobbes),
+            textEl('adept:clientOS', d.clientOS),
+            textEl('adept:clientLocale', d.clientLocale),
+            textEl('adept:clientVersion', d.deviceClass),
+            textEl('adept:deviceType', d.deviceType),
+            textEl('adept:fingerprint', d.fingerprint),
+          ]);
+          const reqDoc = el('adept:activate', { 'xmlns:adept': ADEPT_NS, requestType: 'initial' }, [
+            textEl('adept:fingerprint', d.fingerprint),
+            textEl('adept:deviceType', d.deviceType),
+            textEl('adept:clientOS', d.clientOS),
+            textEl('adept:clientLocale', d.clientLocale),
+            textEl('adept:clientVersion', d.deviceClass),
+            target,
+          ]);
+          addNonce(reqDoc);
+          reqDoc.children.push(textEl('adept:user', act.userUuid));
+          signNode(reqDoc);
+
+          const token = await sendAdept(act.activationURL + '/Activate', reqDoc);
+          act.deviceUuid = required(find(token, 'device'), 'device (activation token)');
+        }
+
+        // ====================================================================
+        // ADEPT: operator auth + fulfilment
+        // ====================================================================
+
+        function authBaseFrom(fulfillURL) {
+          const trimmed = fulfillURL.replace(/\/+$/, '');
+          return trimmed.endsWith('/Fulfill')
+            ? trimmed.slice(0, -'/Fulfill'.length)
+            : trimmed;
+        }
+
+        function buildAuthRequest(act) {
+          return el('adept:credentials', { 'xmlns:adept': ADEPT_NS }, [
+            textEl('adept:user', act.userUuid),
+            textEl('adept:certificate', act.signingCert),
+            textEl('adept:licenseCertificate', act.licenseCertificate),
+            textEl('adept:authenticationCertificate', act.authenticationCertificate),
+          ]);
+        }
+
+        async function doOperatorAuth(fulfillURL) {
+          const act = session.act;
+          const authBase = authBaseFrom(fulfillURL);
+          await sendAdept(authBase + '/Auth', buildAuthRequest(act));
+          const initReq = el('adept:licenseServiceRequest',
+            { 'xmlns:adept': ADEPT_NS, identity: 'user' }, [
+              textEl('adept:operatorURL', authBase),
+            ]);
+          addNonce(initReq);
+          initReq.children.push(textEl('adept:user', act.userUuid));
+          signNode(initReq);
+          await sendAdept(act.activationURL + '/InitLicenseService', initReq);
+          if (act.operatorUrls.indexOf(fulfillURL) === -1) act.operatorUrls.push(fulfillURL);
+        }
+
+        async function operatorAuth(fulfillURL) {
+          if (session.act.operatorUrls.indexOf(fulfillURL) !== -1) return;
+          await doOperatorAuth(fulfillURL);
+        }
+
+        async function fetchLicenseServiceCertificate(operatorURL, licenseURL) {
+          const act = session.act;
+          if (act.licenseServiceCerts[licenseURL]) return;
+          const reply = parseXml((await httpGet(
+            operatorURL + '/LicenseServiceInfo?licenseURL=' + encodeURIComponent(licenseURL))).body);
+          act.licenseServiceCerts[licenseURL] =
+            required(find(reply, 'certificate'), 'license service certificate');
+        }
+
+        async function notifyServer(reply) {
+          const act = session.act;
+          const notify = find(reply, 'notify');
+          if (!notify) return;
+          const notifyUrl = childText(notify, 'notifyURL');
+          const body = child(notify, 'body');
+          if (!notifyUrl || !body) return;
+          try {
+            const bodyCopy = deepCopy(body);
+            bodyCopy.attrs.xmlns = ADEPT_NS;
+            const reqDoc = el('adept:notification', { 'xmlns:adept': ADEPT_NS }, [
+              textEl('adept:user', act.userUuid),
+              textEl('adept:device', act.deviceUuid),
+              bodyCopy,
+            ]);
+            addNonce(reqDoc);
+            signNode(reqDoc);
+            await sendAdept(notifyUrl, reqDoc);
+          } catch (e) {
+            // Best effort: the loan is already fulfilled, and a failed
+            // notification does not stop the book from opening.
+          }
+        }
+
+        function safeBookName(title) {
+          return (title || '')
+            .replace(/[\/\\:*?"<>|]/g, ' ')
+            .replace(/[\u0000-\u001f\u007f]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/^\.+|\.+$/g, '')
+            .slice(0, 60) || 'book';
+        }
+
+        async function uniqueBookDestination(title) {
+          let names = new Set();
+          try {
+            const r = await fetch('/api/files?path=' + encodeURIComponent(BOOK_DIR));
+            if (r.ok) {
+              const body = await r.json();
+              const items = Array.isArray(body) ? body : (body.items || []);
+              names = new Set(items.map((e) => String(e.name).toLowerCase()));
+            }
+          } catch (e) {
+            // A missing /Libby is the normal first-run case; the device creates
+            // it on write. An unreadable one just means no collision check.
+          }
+          for (let n = 1; n < 1000; n++) {
+            const name = title + (n === 1 ? '' : ' (' + n + ')') + '.epub';
+            if (!names.has(name.toLowerCase())) return BOOK_DIR + '/' + name;
+          }
+          throw new Error('too many books named “' + title + '”');
+        }
+
+        // opts.existingDest: renewing a book already on the card -- refresh only
+        // its licence sidecar and skip the multi-megabyte re-download.
+        async function fulfill(acsmText, opts) {
+          opts = opts || {};
+          const act = session.act;
+          const acsmRoot = parseXml(acsmText);
+          if (!acsmRoot.name.endsWith('fulfillmentToken')) {
+            throw new Error('not a fulfilment token (root <' + acsmRoot.name + '>)');
+          }
+
+          const operatorURL = required(find(acsmRoot, 'operatorURL'), 'operatorURL').replace(/\/+$/, '');
+          const fulfillURL = operatorURL + '/Fulfill';
+
+          const reqDoc = el('adept:fulfill', { 'xmlns:adept': ADEPT_NS }, [
+            textEl('adept:user', act.userUuid),
+            textEl('adept:device', act.deviceUuid),
+            textEl('adept:deviceType', session.device.deviceType),
+            deepCopy(acsmRoot),
+          ]);
+          // The server verifies the token's hmac against the UNSIGNED token, so
+          // lift it out, sign, then put it back.
+          const hmac = removeFirst(reqDoc, 'hmac');
+          if (!hmac) throw new Error('the fulfilment token has no hmac');
+          const hmacText = textContent(hmac);
+          signNode(reqDoc);
+          find(reqDoc, 'fulfillmentToken').children.push(el('hmac', {}, [hmacText]));
+
+          busyStatus('Authenticating to the library distributor…');
+          await operatorAuth(fulfillURL);
+
+          busyStatus('Fulfilling the loan…');
+          let reply;
+          try {
+            reply = await sendAdept(fulfillURL, reqDoc);
+          } catch (e) {
+            if (String(e.message).indexOf('E_ADEPT_DISTRIBUTOR_AUTH') !== -1) {
+              await doOperatorAuth(fulfillURL);
+              reply = await sendAdept(fulfillURL, reqDoc);
+            } else {
+              throw e;
+            }
+          }
+
+          const itemInfo = find(reply, 'resourceItemInfo');
+          if (!itemInfo) throw new Error('the fulfilment reply has no resourceItemInfo');
+          const downloadUrl = required(child(itemInfo, 'src'), 'download URL');
+          const licenseToken = child(itemInfo, 'licenseToken');
+          if (!licenseToken) throw new Error('the fulfilment reply has no licenceToken');
+          const licenseURL = required(find(licenseToken, 'licenseURL'), 'licenseURL');
+          const titleNode = find(reply, 'title');
+          const title = safeBookName(titleNode ? textContent(titleNode).trim() : '');
+
+          await fetchLicenseServiceCertificate(operatorURL, licenseURL);
+          await notifyServer(reply);
+
+          // The rights document travels beside the book rather than inside it,
+          // so the .epub on the card stays byte-identical to what was delivered.
+          const tokenForRights = deepCopy(licenseToken);
+          if (!tokenForRights.attrs.xmlns) tokenForRights.attrs.xmlns = ADEPT_NS;
+          const rights = el('adept:rights', { 'xmlns:adept': ADEPT_NS }, [
+            tokenForRights,
+            el('adept:licenseServiceInfo', {}, [
+              textEl('adept:licenseURL', licenseURL),
+              textEl('adept:certificate', act.licenseServiceCerts[licenseURL] || ''),
+            ]),
+          ]);
+
+          const renewing = !!opts.existingDest;
+          const dest = renewing ? opts.existingDest : await uniqueBookDestination(title);
+
+          // Write the licence before the long transfer: if the browser drops
+          // after the device has the book but before it reports back, the book
+          // on the card is still openable.
+          busyStatus(renewing
+            ? 'Refreshing the loan for “' + title + '”…'
+            : 'Saving the licence for “' + title + '”…');
+          const rightsWrite = await writeText(dest + '.rights', serialize(rights));
+          if (!rightsWrite.ok) throw new Error('could not write the licence sidecar');
+
+          if (renewing) return { title: title, dest: dest, renewed: true };
+
+          // The payload is already encrypted end to end, so transport TLS
+          // protects only the URL token -- and on the device it costs heap that
+          // truncates downloads. Prefer plain HTTP, fall back to HTTPS. Tampering
+          // is self-detecting: a modified book fails to decrypt when opened.
+          const attempts = [downloadUrl.replace(/^https:/, 'http:'), downloadUrl];
+          let lastError = null;
+          for (const url of attempts) {
+            try {
+              await fetchToSd(url, dest, {}, (got, total) => {
+                const mb = (n) => (n / (1024 * 1024)).toFixed(1);
+                busyStatus('Downloading “' + title + '”… ' +
+                  mb(got) + ' MB' + (total ? ' of ' + mb(total) + ' MB' : ''));
+              });
+              return { title: title, dest: dest };
+            } catch (e) {
+              lastError = e;
+            }
+          }
+          throw new Error('download failed: ' + (lastError ? lastError.message : 'unknown'));
+        }
+
+        // ====================================================================
+        // credential file
+        // ====================================================================
+        //
+        // The reader's own credential parser reads the first six fields and
+        // ignores anything it does not recognise, so the Adobe session rides
+        // along in the last one. That is what lets this page fulfil a second
+        // loan later without asking for the Adobe password again.
+
+        async function writeCredential() {
+          const d = session.device;
+          const act = session.act;
+          // Exactly the fields Credential.h parses, and nothing else.
+          const lines = [
+            'FREEINK-CONTENT-KEY 1',
+            'username: ' + (act.username || ''),
+            'userUuid: ' + act.userUuid,
+            'deviceUuid: ' + act.deviceUuid,
+            'serial: ' + d.serial,
+            'fingerprint: ' + d.fingerprint,
+            'privateLicenseKey: ' + act.privateLicenseKey,
+            'devicesalt: ' + session.salt,
+          ];
+          const w = await writeText(CREDENTIAL_PATH, lines.join('\n') + '\n');
+          if (!w.ok) throw new Error('could not write ' + CREDENTIAL_PATH);
+          await writeSession();
+        }
+
+        // What this page needs to fulfil another loan without asking for the
+        // password again. Deliberately omits everything re-fetchable: bootstrap()
+        // pulls `certificate` and `authenticationCertificate` from the service on
+        // every load, and licenseServiceCerts is just a per-licence cache. Those
+        // three were the bulk of the old blob -- X.509 certificates, base64'd
+        // twice on the way to the card.
+        async function writeSession() {
+          const act = session.act;
+          const slim = {
+            version: 2,
+            salt: session.salt,
+            device: session.device,
+            act: {
+              username: act.username,
+              userUuid: act.userUuid,
+              deviceUuid: act.deviceUuid,
+              authURL: act.authURL,
+              userInfoURL: act.userInfoURL,
+              activationURL: act.activationURL,
+              licenseCertificate: act.licenseCertificate,
+              privateLicenseKey: act.privateLicenseKey,
+              signingKey: act.signingKey,
+              signingCert: act.signingCert,
+            },
+          };
+          const w = await writeText(SESSION_PATH, JSON.stringify(slim));
+          if (!w.ok) throw new Error('could not write ' + SESSION_PATH);
+        }
+
+        function parseCredential(text) {
+          const fields = {};
+          const lines = String(text).split(/\r?\n/);
+          if (!lines.length || !lines[0].startsWith('FREEINK-CONTENT-KEY')) {
+            throw new Error('the credential file on the card has an unsupported format');
+          }
+          for (const line of lines.slice(1)) {
+            const split = line.indexOf(': ');
+            if (split > 0) fields[line.slice(0, split)] = line.slice(split + 2);
+          }
+          return fields;
+        }
+
+        // The credential proves the reader is set up; the session file is what
+        // lets this page borrow again without a password. Either can be present
+        // without the other, and the UI distinguishes the two.
+        async function loadCredential() {
+          const text = await readFile(CREDENTIAL_PATH);
+          if (!text) return null;
+          let fields;
+          try {
+            fields = parseCredential(text);
+          } catch (e) {
+            return null;
+          }
+
+          const sessionText = await readFile(SESSION_PATH);
+          if (sessionText) {
+            try {
+              const restored = JSON.parse(sessionText);
+              // Accept a session that has not been activated yet: it carries the
+              // device fingerprint, and reusing that is what stops a retry from
+              // burning another activation slot.
+              if (restored && restored.act) {
+                // The certificates were deliberately not persisted; bootstrap()
+                // fetches them, so a restored session is only usable once that
+                // has filled them back in (see ensureBootstrapped).
+                restored.act.operatorUrls = [];
+                restored.act.licenseServiceCerts = {};
+                return restored;
+              }
+            } catch (e) {
+              // Fall through: the reader can still open its books, this page
+              // just cannot fulfil new ones until the user signs in again.
+            }
+          }
+          return { partial: true, username: fields.username || '' };
+        }
+
+        // Fill in the parts of the session that are fetched rather than stored.
+        // Cheap and idempotent: two GETs against the activation service.
+        async function ensureBootstrapped() {
+          const act = session.act;
+          if (act.certificate && act.authenticationCertificate) return;
+          busyStatus('Contacting the account service…');
+          const fresh = await bootstrap();
+          act.certificate = fresh.certificate;
+          act.authenticationCertificate = fresh.authenticationCertificate;
+          act.authURL = act.authURL || fresh.authURL;
+          act.userInfoURL = act.userInfoURL || fresh.userInfoURL;
+          act.activationURL = act.activationURL || fresh.activationURL;
+        }
+
+        // ====================================================================
+        // Libby
+        // ====================================================================
+
+        // Libby's Sentry API derives an Accept-Language header from the chip:
+        // keep a-z, reverse, take characters 5-6. Without it /chip/clone answers
+        // missing_chip. The pre-mint call uses the same fixed seed as the web app.
+        function acceptLanguage(chip) {
+          const seed = chip && chip.length ? chip : 'cudlkahllcnsjxhbmddl';
+          let letters = '';
+          for (const ch of seed) if (ch >= 'a' && ch <= 'z') letters += ch;
+          return letters.split('').reverse().join('').slice(4, 6);
+        }
+
+        // The v= query on a chip refresh is the first segment of the chip UUID,
+        // which lives in the JWT payload as chip.id.
+        function shortChipId(chip) {
+          const seg = chip.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+          return JSON.parse(atob(seg)).chip.id.split('-')[0];
+        }
+
+        async function sentry(method, path, bearer, jsonBody) {
+          const headers = {
+            'Accept': 'application/json',
+            'Referer': 'https://libbyapp.com/',
+            'Origin': 'https://libbyapp.com',
+            'Accept-Language': acceptLanguage(bearer),
+          };
+          if (bearer) headers['Authorization'] = 'Bearer ' + bearer;
+          let body = '';
+          if (jsonBody !== undefined) {
+            headers['Content-Type'] = 'application/json';
+            body = JSON.stringify(jsonBody);
+          }
+          const r = await relay(method, SENTRY + path, headers, body);
+          let parsed = null;
+          try { parsed = r.body ? JSON.parse(r.body) : null; } catch (e) { /* not JSON */ }
+          return { status: r.status, body: parsed, raw: r.body };
+        }
+
+        async function saveIdentity(id) {
+          identity = id;
+          await writeText(IDENTITY_PATH, JSON.stringify({ identity: id }));
+        }
+
+        async function loadIdentity() {
+          const text = await readFile(IDENTITY_PATH);
+          if (!text) return null;
+          try {
+            const doc = JSON.parse(text);
+            return (doc && typeof doc.identity === 'string') ? doc.identity : null;
+          } catch (e) {
+            return null;
+          }
+        }
+
+        // Loan endpoints can answer a valid identity with 403 missing_chip;
+        // re-registering the chip and retrying clears it.
+        async function refreshChip() {
+          const r = await sentry('POST',
+            '/chip?c=' + CLIENT + '&s=0&v=' + shortChipId(identity), identity);
+          if (r.status !== 200 || !r.body || !r.body.identity) return false;
+          await saveIdentity(r.body.identity);
+          return true;
+        }
+
+        async function mintChip() {
+          const r = await sentry('POST', '/chip?c=' + CLIENT + '&s=0', null);
+          if (r.status !== 200 || !r.body || !r.body.identity) {
+            throw new Error('could not start a Libby session (HTTP ' + r.status + ')');
+          }
+          return r.body.identity;
+        }
+
+        async function requestCode(chip) {
+          const r = await sentry('GET', '/chip/clone/code?code=&role=pointer', chip);
+          if (r.status !== 200 || !r.body || !r.body.code) {
+            throw new Error('could not get a setup code (HTTP ' + r.status + ')');
+          }
+          return r.body.code;
+        }
+
+        async function pollBlessing(chip, code) {
+          const r = await sentry('GET',
+            '/chip/clone/code?code=' + encodeURIComponent(code) + '&role=pointer', chip);
+          if (r.status !== 200 || !r.body) return null;
+          return (r.body.result === 'fulfilled' && r.body.blessing) ? r.body.blessing : null;
+        }
+
+        // The first clone always answers missing_chip; re-registering and
+        // retrying yields result:"cloned", and a final refresh returns the
+        // authenticated identity that /chip/sync accepts.
+        async function completeClone(chip, blessing) {
+          const sid = shortChipId(chip);
+          let token = chip;
+          let r = await sentry('POST', '/chip/clone', token, { blessing: blessing });
+          if (r.status === 403 && r.body && r.body.result === 'missing_chip') {
+            const refreshed = await sentry('POST', '/chip?c=' + CLIENT + '&s=0&v=' + sid, token);
+            if (refreshed.status !== 200 || !refreshed.body || !refreshed.body.identity) {
+              throw new Error('Libby chip refresh failed (HTTP ' + refreshed.status + ')');
+            }
+            token = refreshed.body.identity;
+            r = await sentry('POST', '/chip/clone', token, { blessing: blessing });
+          }
+          if (r.status !== 200 || !r.body || r.body.result !== 'cloned') {
+            throw new Error('linking failed (HTTP ' + r.status + ')');
+          }
+          const final = await sentry('POST', '/chip?c=' + CLIENT + '&s=0&v=' + sid, token);
+          if (final.status !== 200 || !final.body || !final.body.identity) {
+            throw new Error('post-link chip refresh failed (HTTP ' + final.status + ')');
+          }
+          return final.body.identity;
+        }
+
+        async function getLoans() {
+          if (!identity) throw new Error('not linked to Libby');
+          // /chip/sync returns every card, loan, hold and library in one
+          // response, which is far too large for the relay's 32KB buffer on a
+          // multi-card account. Stream it to the card and parse it here instead.
+          const r = await fetchToSd(SENTRY + '/chip/sync', SYNC_PATH, {
+            'Authorization': 'Bearer ' + identity,
+            'Accept': 'application/json',
+            'Referer': 'https://libbyapp.com/',
+            'Origin': 'https://libbyapp.com',
+          });
+          if (r.status && (r.status < 200 || r.status >= 300)) {
+            throw new Error('Libby sync failed (HTTP ' + r.status + ')');
+          }
+          const text = await readFile(SYNC_PATH);
+          await deleteFile(SYNC_PATH);  // account metadata: don't leave it lying around
+          if (!text) throw new Error('could not read the Libby sync file back');
+          const body = JSON.parse(text);
+          return Array.isArray(body.loans) ? body.loans : [];
+        }
+
+        function pickAdobeEpubFormat(loan) {
+          const formats = (loan.formats || []).map((f) => String(f.id || ''));
+          if (formats.indexOf(ADOBE_EPUB_FORMAT) !== -1) return ADOBE_EPUB_FORMAT;
+          const adobe = formats.find(
+            (id) => id.indexOf('epub') !== -1 && id.indexOf('adobe') !== -1);
+          if (adobe) return adobe;
+          throw new Error('“' + (loan.title || loan.id) +
+            '” has no Adobe EPUB edition (audiobooks, magazines and comics are not supported)');
+        }
+
+        async function fetchAcsm(loan) {
+          const format = pickAdobeEpubFormat(loan);
+          const path = '/card/' + loan.cardId + '/loan/' + loan.id + '/fulfill/' + format;
+          let r = await sentry('GET', path, identity);
+          if (r.status === 403 && r.body && r.body.result === 'missing_chip' && await refreshChip()) {
+            r = await sentry('GET', path, identity);
+          }
+          if (r.status !== 200 || !r.body || !r.body.fulfill || !r.body.fulfill.href) {
+            throw new Error('Libby would not fulfil this loan (HTTP ' + r.status +
+              (r.body && r.body.result ? ' ' + r.body.result : '') + ')');
+          }
+          const acsm = await relayFollow('GET', r.body.fulfill.href, { 'Accept': '*/*' }, '');
+          if (acsm.status !== 200 || !acsm.body) {
+            throw new Error('could not download the fulfilment token');
+          }
+          return acsm.body;
+        }
+
+        async function loanAction(loan, method) {
+          const path = '/card/' + loan.cardId + '/loan/' + loan.id;
+          let r = await sentry(method, path, identity, method === 'PUT' ? {} : undefined);
+          if (r.status === 403 && r.body && r.body.result === 'missing_chip' && await refreshChip()) {
+            r = await sentry(method, path, identity, method === 'PUT' ? {} : undefined);
+          }
+          if (r.status < 200 || r.status >= 300) {
+            throw new Error('Libby refused (HTTP ' + r.status +
+              (r.body && r.body.result ? ' ' + r.body.result : '') + ')');
+          }
+          return true;
+        }
+
+        // --- map of sent loans, so a renewal can find the book on the card ---
+
+        async function loadBookMap() {
+          const text = await readFile(BOOKS_PATH);
+          if (!text) return {};
+          try {
+            const doc = JSON.parse(text);
+            return (doc && typeof doc === 'object') ? doc : {};
+          } catch (e) {
+            return {};
+          }
+        }
+
+        async function recordBook(loanId, dest) {
+          if (!dest) return;
+          const map = await loadBookMap();
+          map[String(loanId)] = dest;
+          await writeText(BOOKS_PATH, JSON.stringify(map));
+        }
+
+        // ====================================================================
+        // UI
+        // ====================================================================
+
+        // These ids predate ByteBooks and are left alone deliberately: they name
+        // the account service generally, and renaming them would churn markup and
+        // script for no behavioural change.
+        const adobeState = document.getElementById('adobeState');
+        const adobeForm = document.getElementById('adobeForm');
+        const libbyState = document.getElementById('libbyState');
+        const libbyLink = document.getElementById('libbyLink');
+        const codeBox = document.getElementById('codeBox');
+        const setupCode = document.getElementById('setupCode');
+        const codeCountdown = document.getElementById('codeCountdown');
+        const loansEl = document.getElementById('loans');
+
+        function setBusy(on) {
+          busy = on;
+          for (const b of document.querySelectorAll('button')) b.disabled = on;
+        }
+
+        function renderAdobeState() {
+          if (session && session.act && session.act.deviceUuid) {
+            adobeState.textContent = 'ready' +
+              (session.act.username ? ' — ' + session.act.username : '');
+            adobeState.className = 'state state-ok';
+            adobeForm.classList.add('hidden');
+          } else if (session && session.partial) {
+            adobeState.textContent =
+              'credential on the card, but this browser needs to sign in again to borrow';
+            adobeState.className = 'state state-off';
+            adobeForm.classList.remove('hidden');
+            if (session.username) document.getElementById('adobeUser').value = session.username;
+          } else {
+            adobeState.textContent = 'not set up';
+            adobeState.className = 'state state-off';
+            adobeForm.classList.remove('hidden');
+          }
+        }
+
+        function renderLibbyState() {
+          if (identity) {
+            libbyState.textContent = 'linked';
+            libbyState.className = 'state state-ok';
+            libbyLink.classList.add('hidden');
+          } else {
+            libbyState.textContent = 'not linked';
+            libbyState.className = 'state state-off';
+            libbyLink.classList.remove('hidden');
+          }
+        }
+
+        function dueText(loan) {
+          if (!loan.expireDate) return '';
+          const when = new Date(loan.expireDate);
+          if (isNaN(when.getTime())) return '';
+          return 'due ' + when.toLocaleDateString();
+        }
+
+        function renderLoans() {
+          if (!identity) {
+            loansEl.innerHTML = '<p class="muted">Link your Libby account to see your loans.</p>';
+            return;
+          }
+          if (!loans.length) {
+            loansEl.innerHTML = '<p class="muted">No loans found. Borrow a book in Libby, then refresh.</p>';
+            return;
+          }
+          loansEl.textContent = '';
+          for (const loan of loans) {
+            const row = document.createElement('div');
+            row.className = 'row';
+
+            const info = document.createElement('div');
+            info.className = 'row-info';
+            const title = document.createElement('div');
+            title.textContent = loan.title || loan.id;
+            const meta = document.createElement('div');
+            meta.className = 'row-meta';
+            const bits = [];
+            if (loan.firstCreatorName) bits.push(loan.firstCreatorName);
+            const due = dueText(loan);
+            if (due) bits.push(due);
+            meta.textContent = bits.join(' — ');
+            info.appendChild(title);
+            info.appendChild(meta);
+
+            const actions = document.createElement('div');
+            actions.className = 'row-actions';
+            actions.appendChild(button('Send to reader', 'btn-primary', () => sendLoan(loan)));
+            actions.appendChild(button('Renew', 'btn-plain', () => renewLoan(loan)));
+            actions.appendChild(button('Return', 'btn-danger', () => returnLoan(loan)));
+
+            row.appendChild(info);
+            row.appendChild(actions);
+            loansEl.appendChild(row);
+          }
+        }
+
+        function button(label, cls, onClick) {
+          const b = document.createElement('button');
+          b.className = 'btn ' + cls;
+          b.textContent = label;
+          b.addEventListener('click', onClick);
+          return b;
+        }
+
+        // The account service returns machine codes like
+        // "E_ACT_TOO_MANY_ACTIVATIONS http://.../Activate 3:6003:6003 urn:uuid:...".
+        // Those are accurate and useless. Translate the ones a user can actually
+        // act on, and keep the raw text after it so a bug report still carries
+        // the detail.
+        function friendlyError(message) {
+          const raw = String(message || '');
+          if (raw.indexOf('E_ACT_TOO_MANY_ACTIVATIONS') !== -1) {
+            return 'This account has activated as many devices as it is allowed ' +
+              '(ByteBooks allows 10 per user). Ask for the count to be reset — ' +
+              'ebooks-support@wipro.com — or use a different account.\n\n' + raw;
+          }
+          if (raw.indexOf('E_AUTH_BAD_DEVICE_KEY_OR_PWD') !== -1 ||
+              raw.indexOf('E_AUTH_FAILED') !== -1) {
+            return 'That email or password was not accepted.\n\n' + raw;
+          }
+          if (raw.indexOf('E_ADEPT_DISTRIBUTOR_AUTH') !== -1) {
+            return 'The library’s distributor refused this reader. Try the loan again.\n\n' + raw;
+          }
+          if (raw.indexOf('E_LIC_ALREADY_FULFILLED_BY_ANOTHER_USER') !== -1) {
+            return 'This loan was already fulfilled by a different account.\n\n' + raw;
+          }
+          return raw;
+        }
+
+        // Wraps an action so one failure cannot leave every button disabled.
+        function guard(fn) {
+          return async function () {
+            if (busy) return;
+            setBusy(true);
+            try {
+              await fn();
+            } catch (e) {
+              errStatus(friendlyError(e && e.message ? e.message : String(e)));
+            } finally {
+              setBusy(false);
+            }
+          };
+        }
+
+        // --- actions ---
+
+        const doAdobeSetup = guard(async function () {
+          const user = document.getElementById('adobeUser').value.trim();
+          const pass = document.getElementById('adobePass').value;
+          if (!user || !pass) throw new Error('enter your ByteBooks (or Adobe ID) email and password');
+
+          busyStatus('Contacting the account service…');
+
+          // Reuse a device identity from a previous attempt if there is one.
+          // Activation is keyed on the device fingerprint and the account has a
+          // hard cap on how many distinct devices it will EVER activate (10 on
+          // ByteBooks), so minting a fresh fingerprint on every retry turns each
+          // failed setup into a permanently burned slot. Reusing it means a
+          // retry re-activates the same device instead of registering a new one.
+          const prior = (session && session.salt && session.device) ? session : null;
+          const identity = prior || makeIdentity();
+          // Carry the ACCOUNT state forward only when this is the same account.
+          // A different email is a different user, with its own activation quota
+          // and its own keys: inheriting the previous deviceUuid would skip
+          // activation below and then write the old account's licence key into
+          // content.key -- a setup that reports success and cannot open a book.
+          // The device fingerprint is kept either way; it identifies the reader,
+          // not the user, and reusing it is what protects the quota.
+          const priorAct = (prior && prior.act) || {};
+          const sameAccount = !!priorAct.username &&
+            priorAct.username.toLowerCase() === user.toLowerCase();
+          session = {
+            salt: identity.salt,
+            device: identity.device,
+            act: Object.assign(await bootstrap(), sameAccount ? priorAct : {}),
+          };
+          if (!sameAccount && priorAct.username) {
+            LOGNOTE('switching account: ' + priorAct.username + ' -> ' + user);
+          }
+          // Persist the fingerprint before anything can fail.
+          await writeSession();
+
+          await signIn(user, pass);
+          // The signing key and licence key cannot be recovered without another
+          // sign-in, and the activation that follows is the step that can fail on
+          // a quota -- so bank them first.
+          await writeSession();
+
+          if (!session.act.deviceUuid) await activateDevice();
+          busyStatus('Saving the reader’s credential…');
+          await writeCredential();
+          document.getElementById('adobePass').value = '';
+          renderAdobeState();
+          okStatus('This reader is set up. You can now send loans to it.');
+        });
+
+        const doLibbyLink = guard(async function () {
+          busyStatus('Asking Libby for a setup code…');
+          const chip = await mintChip();
+          const code = await requestCode(chip);
+          setupCode.textContent = code;
+          codeBox.classList.remove('hidden');
+          okStatus('Enter this code in the Libby app.');
+
+          // Codes last about a minute; Libby reissues on the next attempt.
+          for (let i = 0; i < 40; i++) {
+            codeCountdown.textContent = 'Waiting for the code to be entered… (' +
+              Math.max(0, 120 - i * 3) + 's)';
+            await new Promise((r) => setTimeout(r, 3000));
+            const blessing = await pollBlessing(chip, code);
+            if (blessing) {
+              busyStatus('Linking…');
+              await saveIdentity(await completeClone(chip, blessing));
+              codeBox.classList.add('hidden');
+              codeCountdown.textContent = '';
+              renderLibbyState();
+              okStatus('Libby account linked.');
+              await reloadLoans();
+              return;
+            }
+          }
+          codeBox.classList.add('hidden');
+          throw new Error('the setup code expired before it was entered');
+        });
+
+        // Unguarded, so the actions below can reuse it. guard() short-circuits
+        // while an action is running, which would make a nested call a silent
+        // no-op -- exactly the calls that most need to refresh the list.
+        async function reloadLoans() {
+          if (!identity) return;
+          busyStatus('Fetching your loans…');
+          loans = await getLoans();
+          renderLoans();
+          okStatus(loans.length + (loans.length === 1 ? ' loan' : ' loans') + ' found.');
+        }
+
+        const refreshLoans = guard(reloadLoans);
+
+        async function requireSession() {
+          if (!session || !session.act || !session.act.deviceUuid) {
+            throw new Error('set the reader up first (step 1 above)');
+          }
+          await ensureBootstrapped();
+        }
+
+        const sendLoan = (loan) => guard(async function () {
+          await requireSession();
+          busyStatus('Asking Libby to fulfil “' + (loan.title || loan.id) + '”…');
+          const acsm = await fetchAcsm(loan);
+          const result = await fulfill(acsm);
+          await recordBook(loan.id, result.dest);
+          okStatus('“' + result.title + '” is on the reader, in ' + BOOK_DIR + '.');
+        })();
+
+        const renewLoan = (loan) => guard(async function () {
+          await requireSession();
+          busyStatus('Renewing on Libby…');
+          await loanAction(loan, 'PUT');
+          const bookPath = (await loadBookMap())[String(loan.id)];
+          if (!bookPath) {
+            okStatus('Renewed on Libby. This book was not sent from here, so use ' +
+              '“Send to reader” to put the new licence on the card.');
+            return;
+          }
+          const acsm = await fetchAcsm(loan);
+          const result = await fulfill(acsm, { existingDest: bookPath });
+          okStatus('“' + result.title + '” renewed; the book on the card was kept.');
+          await reloadLoans();
+        })();
+
+        const returnLoan = (loan) => guard(async function () {
+          busyStatus('Returning “' + (loan.title || loan.id) + '”…');
+          await loanAction(loan, 'DELETE');
+          // Deliberately not "the copy will stop opening": the reader checks the
+          // due date baked into the .rights sidecar at open time and never asks
+          // Libby anything, so a returned loan keeps opening until that date.
+          okStatus('Returned on Libby. The copy on the card keeps opening until its ' +
+            'original due date — delete it from the File Manager to remove it now.');
+          await reloadLoans();
+        })();
+
+        document.getElementById('adobeGo').addEventListener('click', doAdobeSetup);
+        document.getElementById('libbyGo').addEventListener('click', doLibbyLink);
+        document.getElementById('refreshLoans').addEventListener('click', refreshLoans);
+
+        // --- startup ---
+
+        (async function init() {
+          try {
+            session = await loadCredential();
+            identity = await loadIdentity();
+          } catch (e) {
+            errStatus('Could not read the reader’s saved state: ' + e.message);
+          }
+          renderAdobeState();
+          renderLibbyState();
+          renderLoans();
+          if (identity) await refreshLoans();
+        })();
+      })();
+    </script>
+  </body>
+</html>

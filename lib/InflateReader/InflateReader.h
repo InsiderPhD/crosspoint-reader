@@ -77,6 +77,20 @@ class InflateScratchLease {
   bool registered = false;
 };
 
+// Borrow the region an InflateScratchLease is currently lending, when one is
+// outstanding and nothing else is using it; returns nullptr otherwise.
+//
+// This exists for the content-protection read path, which inflates through
+// miniz rather than uzlib and needs the same guaranteed-contiguous memory (one
+// ~44KB allocation: the 32KB dictionary plus Huffman tables). The two never
+// inflate simultaneously -- a single entry is read at a time -- so they share
+// the one lent region instead of each leasing the framebuffer and overlapping.
+uint8_t* borrowInflateScratch(size_t needed);
+
+// Hand back a pointer from borrowInflateScratch(). Returns false if it did not
+// come from the lent region, so callers can fall through to free().
+bool returnInflateScratch(const uint8_t* buffer);
+
 class InflateReader {
  public:
   InflateReader() = default;

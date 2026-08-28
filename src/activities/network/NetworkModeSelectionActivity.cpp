@@ -1,6 +1,7 @@
 #include "NetworkModeSelectionActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalStorage.h>
 #include <I18n.h>
 
 #include "BookFusionTokenStore.h"
@@ -10,15 +11,85 @@
 #include "util/TouchListNav.h"
 
 namespace {
+// One row of the File Transfer menu.
+struct MenuRow {
+  NetworkMode mode;
+  StrId title;
+  StrId description;
+  UIIcon icon;
+};
+
+constexpr MenuRow MENU_ROWS[] = {
+    {NetworkMode::JOIN_NETWORK, StrId::STR_JOIN_NETWORK, StrId::STR_JOIN_DESC, UIIcon::Wifi},
+    {NetworkMode::CONNECT_CALIBRE, StrId::STR_CALIBRE_WIRELESS, StrId::STR_CALIBRE_DESC, UIIcon::Library},
+    {NetworkMode::CREATE_HOTSPOT, StrId::STR_CREATE_HOTSPOT, StrId::STR_HOTSPOT_DESC, UIIcon::Hotspot},
+    {NetworkMode::BOOKFUSION, StrId::STR_BF_BROWSE_LIBRARY, StrId::STR_BF_LIBRARY_DESC, UIIcon::BookFusion},
+    {NetworkMode::LIBBY, StrId::STR_LIBBY, StrId::STR_LIBBY_DESC, UIIcon::Book},
+};
+constexpr int MAX_MENU_ITEM_COUNT = static_cast<int>(sizeof(MENU_ROWS) / sizeof(MENU_ROWS[0]));
+
 // The BookFusion entry only appears once the user has linked an account in
 // Settings → System → BookFusion Sync. Hiding it pre-link avoids the dead row
 // that would otherwise just fail with NO_TOKEN once the user tried to use it.
-constexpr int MAX_MENU_ITEM_COUNT = 4;
-int visibleMenuItemCount() { return BF_TOKEN_STORE.hasToken() ? 4 : 3; }
+//
+// Libby is always shown: unlike BookFusion, this row IS its setup path, so
+// hiding it until it were configured would leave no way to configure it.
+// The Libby chip, written by the web UI when an account is linked. Its presence
+// is what "has a Libby account" means.
+constexpr char LIBBY_IDENTITY_PATH[] = "/.crosspoint/libby.json";
+
+// Cached, because rowVisible() runs from the per-row drawList lambdas -- several
+// times per render. An SD stat per row per frame would be pure churn.
+bool g_libbyLinked = false;
+
+void refreshLibbyLinked() { g_libbyLinked = Storage.exists(LIBBY_IDENTITY_PATH); }
+
+bool rowVisible(const MenuRow& row) {
+  if (row.mode == NetworkMode::BOOKFUSION) return BF_TOKEN_STORE.hasToken();
+  // Same reasoning as BookFusion above: before an account is linked this row
+  // could only fail, and linking happens in the web UI (Join Network -> /libby),
+  // not here -- so there is nothing lost by hiding it.
+  //
+  // Gated on the chip alone, not on the reader's content credential. Someone who
+  // has linked Libby but not yet authorised the reader still sees the row, and
+  // LibbyBrowserActivity tells them which half is missing; hiding it there would
+  // strand a half-finished setup with no way to see what was wrong.
+  if (row.mode == NetworkMode::LIBBY) return g_libbyLinked;
+  return true;
+}
+
+// Collect the indices of the visible rows into `out`, returning how many there
+// are. A conditional row used to be handled by simply truncating the list,
+// which silently breaks as soon as another row follows it -- so the mapping
+// from screen position to row is made explicit instead.
+int visibleRows(int (&out)[MAX_MENU_ITEM_COUNT]) {
+  int count = 0;
+  for (int i = 0; i < MAX_MENU_ITEM_COUNT; i++) {
+    if (rowVisible(MENU_ROWS[i])) out[count++] = i;
+  }
+  return count;
+}
+
+int visibleMenuItemCount() {
+  int indices[MAX_MENU_ITEM_COUNT];
+  return visibleRows(indices);
+}
+
+// The row shown at screen position `position`, or the first row if the
+// selection is somehow out of range.
+const MenuRow& rowAt(int position) {
+  int indices[MAX_MENU_ITEM_COUNT];
+  const int count = visibleRows(indices);
+  if (position < 0 || position >= count) return MENU_ROWS[0];
+  return MENU_ROWS[indices[position]];
+}
 }  // namespace
 
 void NetworkModeSelectionActivity::onEnter() {
   Activity::onEnter();
+
+  // Sample the card once per visit; the row lambdas then read the cached flag.
+  refreshLibbyLinked();
 
   // Reset selection
   selectedIndex = 0;
@@ -69,17 +140,7 @@ void NetworkModeSelectionActivity::loop() {
   });
 }
 
-void NetworkModeSelectionActivity::handleSelection() {
-  NetworkMode mode = NetworkMode::JOIN_NETWORK;
-  if (selectedIndex == 1) {
-    mode = NetworkMode::CONNECT_CALIBRE;
-  } else if (selectedIndex == 2) {
-    mode = NetworkMode::CREATE_HOTSPOT;
-  } else if (selectedIndex == 3) {
-    mode = NetworkMode::BOOKFUSION;
-  }
-  onModeSelected(mode);
-}
+void NetworkModeSelectionActivity::handleSelection() { onModeSelected(rowAt(selectedIndex).mode); }
 
 // List body between the header and the button hints. Shared by render() and
 // the loop()'s tap hit-testing so the two can never disagree.
@@ -99,21 +160,14 @@ void NetworkModeSelectionActivity::render(RenderLock&&) {
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_FILE_TRANSFER));
 
-  // Menu items and descriptions. Arrays are sized to MAX_MENU_ITEM_COUNT but
-  // only `visibleMenuItemCount()` of them are passed to drawList — the
-  // BookFusion row at index 3 is hidden whenever the user hasn't linked an
-  // account yet (see BookFusionTokenStore).
-  static constexpr StrId menuItems[MAX_MENU_ITEM_COUNT] = {StrId::STR_JOIN_NETWORK, StrId::STR_CALIBRE_WIRELESS,
-                                                           StrId::STR_CREATE_HOTSPOT, StrId::STR_BF_BROWSE_LIBRARY};
-  static constexpr StrId menuDescs[MAX_MENU_ITEM_COUNT] = {StrId::STR_JOIN_DESC, StrId::STR_CALIBRE_DESC,
-                                                           StrId::STR_HOTSPOT_DESC, StrId::STR_BF_LIBRARY_DESC};
-  static constexpr UIIcon menuIcons[MAX_MENU_ITEM_COUNT] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot,
-                                                            UIIcon::BookFusion};
-
+  // Rows are addressed through rowAt(), so a hidden row (BookFusion, pre-link)
+  // shifts the ones after it on screen without the labels and the selection
+  // falling out of step.
   GUI.drawList(
       renderer, listRect(), visibleMenuItemCount(), selectedIndex,
-      [](int index) { return std::string(I18N.get(menuItems[index])); },
-      [](int index) { return std::string(I18N.get(menuDescs[index])); }, [](int index) { return menuIcons[index]; });
+      [](int index) { return std::string(I18N.get(rowAt(index).title)); },
+      [](int index) { return std::string(I18N.get(rowAt(index).description)); },
+      [](int index) { return rowAt(index).icon; });
 
   // Draw help text at bottom
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));

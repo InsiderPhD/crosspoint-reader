@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ArduinoJson.h>  // JsonDocument, in readJsonBody()'s signature
 #include <HalStorage.h>
 #include <NetworkUdp.h>
 #include <WebServer.h>
@@ -88,7 +89,8 @@ class CrossPointWebServer {
   // more visible entry exists past that window (i.e. the client should request
   // another page). Bounds the raw directory walk so a corrupt FAT chain can't
   // spin the main loop forever.
-  bool scanFiles(const char* path, uint32_t offset, uint32_t limit, const std::function<void(FileInfo)>& callback) const;
+  bool scanFiles(const char* path, uint32_t offset, uint32_t limit,
+                 const std::function<void(FileInfo)>& callback) const;
   String formatFileSize(size_t bytes) const;
   bool isEpubFile(const String& filename) const;
 
@@ -119,6 +121,36 @@ class CrossPointWebServer {
   void handleFontUpload();
   void handleFontUploadData();
   void handleFontDelete();
+
+  // --- Libby -----------------------------------------------------------------
+  //
+  // Everything Libby-specific -- account linking, listing loans, the Adobe
+  // fulfilment handshake and all of its crypto -- runs as JavaScript in the
+  // user's browser. The device contributes only the three things a browser page
+  // physically cannot do for itself, and nothing here knows what Libby is:
+  //
+  //   relay  - make an outbound HTTPS call (the browser is blocked by CORS)
+  //   fetch  - stream a URL straight to SD (never through RAM)
+  //   write  - persist a small file (credential / rights sidecar) to SD
+  //
+  // The consequence worth stating: this costs zero resident RAM. There is no
+  // Libby object, no cached session and no background task -- these handlers
+  // exist only while the web server does, and the server only exists inside
+  // CrossPointWebServerActivity, which reboots on the way out.
+  void handleLibbyPage() const;
+  void handleLibbyCryptoJs() const;
+  void handleLibbyRelay();
+  void handleLibbyFetch();
+  void handleLibbyWrite();
+
+  // Parse a JSON request body, answering 400 itself on a missing/!bad body.
+  bool readJsonBody(JsonDocument& out) const;
+
+  // Drop the WebSocket server and UDP discovery for the duration of an outbound
+  // TLS call, then rebuild them. A wolfSSL handshake needs contiguous heap that
+  // simply is not there while those two are up; see the call sites.
+  void suspendTransferServices();
+  void resumeTransferServices();
 
   // Font upload state
   struct FontUploadState {

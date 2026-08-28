@@ -15,6 +15,7 @@
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
 #include "activities/settings/BookFusionBrowserActivity.h"
+#include "activities/settings/LibbyBrowserActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/QrUtils.h"
@@ -127,8 +128,29 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "Create Hotspot";
   } else if (mode == NetworkMode::BOOKFUSION) {
     modeName = "BookFusion";
+  } else if (mode == NetworkMode::LIBBY) {
+    modeName = "Libby";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
+
+  // Libby browses natively, exactly as BookFusion does. Only the one-time setup
+  // (linking the account, authorising the reader) lives in the web UI, reached
+  // through Join Network -> /libby.
+  if (mode == NetworkMode::LIBBY) {
+    startActivityForResult(
+        std::make_unique<LibbyBrowserActivity>(renderer, mappedInput), [this](const ActivityResult&) {
+          state = WebServerActivityState::MODE_SELECTION;
+          startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
+                                 [this](const ActivityResult& result) {
+                                   if (result.isCancelled) {
+                                     onGoHome();
+                                   } else {
+                                     onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
+                                   }
+                                 });
+        });
+    return;
+  }
 
   if (mode == NetworkMode::BOOKFUSION) {
     // Use startActivityForResult so pressing Back in the browser returns to mode
@@ -291,6 +313,23 @@ void CrossPointWebServerActivity::startWebServer() {
     // repaint can contend with uploads for heap/SD bandwidth. Upload progress
     // lives in the client's browser.
     requestUpdateAndWait();
+
+    // The card is on the panel and e-ink holds it there without a buffer, so
+    // hand those ~48KB back to the heap for the rest of the session. This is
+    // the single biggest thing available on this board: the web server
+    // otherwise starts with roughly 20KB free, and a few page-load fetches take
+    // that low enough that lwIP cannot get pbufs and a single TCP write inside
+    // a response stalls for tens of seconds -- long enough to trip the loop
+    // watchdog mid-response. It also buys the contiguous block a wolfSSL
+    // handshake needs, which is what the Libby page's relay depends on.
+    //
+    // Safe specifically because this activity always reboots on the way out
+    // (onExit -> silentRestart), which is what makes a one-way release
+    // acceptable: reallocating the 48KB would relocate it and progressively
+    // fragment a heap with no PSRAM behind it. Nothing repaints in between --
+    // the WiFi-bar repaint in loop() is deliberately dropped, and the render
+    // task drops any other request via GfxRenderer::isRenderable().
+    renderer.releaseFrameBuffer();
   } else {
     LOG_ERR("WEBACT", "ERROR: Failed to start web server!");
     webServer.reset();
@@ -517,7 +556,6 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     renderer.drawCenteredText(UI_10_FONT_ID, startY, tr(STR_SCAN_QR_HINT), true, EpdFontFamily::BOLD);
     startY += height10 + metrics.verticalSpacing * 2;
 
-    // Show QR code for URL
     std::string webInfo = "http://" + connectedIP + "/";
     const Rect qrBounds((pageWidth - QR_CODE_WIDTH) / 2, startY, QR_CODE_WIDTH, QR_CODE_HEIGHT);
     QrUtils::drawQrCode(renderer, qrBounds, webInfo);

@@ -31,6 +31,18 @@ bool g_scratchInUse = false;
 static_assert(std::is_standard_layout<InflateReader>::value,
               "InflateReader must be standard-layout for the uzlib callback cast to work");
 
+uint8_t* borrowInflateScratch(const size_t needed) {
+  if (!g_scratchBuffer || g_scratchInUse || needed == 0 || needed > g_scratchLength) return nullptr;
+  g_scratchInUse = true;
+  return g_scratchBuffer;
+}
+
+bool returnInflateScratch(const uint8_t* buffer) {
+  if (!buffer || buffer != g_scratchBuffer) return false;
+  g_scratchInUse = false;
+  return true;
+}
+
 InflateReader::~InflateReader() { deinit(); }
 
 bool InflateReader::init(const bool streaming) {

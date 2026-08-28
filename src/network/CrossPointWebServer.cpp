@@ -7,7 +7,10 @@
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <SecureHttpClient.h>  // outbound TLS for the Libby relay/fetch
+#include <Util.h>              // freeink::content::base64Decode
 #include <WiFi.h>
+#include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
 #include <algorithm>
@@ -22,10 +25,66 @@
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
+#include "html/LibbyPageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
+#include "html/js/libbyCryptoJs.generated.h"
 
 namespace {
+// Arduino's WebServer keeps parsed request arguments alive until the NEXT
+// request arrives -- for a JSON POST that includes the entire "plain" body.
+// The Libby relay posts a body and then immediately opens a TLS connection,
+// which needs that same memory as contiguous heap, so expose a narrow way to
+// hand it back at the point the body is no longer needed.
+class CrossPointHttpServer final : public WebServer {
+ public:
+  explicit CrossPointHttpServer(uint16_t port) : WebServer(port) {}
+
+  void releaseRequestArguments() {
+    if (_currentArgs) {
+      delete[] _currentArgs;
+      _currentArgs = nullptr;
+    }
+    _currentArgCount = 0;
+
+    if (_postArgs) {
+      delete[] _postArgs;
+      _postArgs = nullptr;
+    }
+    _postArgsLen = 0;
+  }
+};
+
+void releaseRequestArguments(WebServer* server) {
+  static_cast<CrossPointHttpServer*>(server)->releaseRequestArguments();
+}
+
+// Runs a lambda when the scope ends. Used so an early `return` out of a
+// handler still rebuilds the transfer services it suspended.
+template <typename Fn>
+class ScopedCleanup {
+ public:
+  explicit ScopedCleanup(Fn fn) : fn_(fn) {}
+  ~ScopedCleanup() { fn_(); }
+  ScopedCleanup(const ScopedCleanup&) = delete;
+  ScopedCleanup& operator=(const ScopedCleanup&) = delete;
+
+ private:
+  Fn fn_;
+};
+template <typename Fn>
+ScopedCleanup(Fn) -> ScopedCleanup<Fn>;
+
+// Where the browser side is allowed to write. Deliberately much narrower than
+// "anywhere on the card": the Libby flow only ever persists its credential and
+// session under /.crosspoint/, and books plus their rights sidecars under
+// /Libby/. A page that has been tampered with therefore cannot overwrite the
+// user's library or the firmware's own settings.
+bool libbyWritePath(const std::string& p) {
+  if (p.find("..") != std::string::npos) return false;
+  return p.rfind("/.crosspoint/", 0) == 0 || p.rfind("/Libby/", 0) == 0;
+}
+
 // Folders/files to hide from the web interface file browser
 // Note: Items starting with "." are automatically hidden
 const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
@@ -140,7 +199,7 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "Network mode: %s", apMode ? "AP" : "STA");
 
   LOG_DBG("WEB", "Creating web server on port %d...", port);
-  server.reset(new WebServer(port));
+  server.reset(new CrossPointHttpServer(port));
 
   // Disable WiFi sleep to improve responsiveness and prevent 'unreachable' errors.
   // This is critical for reliable web server operation on ESP32.
@@ -195,6 +254,14 @@ void CrossPointWebServer::begin() {
   server->on("/api/fonts", HTTP_GET, [this] { handleFontList(); });
   server->on("/api/fonts/upload", HTTP_POST, [this] { handleFontUpload(); }, [this] { handleFontUploadData(); });
   server->on("/api/fonts/delete", HTTP_POST, [this] { handleFontDelete(); });
+
+  // Libby. One page plus the three device capabilities it drives; see the
+  // header for why the device side is this thin.
+  server->on("/libby", HTTP_GET, [this] { handleLibbyPage(); });
+  server->on("/js/libbyCrypto.js", HTTP_GET, [this] { handleLibbyCryptoJs(); });
+  server->on("/api/libby/relay", HTTP_POST, [this] { handleLibbyRelay(); });
+  server->on("/api/libby/fetch", HTTP_POST, [this] { handleLibbyFetch(); });
+  server->on("/api/libby/write", HTTP_POST, [this] { handleLibbyWrite(); });
 
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
@@ -1787,4 +1854,633 @@ void CrossPointWebServer::handleFontDelete() {
     server->send(500, "application/json", "{\"error\":\"Delete failed\"}");
     LOG_ERR("WEB", "Failed to delete font family: %s", familyName);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Libby
+// ---------------------------------------------------------------------------
+//
+// The device is a dumb pipe here. Account linking, loan listing, the Adobe
+// fulfilment handshake and every crypto primitive it needs run in the browser
+// (see src/network/html/LibbyPage.html). What is left are the three things a page
+// cannot do for itself: reach a CORS-blocked origin, stream a large body to SD
+// without passing it through RAM, and persist a small file.
+//
+// None of it is resident. These handlers are members of the web server object,
+// which exists only inside CrossPointWebServerActivity; that activity reboots
+// on the way out, so the feature's RAM cost outside a Libby session is zero.
+
+void CrossPointWebServer::suspendTransferServices() {
+  // Leave the WebSocket server alone mid-upload; killing it would abort the
+  // transfer. The outbound call just stalls that upload until it completes.
+  if (wsServer && !wsUploadInProgress) {
+    wsServer->close();
+    wsServer.reset();
+  }
+  if (udpActive) udp.stop();
+  LOG_DBG("WEB", "Transfer services suspended, heap %u, max block %u", (unsigned)ESP.getFreeHeap(),
+          (unsigned)ESP.getMaxAllocHeap());
+}
+
+void CrossPointWebServer::resumeTransferServices() {
+  if (!running) return;
+  if (!wsServer) {
+    auto* ws = new (std::nothrow) WebSocketsServer(wsPort);
+    if (ws) {
+      wsServer.reset(ws);
+      wsServer->begin();
+      wsServer->onEvent(wsEventCallback);
+    } else {
+      LOG_ERR("WEB", "OOM: WebSocket server restart");
+    }
+  }
+  if (udpActive) udpActive = udp.begin(LOCAL_UDP_PORT);
+  LOG_DBG("WEB", "Transfer services resumed, heap %u, max block %u", (unsigned)ESP.getFreeHeap(),
+          (unsigned)ESP.getMaxAllocHeap());
+}
+
+// Parsing a JSON body is memory-expensive on this board and it is worth knowing
+// exactly how it failed. WebServer has already made TWO full copies of the body
+// by the time a handler runs -- readBytesWithTimeout() mallocs it, then
+// `arg.value = String(plainBuf)` copies it again (Parsing.cpp) -- and
+// deserializeJson() then builds a third inside the document. So a body that is
+// merely large fails as NoMemory, which is a completely different problem from
+// malformed JSON and must not be reported as "bad json".
+bool CrossPointWebServer::readJsonBody(JsonDocument& out) const {
+  if (!server->hasArg("plain")) {
+    server->send(400, "application/json", "{\"error\":\"missing body\"}");
+    return false;
+  }
+  const String& body = server->arg("plain");
+  const DeserializationError err = deserializeJson(out, body);
+  if (err == DeserializationError::Ok) return true;
+
+  LOG_ERR("WEB", "JSON body rejected: %s (%u bytes, heap %u, max block %u)", err.c_str(), (unsigned)body.length(),
+          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+  char msg[192];
+  snprintf(msg, sizeof(msg), "{\"error\":\"%s\",\"bytes\":%u,\"maxBlock\":%u}", err.c_str(), (unsigned)body.length(),
+           (unsigned)ESP.getMaxAllocHeap());
+  // 413 for the out-of-memory case: it is the payload's size that is the
+  // problem, and the caller's remedy is to send it in smaller pieces.
+  server->send(err == DeserializationError::NoMemory ? 413 : 400, "application/json", msg);
+  return false;
+}
+
+void CrossPointWebServer::handleLibbyPage() const {
+  sendHtmlContent(server.get(), LibbyPageHtml, sizeof(LibbyPageHtml));
+}
+
+// The page's crypto core, served as its own asset rather than inlined: it is
+// long enough to be worth reviewing on its own, and keeping it separate means
+// the browser caches it across reloads of the page.
+void CrossPointWebServer::handleLibbyCryptoJs() const {
+  server->sendHeader("Content-Encoding", "gzip");
+  server->send_P(200, "application/javascript", libbyCryptoJs, libbyCryptoJsCompressedSize);
+}
+
+// POST /api/libby/relay {method,url,headers,body}
+//   -> {status, headers:[[name,value],...], body}
+//
+// An authenticated HTTP proxy and nothing more: it ascribes no meaning to any
+// header or payload. Headers come back as an ordered, duplicate-preserving list
+// so the page can read every Set-Cookie and carry a session itself.
+void CrossPointWebServer::handleLibbyRelay() {
+  JsonDocument req;
+  if (!readJsonBody(req)) return;
+  const std::string url = req["url"] | "";
+  const std::string method = req["method"] | "GET";
+  if (url.empty()) {
+    server->send(400, "application/json", "{\"error\":\"missing url\"}");
+    return;
+  }
+
+  // Declared before the TLS client so reverse destruction order releases every
+  // client/response allocation before these services are rebuilt.
+  suspendTransferServices();
+  ScopedCleanup resumeServices{[this] { resumeTransferServices(); }};
+  freeink::SecureHttpClient http;
+  http.setUserAgent("CrossPoint");
+  // The SecureNet transport ships no CA bundle, so peer verification always
+  // fails (wolfSSL -188); skip it like HttpDownloader does. Traffic is still
+  // TLS-encrypted, just unauthenticated.
+  http.setInsecure();
+  if (!http.begin(url)) {
+    server->send(502, "application/json", "{\"error\":\"begin failed\"}");
+    return;
+  }
+  if (req["headers"].is<JsonObject>()) {
+    for (JsonPair kv : req["headers"].as<JsonObject>()) {
+      const char* v = kv.value().as<const char*>();
+      http.addHeader(kv.key().c_str(), v ? v : "");
+    }
+  }
+  const std::string body = req["body"] | "";
+  // Every value needed below now has independent storage. Drop both copies of
+  // the inbound JSON before wolfSSL allocates its handshake working set.
+  req.clear();
+  req.shrinkToFit();
+  releaseRequestArguments(server.get());
+
+  LOG_DBG("WEB", "Libby relay TLS start: heap %u, max block %u: %s", (unsigned)ESP.getFreeHeap(),
+          (unsigned)ESP.getMaxAllocHeap(), url.c_str());
+
+  // This task is subscribed to the task WDT for the whole web-server session; a
+  // slow peer would otherwise fire it while we block on the response.
+  // SecureHttpClient polls shouldAbort in every wait loop, so feed it there.
+  const auto feedWatchdog = []() {
+    esp_task_wdt_reset();
+    return false;  // never aborts; only feeds
+  };
+  // The body is accumulated once, then streamed out escaped. The copy is
+  // hard-capped: an uncapped std::string growth abort()s under -fno-exceptions.
+  // Libby's API replies are small JSON; anything big is a book, and books go
+  // through /api/libby/fetch, which never buffers.
+  static constexpr size_t RELAY_BODY_LIMIT = 32 * 1024;
+  std::string respBody;
+  bool tooLarge = false;
+  bool sized = false;
+  const int status = http.sendRequest(
+      method.c_str(), reinterpret_cast<const uint8_t*>(body.data()), body.size(),
+      [&](const uint8_t* data, size_t len) {
+        if (!sized) {
+          sized = true;
+          if (http.hasContentLength()) {
+            const size_t contentLength = http.getContentLength();
+            // Known-oversized: refuse before buffering a single chunk. Also bail
+            // if the reserve would not fit the largest free block, since the
+            // std::string growth that follows would abort() under -fno-exceptions.
+            if (contentLength > RELAY_BODY_LIMIT || contentLength + 4096 > ESP.getMaxAllocHeap()) {
+              tooLarge = true;
+              return false;
+            }
+            respBody.reserve(contentLength);
+          }
+        }
+        if (respBody.size() + len > RELAY_BODY_LIMIT) {
+          tooLarge = true;
+          return false;
+        }
+        respBody.append(reinterpret_cast<const char*>(data), len);
+        return true;
+      },
+      feedWatchdog);
+  if (tooLarge) {
+    LOG_ERR("WEB", "Libby relay response exceeds %u byte cap: %s", (unsigned)RELAY_BODY_LIMIT, url.c_str());
+    server->send(413, "application/json", "{\"error\":\"response too large, use fetch\"}");
+    return;
+  }
+  if (status < 0) {
+    LOG_ERR("WEB", "Libby relay transport failure: heap %u, max block %u: %s", (unsigned)ESP.getFreeHeap(),
+            (unsigned)ESP.getMaxAllocHeap(), url.c_str());
+    server->send(502, "application/json", "{\"error\":\"transport failure\"}");
+    return;
+  }
+  // A 2xx with an incomplete body would hand the page a silently cut-short
+  // payload -- worse than an error, because it parses.
+  if (status >= 200 && status < 300 && !http.responseComplete()) {
+    LOG_ERR("WEB", "Libby relay truncated: %u bytes (heap %u): %s", (unsigned)respBody.size(),
+            (unsigned)ESP.getFreeHeap(), url.c_str());
+    server->send(502, "application/json", "{\"error\":\"response truncated\"}");
+    return;
+  }
+
+  // Serialize only the small header set up front; the body is streamed below so
+  // it is never copied into a JsonDocument or a second String.
+  JsonDocument headersDoc;
+  JsonArray headers = headersDoc.to<JsonArray>();
+  for (const auto& h : http.getHeaders()) {
+    JsonArray pair = headers.add<JsonArray>();
+    pair.add(h.first);
+    pair.add(h.second);
+  }
+  String headersJson;
+  serializeJson(headers, headersJson);
+
+  // Stream {"status":N,"headers":[...],"body":"<escaped>"} in chunks so peak RAM
+  // is one copy of the body, not three.
+  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server->send(200, "application/json", "");
+  char prefix[64];
+  snprintf(prefix, sizeof(prefix), "{\"status\":%d,\"headers\":", status);
+  server->sendContent(prefix);
+  server->sendContent(headersJson);
+  server->sendContent(",\"body\":\"");
+  std::string chunk;
+  chunk.reserve(576);
+  for (const char c : respBody) {
+    switch (c) {
+      case '"':
+        chunk += "\\\"";
+        break;
+      case '\\':
+        chunk += "\\\\";
+        break;
+      case '\b':
+        chunk += "\\b";
+        break;
+      case '\f':
+        chunk += "\\f";
+        break;
+      case '\n':
+        chunk += "\\n";
+        break;
+      case '\r':
+        chunk += "\\r";
+        break;
+      case '\t':
+        chunk += "\\t";
+        break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          char esc[8];
+          snprintf(esc, sizeof(esc), "\\u%04x", static_cast<unsigned char>(c));
+          chunk += esc;
+        } else {
+          chunk += c;  // raw UTF-8 bytes pass through untouched
+        }
+        break;
+    }
+    if (chunk.size() >= 512) {
+      server->sendContent(chunk.c_str());
+      chunk.clear();
+      esp_task_wdt_reset();  // each sendContent() is a blocking network write
+    }
+  }
+  if (!chunk.empty()) server->sendContent(chunk.c_str());
+  server->sendContent("\"}");
+  server->sendContent("");
+}
+
+// POST /api/libby/write {path, data, offset}  (data is base64)
+//   -> {ok, bytes}
+//
+// Appends one bounded chunk. offset 0 truncates and creates; a non-zero offset
+// must equal the file's current size, so a retried or reordered chunk is
+// refused rather than silently corrupting the file.
+//
+// Chunked rather than whole-file because the body is expensive long before it
+// reaches this function: WebServer mallocs the whole thing, copies it into a
+// String, and deserializeJson() then builds a third copy in the document
+// (see readJsonBody). A one-shot 16KB credential therefore needed ~48KB, much
+// of it contiguous, and failed as NoMemory on a board with ~380KB total. The
+// cap below keeps that cost flat no matter how large the file is.
+void CrossPointWebServer::handleLibbyWrite() {
+  // Refuse an oversized body before ArduinoJson tries to parse it -- the point
+  // is to avoid the allocation, so checking afterwards would be too late.
+  static constexpr size_t MAX_WRITE_CHUNK_B64 = 8 * 1024;
+  if (server->hasArg("plain") && server->arg("plain").length() > MAX_WRITE_CHUNK_B64 + 512) {
+    LOG_ERR("WEB", "Libby write chunk too large: %u bytes", (unsigned)server->arg("plain").length());
+    server->send(413, "application/json", "{\"error\":\"chunk too large\",\"maxChunk\":8192}");
+    return;
+  }
+
+  JsonDocument req;
+  if (!readJsonBody(req)) return;
+  const std::string path = req["path"] | "";
+  const std::string dataB64 = req["data"] | "";
+  const size_t offset = req["offset"] | 0;
+  if (!libbyWritePath(path)) {
+    LOG_ERR("WEB", "Rejected Libby write outside allowed roots: '%s'", path.c_str());
+    server->send(400, "application/json", "{\"error\":\"bad path\"}");
+    return;
+  }
+  if (dataB64.size() > MAX_WRITE_CHUNK_B64) {
+    server->send(413, "application/json", "{\"error\":\"chunk too large\",\"maxChunk\":8192}");
+    return;
+  }
+  std::string decoded;
+  decoded.resize((dataB64.size() * 3) / 4 + 3);
+  const int32_t n = freeink::content::base64Decode(dataB64.data(), dataB64.size(),
+                                                   reinterpret_cast<uint8_t*>(decoded.data()), decoded.size());
+  if (n < 0) {
+    server->send(400, "application/json", "{\"error\":\"bad base64\"}");
+    return;
+  }
+  decoded.resize(static_cast<size_t>(n));
+  req.clear();
+  req.shrinkToFit();
+  releaseRequestArguments(server.get());
+
+  HalFile f;
+  if (offset == 0) {
+    // ensureDirectoryExists() creates missing parents, so a first write into a
+    // fresh /Libby/ works without anything having made it beforehand.
+    const size_t lastSlash = path.rfind('/');
+    if (lastSlash != std::string::npos && lastSlash > 0) {
+      Storage.ensureDirectoryExists(path.substr(0, lastSlash).c_str());
+    }
+    Storage.remove(path.c_str());
+    if (!Storage.openFileForWrite("LIBBY", path, f)) {
+      server->send(500, "application/json", "{\"error\":\"cannot write\"}");
+      return;
+    }
+  } else {
+    f = Storage.open(path.c_str(), O_RDWR | O_AT_END);
+    const size_t existing = f ? f.size() : 0;
+    if (!f || existing != offset) {
+      if (f) f.close();
+      char msg[96];
+      snprintf(msg, sizeof(msg), "{\"error\":\"offset mismatch\",\"bytes\":%u}", (unsigned)existing);
+      server->send(409, "application/json", msg);
+      return;
+    }
+  }
+
+  const size_t written = decoded.empty() ? 0 : f.write(decoded.data(), decoded.size());
+  f.flush();
+  const size_t total = f.size();
+  f.close();
+
+  JsonDocument resp;
+  resp["ok"] = (written == decoded.size());
+  resp["bytes"] = total;
+  String out;
+  serializeJson(resp, out);
+  server->send(200, "application/json", out);
+}
+
+// POST /api/libby/fetch {url, dest, headers, offset, maxBytes, probe}
+//   -> {status, bytes, complete, total}
+//
+// Streams a URL straight to SD. The book never exists in RAM: bytes go from the
+// TLS record to file.write() a chunk at a time, which is the whole reason a
+// 5MB EPUB is possible on a board with ~380KB.
+//
+// Resumable by design. A 2xx only means the headers arrived -- the body can
+// still be cut short by a transport drop or a server stall -- so a truncated
+// attempt reconnects with a Range request from the byte count already on the
+// card. `offset`/`maxBytes` let the page pull a large book as a series of
+// bounded segments so no single HTTP request has to survive the whole transfer.
+void CrossPointWebServer::handleLibbyFetch() {
+  JsonDocument req;
+  if (!readJsonBody(req)) return;
+  const std::string url = req["url"] | "";
+  const std::string dest = req["dest"] | "";
+  const bool probeOnly = req["probe"] | false;
+  const size_t requestedOffset = req["offset"] | 0;
+  size_t segmentLimit = req["maxBytes"] | 0;
+  static constexpr size_t FETCH_MAX_SEGMENT_SIZE = 4 * 1024 * 1024;
+  if (segmentLimit > FETCH_MAX_SEGMENT_SIZE) segmentLimit = FETCH_MAX_SEGMENT_SIZE;
+  if (url.empty() || (!probeOnly && !libbyWritePath(dest))) {
+    server->send(400, "application/json", "{\"error\":\"bad url/dest\"}");
+    return;
+  }
+
+  std::vector<std::pair<std::string, std::string>> requestHeaders;
+  if (req["headers"].is<JsonObject>()) {
+    for (JsonPair kv : req["headers"].as<JsonObject>()) {
+      const char* value = kv.value().as<const char*>();
+      requestHeaders.emplace_back(kv.key().c_str(), value ? value : "");
+    }
+  }
+  req.clear();
+  req.shrinkToFit();
+  releaseRequestArguments(server.get());
+
+  // A probe answers "how big is this?" without writing anything, so the page can
+  // warn before spending the transfer.
+  if (probeOnly) {
+    suspendTransferServices();
+    ScopedCleanup resumeServices{[this] { resumeTransferServices(); }};
+    freeink::SecureHttpClient probe;
+    probe.setInsecure();
+    probe.setUserAgent("CrossPoint");
+    probe.setFollowRedirects(5);
+    for (const auto& header : requestHeaders) probe.addHeader(header.first, header.second);
+    if (!probe.begin(url)) {
+      server->send(502, "application/json", "{\"error\":\"begin failed\"}");
+      return;
+    }
+    // HEAD, not a ranged GET: every byte a probe pulls is a byte paid twice.
+    // Servers that refuse HEAD simply report no length, and the caller falls
+    // back to downloading blind rather than being blocked.
+    const int status = probe.sendRequest("HEAD", nullptr, 0);
+    JsonDocument resp;
+    resp["status"] = status;
+    if (status >= 200 && status < 400 && probe.hasContentLength()) resp["total"] = probe.getContentLength();
+    String out;
+    serializeJson(resp, out);
+    server->send(200, "application/json", out);
+    LOG_DBG("WEB", "Libby fetch probe: status %d: %s", status, url.c_str());
+    return;
+  }
+
+  HalFile file;
+  if (requestedOffset == 0) {
+    const size_t lastSlash = dest.rfind('/');
+    if (lastSlash != std::string::npos && lastSlash > 0) {
+      Storage.ensureDirectoryExists(dest.substr(0, lastSlash).c_str());
+    }
+    Storage.remove(dest.c_str());
+    if (!Storage.openFileForWrite("LIBBY", dest, file)) {
+      server->send(500, "application/json", "{\"error\":\"cannot create file\"}");
+      return;
+    }
+  } else {
+    file = Storage.open(dest.c_str(), O_RDWR | O_AT_END);
+    const size_t existingSize = file ? file.size() : 0;
+    if (!file || existingSize != requestedOffset) {
+      if (file) file.close();
+      char msg[96];
+      snprintf(msg, sizeof(msg), "{\"error\":\"offset mismatch\",\"bytes\":%u}", (unsigned)existingSize);
+      server->send(409, "application/json", msg);
+      return;
+    }
+  }
+
+  suspendTransferServices();
+  ScopedCleanup resumeServices{[this] { resumeTransferServices(); }};
+
+  // A resume keeps all prior progress, so only consecutive zero-progress
+  // attempts count against the cap; the absolute ceiling is a backstop against
+  // a dead server.
+  static constexpr int FETCH_MAX_STALLED_ATTEMPTS = 3;
+  static constexpr int FETCH_MAX_TOTAL_ATTEMPTS = 20;
+  size_t written = requestedOffset;
+  size_t totalExpected = 0;
+  size_t nextHeapLog = written;
+  bool sdFull = false;
+  bool complete = false;
+  bool segmentBoundary = false;
+  bool rangeUnsupported = false;
+  int status = 0;
+  int stalled = 0;
+  const unsigned long fetchStartedAt = millis();
+  unsigned long sdWriteMs = 0;
+  unsigned long lastBrowserHeartbeat = fetchStartedAt;
+  bool browserResponseStarted = false;
+
+  // A phone may discard an HTTP response that sends no bytes for several minutes
+  // even while the device is actively downloading upstream. Start a chunked JSON
+  // response once the operation becomes long-running, then send JSON whitespace
+  // to keep that browser-facing connection alive.
+  const auto keepBrowserAlive = [this, &browserResponseStarted, &lastBrowserHeartbeat]() {
+    const unsigned long now = millis();
+    if (now - lastBrowserHeartbeat < 5000) return;
+    lastBrowserHeartbeat = now;
+    if (!server->client().connected()) return;
+    if (!browserResponseStarted) {
+      server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+      server->send(200, "application/json", "");
+      browserResponseStarted = true;
+    }
+    server->sendContent(" \n", 2);
+  };
+  const auto sendFetchResult = [this, &browserResponseStarted](int code, const String& payload) {
+    if (!browserResponseStarted) {
+      server->send(code, "application/json", payload);
+      return;
+    }
+    if (server->client().connected()) {
+      server->sendContent(payload);
+      server->sendContent("", 0);
+    }
+  };
+
+  for (int attempt = 0; attempt < FETCH_MAX_TOTAL_ATTEMPTS && stalled < FETCH_MAX_STALLED_ATTEMPTS; ++attempt) {
+    freeink::SecureHttpClient http;
+    http.setUserAgent("CrossPoint");
+    http.setInsecure();  // no CA bundle in SecureNet; see handleLibbyRelay()
+    // Fulfilment servers can assemble a book on the fly and stall mid-body while
+    // packaging; the default 15s no-data timeout truncates those downloads.
+    http.setTimeout(60000);
+    if (!http.begin(url)) {
+      status = -1;
+      break;
+    }
+    for (const auto& header : requestHeaders) http.addHeader(header.first, header.second);
+    const bool resuming = written > 0;
+    if (resuming) {
+      char range[48];
+      snprintf(range, sizeof(range), "bytes=%u-", (unsigned)written);
+      http.addHeader("Range", range);
+      LOG_INF("WEB", "Libby fetch attempt %d resuming from byte %u", attempt + 1, (unsigned)written);
+    }
+    bool rewindFailed = false;
+    bool firstChunk = true;
+    size_t attemptStart = written;
+    status = http.GET(
+        [&](const uint8_t* data, size_t len) {
+          esp_task_wdt_reset();
+          if (firstChunk) {
+            firstChunk = false;
+            // Range ignored: this body restarts from byte 0, so the file must too.
+            if (resuming && http.getStatus() == 200) {
+              if (requestedOffset > 0) {
+                rangeUnsupported = true;
+                return false;
+              }
+              file.close();
+              if (!Storage.openFileForWrite("LIBBY", dest, file)) {
+                rewindFailed = true;
+                return false;
+              }
+              written = 0;
+              attemptStart = 0;
+            }
+          }
+          size_t writeLen = len;
+          if (segmentLimit > 0) {
+            const size_t segmentBytes = written - requestedOffset;
+            if (segmentBytes >= segmentLimit) {
+              segmentBoundary = true;
+              return false;
+            }
+            writeLen = std::min(writeLen, segmentLimit - segmentBytes);
+          }
+          // Time the card, not the network: a segment's wall clock is transfer +
+          // SD, and only splitting them says whether the link or the card is slow.
+          const unsigned long writeStartedAt = millis();
+          const size_t wrote = file.write(data, writeLen);
+          sdWriteMs += millis() - writeStartedAt;
+          if (wrote != writeLen) {
+            sdFull = true;
+            return false;
+          }
+          written += writeLen;
+          // Heap trajectory during the transfer: a steady value rules RAM out of
+          // a mid-body failure; a falling one implicates it.
+          if (written >= nextHeapLog) {
+            LOG_DBG("WEB", "Libby fetch %u bytes, heap %u", (unsigned)written, (unsigned)ESP.getFreeHeap());
+            nextHeapLog = written + 1024 * 1024;
+          }
+          keepBrowserAlive();
+          if (writeLen < len || (segmentLimit > 0 && written - requestedOffset >= segmentLimit)) {
+            // Bounded segment requested. Stopping the response callback closes
+            // this upstream socket cleanly; the next request resumes with Range.
+            segmentBoundary = true;
+            return false;
+          }
+          return true;
+        },
+        // The data callback only runs when bytes arrive; with the 60s no-data
+        // timeout a server stall would starve this task's WDT subscription.
+        // shouldAbort is polled in every wait loop.
+        [&keepBrowserAlive]() {
+          esp_task_wdt_reset();
+          keepBrowserAlive();
+          return false;  // never aborts; only feeds
+        });
+    if (sdFull || rewindFailed || rangeUnsupported) break;
+    if (status < 200 || status >= 300) break;  // http-level failure: resume cannot help
+    // A 206's Content-Length covers only the remainder, so anchor at the
+    // attempt's starting offset to get the whole-file size.
+    if (totalExpected == 0 && http.hasContentLength()) totalExpected = attemptStart + http.getContentLength();
+    if (segmentBoundary) {
+      if (totalExpected > 0 && written >= totalExpected) complete = true;
+      break;
+    }
+    if (http.responseComplete()) {
+      complete = true;
+      break;
+    }
+    LOG_ERR("WEB", "Libby fetch truncated: %u of %u bytes (heap %u, attempt %d): %s", (unsigned)written,
+            (unsigned)totalExpected, (unsigned)ESP.getFreeHeap(), attempt + 1, url.c_str());
+    stalled = written > attemptStart ? 0 : stalled + 1;
+  }
+  file.flush();
+  file.close();
+
+  if (segmentBoundary && !complete && status >= 200 && status < 300) {
+    JsonDocument resp;
+    resp["status"] = status;
+    resp["bytes"] = written;
+    resp["complete"] = false;
+    if (totalExpected > 0) resp["total"] = totalExpected;
+    String out;
+    serializeJson(resp, out);
+    const unsigned long fetchElapsed = millis() - fetchStartedAt;
+    LOG_INF("WEB", "Libby fetch segment: %u bytes in %lu ms (%lu%% in SD writes): %s", (unsigned)written, fetchElapsed,
+            fetchElapsed > 0 ? (sdWriteMs * 100 / fetchElapsed) : 0, url.c_str());
+    sendFetchResult(200, out);
+    return;
+  }
+
+  if (!complete && status >= 200 && status < 300) {
+    Storage.remove(dest.c_str());
+    char msg[96];
+    const char* error = sdFull ? "sd write failed" : rangeUnsupported ? "range unsupported" : "download truncated";
+    // complete:false matters once the heartbeat has committed HTTP 200 chunked:
+    // it is the only failure signal the page still sees on this path.
+    snprintf(msg, sizeof(msg), "{\"error\":\"%s\",\"bytes\":%u,\"complete\":false}", error, (unsigned)written);
+    LOG_ERR("WEB", "Libby fetch failed after %u bytes in %lu ms: %s", (unsigned)written, millis() - fetchStartedAt,
+            url.c_str());
+    sendFetchResult(502, msg);
+    return;
+  }
+
+  JsonDocument resp;
+  if (status < 200 || status >= 300) {
+    Storage.remove(dest.c_str());
+    resp["error"] = status < 0 ? "transport failure" : "http status";
+  }
+  resp["status"] = status;
+  resp["bytes"] = written;
+  resp["complete"] = complete;
+  if (totalExpected > 0) resp["total"] = totalExpected;
+  String out;
+  serializeJson(resp, out);
+  LOG_INF("WEB", "Libby fetch %s: %u bytes in %lu ms: %s", complete ? "complete" : "failed", (unsigned)written,
+          millis() - fetchStartedAt, url.c_str());
+  sendFetchResult(200, out);
 }
