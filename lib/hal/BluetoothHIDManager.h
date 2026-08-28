@@ -351,6 +351,11 @@ class BleMemoryPause {
   BleMemoryPause(const BleMemoryPause&) = delete;
   BleMemoryPause& operator=(const BleMemoryPause&) = delete;
 
+  // False when the stack was already down, or when pauseForMemory() declined
+  // (a roomy board — see DevicePolicy.h). Callers that only do expensive work
+  // *because* heap was freed should check this rather than assume.
+  bool didPause() const { return paused; }
+
  private:
   const bool paused;
 };

@@ -2398,13 +2398,35 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   const int viewportBottom = renderer.getScreenHeight() - orientedMarginBottom;
   const int viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
 
-  // Font prewarm: scan pass accumulates text, then prewarm, then real render
+  // Font prewarm: scan pass accumulates text, then prewarm, then real render.
+  // Retried once if the prewarm could not fit a glyph buffer — see below.
   const uint32_t heapBefore = esp_get_free_heap_size();
-  auto scope = fcm->createPrewarmScope();
-  page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);  // scan pass
-  if (ReaderUtils::footnotesOnPage())
-    page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
-  scope.endScanAndPrewarm();
+  std::optional<FontCacheManager::PrewarmScope> scope;
+  for (uint8_t attempt = 0;; attempt++) {
+    scope.reset();  // hand back a failed attempt's glyph buffers before retrying
+    scope.emplace(fcm->createPrewarmScope());
+    page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);  // scan pass
+    if (ReaderUtils::footnotesOnPage())
+      page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+    scope->endScanAndPrewarm();
+
+    // Ground truth, unlike the largest-block guard above, which only predicts:
+    // the prewarm has just reported that a glyph buffer would not fit, so this
+    // page WILL paint with characters missing — the "losing words" a connected
+    // page-turner produces once free heap sits near 10KB. The only meaningful
+    // heap to reclaim here is the BLE stack's ~50KB, so give it back and lay
+    // the page out again. One retry only: if it still doesn't fit, the heap is
+    // short for some other reason and looping would just stall the page turn.
+    if (!fcm->glyphAllocFailed() || attempt > 0) break;
+    auto& btMgr = BluetoothHIDManager::getInstance();
+    if (!btMgr.isEnabled()) break;
+    LOG_INF("ERS", "Glyph buffer alloc failed (free=%lu largest=%u); pausing Bluetooth and re-rendering page",
+            (unsigned long)esp_get_free_heap_size(), ESP.getMaxAllocHeap());
+    BleMemoryPause blePause;          // flag clears at scope end so auto-restore can re-arm
+    if (!blePause.didPause()) break;  // nothing was freed; a second pass would fail identically
+    // Without the defer, restore's ~5s retry re-enables into the same tight heap.
+    btMgr.deferAutoRestore(BT_GUARD_RESTORE_DEFER_MS);
+  }
   const uint32_t heapAfter = esp_get_free_heap_size();
   fcm->logStats("prewarm");
   const auto tPrewarm = millis();

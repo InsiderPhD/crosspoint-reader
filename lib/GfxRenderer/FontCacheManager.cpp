@@ -19,6 +19,17 @@ void FontCacheManager::clearCache() {
   }
 }
 
+void FontCacheManager::clearPageCache() {
+  if (fontDecompressor_) fontDecompressor_->clearPageCache();
+  for (auto& [id, font] : sdCardFonts_) {
+    font->clearCache();
+  }
+}
+
+bool FontCacheManager::glyphAllocFailed() const {
+  return fontDecompressor_ && fontDecompressor_->getStats().allocFailures > 0;
+}
+
 void FontCacheManager::clearCachesDeep() {
   clearCache();
   for (auto& [id, font] : sdCardFonts_) {
@@ -86,7 +97,7 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
 
 FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manager_(&manager) {
   manager_->scanMode_ = ScanMode::Scanning;
-  manager_->clearCache();
+  manager_->clearPageCache();
   manager_->resetStats();
   manager_->scanEntries_.clear();
 }
@@ -113,7 +124,7 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
 FontCacheManager::PrewarmScope::~PrewarmScope() {
   if (active_) {
     endScanAndPrewarm();  // no-op if already called (scanEntries_ is empty)
-    manager_->clearCache();
+    manager_->clearPageCache();
   }
 }
 

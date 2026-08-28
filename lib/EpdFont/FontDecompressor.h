@@ -19,8 +19,15 @@ class FontDecompressor {
   // Checks the page buffer (from prewarm) first, then falls back to the hot group slot.
   const uint8_t* getBitmap(const EpdFontData* fontData, const EpdGlyph* glyph, uint32_t glyphIndex);
 
-  // Free all cached data (page buffer + hot group).
+  // Free all cached data (page buffers + group scratch). For heap-critical work
+  // (section builds, TLS sessions) that needs every byte back.
   void clearCache();
+
+  // Free only the per-page glyph buffers, keeping the decompression scratch
+  // allocated. Re-malloc'ing that ~3KB block on every page turn is what fails
+  // once the BLE stack is resident and free heap sits near 10KB, so it is held
+  // for the reading session and released only by clearCache().
+  void clearPageCache();
 
   // Pre-scan UTF-8 text and extract needed glyph bitmaps into a flat page buffer.
   // Each group is decompressed once into a temp buffer; only needed glyphs are kept.
@@ -38,6 +45,7 @@ class FontDecompressor {
     uint32_t peakTempBytes = 0;    // largest temp buffer in prewarm
     uint32_t getBitmapTimeUs = 0;  // cumulative getBitmap time (micros)
     uint32_t getBitmapCalls = 0;   // number of getBitmap calls
+    uint16_t allocFailures = 0;    // glyph buffers this page could not allocate (missing glyphs)
   };
   // Per-page font-cache profiling. Ten lines of serial per page turn drowns
   // everything else out, so the output is compiled in only under
@@ -67,8 +75,10 @@ class FontDecompressor {
   PageSlot pageSlots[MAX_PAGE_SLOTS] = {};
   uint8_t pageSlotCount = 0;
 
-  // Hot group: last decompressed group (byte-aligned) for non-prewarmed fallback path.
-  // Kept in byte-aligned format; individual glyphs are compacted on demand into hotGlyphBuf.
+  // Group scratch / hot group: one grow-only buffer, shared by prewarmCache()'s
+  // per-group decompression and getBitmap()'s non-prewarmed fallback path. It
+  // holds the last decompressed group (byte-aligned) so the fallback can hit it
+  // without re-inflating; individual glyphs are compacted on demand into hotGlyphBuf.
   // malloc'd, NOT std::vector: resize() failure throws bad_alloc, which is an
   // instant abort() under -fno-exceptions — and this path runs exactly when the
   // heap is at its tightest (a glyph the prewarm couldn't fit). Allocation
@@ -91,6 +101,8 @@ class FontDecompressor {
 
   void freePageBuffer();
   void freeHotGroup();
+  // Grow-only accessor for the shared group scratch. Returns nullptr on OOM.
+  uint8_t* acquireGroupScratch(uint32_t size);
   uint16_t getGroupIndex(const EpdFontData* fontData, uint32_t glyphIndex);
   uint32_t getAlignedOffset(const EpdFontData* fontData, uint16_t groupIndex, uint32_t glyphIndex);
   bool decompressGroup(const EpdFontData* fontData, uint16_t groupIndex, uint8_t* outBuf, uint32_t outSize);

@@ -16,6 +16,14 @@ class FontCacheManager {
   void setFontDecompressor(FontDecompressor* d);
 
   void clearCache();
+  // Frees the per-page glyph buffers but keeps the ~3KB group-decompression
+  // scratch allocated. Used between page renders; clearCache() is for the
+  // heap-critical paths that need every byte back.
+  void clearPageCache();
+  // True if this page's prewarm/render could not allocate a glyph buffer — i.e.
+  // characters are missing from what was just laid out. The caller decides what
+  // heap to give back (on a tight-heap board, the BLE stack) and render again.
+  bool glyphAllocFailed() const;
   // clearCache() plus each SD font's persistent advance cache — those survive
   // a normal clear by design (they amortize SD reads across passes) but can
   // hold 10KB+ after a reading session. Use before heap-critical work
