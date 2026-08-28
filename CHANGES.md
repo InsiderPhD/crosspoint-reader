@@ -6,6 +6,31 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ## Unreleased
 
+### A session can hand the 48KB framebuffer back to the heap
+
+E-ink is bistable: once a screen has been refreshed the panel holds that image with no buffer behind it. For a session that paints its final screen and then stops drawing, the framebuffer is 48KB of pure dead weight — on this board the difference between roughly 20KB and 68KB free.
+
+`GfxRenderer::releaseFrameBuffer()` gives it back and `isRenderable()` says whether drawing is still legal. The release is deliberately **one-way**: there is no realloc wrapper, because reallocating relocates the 48KB and progressively fragments a heap with no PSRAM behind it. Callers must therefore be sessions that restart on exit.
+
+The web server is the first (and so far only) caller. Without those 48KB it starts near 20KB free, and a few page-load fetches take it low enough that lwIP cannot get pbufs and a single TCP write inside a response stalls for tens of seconds — long enough to trip the loop watchdog mid-response. `CrossPointWebServerActivity` already reboots on the way out, which is what makes a one-way release acceptable.
+
+Everything that can draw from the main loop is gated: the render task drops requests centrally in `ActivityManager` (so the waiter notification still fires and `requestUpdateAndWait()` cannot deadlock), and the two POWER chords plus the serial `SCREENSHOT` command carry their own checks because they write straight to the buffer.
+
+**Files changed**: `lib/GfxRenderer/GfxRenderer.*`, `lib/hal/HalDisplay.*`, `src/activities/ActivityManager.cpp`, `src/main.cpp`, `src/activities/network/CrossPointWebServerActivity.cpp`.
+
+### Pages no longer lose words with a Bluetooth remote connected
+
+With the BLE stack resident, free heap sits near 10KB and the font cache's per-page ~3KB group-decompression buffer stops fitting. The glyphs in the group that missed then paint as blanks — whole words vanishing from an otherwise normal page, only with a page-turner connected.
+
+Two changes, both aimed at that one allocation:
+
+- **The group scratch is now persistent and shared.** `prewarmCache()` used to `malloc`/`free` a temp buffer per group; it now takes the largest group's worth once, up front — largest block first, before the page buffers carve up the heap — and reuses the same grow-only block `getBitmap()`'s fallback path already keeps. `clearPageCache()` releases the per-page glyph buffers between pages but deliberately holds the scratch, because handing back the biggest contiguous block only to ask for it again is exactly what fails here. `clearCache()` still frees everything for the heap-critical paths (section builds, TLS).
+- **The page retries once when it still doesn't fit.** `allocFailures` in the cache stats is ground truth — the prewarm has just reported that this page *will* paint incomplete — so the reader pauses the BLE stack (~50KB), defers its auto-restore so the ~5s retry can't re-enter the same tight heap, and lays the page out again. One retry only; a second failure means the heap is short for another reason and looping would just stall the page turn.
+
+Also fixes a latent out-of-bounds read: `getGroupIndex()` returns a sentinel for glyphs no group owns, which the prewarm then used to index `fontData->groups`.
+
+**Files changed**: `lib/EpdFont/FontDecompressor.*`, `lib/GfxRenderer/FontCacheManager.*`, `lib/hal/BluetoothHIDManager.h`, `src/activities/reader/EpubReaderActivity.cpp`.
+
 ### Reader Controls: Sleep and Mark Finished retired
 
 Two bindable reader actions are gone from **Settings → Reader Controls**. **Sleep** (8) was redundant — a long press of **Power** is hard-wired to sleep on every board, so binding a second control to it only cost a slot. **Mark Finished** (14) survives as **Mark as Read** in the Book Options popup, which is where the rest of the per-book actions already live.
