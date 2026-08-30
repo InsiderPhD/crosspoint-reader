@@ -12,6 +12,13 @@ bool isClockValid();
 bool isClockValid(uint32_t epochSeconds);
 uint32_t getAuthoritativeTimestamp();
 uint32_t getCurrentValidTimestamp();
+// Best date the device has, without going back to the network: the live system
+// clock when it is valid, otherwise the timestamp the last successful NTP or
+// manual date-set persisted (APP_STATE.lastKnownValidTimestamp). Returns 0 only
+// when this device has never known the date at all. Use this for "which day is
+// it" decisions that must not drag the user through another sync; use
+// getAuthoritativeTimestamp() when only a this-boot-verified clock will do.
+uint32_t getBestKnownTimestamp();
 bool setCurrentDate(int year, unsigned month, unsigned day, uint32_t* epochSeconds = nullptr);
 uint32_t getLocalDayOrdinal(uint32_t epochSeconds);
 uint32_t getDayOrdinalForDate(int year, unsigned month, unsigned day);

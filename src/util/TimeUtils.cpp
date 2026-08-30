@@ -9,6 +9,7 @@
 #include <ctime>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "TimeZoneRegistry.h"
 
 namespace {
@@ -121,6 +122,19 @@ uint32_t TimeUtils::getAuthoritativeTimestamp() {
 uint32_t TimeUtils::getCurrentValidTimestamp() {
   const uint32_t now = static_cast<uint32_t>(time(nullptr));
   return isClockValid(now) ? now : 0;
+}
+
+uint32_t TimeUtils::getBestKnownTimestamp() {
+  const uint32_t now = static_cast<uint32_t>(time(nullptr));
+  if (isClockValid(now)) {
+    return now;
+  }
+  // The boot-time silent NTP attempt (WifiTimeSync::startSilentBootAttempt) is
+  // where the date normally comes from, and it persists what it found. When the
+  // live clock is unset — no radio at boot, or the attempt is still in flight —
+  // that persisted value is the date the device already established, so callers
+  // don't need to make the user sync again to learn the day.
+  return isClockValid(APP_STATE.lastKnownValidTimestamp) ? APP_STATE.lastKnownValidTimestamp : 0;
 }
 
 bool TimeUtils::setCurrentDate(const int year, const unsigned month, const unsigned day, uint32_t* epochSeconds) {

@@ -20,7 +20,7 @@
 #include <ZipFile.h>
 #include <esp_heap_caps.h>
 
-#include <ctime>
+#include <cstdint>
 
 #include "../../src/util/TimeUtils.h"
 
@@ -192,21 +192,25 @@ std::unique_ptr<ContentDecryptor> openProtectedBook(const std::string& epubPath,
   // this read path; let the reader open it normally.
   if (!book->isProtected()) return nullptr;
 
-  // Loan enforcement against the system clock, which the boot-time NTP sync
-  // sets. Validity is TimeUtils::isClockValid() — the firmware's single notion
-  // of "we have a real time", the same one that puts the "?" on the status-bar
-  // clock when the sync failed. The device has no battery-backed RTC, so an
-  // unsynced cold boot sits near epoch 0, which reads as *before* any due date;
-  // that must fail closed rather than quietly open an expired loan. The reader
-  // then offers a Wi-Fi sync to resolve it.
+  // Loan enforcement against the date the device already has: the live system
+  // clock when it is valid, else the timestamp the boot-time NTP sync persisted
+  // (TimeUtils::getBestKnownTimestamp). Opening a book is not a reason to send
+  // the user through a second date check — boot already asked the network what
+  // day it is, and the answer is kept across boots in state.json.
+  // The device has no battery-backed RTC, so a device that has *never* had a
+  // date sits near epoch 0, which reads as *before* any due date; that one case
+  // still fails closed rather than quietly opening an expired loan, and the
+  // reader offers a Wi-Fi sync to resolve it. Note the fallback is a lower
+  // bound on the real time, so a loan that expired since the last successful
+  // sync opens until the device next learns the date.
   // Exact err strings below are matched by the reader for the user message.
   if (book->expiresAt() != 0) {
-    if (!TimeUtils::isClockValid()) {
+    const uint32_t now = TimeUtils::getBestKnownTimestamp();
+    if (now == 0) {
       err = "loan date unverified";
       return nullptr;
     }
-    const int64_t now = static_cast<int64_t>(time(nullptr));
-    if (book->isExpired(now)) {
+    if (book->isExpired(static_cast<int64_t>(now))) {
       err = "access expired";
       return nullptr;
     }
