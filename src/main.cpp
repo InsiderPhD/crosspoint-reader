@@ -194,6 +194,23 @@ void silentRestartToReader() {
   ESP.restart();
 }
 
+// Set when a restart is taken specifically to win back the BLE controller's
+// >=30KB contiguous block. RTC_NOINIT survives ESP.restart() but not power loss,
+// which is exactly the lifetime wanted: the intent should not outlive the battery
+// being pulled. Consumed once in setup().
+RTC_NOINIT_ATTR uint32_t bleRestartMagic;
+constexpr uint32_t BLE_RESTART_MAGIC = 0xB1E0B007;
+// Plain static, not RTC: the guard only has to last the boot it was set on.
+static bool bleRestartUsedThisBoot = false;
+
+bool bluetoothRestartAvailable() { return !bleRestartUsedThisBoot; }
+
+void silentRestartToReaderForBluetooth() {
+  bleRestartMagic = BLE_RESTART_MAGIC;
+  LOG_INF("MAIN", "Silent restart to reclaim a contiguous block for Bluetooth");
+  silentRestartToReader();  // sets the reader target, then restarts
+}
+
 // Verify power button press duration on wake-up from deep sleep
 // Pre-condition: isWakeupByPowerButton() == true
 void verifyPowerButtonDuration() {
@@ -439,6 +456,11 @@ void setup() {
   // Read-and-clear so a panic later in setup() doesn't loop into silent reboot.
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
+  // Consume the BLE-recovery flag in the same breath, so a later crash-reboot
+  // can never re-trigger the auto-enable.
+  const bool isBleRecoveryReboot = (bleRestartMagic == BLE_RESTART_MAGIC);
+  bleRestartMagic = 0;
+  bleRestartUsedThisBoot = isBleRecoveryReboot;
   const uint32_t snapshotTarget =
       (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_READER) ? silentRebootTarget : 0;
   silentRebootMagic = 0;
@@ -623,6 +645,16 @@ void setup() {
 
   READING_STATS.loadFromFile();
   BF_TOKEN_STORE.loadFromFile();
+
+  if (isBleRecoveryReboot) {
+    // The restart was taken because enable() was refused on a fragmented heap.
+    // Re-arm the intent rather than enabling here: maybeAutoRestoreBluetooth()
+    // only fires once a chapter is resident, which is the state that guarantees
+    // the controller's contiguous block exists. Enabling straight from setup()
+    // would skip that guarantee.
+    LOG_INF("MAIN", "Rebooted for Bluetooth; re-arming auto-restore");
+    BluetoothHIDManager::getInstance().setBluetoothWanted(true);
+  }
 
   // Silent NTP attempt against the last-connected WiFi network, on a background
   // task — non-blocking. Up to 3 SNTP retries, ~10s worst case, no UI shown.

@@ -52,6 +52,7 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "WifiCredentialStore.h"
+#include "SilentRestart.h"
 #include "activities/home/ReadingStatsDetailActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/FontLayoutPreviewActivity.h"
@@ -867,10 +868,19 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
     if (auto* fcm = renderer.getFontCacheManager()) {
       fcm->clearCache();
     }
+    bool restartForBluetooth = false;
     if (!btMgr.enable()) {
+      // HeapFragmented is recoverable and nothing else here can recover it: the
+      // controller needs one >=30KB contiguous block, and a BLE session that has
+      // been torn down leaves small allocations scattered through the working
+      // region that cap the largest block well below that (measured on-device:
+      // ~17KB largest with ~82KB free). Freeing more does not help — only a
+      // restart rebuilds the heap. The firmware already told the user to restart
+      // by hand for exactly this; take it for them, once per boot.
+      restartForBluetooth = btMgr.lastStatus == BtStatus::HeapFragmented && bluetoothRestartAvailable();
       RenderLock lock(*this);
       if (SETTINGS.darkMode) renderer.invertScreen();
-      GUI.drawPopup(renderer, tr(STR_BT_ENABLE_FAILED));
+      GUI.drawPopup(renderer, restartForBluetooth ? tr(STR_BT_RESTARTING_FOR_MEMORY) : tr(STR_BT_ENABLE_FAILED));
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
       vTaskDelay(1500 / portTICK_PERIOD_MS);
@@ -878,6 +888,15 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
     // The Epub comes back whether or not enable() succeeded — the reader
     // can't render without it.
     if (!epubPath.empty() && !reloadEpubAfterBluetooth(epubPath)) {
+      return;
+    }
+    if (restartForBluetooth) {
+      // Persist the page first: the restart lands back here via
+      // silentRestartToReader() + APP_STATE.openEpubPath, and the position is
+      // restored from progress.bin. epub is alive again by now, which
+      // saveProgress() requires for the cache path.
+      saveProgress(currentSpineIndex, nextPageNumber, cachedChapterTotalPageCount);
+      silentRestartToReaderForBluetooth();  // does not return
       return;
     }
   } else {
