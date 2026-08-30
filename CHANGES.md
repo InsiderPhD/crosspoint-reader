@@ -6,6 +6,57 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ## Unreleased
 
+### A line of text is one heap allocation, not five vectors
+
+A resident page holds roughly 25-30 laid-out lines, and each one used to carry five parallel containers — `std::vector<std::string>` words plus per-word x-positions, styles and the two bionic arrays. That is on the order of **250 small heap blocks per page load**, and it was the single largest driver of fragmentation on the C3. Fragmentation is the failure that matters here: free bytes can look healthy while the section builder still cannot find the 32KB contiguous window miniz needs, which is exactly the state a resident BLE stack puts the heap in.
+
+`TextBlock` now takes **one** allocation — an offset table plus a NUL-terminated text blob, with typed views bound over it. Words come back as `const char*` and go straight to `drawText` with no `std::string` materialised on the way. The two bionic arrays are omitted from the arena entirely when no word on the line has a split, so bionic reading costs zero per-word RAM when it is off. The arena is taken with `makeUniqueNoThrow`, so an OOM produces an invalid block the caller drops rather than an `abort()` under `-fno-exceptions`.
+
+Two smaller changes ride along on the same path:
+
+- **Page elements move from `shared_ptr` to `unique_ptr`.** A block is produced by the layout and handed to exactly one `PageLine`; the atomic refcount and per-object control block bought nothing on a single-core RISC-V part.
+- **`ParsedText`'s word list becomes a `std::deque`.** A CJK paragraph splits every character, and a vector of a few thousand `std::string`s reallocates its whole element array into one 64-128KB contiguous block — precisely the request that fails on a fragmented heap. A deque grows in ~512B nodes, so the largest request stays ~2KB regardless of token count.
+
+Separately, `Epub::load()` now **releases the resolved CSS rule map** once loading finishes. It is only needed while section caches are being built, and `Section::createSectionFile()` reloads it on demand; holding it pinned tens of KB for a whole reading session, worst on a warm resume into an already-cached chapter where the builder never runs and so never cleared it.
+
+Section cache format **v41**. Ported from upstream crosspoint #2547 and #2814.
+
+**Files changed**: `lib/Epub/Epub/blocks/TextBlock.*`, `lib/Epub/Epub/{Page,ParsedText,Section}.*`, `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.*`, `lib/Epub/Epub.cpp`, `src/activities/reader/EpubReaderActivity.cpp`.
+
+### Bluetooth takes the restart it needs
+
+The BLE controller wants one contiguous block of at least 30KB. Once a session has been torn down, small allocations left scattered through the working region cap the largest block far below that — measured on-device at ~17KB largest with ~82KB *free*. Nothing the firmware can free fixes that; only a fresh heap does. The reader used to put up "Not enough RAM for Bluetooth" and leave the user to work out that a manual restart was the remedy.
+
+On a `HeapFragmented` refusal the reader now saves progress and **restarts itself, once per boot**. The intent rides in `RTC_NOINIT` memory — it survives `ESP.restart()` but not a power cut, which is the right lifetime — and `setup()` consumes it in the same breath as the silent-reboot flag, so a later panic cannot re-trigger the auto-enable. The boot does not enable BLE directly: it re-arms "Bluetooth wanted" and lets `maybeAutoRestoreBluetooth()` fire once a chapter is resident, which is the state that guarantees the contiguous block exists.
+
+**Files changed**: `src/SilentRestart.h`, `src/main.cpp`, `src/activities/reader/EpubReaderActivity.cpp`, `lib/I18n/translations/english.yaml`.
+
+### A heap attribution ladder
+
+`HeapReport::logBrief()` is a one-line probe — free, largest block, live block count — cheap enough to sit at lifecycle transitions rather than only behind the POWER chord's full region map. Tagged readings at `boot.done`, `reader.enter`, `reader.entered` and `reader.section` turn a single serial capture into a delta per subsystem.
+
+`capture()` also reports **allocated and free block counts** now. That is the number that moves when an allocation's *shape* changes: collapsing several per-object vectors into one arena can leave free bytes identical while halving the live block count, and so the fragmentation pressure. Reading it on the same page of the same book before and after a change is the most direct evidence available on-device.
+
+**Files changed**: `src/util/HeapReport.*`, `src/main.cpp`, `src/activities/reader/EpubReaderActivity.cpp`.
+
+### Pre-release firmware channel (Dev tab)
+
+*Settings -> Check for updates* reads GitHub's `/releases/latest`, which is defined to skip prereleases — that is how stable devices are kept off beta and X4 Pro builds, and it stays the default. The new **Enable Pre-Releases** toggle switches the check to the release **list** and offers the newest entry carrying this build's asset, so a C3 falls through an x4pro-only beta rather than being handed an image it cannot boot.
+
+The toggle sits on the **Dev** tab and is read gated on `devMode` as well as its own value, so leaving Dev Mode cannot strand a device on the beta channel with no visible switch. (Value settings tagged Dev now render on that tab at all, which they previously did not.)
+
+`ReleaseJsonParser` gained a `releaseList` mode for the array shape: it walks the array in GitHub's order (newest `created_at` first), discards the partial state of any release without a matching asset, and locks in the first that has one. An empty or asset-less list reports `NO_UPDATE` rather than a parse error, because that is a normal outcome for this channel and not a malformed payload. Note `isUpdateNewer()` is unchanged and still correct semver, so `1.7.9-rc1` is **not** newer than `v1.7.9`.
+
+**Files changed**: `lib/JsonParser/ReleaseJsonParser.*`, `src/network/OtaUpdater.cpp`, `src/{CrossPointSettings,SettingsList}.h`, `src/activities/settings/SettingsActivity.cpp`, `test/release_json_parser/ReleaseJsonParserTest.cpp`, `lib/I18n/translations/english.yaml`.
+
+### Libby: covers, a nameable renewal failure, and a date that persists
+
+- **Loans get their artwork.** Library books are Adobe-encrypted, so the cover inside the EPUB is not dependably readable and loans sat in the library as blank tiles. A loan's `id` *is* the OverDrive title id, so the largest published cover is fetched on demand from OverDrive's public catalogue — no chip, no card, no `Authorization` header — rather than every loan in the list carrying a ~128 byte URL for the one title about to be sent. Best-effort: a failure logs and the send still succeeds.
+- **"Already fulfilled by another user" is its own error.** ADEPT's `E_LIC_ALREADY_FULFILLED_BY_ANOTHER_USER` is the one refusal the user can act on, and retrying will never clear it, so it no longer reads as a generic server error. The renewal path also reports the two-part outcome — renewed on Libby, but the copy on the card kept its old date.
+- **A loan opens against the date the device already knows.** Enforcement used `isClockValid()`, so a boot whose NTP sync did not land refused to open a protected book even though the device had learned the date on an earlier boot and persisted it. `TimeUtils::getBestKnownTimestamp()` returns the live clock when valid and the last persisted sync otherwise, and reports 0 only for a device that has *never* known the date — which still fails closed, because an unsynced cold boot sits near epoch 0 and would read as before any due date. The fallback is a lower bound on real time, so a loan that expired since the last sync opens until the device next learns the date.
+
+**Files changed**: `lib/Libby/{LibbyClient,AdeptClient}.*`, `src/activities/settings/LibbyBrowserActivity.*`, `lib/Epub/ContentProtection.cpp`, `src/util/TimeUtils.*`, `lib/I18n/translations/english.yaml`.
+
 ### Protected library loans (Libby)
 
 Adds a **decrypt-on-read** path for protected EPUBs, and a **Libby** row in **File Transfer** that uses it. Books stay encrypted at rest: entries are decoded in memory, streamed in chunks, and never written back to the card.
