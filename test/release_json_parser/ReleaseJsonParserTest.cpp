@@ -858,6 +858,204 @@ void testX4ProIgnoresC3OnlyRelease() {
 }
 
 // ============================================================================
+// Release LIST mode (pre-release channel: GET /releases)
+// ============================================================================
+
+// Newest first, exactly as GitHub orders /releases. Entry 0 is a prerelease.
+static const char* kReleaseList = R"([
+  {
+    "html_url": "https://github.com/o/r/releases/tag/1.8.0-rc1",
+    "id": 3,
+    "author": {"login": "releasebot", "id": 1},
+    "tag_name": "1.8.0-rc1",
+    "draft": false,
+    "prerelease": true,
+    "body": "Release candidate.\n- fixes",
+    "assets": [
+      {"name": "firmware.bin",
+       "browser_download_url": "https://example.test/download/1.8.0-rc1/firmware.bin",
+       "size": 1600000},
+      {"name": "x4pro_firmware.bin",
+       "browser_download_url": "https://example.test/download/1.8.0-rc1/x4pro_firmware.bin",
+       "size": 1700000}
+    ]
+  },
+  {
+    "tag_name": "1.7.9",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {"name": "firmware.bin",
+       "browser_download_url": "https://example.test/download/1.7.9/firmware.bin",
+       "size": 1500000}
+    ]
+  }
+])";
+
+static void testListModeTakesNewestRelease() {
+  printf("Test: list mode takes the newest release\n");
+
+  ReleaseJsonParser p("firmware.bin", /*releaseList=*/true);
+  p.feed(kReleaseList, strlen(kReleaseList));
+
+  ASSERT_TRUE(p.foundTag());
+  ASSERT_TRUE(p.foundFirmware());
+  ASSERT_STREQ(p.getTagName(), "1.8.0-rc1");
+  ASSERT_STREQ(p.getFirmwareUrl(), "https://example.test/download/1.8.0-rc1/firmware.bin");
+  ASSERT_EQ(p.getFirmwareSize(), (size_t)1600000);
+
+  printf("  passed\n");
+  PASS();
+}
+
+static void testListModePicksX4ProAsset() {
+  printf("Test: list mode picks the X4 Pro asset\n");
+
+  ReleaseJsonParser p("x4pro_firmware.bin", /*releaseList=*/true);
+  p.feed(kReleaseList, strlen(kReleaseList));
+
+  ASSERT_STREQ(p.getTagName(), "1.8.0-rc1");
+  ASSERT_STREQ(p.getFirmwareUrl(), "https://example.test/download/1.8.0-rc1/x4pro_firmware.bin");
+  ASSERT_EQ(p.getFirmwareSize(), (size_t)1700000);
+
+  printf("  passed\n");
+  PASS();
+}
+
+// A C3 build looking at a list whose newest entry is an X4 Pro-only prerelease
+// must fall through to the next release rather than report "no update".
+static void testListModeSkipsReleaseWithoutOurAsset() {
+  printf("Test: list mode falls through a release with no matching asset\n");
+
+  static const char* kJson = R"([
+    {"tag_name": "1.8.0-x4pro-beta",
+     "prerelease": true,
+     "assets": [
+       {"name": "x4pro_firmware.bin",
+        "browser_download_url": "https://example.test/download/1.8.0/x4pro_firmware.bin",
+        "size": 1700000}
+     ]},
+    {"tag_name": "1.7.9",
+     "prerelease": false,
+     "assets": [
+       {"name": "firmware.bin",
+        "browser_download_url": "https://example.test/download/1.7.9/firmware.bin",
+        "size": 1500000}
+     ]}
+  ])";
+
+  ReleaseJsonParser p("firmware.bin", /*releaseList=*/true);
+  p.feed(kJson, strlen(kJson));
+
+  ASSERT_TRUE(p.foundFirmware());
+  ASSERT_STREQ(p.getTagName(), "1.7.9");
+  ASSERT_STREQ(p.getFirmwareUrl(), "https://example.test/download/1.7.9/firmware.bin");
+  ASSERT_EQ(p.getFirmwareSize(), (size_t)1500000);
+
+  printf("  passed\n");
+  PASS();
+}
+
+static void testListModeEmptyArray() {
+  printf("Test: list mode with an empty array\n");
+
+  static const char* kJson = "[]";
+  ReleaseJsonParser p("firmware.bin", /*releaseList=*/true);
+  p.feed(kJson, strlen(kJson));
+
+  ASSERT_TRUE(!p.foundTag());
+  ASSERT_TRUE(!p.foundFirmware());
+
+  printf("  passed\n");
+  PASS();
+}
+
+static void testListModeNoMatchingAssetAnywhere() {
+  printf("Test: list mode with no matching asset in any release\n");
+
+  static const char* kJson = R"([
+    {"tag_name": "1.8.0", "assets": [{"name": "notes.txt",
+      "browser_download_url": "https://example.test/notes.txt", "size": 12}]},
+    {"tag_name": "1.7.9", "assets": []}
+  ])";
+
+  ReleaseJsonParser p("firmware.bin", /*releaseList=*/true);
+  p.feed(kJson, strlen(kJson));
+
+  ASSERT_TRUE(!p.foundTag());
+  ASSERT_TRUE(!p.foundFirmware());
+
+  printf("  passed\n");
+  PASS();
+}
+
+// Nested objects/arrays inside a release (author, reactions, mentions) must not
+// disturb the depth bookkeeping that identifies a release's own keys.
+static void testListModeNestedStructuresInsideRelease() {
+  printf("Test: list mode tolerates nested objects/arrays in a release\n");
+
+  static const char* kJson = R"([
+    {"author": {"login": "bot", "nested": {"deep": [1, 2, {"x": "y"}]}},
+     "mentions": ["a", "b"],
+     "reactions": {"+1": 3, "url": "https://example.test/r"},
+     "tag_name": "1.8.0-rc1",
+     "assets": [
+       {"name": "firmware.bin",
+        "uploader": {"login": "bot", "id": 7},
+        "browser_download_url": "https://example.test/download/1.8.0-rc1/firmware.bin",
+        "size": 1600000}
+     ]},
+    {"tag_name": "1.7.9", "assets": []}
+  ])";
+
+  ReleaseJsonParser p("firmware.bin", /*releaseList=*/true);
+  p.feed(kJson, strlen(kJson));
+
+  ASSERT_STREQ(p.getTagName(), "1.8.0-rc1");
+  ASSERT_STREQ(p.getFirmwareUrl(), "https://example.test/download/1.8.0-rc1/firmware.bin");
+
+  printf("  passed\n");
+  PASS();
+}
+
+// The list arrives in TLS-sized chunks, so every byte boundary must be safe.
+static void testListModeChunkedEveryBoundary() {
+  printf("Test: list mode chunked at every byte boundary\n");
+
+  const size_t len = strlen(kReleaseList);
+  for (size_t split = 1; split < len; split++) {
+    ReleaseJsonParser p("firmware.bin", /*releaseList=*/true);
+    p.feed(kReleaseList, split);
+    p.feed(kReleaseList + split, len - split);
+
+    if (!p.foundTag() || !p.foundFirmware() || strcmp(p.getTagName(), "1.8.0-rc1") != 0 ||
+        strcmp(p.getFirmwareUrl(), "https://example.test/download/1.8.0-rc1/firmware.bin") != 0) {
+      fprintf(stderr, "  FAIL: split at %zu produced tag=\"%s\" url=\"%s\"\n", split, p.getTagName(),
+              p.getFirmwareUrl());
+      testsFailed++;
+      return;
+    }
+  }
+
+  printf("  passed\n");
+  PASS();
+}
+
+// List mode is opt-in: the default constructor must still parse a single
+// /releases/latest object, and list mode must not be confused by it.
+static void testListModeIsOptIn() {
+  printf("Test: single-object payload still parses in default mode\n");
+
+  ReleaseJsonParser p("firmware.bin");
+  p.feed(kRealisticMinified, strlen(kRealisticMinified));
+  ASSERT_TRUE(p.foundTag());
+  ASSERT_TRUE(p.foundFirmware());
+
+  printf("  passed\n");
+  PASS();
+}
+
+// ============================================================================
 
 int main() {
   printf("=== ReleaseJsonParser Tests ===\n\n");
@@ -896,6 +1094,14 @@ int main() {
   testSelectsC3AssetByDefault();
   testSelectsX4ProAssetWhenRequested();
   testX4ProIgnoresC3OnlyRelease();
+  testListModeTakesNewestRelease();
+  testListModePicksX4ProAsset();
+  testListModeSkipsReleaseWithoutOurAsset();
+  testListModeEmptyArray();
+  testListModeNoMatchingAssetAnywhere();
+  testListModeNestedStructuresInsideRelease();
+  testListModeChunkedEveryBoundary();
+  testListModeIsOptIn();
 
   printf("\n=== Results: %d passed, %d failed ===\n", testsPassed, testsFailed);
   return testsFailed > 0 ? 1 : 0;

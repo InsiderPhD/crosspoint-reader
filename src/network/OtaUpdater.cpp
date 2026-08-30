@@ -6,11 +6,21 @@
 #include <SecureHttpClient.h>
 #include <esp_wifi.h>
 
+#include "CrossPointSettings.h"
 #include "FirmwareFlasher.h"
 #include "HttpDownloader.h"
 
 namespace {
 constexpr char latestReleaseUrl[] = "https://api.github.com/repos/InsiderPhD/crosspoint-reader/releases/latest";
+
+// Pre-release channel (Dev Mode -> "Enable Pre-Releases"). /releases/latest
+// deliberately skips prereleases -- that is exactly how stable devices are kept
+// off beta/rc/x4pro builds -- so the opt-in channel reads the release LIST and
+// takes the newest entry carrying this build's asset. per_page bounds the
+// response: the body streams through the parser and is never buffered, but each
+// release carries its full release notes, so ask for a window rather than the
+// default 30.
+constexpr char releaseListUrl[] = "https://api.github.com/repos/InsiderPhD/crosspoint-reader/releases?per_page=10";
 
 // SD staging slot for the downloaded image, shared by downloadUpdate() and
 // flashUpdate(). Reuses the SD recovery temp path; kept on SD root so a
@@ -32,9 +42,15 @@ constexpr char kFirmwareAssetName[] = "firmware.bin";
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
-  ReleaseJsonParser releaseParser(kFirmwareAssetName);
+  // Gated on devMode as well as the toggle itself: the toggle only exists on the
+  // Dev tab, so leaving Dev Mode must not strand a device on the beta channel
+  // with no visible switch. Turning Dev Mode back on restores the choice.
+  const bool preReleases = SETTINGS.devMode != 0 && SETTINGS.allowPreReleases != 0;
+  const char* releaseUrl = preReleases ? releaseListUrl : latestReleaseUrl;
+  ReleaseJsonParser releaseParser(kFirmwareAssetName, /*releaseList=*/preReleases);
 
-  LOG_DBG("OTA", "Checking for update (current: %s)", CROSSPOINT_VERSION);
+  LOG_DBG("OTA", "Checking for update (current: %s, channel: %s)", CROSSPOINT_VERSION,
+          preReleases ? "pre-release" : "stable");
 
   // Transport is freeink::SecureHttpClient (wolfSSL), the last esp-tls call
   // site to migrate. setInsecure() is not a downgrade: the previous esp-tls
@@ -49,7 +65,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   http.setTimeout(15000);
   // GitHub's API rejects UA-less requests.
   http.setUserAgent("CrossPoint-ESP32-" CROSSPOINT_VERSION);
-  if (!http.begin(latestReleaseUrl)) {
+  if (!http.begin(releaseUrl)) {
     LOG_ERR("OTA", "Bad release URL");
     return INTERNAL_UPDATE_ERROR;
   }
@@ -77,6 +93,13 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
           releaseParser.foundFirmware() ? "yes" : "no");
 
   if (!releaseParser.foundTag()) {
+    // An empty (or asset-less) release list is a normal outcome for the
+    // pre-release channel, not a malformed payload -- report it as such so the
+    // UI says "no update" instead of "update failed".
+    if (preReleases) {
+      LOG_DBG("OTA", "No release with a %s asset in the pre-release list", kFirmwareAssetName);
+      return NO_UPDATE;
+    }
     LOG_ERR("OTA", "No tag_name in release JSON");
     return JSON_PARSE_ERROR;
   }

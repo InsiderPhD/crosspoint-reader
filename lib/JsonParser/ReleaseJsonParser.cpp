@@ -13,15 +13,18 @@ void safeCopy(char* dst, size_t dstSize, const char* src, size_t srcLen) {
 
 }  // namespace
 
-ReleaseJsonParser::ReleaseJsonParser(const char* assetName)
+ReleaseJsonParser::ReleaseJsonParser(const char* assetName, bool releaseList)
     : parser(JsonCallbacks{this, sOnKey, sOnString, sOnNumber, sOnBool, sOnNull, sOnObjectStart, sOnObjectEnd,
                            sOnArrayStart, sOnArrayEnd}),
-      wantedAssetName(assetName) {
+      wantedAssetName(assetName),
+      listMode(releaseList) {
   reset();
 }
 
 void ReleaseJsonParser::reset() {
   parser.reset();
+  inRootArray = false;
+  locked = false;
   position = Position::TOP_LEVEL;
   lastKey = LastKey::NONE;
   depth = 0;
@@ -55,10 +58,26 @@ void ReleaseJsonParser::commitAsset() {
   currentAssetSize = 0;
 }
 
+void ReleaseJsonParser::finishRelease() {
+  if (firmwareFound && tagFound) {
+    // Newest release carrying our asset wins; ignore every older entry.
+    locked = true;
+    return;
+  }
+  // No usable asset in this release (e.g. an X4 Pro-only prerelease seen from a
+  // C3 build): drop its tag and fall through to the next, older, release.
+  tagName[0] = '\0';
+  firmwareUrl[0] = '\0';
+  firmwareSize = 0;
+  tagFound = false;
+  firmwareFound = false;
+}
+
 // -- SAX callbacks (static trampolines) -------------------------------------
 
 void ReleaseJsonParser::sOnKey(void* ctx, const char* key, size_t len) {
   auto* self = static_cast<ReleaseJsonParser*>(ctx);
+  if (self->locked) return;
 
   switch (self->position) {
     case Position::TOP_LEVEL:
@@ -90,6 +109,7 @@ void ReleaseJsonParser::sOnKey(void* ctx, const char* key, size_t len) {
 
 void ReleaseJsonParser::sOnString(void* ctx, const char* value, size_t len) {
   auto* self = static_cast<ReleaseJsonParser*>(ctx);
+  if (self->locked) return;
 
   switch (self->lastKey) {
     case LastKey::TAG_NAME:
@@ -114,6 +134,7 @@ void ReleaseJsonParser::sOnString(void* ctx, const char* value, size_t len) {
 
 void ReleaseJsonParser::sOnNumber(void* ctx, const char* value, size_t /*len*/) {
   auto* self = static_cast<ReleaseJsonParser*>(ctx);
+  if (self->locked) return;
 
   if (self->lastKey == LastKey::ASSET_SIZE && self->position == Position::IN_ASSET_OBJECT && self->assetDepth == 1) {
     self->currentAssetSize = static_cast<size_t>(strtoul(value, nullptr, 10));
@@ -122,13 +143,20 @@ void ReleaseJsonParser::sOnNumber(void* ctx, const char* value, size_t /*len*/) 
 }
 
 void ReleaseJsonParser::sOnBool(void* ctx, bool /*value*/) {
-  static_cast<ReleaseJsonParser*>(ctx)->lastKey = LastKey::NONE;
+  auto* self = static_cast<ReleaseJsonParser*>(ctx);
+  if (self->locked) return;
+  self->lastKey = LastKey::NONE;
 }
 
-void ReleaseJsonParser::sOnNull(void* ctx) { static_cast<ReleaseJsonParser*>(ctx)->lastKey = LastKey::NONE; }
+void ReleaseJsonParser::sOnNull(void* ctx) {
+  auto* self = static_cast<ReleaseJsonParser*>(ctx);
+  if (self->locked) return;
+  self->lastKey = LastKey::NONE;
+}
 
 void ReleaseJsonParser::sOnObjectStart(void* ctx) {
   auto* self = static_cast<ReleaseJsonParser*>(ctx);
+  if (self->locked) return;
 
   switch (self->position) {
     case Position::TOP_LEVEL:
@@ -152,10 +180,14 @@ void ReleaseJsonParser::sOnObjectStart(void* ctx) {
 
 void ReleaseJsonParser::sOnObjectEnd(void* ctx) {
   auto* self = static_cast<ReleaseJsonParser*>(ctx);
+  if (self->locked) return;
 
   switch (self->position) {
     case Position::TOP_LEVEL:
       if (self->depth > 0) self->depth--;
+      // List mode: depth back to 0 inside the root array means one whole
+      // release object just closed.
+      if (self->inRootArray && self->depth == 0) self->finishRelease();
       break;
     case Position::IN_ASSET_OBJECT:
       self->assetDepth--;
@@ -172,10 +204,16 @@ void ReleaseJsonParser::sOnObjectEnd(void* ctx) {
 
 void ReleaseJsonParser::sOnArrayStart(void* ctx) {
   auto* self = static_cast<ReleaseJsonParser*>(ctx);
+  if (self->locked) return;
 
   switch (self->position) {
     case Position::TOP_LEVEL:
-      if (self->lastKey == LastKey::ASSETS && self->depth == 1) {
+      // List mode: the root array is transparent — its release objects then sit
+      // at depth 1, exactly where the single-release form puts the keys, so the
+      // rest of the state machine is unchanged.
+      if (self->listMode && !self->inRootArray && self->depth == 0) {
+        self->inRootArray = true;
+      } else if (self->lastKey == LastKey::ASSETS && self->depth == 1) {
         self->position = Position::IN_ASSETS_ARRAY;
       } else {
         self->depth++;
@@ -193,6 +231,7 @@ void ReleaseJsonParser::sOnArrayStart(void* ctx) {
 
 void ReleaseJsonParser::sOnArrayEnd(void* ctx) {
   auto* self = static_cast<ReleaseJsonParser*>(ctx);
+  if (self->locked) return;
 
   switch (self->position) {
     case Position::TOP_LEVEL:

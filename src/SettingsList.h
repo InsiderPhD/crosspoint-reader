@@ -357,6 +357,12 @@ inline void appendSystemSettings(std::vector<SettingInfo>& v) {
                                  {StrId::STR_FOLDERS, StrId::STR_TAGS, StrId::STR_AUTHORS, StrId::STR_SERIES},
                                  "folderView", StrId::STR_CAT_DISPLAY),
                SettingInfo::Toggle(StrId::STR_DEV_MODE, &CrossPointSettings::devMode, "devMode", StrId::STR_CAT_SYSTEM),
+               // Dev tab: opting a device into beta/rc firmware. Lives behind Dev
+               // Mode because the pre-release channel can hand this device an
+               // unvalidated image, and the flasher deliberately bypasses
+               // esp_image_verify (see OtaBootSwitch.h).
+               SettingInfo::Toggle(StrId::STR_ENABLE_PRERELEASES, &CrossPointSettings::allowPreReleases,
+                                   "allowPreReleases", StrId::STR_CAT_DEV),
            });
 }
 

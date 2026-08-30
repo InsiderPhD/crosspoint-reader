@@ -10,7 +10,15 @@ class ReleaseJsonParser {
   // `assetName` is the release asset to pick out of the assets array. It must
   // outlive the parser — callers pass a string literal. Defaults to the C3
   // image so existing call sites and tests are unaffected.
-  explicit ReleaseJsonParser(const char* assetName = "firmware.bin");
+  //
+  // `releaseList` selects the payload shape. false (default) = a single release
+  // object, i.e. GitHub's /releases/latest. true = the /releases ARRAY, used by
+  // the pre-release channel because /releases/latest deliberately skips
+  // prereleases. In list mode the parser walks the array in the order GitHub
+  // returns it (newest created_at first) and keeps the FIRST release that
+  // carries `assetName`, discarding the partial state of any earlier release
+  // that had no matching asset; everything after that release is ignored.
+  explicit ReleaseJsonParser(const char* assetName = "firmware.bin", bool releaseList = false);
 
   ReleaseJsonParser(const ReleaseJsonParser&) = delete;
   ReleaseJsonParser& operator=(const ReleaseJsonParser&) = delete;
@@ -51,11 +59,23 @@ class ReleaseJsonParser {
   static void sOnArrayEnd(void* ctx);
 
   void commitAsset();
+  // List mode only: called when one release object in the array closes. Either
+  // locks in a release that yielded our asset, or clears the partial state so
+  // the next (older) release is parsed from scratch.
+  void finishRelease();
 
   StreamingJsonParser parser;
 
   // Not owned; a string literal supplied by the caller.
   const char* wantedAssetName;
+
+  // Payload shape; fixed at construction, so reset() does not clear it.
+  bool listMode;
+  // List mode: the root array has been entered (its release objects sit at
+  // depth 1, exactly where the single-object form puts the release's keys).
+  bool inRootArray;
+  // List mode: a release with a matching asset is locked in; ignore the rest.
+  bool locked;
 
   Position position;
   LastKey lastKey;
