@@ -1060,10 +1060,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             if (el->getTag() == TAG_PageLine) {
               const auto& line = static_cast<const PageLine&>(*el);
               if (line.getBlock()) {
-                const auto& words = line.getBlock()->getWords();
-                for (const auto& w : words) {
+                const auto& block = *line.getBlock();
+                for (uint16_t i = 0; i < block.wordCount(); i++) {
                   if (!fullText.empty()) fullText += " ";
-                  fullText += w;
+                  fullText += block.wordText(i);
                 }
               }
             }
@@ -1373,10 +1373,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
 // TODO: Failure handling
 namespace {
 // Visible text of a laid-out word: skips the U+2003 paragraph-indent marker without copying.
-const char* clipVisibleText(const std::string& s) {
-  const char* text = s.c_str();
-  return clipword::hasEmSpacePrefix(text) ? text + 3 : text;
-}
+const char* clipVisibleText(const char* text) { return clipword::hasEmSpacePrefix(text) ? text + 3 : text; }
 }  // namespace
 
 void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY, const bool forLookup) {
@@ -1425,12 +1422,11 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
         if (!line.getBlock()) continue;
 
         const auto& block = *line.getBlock();
-        const auto& wordList = block.getWords();
-        const size_t count = std::min({wordList.size(), block.getWordXpos().size(), block.getWordStyles().size()});
-        for (size_t i = 0; i < count; ++i) {
-          if (clipword::isBlank(clipVisibleText(wordList[i]))) continue;
+        const uint16_t count = block.wordCount();
+        for (uint16_t i = 0; i < count; ++i) {
+          if (clipword::isBlank(clipVisibleText(block.wordText(i)))) continue;
           pageWordCount++;
-          pagePoolBytes += wordList[i].size() + 1;  // +1 for the '\0' terminator in the pool
+          pagePoolBytes += block.wordTextLen(i) + 1;  // +1 for the '\0' terminator in the pool
         }
       }
       if (clipWords.textPool.size() + pagePoolBytes > UINT16_MAX) {
@@ -1447,38 +1443,36 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
         if (!line.getBlock()) continue;
 
         const auto& block = *line.getBlock();
-        const auto& xpos = block.getWordXpos();
-        const auto& wordList = block.getWords();
-        const auto& styles = block.getWordStyles();
-        const size_t count = std::min({wordList.size(), xpos.size(), styles.size()});
+        const uint16_t count = block.wordCount();
         if (renderer.isSdCardFont(readerFontId) && count > 0) {
           uint8_t styleMask = 0;
           std::string joined;
-          for (size_t i = 0; i < count; ++i) {
-            styleMask |= static_cast<uint8_t>(1u << (static_cast<uint8_t>(styles[i]) & 0x03));
-            joined += wordList[i];
+          for (uint16_t i = 0; i < count; ++i) {
+            styleMask |= static_cast<uint8_t>(1u << (static_cast<uint8_t>(block.wordStyle(i)) & 0x03));
+            joined += block.wordText(i);
           }
           renderer.ensureSdCardFontReady(readerFontId, joined.c_str(), styleMask);
         }
-        for (size_t i = 0; i < count; ++i) {
-          if (clipword::isBlank(clipVisibleText(wordList[i]))) continue;
+        for (uint16_t i = 0; i < count; ++i) {
+          const char* wordText = block.wordText(i);
+          if (clipword::isBlank(clipVisibleText(wordText))) continue;
 
-          const auto textStyle = static_cast<EpdFontFamily::Style>(styles[i] & ~EpdFontFamily::UNDERLINE);
-          int wordWidth = renderer.getTextAdvanceX(readerFontId, wordList[i].c_str(), textStyle);
+          const auto textStyle = static_cast<EpdFontFamily::Style>(block.wordStyle(i) & ~EpdFontFamily::UNDERLINE);
+          int wordWidth = renderer.getTextAdvanceX(readerFontId, wordText, textStyle);
           if (wordWidth <= 0) continue;
 
           WordRef word;
           word.textOffset = static_cast<uint16_t>(clipWords.textPool.size());
-          word.x = static_cast<int16_t>(orientedMarginLeft + line.xPos + xpos[i]);
+          word.x = static_cast<int16_t>(orientedMarginLeft + line.xPos + block.wordXpos(i));
           word.y = static_cast<int16_t>(orientedMarginTop + line.yPos);
-          if (i + 1 < count && xpos[i + 1] > xpos[i]) {
-            wordWidth = std::min(wordWidth, static_cast<int>(xpos[i + 1] - xpos[i]));
+          if (i + 1 < count && block.wordXpos(i + 1) > block.wordXpos(i)) {
+            wordWidth = std::min(wordWidth, static_cast<int>(block.wordXpos(i + 1) - block.wordXpos(i)));
           }
           word.w = static_cast<int16_t>(wordWidth);
           word.h = static_cast<int16_t>(lineHeight);
           word.pageIdx = static_cast<uint8_t>(pageIdx);
           word.style = textStyle;
-          clipWords.textPool.append(wordList[i]);
+          clipWords.textPool.append(wordText, block.wordTextLen(i));
           clipWords.textPool.push_back('\0');
           clipWords.words.push_back(word);
         }
@@ -2097,12 +2091,12 @@ EpubReaderActivity::BookmarkToggleResult EpubReaderActivity::addBookmark() {
       if (!line.getBlock()) {
         continue;
       }
-      const auto& words = line.getBlock()->getWords();
-      for (const auto& word : words) {
+      const auto& block = *line.getBlock();
+      for (uint16_t i = 0; i < block.wordCount(); i++) {
         if (!pageText.empty()) {
           pageText += " ";
         }
-        pageText += word;
+        pageText += block.wordText(i);
       }
       if (pageText.size() > 300) {
         break;

@@ -1,6 +1,8 @@
 #include "ParsedText.h"
 
 #include <GfxRenderer.h>
+#include <Logging.h>
+#include <Memory.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -183,7 +185,7 @@ bool ParsedText::isBionicWord(const size_t i) const {
 
 // Consumes data to minimize memory usage
 void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int baseFontId, const uint16_t viewportWidth,
-                                       const std::function<void(std::shared_ptr<TextBlock>)>& processLine,
+                                       const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
                                        const bool includeLastLine) {
   if (words.empty()) {
     return;
@@ -566,7 +568,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 
 void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const std::vector<uint16_t>& wordWidths,
                              const std::vector<bool>& continuesVec, const std::vector<size_t>& lineBreakIndices,
-                             const std::function<void(std::shared_ptr<TextBlock>)>& processLine,
+                             const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
                              const GfxRenderer& renderer, const int fontId) {
   const size_t lineBreak = lineBreakIndices[breakIndex];
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
@@ -732,7 +734,17 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   }
 
   const bool hasBionic = std::any_of(outBoundary.begin(), outBoundary.end(), [](const uint8_t b) { return b > 0; });
-  processLine(std::make_shared<TextBlock>(std::move(outWords), std::move(outXPos), std::move(outStyles), blockStyle,
-                                          hasBionic ? std::move(outBoundary) : std::vector<uint8_t>{},
-                                          hasBionic ? std::move(outSuffixX) : std::vector<uint16_t>{}));
+  // TextBlock flattens these vectors into its single arena allocation; they stay
+  // owned here and die at return. Passing the empty statics when no word on the
+  // line has a split keeps the bionic arrays out of the arena entirely.
+  static const std::vector<uint8_t> kNoBoundary;
+  static const std::vector<uint16_t> kNoSuffixX;
+  auto block = makeUniqueNoThrow<TextBlock>(outWords, outXPos, outStyles, blockStyle,
+                                            hasBionic ? outBoundary : kNoBoundary,
+                                            hasBionic ? outSuffixX : kNoSuffixX);
+  if (!block || !block->valid()) {
+    LOG_ERR("PTX", "Dropping line: TextBlock allocation failed");
+    return;
+  }
+  processLine(std::move(block));
 }
