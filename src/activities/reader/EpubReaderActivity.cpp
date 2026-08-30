@@ -60,6 +60,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
+#include "util/HeapReport.h"
 #include "util/ScreenshotUtil.h"
 #include "util/TimeUtils.h"
 #include "util/WifiTimeSync.h"
@@ -361,6 +362,9 @@ void EpubReaderActivity::onEnter() {
   if (!epub) {
     return;
   }
+  // Heap attribution ladder (see HeapReport::logBrief). Transitions only, never
+  // a hot path: the deltas between these tags say which subsystem owns the heap.
+  HeapReport::logBrief("reader.enter");
 
   // Configure screen orientation based on settings
   // NOTE: This affects layout math and must be applied before any render calls.
@@ -428,6 +432,8 @@ void EpubReaderActivity::onEnter() {
 #endif
   longPressPageBackFired = mappedInput.isPressed(MappedInputManager::Button::PageBack);
   longPressPageForwardFired = mappedInput.isPressed(MappedInputManager::Button::PageForward);
+
+  HeapReport::logBrief("reader.entered");
 
   // Trigger first update
   requestUpdate();
@@ -1824,6 +1830,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     } else {
       LOG_DBG("ERS", "Cache found, skipping build...");
     }
+    HeapReport::logBrief("reader.section");
 
     if (pendingPageJump.has_value()) {
       if (*pendingPageJump >= section->pageCount && section->pageCount > 0) {

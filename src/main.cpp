@@ -661,6 +661,11 @@ void setup() {
   // Ensure we're not still holding the power button before leaving setup
   waitForPowerRelease();
   allowSleepAt = millis() + 2000;
+
+  // Baseline for the heap attribution ladder: framebuffer, fonts, settings and
+  // i18n are up, no book, no radios. Every later HeapReport::logBrief tag is
+  // read as a delta from this line.
+  HeapReport::logBrief("boot.done");
 }
 
 void loop() {
