@@ -102,6 +102,10 @@ void SettingsActivity::onEnter() {
       statsSettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_SYSTEM) {
       systemSettings.push_back(setting);
+    } else if (setting.category == StrId::STR_CAT_DEV) {
+      // Value settings tagged Dev land above the Dev tab's action rows appended
+      // below. The tab itself is only shown when Dev Mode is on.
+      devSettings.push_back(setting);
     }
     // Web-only categories (KOReader Sync, OPDS Browser) are skipped for device UI
   }

@@ -474,6 +474,12 @@ class CrossPointSettings {
   // Developer mode: surfaces testing-only book actions (Reset Progress, Delete Book
   // Cache, Regenerate Cover) in the book context menus. Off by default.
   uint8_t devMode = 0;
+  // Pre-release OTA channel (Dev tab). Off = "Check for updates" reads
+  // /releases/latest, which GitHub defines to skip prereleases. On = it reads
+  // the release list and offers the newest entry carrying this build's asset,
+  // beta/rc included. Only OtaUpdater reads this; the field exists on every
+  // build so settings.json round-trips.
+  uint8_t allowPreReleases = 0;
   // Full Touch mode (X4 Pro): taps hit-test the drawn UI directly (tap a row to
   // select and activate it) instead of injecting Confirm on the current
   // selection. Gestures keep working either way. Field exists on every build so
