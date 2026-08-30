@@ -2,6 +2,7 @@
 
 #include <EpdFontFamily.h>
 
+#include <deque>
 #include <functional>
 #include <memory>
 #include <string>
@@ -13,7 +14,16 @@
 class GfxRenderer;
 
 class ParsedText {
-  std::vector<std::string> words;
+  // std::deque, not std::vector: a paragraph can hold thousands of tokens (CJK
+  // splits every character), and a vector grows by reallocating its whole element
+  // array into ONE contiguous block (32 B/std::string -> 64-128 KB at a few thousand
+  // tokens). On the ESP32-C3 that single large contiguous request is exactly what
+  // fails under a fragmented, BLE-resident heap, and the throwing operator new then
+  // abort()s the firmware. A deque grows in fixed ~512 B nodes, so the largest
+  // contiguous request stays ~2 KB regardless of token count. The per-token parallel
+  // arrays below stay vectors: at 1 byte / 1 bit each they never approach that
+  // ceiling. Ported from upstream crosspoint #2814.
+  std::deque<std::string> words;
   std::vector<EpdFontFamily::Style> wordStyles;
   std::vector<bool> wordContinues;  // true = word attaches to previous (no space before it)
   BlockStyle blockStyle;
@@ -30,7 +40,7 @@ class ParsedText {
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks);
   void extractLine(size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
                    const std::vector<bool>& continuesVec, const std::vector<size_t>& lineBreakIndices,
-                   const std::function<void(std::shared_ptr<TextBlock>)>& processLine, const GfxRenderer& renderer,
+                   const std::function<void(std::unique_ptr<TextBlock>)>& processLine, const GfxRenderer& renderer,
                    int fontId);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
   // True if word i should render with bionic bolding (feature on and not already bold).
@@ -51,6 +61,6 @@ class ParsedText {
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }
   void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
-                             const std::function<void(std::shared_ptr<TextBlock>)>& processLine,
+                             const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
                              bool includeLastLine = true);
 };
