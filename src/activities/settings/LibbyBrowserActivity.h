@@ -76,7 +76,9 @@ class LibbyBrowserActivity final : public Activity {
   int sendStatusY = 0;
   void drawSendDynamic(int statusY);
 
-  char errorMsg[160] = {};
+  // Wide enough for a two-part message: a renewal can succeed on Libby and
+  // still fail to refresh the licence on the card, and both halves matter.
+  char errorMsg[224] = {};
   // The completion screen serves both actions, so it carries its own headline
   // rather than assuming a download happened.
   char completeMsg[96] = {};
@@ -89,6 +91,13 @@ class LibbyBrowserActivity final : public Activity {
   void loadLoans();
   void sendSelectedLoan();
   void renewSelectedLoan();
+  // Cache OverDrive's cover artwork for a loan that is now on the card.
+  //
+  // Library books are Adobe-encrypted, so the artwork inside the EPUB is not
+  // dependably readable and these titles otherwise sit in the library with a
+  // blank cover. Best-effort and never fatal -- it does its own framebuffer
+  // borrow, so it must be called with none already held.
+  void cacheLoanCover(const LibbyLoan& loan, const char* bookPath);
   void runAction();
   void fail(const char* message);
   // Shared prologue for both actions: freeze the info card on the panel before

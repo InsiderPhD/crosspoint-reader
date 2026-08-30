@@ -6,6 +6,7 @@
 #include <SecureHttpClient.h>
 #include <Util.h>  // freeink::content::base64Decode
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -27,6 +28,15 @@ constexpr char CREDENTIAL_PATH[] = "/.crosspoint/content.key";
 constexpr char SYNC_TMP_PATH[] = "/.crosspoint/.libby-sync.tmp";
 // Shared with the web UI, which writes the same shape: { "<loanId>": "<path>" }.
 constexpr char BOOKS_PATH[] = "/.crosspoint/libby-books.json";
+
+// OverDrive's public catalogue -- the same records the Libby web app paints
+// from. Unauthenticated: no chip, no card, no Authorization header. Keyed on the
+// title id, which is what a loan's `id` is.
+constexpr char THUNDER_MEDIA[] = "https://thunder.api.overdrive.com/v2/media/";
+// A media record carries the full blurb and every format, so it can run well
+// past any sane in-RAM cap. Same treatment as /chip/sync: stream it to the card,
+// filter it back, delete it.
+constexpr char COVER_TMP_PATH[] = "/.crosspoint/.libby-cover.tmp";
 
 // The chip is a JWT. 1KB is generous; a real one is ~600 bytes.
 char g_identity[1280] = {};
@@ -537,6 +547,102 @@ bool LibbyClient::lookupBook(const char* loanId, char* outPath, const size_t out
     return false;
   }
   strlcpy(outPath, path, outLen);
+  return true;
+}
+
+bool LibbyClient::fetchCoverUrl(const LibbyLoan& loan, char* outUrl, const size_t outLen) {
+  if (!outUrl || outLen == 0) return false;
+  outUrl[0] = '\0';
+
+  // The id is spliced into a URL path. Real title ids are digits, but this one
+  // arrived in a JSON reply, so refuse anything that isn't path-safe rather
+  // than trusting it.
+  if (!loan.id[0]) return false;
+  for (const char* p = loan.id; *p; ++p) {
+    if (!isalnum(static_cast<unsigned char>(*p)) && *p != '-') {
+      LOG_ERR("LIBBY", "loan id is not usable in a URL path");
+      return false;
+    }
+  }
+
+  if (!acquireClient()) return false;
+
+  Storage.remove(COVER_TMP_PATH);
+  HalFile file;
+  if (!Storage.openFileForWrite("LIBBY", COVER_TMP_PATH, file)) return false;
+
+  char url[192];
+  snprintf(url, sizeof(url), "%s%s", THUNDER_MEDIA, loan.id);
+  if (!g_client->begin(url)) {
+    file.close();
+    Storage.remove(COVER_TMP_PATH);
+    dropConnection();
+    return false;
+  }
+  // Deliberately no applySentryHeaders(): this is the catalogue, not Libby, and
+  // sending the chip to it would leak the account for no benefit.
+  g_client->addHeader("Accept", "application/json");
+
+  bool writeFailed = false;
+  const int status = g_client->GET([&](const uint8_t* data, size_t len) {
+    if (file.write(data, len) != len) {
+      writeFailed = true;
+      return false;
+    }
+    return true;
+  });
+  file.flush();
+  file.close();
+
+  if (status < 0) dropConnection();
+  if (writeFailed || status < 200 || status >= 300) {
+    Storage.remove(COVER_TMP_PATH);
+    LOG_ERR("LIBBY", "cover lookup for %s failed: HTTP %d%s", loan.id, status, writeFailed ? " (SD write)" : "");
+    return false;
+  }
+
+  // Keep only the covers block; the blurb and the format list never materialise.
+  JsonDocument filter;
+  filter["covers"] = true;
+
+  HalFile readBack;
+  if (!Storage.openFileForRead("LIBBY", COVER_TMP_PATH, readBack)) {
+    Storage.remove(COVER_TMP_PATH);
+    return false;
+  }
+  JsonDocument doc;
+  HalFileReader reader(readBack);
+  const DeserializationError err = deserializeJson(doc, reader, DeserializationOption::Filter(filter));
+  readBack.close();
+  Storage.remove(COVER_TMP_PATH);
+
+  if (err != DeserializationError::Ok) {
+    LOG_ERR("LIBBY", "cover lookup parse failed: %s", err.c_str());
+    return false;
+  }
+
+  // Widest wins. OverDrive names the entries cover150Wide/cover300Wide/
+  // cover510Wide, but which of them a title carries varies, so choose on the
+  // declared width rather than on a key that may not be there. The extra pixels
+  // are worth having: these are progressive JPEGs, and the decoder in this
+  // firmware only reads their DC scan, so whatever arrives is downscaled to an
+  // eighth before it reaches the screen.
+  int bestWidth = 0;
+  for (JsonPair entry : doc["covers"].as<JsonObject>()) {
+    JsonObject cover = entry.value().as<JsonObject>();
+    const char* href = cover["href"] | "";
+    const int width = cover["width"] | 0;
+    if (!href[0] || width <= bestWidth) continue;
+    if (cover["isPlaceholderImage"] | false) continue;  // a generic "no artwork" tile
+    bestWidth = width;
+    strlcpy(outUrl, href, outLen);
+  }
+
+  if (!outUrl[0]) {
+    LOG_DBG("LIBBY", "no cover artwork published for %s", loan.id);
+    return false;
+  }
+  LOG_INF("LIBBY", "cover %dpx wide for %s", bestWidth, loan.id);
   return true;
 }
 

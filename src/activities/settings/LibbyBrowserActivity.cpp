@@ -1,9 +1,11 @@
 #include "LibbyBrowserActivity.h"
 
 #include <AdeptClient.h>
+#include <Epub.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <WiFi.h>
 
@@ -14,6 +16,7 @@
 #include "activities/reader/TlsFramebufferBorrow.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/BookFusionCoverCache.h"
 #include "util/TouchListNav.h"
 
 namespace {
@@ -132,6 +135,39 @@ void LibbyBrowserActivity::beginBusyCard(const LibbyLoan& loan, const char* stat
   requestUpdateAndWait();
 }
 
+void LibbyBrowserActivity::cacheLoanCover(const LibbyLoan& loan, const char* bookPath) {
+  if (!bookPath || !bookPath[0]) return;
+
+  // Epub's cache path is a hash of the file path, so it resolves without
+  // opening (or decrypting) the book at all.
+  const Epub epub(bookPath, "/.crosspoint");
+  epub.setupCacheDir();
+  const int coverHeight = UITheme::getInstance().getMetrics().homeCoverHeight;
+  if (Storage.exists(epub.getThumbBmpPath(coverHeight).c_str())) return;  // already has one
+
+  char coverUrl[192] = {};
+  bool fetched = false;
+  {
+    // Same trade as the loan list and the fulfilment: TLS wants a contiguous
+    // block this heap rarely has spare, and the busy card is already on the
+    // panel where e-ink holds it.
+    TlsFramebufferBorrow borrow(renderer);
+    if (LibbyClient::fetchCoverUrl(loan, coverUrl, sizeof(coverUrl))) {
+      fetched = BookFusionCoverCache::download(coverUrl, epub);
+    }
+  }
+  if (!fetched) return;
+
+  // The JPEG decoder wants the framebuffer as well, but never at the same time:
+  // the fetch's TLS client is destroyed before its borrow ends.
+  RenderLock lock(*this);
+  JpegScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
+  if (!BookFusionCoverCache::convert(epub, coverHeight)) {
+    LOG_ERR("LBB", "could not cache the OverDrive cover for %s", bookPath);
+  }
+  sendScreenPainted = false;  // the lease scrambled the framebuffer
+}
+
 void LibbyBrowserActivity::sendSelectedLoan() {
   if (selectedIndex < 0 || selectedIndex >= loans.count) return;
   const LibbyLoan& loan = loans.loans[selectedIndex];
@@ -169,6 +205,8 @@ void LibbyBrowserActivity::sendSelectedLoan() {
   // Record where it landed so a later renewal can rewrite this book's licence
   // instead of pulling the whole file down again.
   LibbyClient::rememberBook(loan.id, result.destPath);
+
+  cacheLoanCover(loan, result.destPath);
 
   {
     RenderLock lock(*this);
@@ -209,12 +247,22 @@ void LibbyBrowserActivity::renewSelectedLoan() {
   }
   Storage.remove(ACSM_TMP);
 
+  // A renewal is the natural moment to fill in a cover that was never there --
+  // and it runs ahead of the error checks on purpose, because the licence
+  // refresh failing does not make the artwork any less fetchable.
+  if (haveCopy) cacheLoanCover(loan, bookPath);
+
   if (libbyErr != LibbyClient::OK) {
     fail(LibbyClient::errorText(libbyErr));
     return;
   }
   if (adeptErr != AdeptClient::OK) {
-    fail(AdeptClient::errorText(adeptErr));
+    // Libby already extended the loan by this point; only the licence beside
+    // the book is stale. Say both, or this reads as a renewal that never
+    // happened and the user renews again.
+    char message[sizeof(errorMsg)];
+    snprintf(message, sizeof(message), "%s %s", tr(STR_LIBBY_RENEWED_STALE_LICENCE), AdeptClient::errorText(adeptErr));
+    fail(message);
     return;
   }
 

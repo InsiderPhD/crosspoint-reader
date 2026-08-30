@@ -38,10 +38,14 @@ class AdeptClient {
     BAD_TOKEN,         // the .acsm is not a fulfilment token
     NETWORK_ERROR,     // TLS/HTTP failure
     DISTRIBUTOR_AUTH,  // the operator refused this reader
-    SERVER_ERROR,      // the service returned an ADEPT <error>
-    SIGN_FAILED,       // could not sign the request (bad/missing signing key)
-    SD_ERROR,          // could not write the book or its licence
-    DOWNLOAD_FAILED,   // the book transfer did not complete
+    // The loan is bound to a different Adobe account than the one on this card.
+    // Called out separately from SERVER_ERROR because it is the one ADEPT
+    // refusal the user can act on, and retrying will never clear it.
+    ALREADY_FULFILLED,
+    SERVER_ERROR,     // the service returned an ADEPT <error>
+    SIGN_FAILED,      // could not sign the request (bad/missing signing key)
+    SD_ERROR,         // could not write the book or its licence
+    DOWNLOAD_FAILED,  // the book transfer did not complete
   };
 
   static const char* errorText(Error e);

@@ -546,8 +546,13 @@ AdeptClient::Error sendAdept(const std::string& url, const XmlNode& doc, XmlNode
     const std::string* data = reply.attr("data");
     err = data ? *data : "ADEPT error";
     LOG_ERR("ADEPT", "service error: %s", err.c_str());
-    return err.find("E_ADEPT_DISTRIBUTOR_AUTH") != std::string::npos ? AdeptClient::DISTRIBUTOR_AUTH
-                                                                     : AdeptClient::SERVER_ERROR;
+    if (err.find("E_ADEPT_DISTRIBUTOR_AUTH") != std::string::npos) return AdeptClient::DISTRIBUTOR_AUTH;
+    // E_LIC_ALREADY_FULFILLED_BY_ANOTHER_USER: the loan was redeemed under a
+    // different Adobe account -- another app, another device, or this reader
+    // before it was re-authorised. Nothing on this side can unpick that, so it
+    // gets its own code rather than reading as a generic server refusal.
+    if (err.find("ALREADY_FULFILLED_BY_ANOTHER_USER") != std::string::npos) return AdeptClient::ALREADY_FULFILLED;
+    return AdeptClient::SERVER_ERROR;
   }
   if (status < 200 || status >= 300) return AdeptClient::SERVER_ERROR;
   return AdeptClient::OK;
@@ -674,6 +679,8 @@ const char* AdeptClient::errorText(const Error e) {
       return "Couldn't reach the library's servers.";
     case DISTRIBUTOR_AUTH:
       return "The library's distributor refused this reader.";
+    case ALREADY_FULFILLED:
+      return "This loan was already downloaded under a different Adobe account. Return and borrow it again.";
     case SERVER_ERROR:
       return "The library's servers refused the loan.";
     case SIGN_FAILED:

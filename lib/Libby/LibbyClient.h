@@ -107,6 +107,18 @@ class LibbyClient {
   static bool rememberBook(const char* loanId, const char* bookPath);
   static bool lookupBook(const char* loanId, char* outPath, size_t outLen);
 
+  // Copy the largest cover URL OverDrive publishes for this loan into `outUrl`.
+  //
+  // The artwork is fetched on demand rather than kept on LibbyLoan, because a
+  // loan's `id` IS the OverDrive title id -- every /card/<card>/loan/<id>
+  // endpoint keys on it -- so the list does not have to carry MAX_LOANS x ~128
+  // bytes of URL for the one title that is about to be sent.
+  //
+  // Uses OverDrive's public catalogue, not Libby: no chip, no card, no
+  // Authorization header. Best-effort by design -- a cover is decoration, so
+  // this returns false and logs rather than failing a send.
+  static bool fetchCoverUrl(const LibbyLoan& loan, char* outUrl, size_t outLen);
+
   // Give a loan back. Note this does NOT stop an already-downloaded copy from
   // opening: the reader checks the due date baked into the .rights sidecar and
   // never asks Libby anything. Delete the book to remove it now.
