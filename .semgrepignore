@@ -1,0 +1,37 @@
+# Semgrep ignore list.
+#
+# NOTE: the presence of this file REPLACES Semgrep's built-in defaults
+# entirely -- it does not extend them. The "restored defaults" block below
+# must stay, or test/ and minified JS come back into every scan.
+
+# ---- Restored Semgrep defaults ----
+# Common large / vendored paths
+node_modules/
+build/
+dist/
+vendor/
+.env/
+.venv/
+.tox/
+.npm/
+.yarn/
+*.min.js
+
+# Common test paths
+test/
+tests/
+*_test.go
+
+# Semgrep's own artifacts
+.semgrep
+.semgrep_logs/
+
+# ---- CrossPoint Reader additions ----
+# Vendored upstream NimBLE: ~460 of 1188 targets and the source of every
+# github-actions-mutable-action-tag / memset-removal / sizeof-pointer-type
+# finding. We do not patch it and its workflows never run from this repo.
+lib/NimBLE-Arduino/
+
+# PlatformIO build output and generated headers (see CLAUDE.md).
+.pio/
+*.generated.h
