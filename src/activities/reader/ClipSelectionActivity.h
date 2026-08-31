@@ -55,6 +55,9 @@ class ClipSelectionActivity final : public Activity {
   // Taps pick words here, so the global tap-is-Confirm injection must stay off
   // (it would anchor or finish the selection at the current cursor instead).
   bool handlesDirectTouch() const override { return true; }
+  // Keep the bar's Confirm: taps move the word selection, and Confirm is what
+  // closes the range and saves the clip.
+  bool tapActivatesConfirm() const override { return false; }
 
  private:
   WordList wordList;

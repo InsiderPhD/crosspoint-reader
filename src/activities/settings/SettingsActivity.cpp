@@ -281,16 +281,16 @@ void SettingsActivity::loop() {
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
 #if FREEINK_DEVICE_X4PRO
-    // Full Touch: Back arrives only as the leftward swipe (the X4 Pro has no
-    // front buttons), so it mirrors the rightward swipe — step to the previous
-    // tab, and close only when already on the first one. Row focus is not a
-    // step on the way out here: taps move the cursor, so there is nothing to
-    // back out of.
+    // Full Touch: Back closes outright, like it does on every other screen and
+    // on the button boards. It used to walk back one tab at a time and close
+    // only from the first — which made leaving take as many gestures as there
+    // are tabs. Reaching a previous tab needs no help from Back here: every tab
+    // is one tap on the ribbon, and a rightward swipe still wraps forward.
+    //
+    // Row focus is not a step on the way out either: taps move the cursor, so
+    // there is nothing to back out of. Gesture mode and the X3/X4 keep the
+    // row -> ribbon -> close ladder below.
     if (SETTINGS.fullTouchUi) {
-      if (selectedCategoryIndex > 0) {
-        enterCategory(selectedCategoryIndex - 1);
-        return;
-      }
       SETTINGS.saveToFile();
       onGoHome();
       return;

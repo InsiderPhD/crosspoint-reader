@@ -195,7 +195,7 @@ void BookReadingAdjustmentActivity::activateSelectedField() {
 void BookReadingAdjustmentActivity::touchActivateSelectedField() {
   // Touch equivalent of activateSelectedField: the date row still opens the
   // picker, but the two value rows step instead of applying — applying is the
-  // Confirm button's job, so a second tap can change the value rather than
+  // action bar's Confirm, so a second tap can change the value rather than
   // committing it.
   if (selectedField == 1) {
     openDateSelection();
@@ -209,21 +209,6 @@ void BookReadingAdjustmentActivity::loop() {
     finish();
     return;
   }
-
-#if FREEINK_DEVICE_X4PRO
-  // The on-screen Confirm button applies. Checked before the rows so a tap that
-  // lands on it never falls through to the field hit-test.
-  if (SETTINGS.fullTouchUi) {
-    int lx, ly;
-    if (mappedInput.wasTapPoint(lx, ly)) {
-      const Rect confirm = UITheme::getConfirmButtonRect(renderer);
-      if (lx >= confirm.x && lx < confirm.x + confirm.width && ly >= confirm.y && ly < confirm.y + confirm.height) {
-        applyAdjustment();
-        return;
-      }
-    }
-  }
-#endif
 
   int tappedIndex;
   switch (TouchListNav::tapRow(mappedInput, listRect(), FIELD_COUNT, selectedField,
@@ -311,8 +296,6 @@ void BookReadingAdjustmentActivity::render(RenderLock&&) {
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), selectedField == 1 ? tr(STR_SELECT) : tr(STR_CONFIRM),
                                             tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
-  UITheme::drawConfirmButton(renderer, tr(STR_CONFIRM));
-
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
   renderer.displayBuffer();
 }

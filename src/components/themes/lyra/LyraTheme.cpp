@@ -11,7 +11,9 @@
 #include <vector>
 
 #include "BookFusionBookIdStore.h"
+#include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
+#include "components/ActionBar.h"
 #include "components/UITheme.h"
 #include "components/icons/arrow24.h"
 #include "components/icons/book.h"
@@ -376,13 +378,26 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
   }
 }
 
-void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
-                                const char* btn4) const {
+const ThemeMetrics& LyraTheme::themeMetrics() const {
 #if FREEINK_DEVICE_X4PRO
-  // No front buttons to label on the X4 Pro; the strip is reclaimed by
-  // buttonHintsHeight = 0 in the metrics table.
+  // See BaseTheme::themeMetrics() -- Full Touch keeps the action-bar strip,
+  // gesture mode reclaims it.
+  return SETTINGS.fullTouchUi ? LyraMetrics::values : LyraMetrics::noActionBarValues;
+#else
+  return LyraMetrics::values;
+#endif
+}
+
+void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
+                                const char* btn4, const bool allSlots) const {
+#if FREEINK_DEVICE_X4PRO
+  // No front buttons to label on the X4 Pro; in Full Touch the same four labels
+  // become tap targets instead (rounded, to match Lyra's boxes).
+  ActionBar::draw(renderer, UITheme::getInstance().getMetrics().buttonHintsHeight, SMALL_FONT_ID, /*rounded=*/true,
+                  btn1, btn2, allSlots ? btn3 : "", allSlots ? btn4 : "");
   return;
 #endif
+  (void)allSlots;  // front-button boards always label all four
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 

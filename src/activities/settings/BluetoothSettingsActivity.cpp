@@ -834,7 +834,7 @@ void BluetoothSettingsActivity::renderMainMenu() {
 
   // Button hints
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
 }
 
 void BluetoothSettingsActivity::drawScanHeader() const {
@@ -917,8 +917,9 @@ void BluetoothSettingsActivity::renderDeviceList() const {
   // Third button appears only when there is something to disconnect, mirroring
   // the way the WiFi list only offers Forget on a saved network.
   const char* disconnectLabel = btMgr->getConnectedDevices().empty() ? "" : tr(STR_BT_DISCONNECT);
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), disconnectLabel, tr(STR_RETRY));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), disconnectLabel, tr(STR_RETRY), /*directional=*/false);
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
 }
 
 void BluetoothSettingsActivity::renderConnecting() const {

@@ -15,6 +15,7 @@
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
 #include "util/TimeUtils.h"
+#include "util/TouchListNav.h"
 
 namespace {
 constexpr int FIELD_COUNT = 3;
@@ -78,9 +79,7 @@ void ManualDateActivity::adjustSelectedField(const int delta) {
   requestUpdate();
 }
 
-std::string ManualDateActivity::getSelectedDateLabel() const {
-  return TimeUtils::formatDateParts(year, month, day);
-}
+std::string ManualDateActivity::getSelectedDateLabel() const { return TimeUtils::formatDateParts(year, month, day); }
 
 void ManualDateActivity::saveDate() {
   uint32_t epoch = 0;
@@ -97,6 +96,27 @@ void ManualDateActivity::loop() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     finish();
     return;
+  }
+
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), FIELD_COUNT, selectedField,
+                               /*hasSubtitle=*/true, tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedField = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      // Tapping the field already under the cursor steps its value, matching
+      // the Right button — the same two-tap spinner SessionDateEdit uses.
+      // Committing is the action bar's Confirm; a second tap must not save, or
+      // the only way to set a value by touch would be gone. (Row SELECTION is
+      // the part that needed this: it is Up/Down, which on the X4 Pro exist
+      // only as swipes, and Full Touch drops those. Left/Right are the physical
+      // side keys, so stepping a value always had a hardware affordance.)
+      adjustSelectedField(1);
+      return;
+    case TouchListNav::TapResult::None:
+      break;
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
@@ -118,6 +138,14 @@ void ManualDateActivity::loop() {
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] { adjustSelectedField(1); });
 }
 
+// The three date-field rows. Shared by render() and loop()'s tap hit-testing so
+// the two can never disagree.
+Rect ManualDateActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  return Rect{0, contentTop, renderer.getScreenWidth(), metrics.listWithSubtitleRowHeight * FIELD_COUNT};
+}
+
 void ManualDateActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
@@ -128,10 +156,11 @@ void ManualDateActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SET_DATE),
                  getSelectedDateLabel().c_str());
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int listHeight = metrics.listWithSubtitleRowHeight * FIELD_COUNT;
+  const Rect fieldsRect = listRect();
+  const int contentTop = fieldsRect.y;
+  const int listHeight = fieldsRect.height;
   GUI.drawList(
-      renderer, Rect{0, contentTop, pageWidth, listHeight}, FIELD_COUNT, selectedField,
+      renderer, fieldsRect, FIELD_COUNT, selectedField,
       [](int index) {
         if (index == 0) return std::string(tr(STR_DAY));
         if (index == 1) return std::string(tr(STR_MONTH));
@@ -150,7 +179,7 @@ void ManualDateActivity::render(RenderLock&&) {
   renderer.drawText(SMALL_FONT_ID, sidePadding, hintTop, hint.c_str());
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
 
   renderer.displayBuffer();
 }

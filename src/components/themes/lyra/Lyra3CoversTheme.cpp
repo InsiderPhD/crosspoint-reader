@@ -8,11 +8,21 @@
 #include <vector>
 
 #include "BookFusionBookIdStore.h"
+#include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "components/icons/bookfusion24.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
+
+const ThemeMetrics& Lyra3CoversTheme::themeMetrics() const {
+#if FREEINK_DEVICE_X4PRO
+  // See BaseTheme::themeMetrics(). LyraLibraryTheme inherits this by design.
+  return SETTINGS.fullTouchUi ? Lyra3CoversMetrics::values : Lyra3CoversMetrics::noActionBarValues;
+#else
+  return Lyra3CoversMetrics::values;
+#endif
+}
 
 // Internal constants
 namespace {

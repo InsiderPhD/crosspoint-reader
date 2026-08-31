@@ -7,6 +7,7 @@
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
+#include "components/ActionBar.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/GroupBrowserActivity.h"
@@ -73,6 +74,17 @@ void ActivityManager::renderTaskLoop() {
     // below still fires, so requestUpdateAndWait() cannot deadlock.
     if (currentActivity && renderer.isRenderable()) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
+      // Drop the previous paint's Full Touch action-bar slots (X4 Pro; a no-op
+      // elsewhere). A screen that draws a hint bar republishes them from
+      // drawButtonHints; one that doesn't must not inherit the last screen's
+      // tap targets, which would still be live while nothing is drawn there.
+      ActionBar::clear();
+      // ...and tell it whether this screen even wants a Confirm slot. A menu
+      // whose rows activate on a tap does not: there the label would just be a
+      // second way to run what the row already runs. Published here rather than
+      // at the drawButtonHints call sites because the answer is the activity's
+      // and moves with its state (a modal opening puts the slot back).
+      ActionBar::setConfirmRedundant(currentActivity->tapActivatesConfirm());
       currentActivity->render(std::move(lock));
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.

@@ -11,8 +11,10 @@
 #include <cstdint>
 #include <string>
 
+#include "CrossPointSettings.h"
 #include "I18n.h"
 #include "RecentBooksStore.h"
+#include "components/ActionBar.h"
 #include "components/UITheme.h"
 #include "components/icons/bluetooth.h"
 #include "components/icons/bluetoothoff.h"
@@ -164,13 +166,36 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
   renderer.drawCenteredText(UI_10_FONT_ID, rect.y + rect.height + 15, percentText.c_str());
 }
 
-void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
-                                const char* btn4) const {
+const ThemeMetrics& BaseTheme::themeMetrics() const {
 #if FREEINK_DEVICE_X4PRO
-  // No front buttons to label on the X4 Pro; the strip is reclaimed by
-  // buttonHintsHeight = 0 in the metrics table.
+  // Full Touch turns the hint strip into the tappable action bar; gesture mode
+  // draws nothing there and reclaims it. Out of line because the choice needs
+  // SETTINGS, which the header must not pull in. UITheme caches the pointer
+  // this returns, so a Full Touch toggle takes effect on UITheme::reload()
+  // (SettingsActivity::onExit) -- which keeps the reserved strip and the paint
+  // in lockstep meanwhile, since drawButtonHints reads the same table.
+  return SETTINGS.fullTouchUi ? BaseMetrics::values : BaseMetrics::noActionBarValues;
+#else
+  return BaseMetrics::values;
+#endif
+}
+
+void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
+                                const char* btn4, const bool allSlots) const {
+#if FREEINK_DEVICE_X4PRO
+  // No front buttons to label on the X4 Pro. In Full Touch the same four labels
+  // become tap targets in the strip the metrics table reserved; in gesture mode
+  // that height is 0 and ActionBar::draw draws nothing.
+  //
+  // The height comes from UITheme's CACHED metrics, not themeMetrics(), so the
+  // bar is drawn exactly when screens are reserving room for it. The two differ
+  // only between toggling Full Touch and the UITheme::reload() on leaving
+  // Settings; taking the cached one keeps paint and layout in lockstep there.
+  ActionBar::draw(renderer, UITheme::getInstance().getMetrics().buttonHintsHeight, UI_10_FONT_ID, /*rounded=*/false,
+                  btn1, btn2, allSlots ? btn3 : "", allSlots ? btn4 : "");
   return;
 #endif
+  (void)allSlots;  // front-button boards always label all four
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 

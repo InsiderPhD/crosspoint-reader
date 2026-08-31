@@ -5,6 +5,8 @@
 #if FREEINK_DEVICE_X4PRO
 #include <GfxRenderer.h>
 #include <Logging.h>
+
+#include "components/ActionBar.h"
 #endif
 
 namespace {
@@ -27,32 +29,42 @@ uint8_t MappedInputManager::getPhysicalButtonIndex(const Button button) const {
   const auto& side = kSideLayouts[sideLayout];
 
 #if FREEINK_DEVICE_X4PRO
-  // X4 Pro has no front buttons. The four front indices are free and are
-  // synthesized from touch swipes by processTouchInput(); the two physical side
-  // keys (SDK BTN_UP = left key, BTN_DOWN = right key) act as logical
-  // Left/Right in menus while keeping their PageBack/PageForward role in the
-  // readers. SETTINGS.frontButton* is deliberately bypassed so imported or
-  // stale remap settings can never make Back/Confirm unreachable.
+  // The X4 Pro has the same SIDE keys as the X3 and X4 -- they are Up/Down,
+  // exactly as on those boards -- and no front buttons at all. What it lacks is
+  // the front four, so those indices are free and touch supplies them: the Full
+  // Touch action bar's slots and the swipes. Left/Right therefore mean what they
+  // mean everywhere else, "the front button pair", and on this board that pair
+  // is on the glass.
   //
-  //   swipe left  -> BTN_BACK    -> Back
-  //   swipe right -> BTN_CONFIRM -> Confirm
-  //   swipe up    -> BTN_LEFT    -> Up
-  //   swipe down  -> BTN_RIGHT   -> Down
-  //   left key    -> BTN_UP      -> Left  (+ PageBack via kSideLayouts)
-  //   right key   -> BTN_DOWN    -> Right (+ PageForward via kSideLayouts)
+  //   left key    -> BTN_UP      -> Up    (+ PageBack via kSideLayouts)
+  //   right key   -> BTN_DOWN    -> Down  (+ PageForward via kSideLayouts)
+  //   swipe right -> BTN_BACK    -> Back
+  //   swipe left  -> BTN_CONFIRM -> Confirm
+  //   swipe up    -> BTN_UP      -> Up    (the side key's gesture twin)
+  //   swipe down  -> BTN_DOWN    -> Down
+  //   bar slot 3  -> BTN_LEFT    -> Left
+  //   bar slot 4  -> BTN_RIGHT   -> Right
+  //
+  // The horizontal swipe pair is the reverse of what the slot names suggest: the
+  // calibrated y axis processTouchInput() derives its deltas from runs opposite
+  // the logical x axis of the tap path, so a rightward flick is the one that
+  // reaches BTN_BACK.
+  //
+  // SETTINGS.frontButton* is deliberately bypassed so imported or stale remap
+  // settings can never make Back/Confirm unreachable.
   switch (button) {
     case Button::Back:
       return HalGPIO::BTN_BACK;
     case Button::Confirm:
       return HalGPIO::BTN_CONFIRM;
     case Button::Up:
-      return HalGPIO::BTN_LEFT;
-    case Button::Down:
-      return HalGPIO::BTN_RIGHT;
-    case Button::Left:
       return HalGPIO::BTN_UP;
-    case Button::Right:
+    case Button::Down:
       return HalGPIO::BTN_DOWN;
+    case Button::Left:
+      return HalGPIO::BTN_LEFT;
+    case Button::Right:
+      return HalGPIO::BTN_RIGHT;
     case Button::Power:
       return HalGPIO::BTN_POWER;
     case Button::PageBack:
@@ -100,6 +112,7 @@ void MappedInputManager::processTouchInput() const {
   // Cleared before any early return, or a swipe recorded on one frame would
   // still be reported as fresh on the next.
   swipe = Swipe::None;
+  tapConsumedByActionBar = false;
 
   // Home key first: a bar contact also reports as an edge screen tap, so drop
   // the rest of the contact the moment a home-key event fires (the GT911 raises
@@ -117,6 +130,28 @@ void MappedInputManager::processTouchInput() const {
 
   float nxs, nys, nxe, nye;
   if (!gpio.wasSwipe(nxs, nys, nxe, nye)) {
+    // The Full Touch action bar comes first, whatever the screen's own tap
+    // policy is: it is the only VISIBLE Back/Confirm this board has, so it must
+    // outrank both the tap-anywhere-is-Confirm fallback below and a screen's
+    // own tap hit-testing. That costs nothing elsewhere -- the bar only exists
+    // inside the strip every screen reserves for it (buttonHintsHeight), which
+    // is outside the geometry those screens hit-test, and it is republished on
+    // every paint so a screen that draws no hint bar has no slots at all.
+    {
+      int lx, ly;
+      Button barButton;
+      if (wasTapPoint(lx, ly) && ActionBar::hitTest(lx, ly, barButton)) {
+        const uint8_t barIdx = getPhysicalButtonIndex(barButton);
+        LOG_DBG("INPUT", "Tap logical=(%d,%d) -> action bar btn %u", lx, ly, barIdx);
+        if (!gpio.isPressed(barIdx)) {
+          gpio.injectButtonPress(barIdx);
+        }
+        // The contact is spent: it is this button's press and nothing else.
+        tapConsumedByActionBar = true;
+        return;
+      }
+    }
+
     // No swipe this frame: in plain UIs a completed tap anywhere is Confirm.
     // Activities that consume touch themselves (readers, keyboard) disable
     // this via setTapActsAsConfirm(false), driven from the main loop.
@@ -166,7 +201,9 @@ void MappedInputManager::processTouchInput() const {
   if (abs(ldx) >= abs(ldy)) {
     idx = ldx < 0 ? HalGPIO::BTN_BACK : HalGPIO::BTN_CONFIRM;  // left / right
   } else {
-    idx = ldy < 0 ? HalGPIO::BTN_LEFT : HalGPIO::BTN_RIGHT;  // up / down
+    // A vertical swipe is the side keys' gesture twin, so it injects THEIR
+    // indices -- logical Up/Down. The front indices belong to the action bar.
+    idx = ldy < 0 ? HalGPIO::BTN_UP : HalGPIO::BTN_DOWN;  // up / down
   }
 
   // Full Touch mode outside the readers: taps do the selecting and activating,
@@ -180,10 +217,10 @@ void MappedInputManager::processTouchInput() const {
   // the main loop).
   if (swipesBackOnly && idx != HalGPIO::BTN_BACK) {
     switch (idx) {
-      case HalGPIO::BTN_LEFT:
+      case HalGPIO::BTN_UP:
         swipe = Swipe::Up;
         break;
-      case HalGPIO::BTN_RIGHT:
+      case HalGPIO::BTN_DOWN:
         swipe = Swipe::Down;
         break;
       default:
@@ -251,6 +288,11 @@ bool MappedInputManager::wasTapPoint(int& lx, int& ly) const {
   if (gpio.wasHomeKeyTapped() || gpio.wasHomeKeyLongPressed()) {
     return false;
   }
+  // Already spent on an action-bar button. Note processTouchInput() calls this
+  // itself to find the bar hit, and sets the flag only afterwards.
+  if (tapConsumedByActionBar) {
+    return false;
+  }
   float nx, ny;
   if (!gpio.wasTouchTap(nx, ny)) {
     return false;
@@ -278,6 +320,9 @@ bool MappedInputManager::wasTouchLongPressPoint(int& lx, int& ly) const {
 MappedInputManager::TapZone MappedInputManager::wasTapZone() const {
   // A frame with a home-key event is a bar contact, never a screen tap.
   if (gpio.wasHomeKeyTapped() || gpio.wasHomeKeyLongPressed()) {
+    return TapZone::None;
+  }
+  if (tapConsumedByActionBar) {
     return TapZone::None;
   }
   float nx, ny;
@@ -331,11 +376,12 @@ unsigned long MappedInputManager::getHeldTime(const Button button) const {
 }
 
 MappedInputManager::Labels MappedInputManager::mapLabels(const char* back, const char* confirm, const char* previous,
-                                                         const char* next) const {
+                                                         const char* next, const bool directional) const {
   // Swap previous/next labels to match the page turn direction swap in INVERTED and LANDSCAPE_CCW.
-  const bool swapLabels =
-      SETTINGS.frontButtonFollowOrientation && (SETTINGS.orientation == CrossPointSettings::INVERTED ||
-                                                SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
+  // Only for labels that name a direction: see the header.
+  const bool swapLabels = directional && SETTINGS.frontButtonFollowOrientation &&
+                          (SETTINGS.orientation == CrossPointSettings::INVERTED ||
+                           SETTINGS.orientation == CrossPointSettings::LANDSCAPE_CCW);
   const char* leftLabel = swapLabels ? next : previous;
   const char* rightLabel = swapLabels ? previous : next;
 
@@ -357,8 +403,18 @@ MappedInputManager::Labels MappedInputManager::mapLabels(const char* back, const
     return "";
   };
 
+#if FREEINK_DEVICE_X4PRO
+  // The X4 Pro bypasses SETTINGS.frontButton* in getPhysicalButtonIndex(), so
+  // resolving labels through it would place them in slots that do not match the
+  // buttons they act on -- and these slots are the Full Touch action bar's tap
+  // targets (ActionBar::kSlotButtons), not passive labels under fixed hardware.
+  // Return them in the fixed Back/Confirm/Left/Right order that mapping uses.
+  (void)labelForHardware;
+  return {back, confirm, leftLabel, rightLabel};
+#else
   return {labelForHardware(HalGPIO::BTN_BACK), labelForHardware(HalGPIO::BTN_CONFIRM),
           labelForHardware(HalGPIO::BTN_LEFT), labelForHardware(HalGPIO::BTN_RIGHT)};
+#endif
 }
 
 int MappedInputManager::getPressedFrontButton() const {

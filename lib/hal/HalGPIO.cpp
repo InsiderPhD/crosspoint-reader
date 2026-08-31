@@ -323,8 +323,27 @@ unsigned long HalGPIO::getHeldTime() const {
 unsigned long HalGPIO::getHeldTime(uint8_t buttonIndex) const {
   const uint8_t mask = (1 << buttonIndex);
   if (virtualButtonState & mask) {
-    // While a virtual press is active, prefer the notify-driven activity timestamp:
-    // BLE remotes report "still held" via repeated HID frames, not a level signal.
+    // A PULSE — a BLE remote click, a touch tap, a swipe — is set and released
+    // between two update()s and update() then exposes it as "pressed" for one
+    // frame so activities can see the edge. Its release is already recorded, so
+    // the press is over: report the pulse's own duration (~0), never the time
+    // since it arrived.
+    //
+    // Falling through to `millis() - virtualPressStart` here is what made a
+    // single remote click fire LONG-press actions. The gap between the HID
+    // notify (NimBLE task) and the frame where the loop task next looks is the
+    // page render — 2.4-3.4s on an image page — so every click cleared the
+    // reader's 700ms threshold and ran Skip Chapter Back / Sync instead of
+    // turning the page. `desiredVirtualButtonState` is the honest "is it still
+    // down" bit: setVirtualButtonState(false) clears it, while a genuinely held
+    // button keeps it set and keeps the activity-driven timing below.
+    if (!(desiredVirtualButtonState & mask)) {
+      return virtualPressFinish[buttonIndex] >= virtualPressStart[buttonIndex]
+                 ? virtualPressFinish[buttonIndex] - virtualPressStart[buttonIndex]
+                 : 0;
+    }
+    // Still held. Prefer the notify-driven activity timestamp: BLE remotes
+    // report "still held" via repeated HID frames, not a level signal.
     if (virtualLastActivityTime[buttonIndex] >= virtualPressStart[buttonIndex]) {
       return virtualLastActivityTime[buttonIndex] - virtualPressStart[buttonIndex];
     }

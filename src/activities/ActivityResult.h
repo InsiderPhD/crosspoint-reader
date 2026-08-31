@@ -35,6 +35,12 @@ struct FrontlightResult {
   uint8_t brightness = 0;
 };
 
+// Returned by ReaderActionSelectActivity: the reader action picked for one
+// Reader Controls row. Not persisted by the picker — the caller writes it.
+struct ReaderActionResult {
+  uint8_t action = 0;
+};
+
 struct ChapterResult {
   int spineIndex = 0;
 };
@@ -113,9 +119,9 @@ struct WordPickResult {
 };
 
 using ResultVariant =
-    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, FrontlightResult, ChapterResult, PercentResult,
-                 PageResult, SyncResult, NetworkModeResult, FootnoteResult, BookContextResult, FilePathResult,
-                 ClippingResult, ClippingJumpResult, WordPickResult>;
+    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, FrontlightResult, ReaderActionResult,
+                 ChapterResult, PercentResult, PageResult, SyncResult, NetworkModeResult, FootnoteResult,
+                 BookContextResult, FilePathResult, ClippingResult, ClippingJumpResult, WordPickResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

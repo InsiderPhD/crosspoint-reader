@@ -55,14 +55,6 @@ class UITheme {
 
   static void drawSyncProgressPopup(GfxRenderer& renderer, const char* title, const char* statusMessage);
 
-  // On-screen commit button for screens whose terminal action has no other
-  // visible affordance — the X4 Pro draws no bottom hint bar, so "press Confirm"
-  // is invisible there. getConfirmButtonRect() is the tap target (callers
-  // hit-test it); drawConfirmButton() is a no-op off the X4 Pro so the button
-  // never appears on devices that still show the hint bar.
-  static Rect getConfirmButtonRect(const GfxRenderer& renderer);
-  static void drawConfirmButton(GfxRenderer& renderer, const char* label);
-
  private:
   const ThemeMetrics* currentMetrics;
   std::unique_ptr<BaseTheme> currentTheme;

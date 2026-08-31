@@ -25,15 +25,19 @@ class GfxRenderer;
 // The hook is installed once and stays installed: when no borrow is active it
 // degrades to plain malloc/free (the free callback routes by pointer range).
 // The one fatal hazard is arena-allocated memory being freed AFTER the borrow
-// ends — the destructor prevents it by closing the BookFusion connection (the
-// only wolfSSL user that outlives a call) BEFORE deactivating the arena.
+// ends — the destructor prevents it by closing every kept-alive wolfSSL session
+// (BookFusion is the only one today) BEFORE deactivating the arena. If you add
+// another module that holds a SecureHttpClient open between calls, close it too:
+// its session object is sitting in the framebuffer, the next paint turns it
+// into pixels, and the following request frees that wreckage inside
+// wolfSSL_free().
 //
 // USAGE: scope this guard around a SINGLE network call (or a run of calls on
 // one reused connection with NO rendering between them). Never nest it inside
 // a held RenderLock — it takes one itself and the mutex is non-recursive, so
 // nesting deadlocks. If a path renders between two requests (popups, epub
 // reload), use a separate guard per request. The destructor closes the
-// BookFusion connection BEFORE restoring rendering, so it must run before any
+// kept-alive connections BEFORE restoring rendering, so it must run before any
 // post-network RenderLock draw. Long transfers (the EPUB download) may hold a
 // borrow too, provided the UI is a pre-painted static frame — the e-ink holds
 // it with no RAM — and any transient SecureHttpClient is destroyed (freeing

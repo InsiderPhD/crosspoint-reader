@@ -18,6 +18,7 @@
 #include "ReadingStatsStore.h"
 #include "SessionDateEditActivity.h"
 #include "activities/util/ConfirmationActivity.h"
+#include "components/ActionBar.h"
 #include "components/UITheme.h"
 #include "components/icons/award24.h"
 #include "components/icons/book24.h"
@@ -59,6 +60,11 @@ constexpr int SESSIONS_PER_PAGE = 4;
 
 // Pixels a scrollable tab moves per Up/Down/Left/Right press (~2 stat rows).
 constexpr int STATS_SCROLL_STEP = 68;
+// A swipe moves a screenful rather than the single step a key press gives —
+// that is the gesture's whole point on a long stats page. Deliberately several
+// key-steps rather than the exact viewport height: the viewport is computed
+// inside render() and is not worth threading out for this.
+constexpr int STATS_SCROLL_PAGE = STATS_SCROLL_STEP * 4;
 
 // Collects sessionLog indices for entries that don't yet have a date
 // assigned. The Sessions tab is intentionally a "needs your input" inbox —
@@ -257,8 +263,15 @@ void drawLyraStyleButtonHints(GfxRenderer& renderer, const char* btn1, const cha
                               const char* btn4) {
 #if FREEINK_DEVICE_X4PRO
   // No front buttons to label on the X4 Pro. This screen paints its own hint
-  // bar instead of going through the theme, so it needs the same opt-out as
-  // BaseTheme/LyraTheme::drawButtonHints.
+  // bar instead of going through the theme, so it needs the same treatment as
+  // BaseTheme/LyraTheme::drawButtonHints: in Full Touch the labels become the
+  // tappable action bar, in gesture mode the strip is 0-height and nothing is
+  // drawn. This whole activity runs force-portrait (see onEnter), so the bar's
+  // logical frame matches the frame taps arrive in.
+  // Two slots: this screen's btn3/btn4 are Up/Down, which belong to the side
+  // keys rather than the bar. See ActionBar.h on when a screen passes four.
+  ActionBar::draw(renderer, UITheme::getInstance().getMetrics().buttonHintsHeight, SMALL_FONT_ID, /*rounded=*/true,
+                  btn1, btn2, "", "");
   return;
 #endif
   const GfxRenderer::Orientation originalOrientation = renderer.getOrientation();
@@ -799,16 +812,10 @@ void ReadingStatsActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-#if FREEINK_DEVICE_X4PRO
-    // Full Touch: Back arrives only as the leftward swipe (the X4 Pro has no
-    // front buttons), so it mirrors the rightward swipe — step to the previous
-    // tab, and close only when already on the first one.
-    if (SETTINGS.fullTouchUi && currentPage > 0) {
-      changePage(-1);
-      scrollOffset = 0;  // each tab always opens at the top
-      return;
-    }
-#endif
+    // Closes from any tab, in every mode. Full Touch used to step to the
+    // previous tab here and close only from the first; that made leaving take
+    // as many gestures as there are tabs, and the ribbon is directly tappable
+    // anyway. See the press handler below for why Full Touch acts on release.
     finish();
     return;
   }
@@ -916,12 +923,12 @@ void ReadingStatsActivity::loop() {
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
 #if FREEINK_DEVICE_X4PRO
-    // Full Touch handles Back on the RELEASE frame (top of loop) as
-    // previous-tab/close. An injected swipe presses on one frame and releases
-    // on the next, so this press frame runs first and must do nothing at all —
-    // finishing here would close the screen from any tab before the release
-    // intercept ever ran, and the row→ribbon step is not part of the way out
-    // in Full Touch (taps move the cursor; there is nothing to back out of).
+    // Full Touch handles Back on the RELEASE frame (top of loop). Both an
+    // injected swipe and an action-bar tap press on one frame and release on
+    // the next, so this press frame runs first and must do nothing at all —
+    // otherwise one Back would do two things: reset row focus here, then close
+    // on the release. The row→ribbon step is not part of the way out in Full
+    // Touch anyway (taps move the cursor; there is nothing to back out of).
     if (SETTINGS.fullTouchUi) {
       return;
     }
@@ -954,6 +961,25 @@ void ReadingStatsActivity::loop() {
   // via the navigator below. maxScroll is set during render.
   const bool scrollablePage = (currentPage == PAGE_OVERVIEW || currentPage == PAGE_WEEKLY);
   if (scrollablePage && selectedItemIndex == 0 && maxScroll > 0) {
+    // Full Touch: a vertical swipe scrolls a screenful, in the same content-drag
+    // sense as the paginated lists (swipe up reveals what is below). Without
+    // this the swipe is dead here — Full Touch records up/down instead of
+    // injecting them as the Up/Down presses the branch below reads, so a page
+    // with a visible scroll bar could only be moved with the side keys.
+    // maxScroll > 0 above is the bounds check pageSwipeDelta requires.
+    switch (TouchListNav::pageSwipeDelta(mappedInput)) {
+      case +1:
+        scrollOffset = std::min(scrollOffset + STATS_SCROLL_PAGE, maxScroll);
+        requestUpdate();
+        return;
+      case -1:
+        scrollOffset = std::max(scrollOffset - STATS_SCROLL_PAGE, 0);
+        requestUpdate();
+        return;
+      default:
+        break;
+    }
+
     const bool scrollDown = mappedInput.wasReleased(MappedInputManager::Button::Down) ||
                             mappedInput.wasReleased(MappedInputManager::Button::Right);
     const bool scrollUp = mappedInput.wasReleased(MappedInputManager::Button::Up) ||

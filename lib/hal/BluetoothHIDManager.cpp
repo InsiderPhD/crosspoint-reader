@@ -62,6 +62,23 @@ constexpr uint32_t BLE_CONNECT_TIMEOUT_MS = 10000;
 // attempt logs the largest block, so the true threshold can be established from
 // evidence rather than assumed.
 constexpr uint32_t BLE_CONTROLLER_MIN_BLOCK = 20 * 1024;
+// Free heap the caller must still have AFTER the stack is up.
+//
+// Starting the controller + host costs ~52KB (measured on an X4: 86,244 free
+// before enable(), 34,224 after), and every caller has real work to do the
+// moment enable() returns — the reader reloads the Epub and its chapter layout
+// immediately. No pre-init gate can model that honestly, because the cost is
+// only known once it has been paid: an enable at 86,244 free cleared every
+// check above, took its 52KB, and the Epub::load() that followed OOM-aborted at
+// 34,224 free (serial capture, 2026-08-31).
+//
+// So this floor is checked against the result rather than predicted. Below it
+// the stack is handed straight back and the caller is told there was not enough
+// memory — a refusal it can render, instead of an abort() it cannot. Sized as
+// the observed fatal point (~34KB) plus the working set a reader still needs
+// after reloading: per-page glyph groups (~3KB each, seen failing at ~9.5KB
+// free) and the render pass itself.
+constexpr uint32_t BLE_POST_ENABLE_FREE_FLOOR = 46 * 1024;
 // --- Press detector tuning ---
 // Nothing here decodes keycodes. The detector answers "did a button just go
 // down?" structurally; which button it was is a separate signature match.
@@ -221,6 +238,21 @@ bool BluetoothHIDManager::enable() {
     lastStatus = BtStatus::StartFailed;
     return false;
   }
+  // Up is not the same as survivable: the stack has just taken its ~52KB out of
+  // the heap the caller still has to work in. Measure what is left and hand the
+  // memory back if the caller could not live with it — see
+  // BLE_POST_ENABLE_FREE_FLOOR. _enabled is still false here, so the teardown is
+  // the direct deinit rather than disable().
+  const uint32_t postInitFree = ESP.getFreeHeap();
+  if (postInitFree < BLE_POST_ENABLE_FREE_FLOOR) {
+    LOG_ERR("BT", "Started into %u free (floor %u, largest %u) - handing the stack back", postInitFree,
+            static_cast<unsigned>(BLE_POST_ENABLE_FREE_FLOOR), ESP.getMaxAllocHeap());
+    NimBLEDevice::deinit(true);
+    lastError = "Not enough free memory";
+    lastStatus = BtStatus::NotEnoughMemory;
+    return false;
+  }
+
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);  // +9dBm
   NimBLEDevice::setDefaultPhy(BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_1M_MASK);
   NimBLEDevice::setSecurityAuth(true, false, true);
@@ -1001,6 +1033,15 @@ void BluetoothHIDManager::setBluetoothWanted(bool wanted) {
     _lastRestoreAttemptMs = 0;
   }
   LOG_INF("BT", "Bluetooth %s", wanted ? "wanted (auto-restore armed)" : "no longer wanted (auto-restore off)");
+  // Inside the change guard above, so this fires once per real transition and a
+  // persisting owner is not asked to write on every call.
+  if (_wantedChangedCallback) {
+    _wantedChangedCallback(wanted);
+  }
+}
+
+void BluetoothHIDManager::setBluetoothWantedChangedCallback(void (*callback)(bool)) {
+  _wantedChangedCallback = callback;
 }
 
 void BluetoothHIDManager::noteWifiActivity() {

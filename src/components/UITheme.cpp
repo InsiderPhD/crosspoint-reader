@@ -228,31 +228,6 @@ UITheme::BookOptionsPopupLayout UITheme::drawBookOptionsPopup(GfxRenderer& rende
   return {Rect{px, py, POPUP_W, popupH}, py + titleBlockH + INFO_COUNT * INFO_H, OPTION_H};
 }
 
-namespace {
-constexpr int CONFIRM_BTN_W = 200;
-constexpr int CONFIRM_BTN_H = 46;
-constexpr int CONFIRM_BTN_BOTTOM_GAP = 24;
-}  // namespace
-
-Rect UITheme::getConfirmButtonRect(const GfxRenderer& renderer) {
-  const auto& metrics = getInstance().getMetrics();
-  const int y = renderer.getScreenHeight() - metrics.buttonHintsHeight - CONFIRM_BTN_BOTTOM_GAP - CONFIRM_BTN_H;
-  return Rect{(renderer.getScreenWidth() - CONFIRM_BTN_W) / 2, y, CONFIRM_BTN_W, CONFIRM_BTN_H};
-}
-
-void UITheme::drawConfirmButton(GfxRenderer& renderer, const char* label) {
-#if !FREEINK_DEVICE_X4PRO
-  // Other devices label this action in the bottom hint bar already.
-  return;
-#endif
-  const Rect r = getConfirmButtonRect(renderer);
-  renderer.fillRect(r.x, r.y, r.width, r.height, false);
-  renderer.drawRect(r.x, r.y, r.width, r.height, 2, true);
-  const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, label, EpdFontFamily::BOLD);
-  const int textY = r.y + (r.height - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
-  renderer.drawText(UI_10_FONT_ID, r.x + (r.width - textWidth) / 2, textY, label, true, EpdFontFamily::BOLD);
-}
-
 void UITheme::drawSyncProgressPopup(GfxRenderer& renderer, const char* title, const char* statusMessage) {
   // Some callers compose multi-part messages with '\n'; the glyph renderer has
   // no glyph for codepoint 10 and wrappedText doesn't treat it as a break, so
