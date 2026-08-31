@@ -19,6 +19,7 @@
 #include "util/HeaderDateUtils.h"
 #include "util/ReadingStatsAnalytics.h"
 #include "util/TimeUtils.h"
+#include "util/TouchListNav.h"
 
 namespace {
 constexpr int SUMMARY_ROW_HEIGHT = 30;
@@ -309,6 +310,22 @@ void ReadingStatsExtendedActivity::loop() {
 
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int maxScrollOffset = getMaxScrollOffset(renderer, metrics);
+
+  // Full Touch: a vertical swipe scrolls the chart strip, content-drag sense
+  // (swipe up reveals what is below). The maxScrollOffset guard plus the clamp
+  // are the bounds check pageSwipeDelta requires — a swipe at either end is
+  // inert rather than costing an e-ink refresh.
+  if (maxScrollOffset > 0) {
+    const int swipe = TouchListNav::pageSwipeDelta(mappedInput);
+    if (swipe != 0) {
+      const int nextOffset = std::clamp(scrollOffset + swipe * CHART_SCROLL_STEP, 0, maxScrollOffset);
+      if (nextOffset != scrollOffset) {
+        scrollOffset = nextOffset;
+        requestUpdate();
+      }
+      return;
+    }
+  }
 
   buttonNavigator.onPreviousRelease([&]() {
     const int nextOffset = std::max(0, scrollOffset - CHART_SCROLL_STEP);

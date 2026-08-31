@@ -40,6 +40,8 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
   }
 
   auto epub = std::unique_ptr<Epub>(new Epub(path, "/.crosspoint"));
+  bool borrowedFramebuffer = false;
+  bool loaded = false;
   {
     // A stale book.bin (cache-version bump) forces a metadata rebuild here, and the
     // rebuild's inflate needs one 32KB CONTIGUOUS dictionary — the allocation that
@@ -48,9 +50,20 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
     // dictionary, exactly as Section.cpp does for section builds: e-ink is bistable
     // so the panel keeps its image, and nothing renders while load() runs.
     InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
-    if (epub->load(true, SETTINGS.embeddedStyle == 0)) {
-      return epub;
-    }
+    borrowedFramebuffer = scratch.active();
+    loaded = epub->load(true, SETTINGS.embeddedStyle == 0);
+  }  // lease released: the framebuffer is ours to paint into again
+
+  // The lease left dictionary bytes in the framebuffer. Clear it — buffer only,
+  // so the panel keeps showing the loading popup — before anything composites a
+  // popup over it instead of repainting in full. Section::createSectionFile does
+  // the same after its own lease.
+  if (borrowedFramebuffer) {
+    renderer.clearScreen();
+  }
+
+  if (loaded) {
+    return epub;
   }
 
   // The book dies with this scope, so carry its refusal reason out.
@@ -127,8 +140,23 @@ void ReaderActivity::onEnter() {
 
   currentBookPath = initialBookPath;
   if (isBmpFile(initialBookPath)) {
-    onGoToBmpViewer(initialBookPath);
-  } else if (isXtcFile(initialBookPath)) {
+    onGoToBmpViewer(initialBookPath);  // BmpViewerActivity draws its own loading popup
+    return;
+  }
+
+  // Opening a book is synchronous and can take several seconds on a cold cache:
+  // the metadata parse (and, on a cache-version bump, a full inflate of the
+  // container) here, then the per-spine page-count scan in the reader's own
+  // onEnter(). Until the reader's first page lands, nothing repaints, so the
+  // device looks frozen with the browser still on screen. Paint the popup over
+  // whatever the previous activity left in the framebuffer and push it before
+  // any of that starts. E-ink is bistable, so it stays visible for the whole
+  // load -- including while loadEpub() lends the framebuffer to the inflate --
+  // until the reader replaces it with the page or with a build's "Indexing..."
+  // popup.
+  GUI.drawPopup(renderer, tr(STR_LOADING));
+
+  if (isXtcFile(initialBookPath)) {
     auto xtc = loadXtc(initialBookPath);
     if (!xtc) {
       onGoBack();

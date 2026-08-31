@@ -26,9 +26,10 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                  .homeCoverTileHeight = 242,
                                  .homeRecentBooksCount = 1,
 #if FREEINK_DEVICE_X4PRO
-                                 // No front buttons on the X4 Pro: the bottom hint bar is never
-                                 // drawn (drawButtonHints no-ops), so screens reclaim its strip.
-                                 .buttonHintsHeight = 0,
+                                 // X4 Pro has no front buttons, so this strip holds the tappable
+                                 // action bar instead of four button labels (see ActionBar.h).
+                                 // Gesture mode reclaims it via noActionBarValues below.
+                                 .buttonHintsHeight = 44,
 #else
                                  .buttonHintsHeight = 40,
 #endif
@@ -50,6 +51,17 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                  .keyboardTextFieldWidthPercent = 85,
                                  .keyboardWidthPercent = 90,
                                  .keyboardKeyCornerRadius = 6};
+
+#if FREEINK_DEVICE_X4PRO
+// Gesture mode (Full Touch off) reclaims the action-bar strip. See the same
+// pair in BaseMetrics; LyraTheme::themeMetrics() is out of line for the same
+// reason (the choice needs SETTINGS).
+constexpr ThemeMetrics noActionBarValues = [] {
+  ThemeMetrics v = values;
+  v.buttonHintsHeight = 0;
+  return v;
+}();
+#endif
 }  // namespace LyraMetrics
 
 class LyraTheme : public BaseTheme {
@@ -58,7 +70,7 @@ class LyraTheme : public BaseTheme {
   // keeps the shared geometry helpers (listGeometry, hitTest*) in lockstep
   // with the Lyra draw code. Lyra3Covers/LyraLibrary inherit it — their metrics
   // differ only in home-tile fields no list geometry reads.
-  const ThemeMetrics& themeMetrics() const override { return LyraMetrics::values; }
+  const ThemeMetrics& themeMetrics() const override;
 
   // Component drawing methods
   //   void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total) override;
@@ -75,8 +87,8 @@ class LyraTheme : public BaseTheme {
                 const std::function<std::string(int index)>& rowSubtitle,
                 const std::function<UIIcon(int index)>& rowIcon, const std::function<std::string(int index)>& rowValue,
                 bool highlightValue, const std::function<bool(int index)>& rowDimmed = nullptr) const override;
-  void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
-                       const char* btn4) const override;
+  void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3, const char* btn4,
+                       bool allSlots) const override;
   void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const override;
   void drawPowerButtonHint(GfxRenderer& renderer, const char* label) const override;
   void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,

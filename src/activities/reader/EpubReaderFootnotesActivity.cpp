@@ -8,6 +8,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 void EpubReaderFootnotesActivity::onEnter() {
   Activity::onEnter();
@@ -75,6 +76,14 @@ void EpubReaderFootnotesActivity::loop() {
     }
   }
 #endif
+
+  // Full Touch: the footnote list is a scroll window, so a vertical swipe jumps
+  // a whole page of it — same content-drag sense as every other list. Inert
+  // unless it actually scrolls (pageSwipe's own guard).
+  if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(footnotes.size()), visibleRows(), selectedIndex)) {
+    requestUpdate();
+    return;
+  }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     activateSelectedFootnote();

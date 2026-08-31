@@ -61,6 +61,24 @@ class Activity {
   // hit-testing is open, so tap-activates-the-highlighted-option comes back
   // for the modal.
   virtual bool handlesDirectTouch() const { return false; }
+  // X4 Pro Full Touch only. True while a tap on the highlighted element does
+  // exactly what the action bar's Confirm slot would do, which makes that slot
+  // a second way to run the same handler. ActionBar then leaves it out and the
+  // remaining slots take its width, so a plain menu shows one wide "Back"
+  // rather than "Back | Select" -- the rows themselves are the Select.
+  //
+  // Defaults to handlesDirectTouch() because that is precisely what those
+  // screens do: the first tap moves the cursor to a row, a second tap on it
+  // calls the same function the Confirm branch calls (TouchListNav::tapRow's
+  // Activated case, or the hand-rolled equivalent).
+  //
+  // Override to false on a screen whose Confirm does something its drawn UI
+  // cannot: the date/number spinners are that case here -- a second tap steps
+  // the field's value and only Confirm commits it. Get this wrong and the user
+  // is stranded: this board has no front buttons, and handlesDirectTouch() has
+  // already switched off the tap-anywhere-is-Confirm injection, so the bar slot
+  // is the only remaining way to reach Confirm.
+  virtual bool tapActivatesConfirm() const { return handlesDirectTouch(); }
   // Bluetooth (BLE page-turner) is only allowed to stay up in activities that
   // actually use it — the reader and the Bluetooth settings screen. Everywhere
   // else the main loop shuts the stack down to return its heap.

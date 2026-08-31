@@ -166,6 +166,17 @@ TlsFramebufferBorrow::~TlsFramebufferBorrow() {
   // Close first so wolfSSL frees the session and record buffers via tlsFree
   // while the arena range is still valid. An arena pointer freed after the
   // range is cleared would hit free() and corrupt the heap.
+  //
+  // Every module that keeps a SecureHttpClient alive between calls must be
+  // closed here. BookFusion is the only one today -- everything else builds a
+  // stack-scoped client inside the borrow and destroys it there -- but add any
+  // new one, because a kept-alive session outliving the borrow is worse than a
+  // stray free: the framebuffer it lives in is repainted the moment rendering
+  // resumes, so the WOLFSSL object becomes pixel data, and the next request's
+  // stale-socket retry frees it -- a load fault inside wolfSSL_free(). The
+  // since-removed native Libby client crashed exactly that way: its loan fetch
+  // left a session in the arena, the list painted over it, and the next request
+  // walked the wreckage.
   BookFusionSyncClient::closeConnection();
 #if CROSSPOINT_FB_SCRATCH_BORROW
   if (installed_) {

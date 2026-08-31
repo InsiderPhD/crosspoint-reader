@@ -5,6 +5,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 class ManualDateActivity final : public Activity {
   ButtonNavigator buttonNavigator;
   int selectedField = 0;
@@ -15,6 +17,7 @@ class ManualDateActivity final : public Activity {
   void adjustSelectedField(int delta);
   void saveDate();
   std::string getSelectedDateLabel() const;
+  Rect listRect() const;
 
  public:
   explicit ManualDateActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -23,4 +26,8 @@ class ManualDateActivity final : public Activity {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+  bool handlesDirectTouch() const override { return true; }
+  // Keep the bar's Confirm: a tap on the highlighted field steps its value
+  // (the Right button's job), so committing the date has no other affordance.
+  bool tapActivatesConfirm() const override { return false; }
 };

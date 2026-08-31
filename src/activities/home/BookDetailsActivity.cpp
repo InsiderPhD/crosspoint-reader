@@ -17,6 +17,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 namespace {
 constexpr int COVER_TO_TEXT_GAP = 16;
@@ -267,6 +268,21 @@ void BookDetailsActivity::loop() {
     requestUpdate();
   };
 
+  // Full Touch: a vertical swipe pages the description, content-drag sense
+  // (swipe up reveals what is below). scrollDown's own clamp lives in render()
+  // (maxScrollOffset), and scrollUp floors at 0, so a swipe at either end is
+  // harmless — the bounds requirement pageSwipeDelta documents.
+  switch (TouchListNav::pageSwipeDelta(mappedInput)) {
+    case +1:
+      scrollDown();
+      return;
+    case -1:
+      scrollUp();
+      return;
+    default:
+      break;
+  }
+
   if (siblingCount() > 1) {
     // Front Left/Right step through the sibling books; scrolling stays on the side
     // Up/Down buttons. Book nav is single-press (no hold-repeat) because each step
@@ -386,7 +402,7 @@ void BookDetailsActivity::render(RenderLock&&) {
   const char* prevLabel = canNavBooks ? tr(STR_BOOK_INFO_PREV_BOOK) : tr(STR_DIR_UP);
   const char* nextLabel = canNavBooks ? tr(STR_BOOK_INFO_NEXT_BOOK) : tr(STR_DIR_DOWN);
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, prevLabel, nextLabel);
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
 
   renderer.displayBuffer();
 }

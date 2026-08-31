@@ -403,6 +403,61 @@
           throw new Error('download did not finish after 512 segments');
         }
 
+        // OverDrive's PUBLIC catalogue -- no chip, no card, no Authorization.
+        // A loan's `id` IS the title id, which is what every /card/<c>/loan/<id>
+        // endpoint keys on, so nothing extra has to be stored per book.
+        const THUNDER_MEDIA = 'https://thunder.api.overdrive.com/v2/media/';
+
+        // The widest real cover the catalogue publishes for a title, or ''.
+        //
+        // A library book is encrypted, so the artwork inside it cannot be read
+        // by the device -- exactly the BookFusion situation, where the cover
+        // also comes from the API rather than the file. Fetched here rather than
+        // on the device because this page already speaks to OverDrive.
+        async function catalogueCoverUrl(titleId) {
+          if (!titleId) return '';
+          let record;
+          try {
+            const r = await relayFollow('GET', THUNDER_MEDIA + encodeURIComponent(titleId), {}, '');
+            if (r.status < 200 || r.status >= 300) return '';
+            record = JSON.parse(r.body);
+          } catch (e) {
+            LOGNOTE('no catalogue record for ' + titleId + ': ' + e.message);
+            return '';
+          }
+          let best = '';
+          let bestWidth = 0;
+          for (const cover of Object.values((record && record.covers) || {})) {
+            if (!cover || !cover.href || cover.isPlaceholderImage) continue;
+            const width = Number(cover.width) || 0;
+            if (width <= bestWidth) continue;
+            bestWidth = width;
+            best = cover.href;
+          }
+          return best;
+        }
+
+        // Artwork lands beside the book, "/Libby/Title.epub" -> "/Libby/Title.jpg",
+        // which is where Epub::generateThumbBmpFromSidecar looks when the copy on
+        // the card has no usable cover of its own. Best-effort: a book with no
+        // artwork is still a book, so this never fails a download.
+        function coverDestinationFor(dest) {
+          return dest.replace(/\.[^./]*$/, '') + '.jpg';
+        }
+
+        async function cacheCoverFor(titleId, dest) {
+          const url = await catalogueCoverUrl(titleId);
+          if (!url) return false;
+          try {
+            await fetchToSd(url, coverDestinationFor(dest), {});
+            LOGNOTE('cover saved to ' + coverDestinationFor(dest));
+            return true;
+          } catch (e) {
+            LOGNOTE('cover download failed: ' + e.message);
+            return false;
+          }
+        }
+
         // ====================================================================
         // XML model
         // ====================================================================
@@ -1448,6 +1503,7 @@
             actions.className = 'row-actions';
             actions.appendChild(button('Send to reader', 'btn-primary', () => sendLoan(loan)));
             actions.appendChild(button('Renew', 'btn-plain', () => renewLoan(loan)));
+            actions.appendChild(button('Get cover', 'btn-plain', () => fetchCover(loan)));
             actions.appendChild(button('Return', 'btn-danger', () => returnLoan(loan)));
 
             row.appendChild(info);
@@ -1611,7 +1667,10 @@
           const acsm = await fetchAcsm(loan);
           const result = await fulfill(acsm);
           await recordBook(loan.id, result.dest);
-          okStatus('“' + result.title + '” is on the reader, in ' + BOOK_DIR + '.');
+          busyStatus('Fetching the cover for “' + result.title + '”…');
+          const gotCover = await cacheCoverFor(loan.id, result.dest);
+          okStatus('“' + result.title + '” is on the reader, in ' + BOOK_DIR + '.' +
+            (gotCover ? '' : ' No cover artwork was published for it.'));
         })();
 
         const renewLoan = (loan) => guard(async function () {
@@ -1628,6 +1687,23 @@
           const result = await fulfill(acsm, { existingDest: bookPath });
           okStatus('“' + result.title + '” renewed; the book on the card was kept.');
           await reloadLoans();
+        })();
+
+        // Standalone, because a book can arrive without artwork for reasons that
+        // later stop applying: the catalogue record was slow, the download
+        // segment failed, or the book predates the device knowing to ask. It
+        // needs no licence and no session -- the catalogue is public -- so it
+        // works on a book that is already sitting on the card.
+        const fetchCover = (loan) => guard(async function () {
+          const bookPath = (await loadBookMap())[String(loan.id)];
+          if (!bookPath) {
+            throw new Error('this book was not sent from here, so the reader has nowhere to put the cover');
+          }
+          busyStatus('Fetching the cover for “' + (loan.title || loan.id) + '”…');
+          if (!await cacheCoverFor(loan.id, bookPath)) {
+            throw new Error('OverDrive publishes no cover artwork for this title');
+          }
+          okStatus('Cover saved. The reader rebuilds its thumbnail the next time it lists the book.');
         })();
 
         const returnLoan = (loan) => guard(async function () {

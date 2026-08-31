@@ -15,7 +15,6 @@
 #include "WifiSelectionActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
 #include "activities/settings/BookFusionBrowserActivity.h"
-#include "activities/settings/LibbyBrowserActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/QrUtils.h"
@@ -132,25 +131,6 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "Libby";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
-
-  // Libby browses natively, exactly as BookFusion does. Only the one-time setup
-  // (linking the account, authorising the reader) lives in the web UI, reached
-  // through Join Network -> /libby.
-  if (mode == NetworkMode::LIBBY) {
-    startActivityForResult(
-        std::make_unique<LibbyBrowserActivity>(renderer, mappedInput), [this](const ActivityResult&) {
-          state = WebServerActivityState::MODE_SELECTION;
-          startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
-                                 [this](const ActivityResult& result) {
-                                   if (result.isCancelled) {
-                                     onGoHome();
-                                   } else {
-                                     onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
-                                   }
-                                 });
-        });
-    return;
-  }
 
   if (mode == NetworkMode::BOOKFUSION) {
     // Use startActivityForResult so pressing Back in the browser returns to mode

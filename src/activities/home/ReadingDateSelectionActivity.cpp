@@ -115,21 +115,6 @@ void ReadingDateSelectionActivity::loop() {
     return;
   }
 
-#if FREEINK_DEVICE_X4PRO
-  // The on-screen Confirm button commits. Checked before the rows so a tap that
-  // lands on it never falls through to the field hit-test.
-  if (SETTINGS.fullTouchUi) {
-    int lx, ly;
-    if (mappedInput.wasTapPoint(lx, ly)) {
-      const Rect confirm = UITheme::getConfirmButtonRect(renderer);
-      if (lx >= confirm.x && lx < confirm.x + confirm.width && ly >= confirm.y && ly < confirm.y + confirm.height) {
-        finishWithDate();
-        return;
-      }
-    }
-  }
-#endif
-
   int tappedIndex;
   switch (TouchListNav::tapRow(mappedInput, listRect(), FIELD_COUNT, selectedField,
                                /*hasSubtitle=*/true, tappedIndex)) {
@@ -139,7 +124,7 @@ void ReadingDateSelectionActivity::loop() {
       return;
     case TouchListNav::TapResult::Activated:
       // Tapping the field already under the cursor steps its value, matching
-      // the Right button; the Confirm button is what commits.
+      // the Right button; the action bar's Confirm is what commits.
       adjustSelectedField(1);
       return;
     case TouchListNav::TapResult::None:
@@ -202,9 +187,7 @@ void ReadingDateSelectionActivity::render(RenderLock&&) {
   const std::string hint = renderer.truncatedText(UI_10_FONT_ID, tr(STR_SET_DATE_HINT), hintWidth);
   renderer.drawText(UI_10_FONT_ID, sidePadding, hintTop, hint.c_str());
 
-  UITheme::drawConfirmButton(renderer, tr(STR_CONFIRM));
-
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
   renderer.displayBuffer();
 }

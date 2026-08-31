@@ -34,4 +34,7 @@ class SessionDateEditActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool handlesDirectTouch() const override { return true; }
+  // Keep the bar's Confirm: a tap on the highlighted field steps its value,
+  // so saving the session has no other affordance.
+  bool tapActivatesConfirm() const override { return false; }
 };

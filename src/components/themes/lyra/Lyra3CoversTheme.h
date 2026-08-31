@@ -13,6 +13,15 @@ constexpr ThemeMetrics values = [] {
   v.homeRecentBooksCount = 3;
   return v;
 }();
+
+#if FREEINK_DEVICE_X4PRO
+// Gesture mode (Full Touch off) reclaims the action-bar strip; see BaseMetrics.
+constexpr ThemeMetrics noActionBarValues = [] {
+  ThemeMetrics v = values;
+  v.buttonHintsHeight = 0;
+  return v;
+}();
+#endif
 }  // namespace Lyra3CoversMetrics
 
 class Lyra3CoversTheme : public LyraTheme {
@@ -22,7 +31,7 @@ class Lyra3CoversTheme : public LyraTheme {
   // homeRecentBooksCount/homeCoverTileHeight from here. Without it every tap in
   // the strip resolved to a single column, i.e. always the first book.
   // LyraLibraryTheme inherits this — it shares these metrics by design.
-  const ThemeMetrics& themeMetrics() const override { return Lyra3CoversMetrics::values; }
+  const ThemeMetrics& themeMetrics() const override;
 
   void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,

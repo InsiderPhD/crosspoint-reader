@@ -6,6 +6,9 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#if FREEINK_DEVICE_X4PRO
+#include "ReaderActionSelectActivity.h"
+#endif
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/TouchListNav.h"
@@ -69,18 +72,14 @@ void ReaderControlsActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
-      cycleActionForRow(kRowIds[selectedRow]);
-      isDirty = true;
-      requestUpdate();
+      activateRow(kRowIds[selectedRow]);
       return;
     case TouchListNav::TapResult::None:
       break;
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    cycleActionForRow(kRowIds[selectedRow]);
-    isDirty = true;
-    requestUpdate();
+    activateRow(kRowIds[selectedRow]);
     return;
   }
 
@@ -164,19 +163,24 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
   const char* btn;
   switch (row / 2) {
 #if FREEINK_DEVICE_X4PRO
-    // Gestures, not buttons: swipes reuse the Back/Confirm/Left/Right action
-    // slots (see MappedInputManager's X4 Pro mapping table).
+    // The front four. Back and Confirm are reached by the horizontal swipes,
+    // which read backwards from the slot names -- on hardware a RIGHTWARD flick
+    // lands on the Back slot and a leftward one on Confirm -- so those rows are
+    // labelled by the gesture the user actually makes, not by the slot behind
+    // it. Left/Right are the action bar's outer slots. The VERTICAL swipes are
+    // not here: they are the side keys' gesture twin and follow the side rows
+    // below. See MappedInputManager's X4 Pro mapping table.
     case 0:
-      btn = tr(STR_SWIPE_LEFT);
-      break;
-    case 1:
       btn = tr(STR_SWIPE_RIGHT);
       break;
+    case 1:
+      btn = tr(STR_SWIPE_LEFT);
+      break;
     case 2:
-      btn = tr(STR_SWIPE_UP);
+      btn = tr(STR_DIR_LEFT);
       break;
     case 3:
-      btn = tr(STR_SWIPE_DOWN);
+      btn = tr(STR_DIR_RIGHT);
       break;
 #else
     case 0:
@@ -194,7 +198,8 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
 #endif
     case 4:
 #if FREEINK_DEVICE_X4PRO
-      // X4 Pro side keys sit left/right of the screen, like the X3's.
+      // X4 Pro side keys sit left/right of the screen, like the X3's, and a
+      // vertical swipe is their gesture twin -- both reach this row.
       btn = tr(STR_DIR_SIDE_L);
 #else
       // X3 side buttons sit left/right, not up/down — label them accordingly.
@@ -295,139 +300,111 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
   }
 }
 
-CrossPointSettings::READER_ACTION ReaderControlsActivity::getActionForRow(const uint8_t row) const {
-  using A = CrossPointSettings::READER_ACTION;
+uint8_t* ReaderControlsActivity::fieldForRow(const uint8_t row) const {
   switch (row) {
     case 0:
-      return static_cast<A>(SETTINGS.readerShortPressBack);
+      return &SETTINGS.readerShortPressBack;
     case 1:
-      return static_cast<A>(SETTINGS.readerLongPressBack);
+      return &SETTINGS.readerLongPressBack;
     case 2:
-      return static_cast<A>(SETTINGS.readerShortPressConfirm);
+      return &SETTINGS.readerShortPressConfirm;
     case 3:
-      return static_cast<A>(SETTINGS.readerLongPressConfirm);
+      return &SETTINGS.readerLongPressConfirm;
     case 4:
-      return static_cast<A>(SETTINGS.readerShortPressLeft);
+      return &SETTINGS.readerShortPressLeft;
     case 5:
-      return static_cast<A>(SETTINGS.readerLongPressLeft);
+      return &SETTINGS.readerLongPressLeft;
     case 6:
-      return static_cast<A>(SETTINGS.readerShortPressRight);
+      return &SETTINGS.readerShortPressRight;
     case 7:
-      return static_cast<A>(SETTINGS.readerLongPressRight);
+      return &SETTINGS.readerLongPressRight;
     case 8:
-      return static_cast<A>(SETTINGS.readerShortPressSideUp);
+      return &SETTINGS.readerShortPressSideUp;
     case 9:
-      return static_cast<A>(SETTINGS.readerLongPressSideUp);
+      return &SETTINGS.readerLongPressSideUp;
     case 10:
-      return static_cast<A>(SETTINGS.readerShortPressSideDown);
+      return &SETTINGS.readerShortPressSideDown;
     case 11:
-      return static_cast<A>(SETTINGS.readerLongPressSideDown);
+      return &SETTINGS.readerLongPressSideDown;
     case 12:
-      return static_cast<A>(SETTINGS.readerShortPressPower);
+      return &SETTINGS.readerShortPressPower;
     case 13:
       // Power long press is fixed sleep and isn't a bindable action; the row's
       // label is special-cased in getRowActionName().
-      return CrossPointSettings::READER_ACTION_NONE;
+      return nullptr;
     case 14:
-      return static_cast<A>(SETTINGS.readerTapLeft);
+      return &SETTINGS.readerTapLeft;
     case 15:
-      return static_cast<A>(SETTINGS.readerTapMiddle);
+      return &SETTINGS.readerTapMiddle;
     case 16:
-      return static_cast<A>(SETTINGS.readerTapRight);
+      return &SETTINGS.readerTapRight;
     case 17:
-      return static_cast<A>(SETTINGS.readerShortPressHome);
+      return &SETTINGS.readerShortPressHome;
     case 18:
-      return static_cast<A>(SETTINGS.readerLongPressHome);
+      // Hard-wired to Open Menu: the menu is the only guaranteed route to Go
+      // Home once every other slot is remappable. (Dev-mode override parked --
+      // see CrossPointSettings::effectiveReaderLongPressHome.)
+      return nullptr;
     case 19:
-      return static_cast<A>(SETTINGS.readerHoldLeft);
+      return &SETTINGS.readerHoldLeft;
     case 20:
-      return static_cast<A>(SETTINGS.readerHoldMiddle);
+      return &SETTINGS.readerHoldMiddle;
     case 21:
-      return static_cast<A>(SETTINGS.readerHoldRight);
+      return &SETTINGS.readerHoldRight;
     default:
-      return CrossPointSettings::READER_ACTION_NONE;
+      return nullptr;
   }
 }
 
+CrossPointSettings::READER_ACTION ReaderControlsActivity::getActionForRow(const uint8_t row) const {
+  const uint8_t* field = fieldForRow(row);
+  return field ? static_cast<CrossPointSettings::READER_ACTION>(*field) : CrossPointSettings::READER_ACTION_NONE;
+}
+
+void ReaderControlsActivity::activateRow(const uint8_t row) {
+#if FREEINK_DEVICE_X4PRO
+  openActionPicker(row);
+#else
+  cycleActionForRow(row);
+  isDirty = true;
+  requestUpdate();
+#endif
+}
+
+#if FREEINK_DEVICE_X4PRO
+
+// X4 Pro only. Cycling costs one Confirm per step, which is the cheaper
+// interaction on a device with real front buttons -- a picker would turn every
+// change into open/scroll/select and wear those buttons three times as fast.
+// The X4 Pro has no front buttons: the same cycle is a blind tap-and-look, so
+// there it becomes a list.
+void ReaderControlsActivity::openActionPicker(const uint8_t row) {
+  uint8_t* field = fieldForRow(row);
+  if (!field) return;
+
+  startActivityForResult(std::make_unique<ReaderActionSelectActivity>(renderer, mappedInput, getRowTitle(row), *field),
+                         [this, field](const ActivityResult& result) {
+                           const auto* picked = std::get_if<ReaderActionResult>(&result.data);
+                           if (!picked || picked->action == *field) return;
+                           *field = picked->action;
+                           // Batched: the single save happens when this screen exits.
+                           isDirty = true;
+                         });
+}
+
+#else
+
 void ReaderControlsActivity::cycleActionForRow(const uint8_t row) {
-  if (row == kFixedRow) return;
-  // Screenshot is a developer/testing action — skip it while cycling unless Dev Mode
+  uint8_t* field = fieldForRow(row);
+  if (!field) return;
+  // Screenshot is a developer/testing action -- skip it while cycling unless Dev Mode
   // is on (a button already set to it from a prior Dev session still works and cycles past).
   // Retired values (Sleep, Mark Finished) are never offered.
   const bool dev = SETTINGS.devMode != 0;
-  const auto advance = [dev](uint8_t& field) {
-    do {
-      field = (field + 1) % static_cast<uint8_t>(CrossPointSettings::READER_ACTION_COUNT);
-    } while (CrossPointSettings::isRetiredReaderAction(field) ||
-             (!dev && field == CrossPointSettings::READER_ACTION_SCREENSHOT));
-  };
-  switch (row) {
-    case 0:
-      advance(SETTINGS.readerShortPressBack);
-      break;
-    case 1:
-      advance(SETTINGS.readerLongPressBack);
-      break;
-    case 2:
-      advance(SETTINGS.readerShortPressConfirm);
-      break;
-    case 3:
-      advance(SETTINGS.readerLongPressConfirm);
-      break;
-    case 4:
-      advance(SETTINGS.readerShortPressLeft);
-      break;
-    case 5:
-      advance(SETTINGS.readerLongPressLeft);
-      break;
-    case 6:
-      advance(SETTINGS.readerShortPressRight);
-      break;
-    case 7:
-      advance(SETTINGS.readerLongPressRight);
-      break;
-    case 8:
-      advance(SETTINGS.readerShortPressSideUp);
-      break;
-    case 9:
-      advance(SETTINGS.readerLongPressSideUp);
-      break;
-    case 10:
-      advance(SETTINGS.readerShortPressSideDown);
-      break;
-    case 11:
-      advance(SETTINGS.readerLongPressSideDown);
-      break;
-    case 12:
-      advance(SETTINGS.readerShortPressPower);
-      break;
-    case 14:
-      advance(SETTINGS.readerTapLeft);
-      break;
-    case 15:
-      advance(SETTINGS.readerTapMiddle);
-      break;
-    case 16:
-      advance(SETTINGS.readerTapRight);
-      break;
-    case 17:
-      advance(SETTINGS.readerShortPressHome);
-      break;
-    case 18:
-      // Hard-wired to Open Menu: the menu is the only guaranteed route to Go
-      // Home once every other slot is remappable. (Dev-mode override parked —
-      // see CrossPointSettings::effectiveReaderLongPressHome.)
-      break;
-    case 19:
-      advance(SETTINGS.readerHoldLeft);
-      break;
-    case 20:
-      advance(SETTINGS.readerHoldMiddle);
-      break;
-    case 21:
-      advance(SETTINGS.readerHoldRight);
-      break;
-    default:
-      break;
-  }
+  do {
+    *field = (*field + 1) % static_cast<uint8_t>(CrossPointSettings::READER_ACTION_COUNT);
+  } while (CrossPointSettings::isRetiredReaderAction(*field) ||
+           (!dev && *field == CrossPointSettings::READER_ACTION_SCREENSHOT));
 }
+
+#endif  // FREEINK_DEVICE_X4PRO

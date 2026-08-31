@@ -120,9 +120,11 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeCoverTileHeight = 400,
                                  .homeRecentBooksCount = 1,
 #if FREEINK_DEVICE_X4PRO
-                                 // No front buttons on the X4 Pro: the bottom hint bar is never
-                                 // drawn (drawButtonHints no-ops), so screens reclaim its strip.
-                                 .buttonHintsHeight = 0,
+                                 // X4 Pro has no front buttons, so this strip holds the tappable
+                                 // action bar instead of four button labels (see ActionBar.h).
+                                 // A touch target wants more than the 40px a label needed.
+                                 // Gesture mode reclaims the strip via noActionBarValues below.
+                                 .buttonHintsHeight = 44,
 #else
                                  .buttonHintsHeight = 40,
 #endif
@@ -144,6 +146,17 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .keyboardTextFieldWidthPercent = 85,
                                  .keyboardWidthPercent = 90,
                                  .keyboardKeyCornerRadius = 0};
+
+#if FREEINK_DEVICE_X4PRO
+// Gesture mode (Full Touch off): nothing is drawn in the hint strip, so screens
+// reclaim it. BaseTheme::themeMetrics() picks between the two at runtime, which
+// is why it is defined out of line -- the choice needs SETTINGS.
+constexpr ThemeMetrics noActionBarValues = [] {
+  ThemeMetrics v = values;
+  v.buttonHintsHeight = 0;
+  return v;
+}();
+#endif
 }  // namespace BaseMetrics
 
 class BaseTheme {
@@ -155,7 +168,7 @@ class BaseTheme {
   // so a theme that overrides drawList/drawTabBar against its own table must
   // override this too — that single override keeps paint and hit-test in
   // lockstep.
-  virtual const ThemeMetrics& themeMetrics() const { return BaseMetrics::values; }
+  virtual const ThemeMetrics& themeMetrics() const;
 
   // Row geometry of a drawList call. Single source for drawList AND
   // hitTestList so the two can never drift.
@@ -192,8 +205,13 @@ class BaseTheme {
                                bool showPercentage = true) const;  // Left aligned (reader mode)
   virtual void drawBatteryRight(const GfxRenderer& renderer, Rect rect,
                                 bool showPercentage = true) const;  // Right aligned (UI headers)
+  // allSlots is an X4 Pro concern only. There the labels become the Full Touch
+  // action bar's tap targets, and only Back/Confirm get one by default -- see
+  // ActionBar.h. A screen whose Left/Right are ACTIONS rather than directions
+  // passes true to have all four drawn. Boards with real front buttons always
+  // draw all four labels and ignore it.
   virtual void drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
-                               const char* btn4) const;
+                               const char* btn4, bool allSlots = false) const;
   virtual void drawSideButtonHints(const GfxRenderer& renderer, const char* topBtn, const char* bottomBtn) const;
   // Side-mounted Power-button hint: a bordered box styled like the front-button hints but
   // rotated 90° (sideways), drawn on the left edge. Used by list screens where a Power

@@ -48,4 +48,7 @@ class BookReadingAdjustmentActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool handlesDirectTouch() const override { return true; }
+  // Keep the bar's Confirm: a tap on the highlighted field steps or edits it
+  // (touchActivateSelectedField), which is not what Confirm does there.
+  bool tapActivatesConfirm() const override { return false; }
 };

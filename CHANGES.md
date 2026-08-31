@@ -6,6 +6,37 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ## Unreleased
 
+### The X4 Pro action bar stops offering "Select"
+
+Full Touch turned the bottom hint strip into real tap targets, and every menu
+inherited the button boards' pair: **Back | Select**. On a screen where the rows
+themselves are tappable, that second slot ran exactly the handler a tap on the
+highlighted row already runs — a button whose only job was to duplicate the list
+it sat under.
+
+The bar now leaves it out. `Activity::tapActivatesConfirm()` defaults to
+`handlesDirectTouch()`, which is precisely the set of screens that hit-test taps
+against their own drawn UI (first tap moves the cursor, second tap activates),
+and `ActivityManager` publishes it to `ActionBar` before each render, so no
+screen threads a flag through its render path. A plain menu is left with one
+full-width **Back**; Home, which has no Back, shows no bar at all. Screens that
+opted into all four slots keep their Left/Right actions and just lose the middle
+one — the Bluetooth device list still offers Disconnect and Retry.
+
+The exception is the screens where Confirm has no on-screen equivalent: the date
+and number spinners (manual date, session date edit, reading date selection,
+book reading adjustment) step the highlighted field on a second tap and commit
+only from the bar, and clip selection uses taps to move the word range. Those
+five override the virtual back to false. Getting that wrong strands the user —
+this board has no front buttons, and `handlesDirectTouch()` has already switched
+off the tap-anywhere-is-Confirm injection — so the rule is documented at the
+virtual itself.
+
+X4 Pro Full Touch only; the button boards still label all four front buttons.
+
+**Files changed**: `src/activities/Activity.h`, `src/activities/ActivityManager.cpp`,
+`src/components/ActionBar.{h,cpp}`, the five opt-out activity headers.
+
 ### A line of text is one heap allocation, not five vectors
 
 A resident page holds roughly 25-30 laid-out lines, and each one used to carry five parallel containers — `std::vector<std::string>` words plus per-word x-positions, styles and the two bionic arrays. That is on the order of **250 small heap blocks per page load**, and it was the single largest driver of fragmentation on the C3. Fragmentation is the failure that matters here: free bytes can look healthy while the section builder still cannot find the 32KB contiguous window miniz needs, which is exactly the state a resident BLE stack puts the heap in.
@@ -23,11 +54,13 @@ Section cache format **v41**. Ported from upstream crosspoint #2547 and #2814.
 
 **Files changed**: `lib/Epub/Epub/blocks/TextBlock.*`, `lib/Epub/Epub/{Page,ParsedText,Section}.*`, `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.*`, `lib/Epub/Epub.cpp`, `src/activities/reader/EpubReaderActivity.cpp`.
 
-### Bluetooth takes the restart it needs
+### Bluetooth asks for a restart instead of taking one
 
-The BLE controller wants one contiguous block of at least 30KB. Once a session has been torn down, small allocations left scattered through the working region cap the largest block far below that — measured on-device at ~17KB largest with ~82KB *free*. Nothing the firmware can free fixes that; only a fresh heap does. The reader used to put up "Not enough RAM for Bluetooth" and leave the user to work out that a manual restart was the remedy.
+The BLE controller wants one contiguous block of at least 30KB. Once a session has been torn down, small allocations left scattered through the working region cap the largest block far below that — measured on-device at ~17KB largest with ~82KB *free*. Nothing the firmware can free fixes that; only a fresh heap does. By the time `enable()` is called from the reader the chapter layout, the `Epub` and the glyph cache have already been handed back, so there is genuinely nothing left to give up.
 
-On a `HeapFragmented` refusal the reader now saves progress and **restarts itself, once per boot**. The intent rides in `RTC_NOINIT` memory — it survives `ESP.restart()` but not a power cut, which is the right lifetime — and `setup()` consumes it in the same breath as the silent-reboot flag, so a later panic cannot re-trigger the auto-enable. The boot does not enable BLE directly: it re-arms "Bluetooth wanted" and lets `maybeAutoRestoreBluetooth()` fire once a chapter is resident, which is the state that guarantees the contiguous block exists.
+The reader briefly answered that by saving progress and rebooting itself, once per boot. That is now gone: a memory refusal puts up **"Restart the device to free memory"** and leaves the decision with the reader. Restarting a device out from under someone mid-page costs them the thing they were doing for a mechanism they never asked for, and it does it blind — a fresh heap is not guaranteed to be enough either, so the reboot can spend the interruption and still land on the same refusal.
+
+`RTC_NOINIT` flag, the once-per-boot guard and the boot-time re-arm are removed with it. The standing "Bluetooth wanted" flag is unaffected: it is persisted in settings, so a paired remote still comes back by itself once a chapter is resident.
 
 **Files changed**: `src/SilentRestart.h`, `src/main.cpp`, `src/activities/reader/EpubReaderActivity.cpp`, `lib/I18n/translations/english.yaml`.
 

@@ -589,8 +589,14 @@ void WifiSelectionActivity::renderNetworkList() const {
   const bool hasSavedPassword = !networks.empty() && networks[selectedNetworkIndex].hasSavedPassword;
   const char* forgetLabel = hasSavedPassword ? tr(STR_FORGET_BUTTON) : "";
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), forgetLabel, tr(STR_RETRY));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Forget and Retry name actions, not directions, so they must not follow the
+  // orientation swap Up/Down labels do -- the buttons behind them never swap.
+  // allSlots gets them drawn on the X4 Pro too, where the front pair they sit
+  // on is the action bar rather than physical buttons. See
+  // MappedInputManager::mapLabels and ActionBar.h.
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONNECT), forgetLabel, tr(STR_RETRY), /*directional=*/false);
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
 }
 
 void WifiSelectionActivity::renderConnecting() const {

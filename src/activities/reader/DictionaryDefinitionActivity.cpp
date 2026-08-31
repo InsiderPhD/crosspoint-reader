@@ -13,6 +13,7 @@
 #include "fontIds.h"
 #include "util/DictHtmlPages.h"
 #include "util/HtmlToPlainText.h"
+#include "util/TouchListNav.h"
 
 namespace {
 
@@ -197,6 +198,26 @@ void DictionaryDefinitionActivity::loop() {
   }
 
 #if FREEINK_DEVICE_X4PRO
+  // Full Touch: a vertical swipe pages the definition too, content-drag sense
+  // (swipe up reveals what is below), matching every other scrollable surface.
+  // The currentPage bounds either side are the check pageSwipeDelta requires.
+  switch (TouchListNav::pageSwipeDelta(mappedInput)) {
+    case +1:
+      if (currentPage + 1 < totalPages) {
+        currentPage++;
+        requestUpdate();
+      }
+      return;
+    case -1:
+      if (currentPage > 0) {
+        currentPage--;
+        requestUpdate();
+      }
+      return;
+    default:
+      break;
+  }
+
   // Same tap zones as the reader page turns: left third = previous page,
   // the rest = next. Back is the usual left-edge swipe. Fenced because the tap
   // queries only exist on the touch board — see MappedInputManager.h.

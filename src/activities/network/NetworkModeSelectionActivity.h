@@ -28,6 +28,10 @@ class NetworkModeSelectionActivity final : public Activity {
   // Confirm the highlighted mode — the Confirm press body, also fired by a
   // Full Touch tap on the selected row.
   void handleSelection();
+
+  // Selecting Libby raises a note pointing at the web UI rather than entering a
+  // mode -- there is no on-device Libby flow any more. Any key clears it.
+  bool showingLibbyNote = false;
   Rect listRect() const;
 
  public:
@@ -37,7 +41,10 @@ class NetworkModeSelectionActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
-  bool handlesDirectTouch() const override { return true; }
+  // While the Libby note is up the screen wants any contact at all to dismiss
+  // it, so it hands touch back to the global tap-is-Confirm injection rather
+  // than hit-testing rows behind the popup.
+  bool handlesDirectTouch() const override { return !showingLibbyNote; }
 
   void onModeSelected(NetworkMode mode);
   void onCancel();

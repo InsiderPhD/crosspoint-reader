@@ -59,13 +59,22 @@ class MappedInputManager {
 
   // Completed screen tap this frame, classified into left/middle/right thirds
   // of the logical screen. None while a home-key event fires (a bar contact
-  // also reports as an edge tap and must not double-dispatch).
+  // also reports as an edge tap and must not double-dispatch), and none for a
+  // tap the Full Touch action bar consumed (see below).
   TapZone wasTapZone() const;
 
   // Completed screen tap this frame in logical screen coordinates for the
   // active orientation, i.e. the same frame the activity draws in. For
   // consumers that hit-test real UI geometry (the keyboard); wasTapZone() is
   // the coarse thirds classification the readers use. Same home-key exclusion.
+  //
+  // Also false for a tap the Full Touch action bar consumed. That tap has
+  // already become a Back/Confirm/Left/Right press, so reporting it as a screen
+  // tap as well would double-dispatch: the dictionary's tap-zone page turn, the
+  // confirmation dialog's tap-anywhere-cancels, and the popups' tap-outside-
+  // dismisses all fire on any point they do not recognise, and the bar's
+  // buttons are exactly such points. Suppressing it here fixes all of them at
+  // once, which is also the honest layering — the contact is spent.
   bool wasTapPoint(int& lx, int& ly) const;
 
   // Finger down and stationary past the SDK long-press threshold, in the same
@@ -102,7 +111,15 @@ class MappedInputManager {
   bool wasAnyReleased() const;
   unsigned long getHeldTime() const;
   unsigned long getHeldTime(Button button) const;
-  Labels mapLabels(const char* back, const char* confirm, const char* previous, const char* next) const;
+  // Places four labels in the four front hint slots, following the user's
+  // button remap. `directional` says whether the left/right pair NAMES a
+  // direction (Up/Down, Prev/Next): those follow the page-turn swap in INVERTED
+  // and LANDSCAPE_CCW, so the label matching the physical direction stays under
+  // the right button. Labels that name an ACTION instead (Renew/Return) must
+  // pass false -- swapping those puts the wrong action's name on a button, and
+  // the button mapping itself never swaps.
+  Labels mapLabels(const char* back, const char* confirm, const char* previous, const char* next,
+                   bool directional = true) const;
   // Returns the raw front button index that was pressed this frame (or -1 if none).
   int getPressedFrontButton() const;
   // Resolves a logical button to the physical hardware index (used for BLE virtual injection).
@@ -117,8 +134,12 @@ class MappedInputManager {
   bool tapActsAsConfirm = true;
   bool swipesBackOnly = false;
   // Written by the const processTouchInput(); the injected presses live in gpio
-  // so this is the only piece of per-frame touch state the manager itself owns.
+  // so these are the only pieces of per-frame touch state the manager owns.
   mutable Swipe swipe = Swipe::None;
+  // This frame's tap landed on an action-bar button and became that button's
+  // press; wasTapPoint()/wasTapZone() must not also report it. Cleared at the
+  // start of every update().
+  mutable bool tapConsumedByActionBar = false;
 
   // A touch point mapped into the logical frame, carried with the logical
   // screen size so callers can classify against it without re-deriving it.

@@ -52,10 +52,13 @@ inline TapResult tapRow(const MappedInputManager& mappedInput, const Rect& rect,
 }
 
 // Full Touch page paging for any list that actually paginates: a vertical swipe
-// jumps a whole page — swipe up = previous page, swipe down = next page, the
-// same wrap-around the held side key gives. Returns true when index moved, so
-// the call site only has to requestUpdate() (and return, since the gesture is
-// consumed):
+// jumps a whole page, with the SAME sense as dragging content on a phone —
+// swipe UP pulls the list up, revealing what is below it, so it goes to the
+// NEXT page; swipe down goes back. (This was the other way round until
+// 2026-08-30; the user asked for the iPhone convention. It is the direction of
+// the CONTENT, not of the cursor or the scrollbar thumb.) Same wrap-around the
+// held side key gives. Returns true when index moved, so the call site only has
+// to requestUpdate() (and return, since the gesture is consumed):
 //
 //   if (TouchListNav::pageSwipe(mappedInput, totalItems, pageItems, selectorIndex)) {
 //     requestUpdate();
@@ -74,30 +77,35 @@ inline bool pageSwipe(const MappedInputManager& mappedInput, const int itemCount
   }
   switch (mappedInput.wasSwipe()) {
     case MappedInputManager::Swipe::Up:
-      index = ButtonNavigator::previousPageIndex(index, itemCount, pageItems);
+      index = ButtonNavigator::nextPageIndex(index, itemCount, pageItems);
       return true;
     case MappedInputManager::Swipe::Down:
-      index = ButtonNavigator::nextPageIndex(index, itemCount, pageItems);
+      index = ButtonNavigator::previousPageIndex(index, itemCount, pageItems);
       return true;
     default:
       return false;
   }
 }
 
-// Full Touch paging for lists whose pagination is server-side (BookFusion
-// browse): one fetched page fits on one screen, so pageSwipe()'s local index
-// jump can never fire there. Returns -1 for swipe up (previous page), +1 for
-// swipe down (next page), 0 otherwise — the same direction mapping as
-// pageSwipe(). The call site performs the page fetch itself and MUST supply
-// its own bounds (no-op when there is no adjacent page): unlike pageSwipe()
-// there is no single-page inertness guard here, and a sloppy tap the panel
-// classifies as a swipe must not trigger a network fetch on a one-page list.
+// Raw Full Touch vertical-swipe direction, for every scrollable surface that
+// pageSwipe() cannot drive itself:
+//   * pagination that is server-side (BookFusion browse) — one fetched page
+//     fills the screen, so there is no local index to jump;
+//   * continuous scroll rather than paging (the stats tables and charts, a book
+//     description) — the call site owns the step size and the clamp.
+// Returns +1 for swipe up (forward: reveal what is below), -1 for swipe down
+// (back), 0 otherwise — the same content-drag direction as pageSwipe().
+//
+// The call site MUST supply its own bounds, i.e. be a no-op when there is
+// nothing in that direction. Unlike pageSwipe() there is no inertness guard
+// here, and a sloppy tap the panel classifies as a swipe must not fire a
+// network fetch or nudge a surface that cannot move.
 inline int pageSwipeDelta(const MappedInputManager& mappedInput) {
   switch (mappedInput.wasSwipe()) {
     case MappedInputManager::Swipe::Up:
-      return -1;
-    case MappedInputManager::Swipe::Down:
       return +1;
+    case MappedInputManager::Swipe::Down:
+      return -1;
     default:
       return 0;
   }
@@ -109,10 +117,12 @@ inline int pageSwipeDelta(const MappedInputManager& mappedInput) {
 //
 // The backward direction is deliberately NOT here. A leftward swipe is still
 // injected as Back — the X4 Pro has no physical Back button, so that gesture
-// cannot be repurposed wholesale. The tabbed screens instead reinterpret their
-// Back handler while Full Touch is on: step to the previous tab, and close only
-// when already on the first one. So "keep swiping left" still leaves the
-// screen, it just walks back through the tabs on the way out.
+// cannot be repurposed wholesale, and since 2026-08-30 Back on these screens
+// simply CLOSES them in Full Touch (it used to step back a tab and close only
+// from the first, which made leaving take as many gestures as there are tabs).
+// A previous tab is reached by tapping it on the ribbon, or by wrapping forward
+// with this swipe. Gesture mode and the button boards are unaffected: there
+// Back keeps its row -> ribbon -> close ladder.
 inline bool tabSwipeNext(const MappedInputManager& mappedInput) {
   return mappedInput.wasSwipe() == MappedInputManager::Swipe::Right;
 }
