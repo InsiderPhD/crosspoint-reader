@@ -835,9 +835,74 @@ bool Epub::generateCoverBmp(bool cropped) const {
 std::string Epub::getThumbBmpPath() const { return cachePath + "/thumb_[HEIGHT].bmp"; }
 std::string Epub::getThumbBmpPath(int height) const { return cachePath + "/thumb_" + std::to_string(height) + ".bmp"; }
 
+std::string Epub::sidecarCoverPath(const char* ext) const {
+  const std::string& book = getPath();
+  const size_t dot = book.find_last_of('.');
+  const size_t slash = book.find_last_of('/');
+  // No extension to replace (or the only dot is in a directory name): append.
+  if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
+    return book + ext;
+  }
+  return book.substr(0, dot) + ext;
+}
+
+bool Epub::generateThumbBmpFromSidecar(const int height) const {
+  static constexpr const char* kExtensions[] = {".jpg", ".jpeg", ".png"};
+
+  for (const char* ext : kExtensions) {
+    const std::string sourcePath = sidecarCoverPath(ext);
+    if (!Storage.exists(sourcePath.c_str())) continue;
+
+    FsFile source;
+    if (!Storage.openFileForRead("EBP", sourcePath, source)) continue;
+
+    FsFile thumbBmp;
+    if (!Storage.openFileForWrite("EBP", getThumbBmpPath(height), thumbBmp)) {
+      source.close();
+      return false;
+    }
+
+    const int targetWidth = static_cast<int>(height * 0.6);
+    const bool success = FsHelpers::hasPngExtension(sourcePath)
+                             ? PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(source, thumbBmp, targetWidth, height)
+                             : JpegToBmpConverter::jpegFileToBmpStreamWithSize(source, thumbBmp, targetWidth, height);
+
+    source.close();
+    thumbBmp.flush();
+    thumbBmp.close();
+
+    if (!success) {
+      // Leave nothing half-written for the next extension to trip over, or for
+      // the library to draw as a cover.
+      LOG_ERR("EBP", "Cover sidecar would not convert: %s", sourcePath.c_str());
+      Storage.remove(getThumbBmpPath(height).c_str());
+      continue;
+    }
+
+    LOG_DBG("EBP", "Generated thumb BMP from cover sidecar %s", sourcePath.c_str());
+    return true;
+  }
+
+  return false;
+}
+
 bool Epub::generateThumbBmp(int height) const {
-  // Already generated, return true
-  if (Storage.exists(getThumbBmpPath(height).c_str())) {
+  const std::string thumbPath = getThumbBmpPath(height);
+  if (Storage.exists(thumbPath.c_str())) {
+    // A zero-byte thumb is the sentinel written below to stop a book with no
+    // usable artwork being re-examined on every paint. It must not outlive the
+    // artwork arriving: the Libby page writes its cover sidecar long after the
+    // book was first listed, and the sentinel would hide it forever. Cheap to
+    // check -- one stat on a file we already know is there.
+    FsFile existing;
+    size_t existingSize = 0;
+    if (Storage.openFileForRead("EBP", thumbPath, existing)) {
+      existingSize = existing.fileSize();
+      existing.close();
+    }
+    if (existingSize > 0) return true;
+    if (!generateThumbBmpFromSidecar(height)) return true;  // still nothing; keep the sentinel
+    LOG_DBG("EBP", "Cover sidecar appeared after the empty thumb was cached; rebuilt it");
     return true;
   }
 
@@ -889,7 +954,9 @@ bool Epub::generateThumbBmp(int height) const {
       Storage.remove(getThumbBmpPath(height).c_str());
     }
     LOG_DBG("EBP", "Generated thumb BMP from JPG cover image, success: %s", success ? "yes" : "no");
-    return success;
+    if (success) return true;
+    // Falls through to the sidecar: an encrypted book has a cover entry in its
+    // OPF like any other, but the bytes behind it decode to nothing.
   } else if (FsHelpers::hasPngExtension(coverImageHref)) {
     LOG_DBG("EBP", "Generating thumb BMP from PNG cover image");
     const auto coverPngTempPath = getCachePath() + "/.cover.png";
@@ -924,9 +991,14 @@ bool Epub::generateThumbBmp(int height) const {
       Storage.remove(getThumbBmpPath(height).c_str());
     }
     LOG_DBG("EBP", "Generated thumb BMP from PNG cover image, success: %s", success ? "yes" : "no");
-    return success;
+    if (success) return true;
   } else {
     LOG_ERR("EBP", "Cover image format not supported for thumbnail: %s", coverImageHref.c_str());
+  }
+
+  // Nothing usable inside the book: try artwork left beside it.
+  if (generateThumbBmpFromSidecar(height)) {
+    return true;
   }
 
   // Write an empty bmp file to avoid generation attempts in the future
