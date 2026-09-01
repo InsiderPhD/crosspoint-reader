@@ -52,7 +52,6 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "WifiCredentialStore.h"
-#include "SilentRestart.h"
 #include "activities/home/ReadingStatsDetailActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/FontLayoutPreviewActivity.h"
@@ -868,35 +867,31 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
     if (auto* fcm = renderer.getFontCacheManager()) {
       fcm->clearCache();
     }
-    bool restartForBluetooth = false;
     if (!btMgr.enable()) {
-      // HeapFragmented is recoverable and nothing else here can recover it: the
+      // A memory refusal is real and nothing left in the reader can undo it: the
       // controller needs one >=30KB contiguous block, and a BLE session that has
       // been torn down leaves small allocations scattered through the working
       // region that cap the largest block well below that (measured on-device:
-      // ~17KB largest with ~82KB free). Freeing more does not help — only a
-      // restart rebuilds the heap. The firmware already told the user to restart
-      // by hand for exactly this; take it for them, once per boot.
-      restartForBluetooth = btMgr.lastStatus == BtStatus::HeapFragmented && bluetoothRestartAvailable();
+      // ~17KB largest with ~82KB free). By this point the chapter layout, the
+      // Epub and the glyph cache are already freed, so there is nothing more to
+      // give up — only a fresh heap carries the stack and the book at once.
+      //
+      // Say so and let the user decide. Rebooting the device out from under
+      // someone who is reading is not ours to take: it costs the page they are
+      // on to a mechanism they never asked for, and it fails silently when the
+      // fresh heap is still not enough.
+      const bool restartWouldHelp =
+          btMgr.lastStatus == BtStatus::HeapFragmented || btMgr.lastStatus == BtStatus::NotEnoughMemory;
       RenderLock lock(*this);
       if (SETTINGS.darkMode) renderer.invertScreen();
-      GUI.drawPopup(renderer, restartForBluetooth ? tr(STR_BT_RESTARTING_FOR_MEMORY) : tr(STR_BT_ENABLE_FAILED));
+      GUI.drawPopup(renderer, restartWouldHelp ? tr(STR_BT_RESTART_FOR_MEMORY) : tr(STR_BT_ENABLE_FAILED));
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
-      vTaskDelay(1500 / portTICK_PERIOD_MS);
+      vTaskDelay(2500 / portTICK_PERIOD_MS);
     }
     // The Epub comes back whether or not enable() succeeded — the reader
     // can't render without it.
     if (!epubPath.empty() && !reloadEpubAfterBluetooth(epubPath)) {
-      return;
-    }
-    if (restartForBluetooth) {
-      // Persist the page first: the restart lands back here via
-      // silentRestartToReader() + APP_STATE.openEpubPath, and the position is
-      // restored from progress.bin. epub is alive again by now, which
-      // saveProgress() requires for the cache path.
-      saveProgress(currentSpineIndex, nextPageNumber, cachedChapterTotalPageCount);
-      silentRestartToReaderForBluetooth();  // does not return
       return;
     }
   } else {
@@ -953,7 +948,17 @@ void EpubReaderActivity::maybeAutoRestoreBluetooth() {
     fcm->clearCache();
   }
   if (!btMgr.enable()) {
-    LOG_INF("BT", "Auto-restore enable() failed (heap still too tight); will retry after backoff");
+    // A memory refusal will not have cleared five seconds later: this path has
+    // already freed everything it owns. Retrying on the short clock would free
+    // the chapter and reload the Epub once per cycle for nothing, so hold off
+    // for the same interval the degraded-heap render guard uses.
+    const bool memoryRefusal =
+        btMgr.lastStatus == BtStatus::NotEnoughMemory || btMgr.lastStatus == BtStatus::HeapFragmented;
+    LOG_INF("BT", "Auto-restore enable() failed (heap still too tight); retrying %s",
+            memoryRefusal ? "after the long hold-off" : "after backoff");
+    if (memoryRefusal) {
+      btMgr.deferAutoRestore(BT_GUARD_RESTORE_DEFER_MS);
+    }
   }
   // The Epub comes back whether or not enable() succeeded — the reader can't
   // render without it.
