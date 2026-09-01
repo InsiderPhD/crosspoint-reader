@@ -588,13 +588,24 @@ void EpubReaderActivity::loop() {
   }
 
 #if FREEINK_DEVICE_X4PRO
-  // X4 Pro: the Left/Right action slots belong to the swipe-up/swipe-down
-  // gestures (logical Up/Down — the swipe injections). The side keys resolve to
-  // logical Left/Right and are handled solely by the Side Up/Down blocks below,
-  // so nothing double-fires. Swipes carry no orientation swap: the direction
-  // transform in MappedInputManager already tracks the screen.
-  constexpr auto kLeftActionButton = MappedInputManager::Button::Up;
-  constexpr auto kRightActionButton = MappedInputManager::Button::Down;
+  // X4 Pro: logical Left/Right are the action bar's OUTER SLOTS (BTN_LEFT /
+  // BTN_RIGHT), which is what MappedInputManager's mapping table and Reader
+  // Controls' "Left"/"Right" rows both say they are.
+  //
+  // They were bound to Up/Down here, on the theory that the Left/Right action
+  // slots stood for the vertical swipes. They cannot: a vertical swipe injects
+  // the SIDE KEY's own index on this board (it is deliberately "the side key's
+  // gesture twin"), so Up/Down here meant this block and the Side Up/Down blocks
+  // below both fired on one press. Nothing short-circuited that, because
+  // executeReaderAction returns false for most actions — Sync, Open Menu,
+  // Bookmark, Refresh, Skip Chapter Back — so the press ran the Left/Right
+  // binding AND then the side binding. That is a remote page-turn also kicking
+  // off a WiFi sync, or a page moving twice, from a single click.
+  //
+  // Swipes carry no orientation swap: the direction transform in
+  // MappedInputManager already tracks the screen.
+  constexpr auto kLeftActionButton = MappedInputManager::Button::Left;
+  constexpr auto kRightActionButton = MappedInputManager::Button::Right;
   const auto shortPressLeft = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressLeft);
   const auto longPressLeft = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerLongPressLeft);
   const auto shortPressRight = static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressRight);
@@ -1728,7 +1739,14 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
   // hints reflows the chapter automatically.
   if (SETTINGS.showButtonHints != CrossPointSettings::BUTTON_HINTS_OFF) {
     const auto& metrics = UITheme::getInstance().getMetrics();
-    const int frontReserve = metrics.buttonHintsHeight;        // front hint bar thickness
+#if FREEINK_DEVICE_X4PRO
+    // The reader draws no front hint bar on the X4 Pro (no front buttons, and
+    // the strip belongs to the Full Touch action bar on the menu screens), so
+    // it reserves nothing for one. See renderButtonHints().
+    const int frontReserve = 0;
+#else
+    const int frontReserve = metrics.buttonHintsHeight;  // front hint bar thickness
+#endif
     const int sideReserve = metrics.sideButtonHintsWidth + 6;  // side/power box strip
     // Front-only modes draw just the front-button bar, so only it needs reserved space.
     const bool sideHints = !CrossPointSettings::buttonHintsFrontOnly(SETTINGS.showButtonHints);
@@ -2777,13 +2795,22 @@ void EpubReaderActivity::renderButtonHints() const {
   const auto origOrientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
+#if !FREEINK_DEVICE_X4PRO
   // Front-button actions -> themed bottom hint bar. mapLabels positions each logical
   // role's label under the physical button it maps to (handles remap + orientation swap).
+  //
+  // Deliberately absent on the X4 Pro. There the theme's bottom strip is the
+  // Full Touch action bar (ActionBar.h) -- tap targets, not labels -- and these
+  // four roles are the reader's SWIPE actions, which a tap must not fire. The
+  // reader also force-renders these widgets in portrait coords, so publishing
+  // tap rects from here would place them in the wrong frame in landscape. The
+  // reserved strip is dropped to match, in the viewport code above.
   const auto front = mappedInput.mapLabels(label(SETTINGS.readerShortPressBack, SETTINGS.readerLongPressBack),
                                            label(SETTINGS.readerShortPressConfirm, SETTINGS.readerLongPressConfirm),
                                            label(SETTINGS.readerShortPressLeft, SETTINGS.readerLongPressLeft),
                                            label(SETTINGS.readerShortPressRight, SETTINGS.readerLongPressRight));
   GUI.drawButtonHints(renderer, front.btn1, front.btn2, front.btn3, front.btn4);
+#endif
 
   if (!frontOnly) {
     // Side Up/Down actions -> themed side hint boxes.
