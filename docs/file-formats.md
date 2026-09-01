@@ -120,14 +120,18 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-> **Current version: 40** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> **Current version: 43** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
 > The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
 > v30 inline ("on page") footnotes; v31–v33 KOReader xpath/paragraph sync data and
 > nested block styles; v34 `<pre>` blocks carry a monospace font override; v35 hanging
 > indent stored as a signed `xpos`; v36 bionic-reading spans; v37 bionic stored as whole
 > words and expanded at layout time; v38 right-sized inline footnote storage; v39 image
 > percentage widths resolve against the wrapper element; v40 images stay in the layout
-> when the decoder cannot open them (previously dropped, and the drop was cached).
+> when the decoder cannot open them (previously dropped, and the drop was cached);
+> v41 a laid-out line's words stored in one flat arena; v42 percentage vertical
+> margins/padding resolve against the column's short axis instead of its width, so
+> paragraph spacing no longer inflates in landscape; v43 adjacent blocks collapse
+> their margins (max) instead of summing them, per CSS.
 >
 > Any change to the on-disk structure **must** bump this constant — a stale cache read
 > against a new layout is how you get a hard fault, not a graceful failure.

@@ -130,6 +130,11 @@ class ChapterHtmlSlimParser {
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
+  // The bottom margin makePages() already added to currentPageNextY for the
+  // block it just finished, so the next block can collapse its own top margin
+  // against it (CSS adjacent-sibling margin collapsing). Reset to 0 by anything
+  // that is not a text block, so nothing collapses across an image or a rule.
+  int16_t previousBlockBottomMargin = 0;
   int fontId;
   int codeFontId;  // monospace font id used for <pre> blocks (0 = no override)
   float lineCompression;
