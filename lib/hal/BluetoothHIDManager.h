@@ -196,16 +196,26 @@ class BluetoothHIDManager {
   void endMemoryPause();  // clears the paused state (does not enable)
   bool isMemoryPaused() const { return _memoryPaused; }
 
-  // "Bluetooth wanted" session flag. Set when the user turns the remote on
-  // (reader menu / settings toggle), cleared when they turn it off or Bluetooth
-  // is disallowed (autosync). It SURVIVES every system-driven teardown — a
-  // section-build memory pause, leaving and re-entering the reader, a WiFi sync —
-  // so the reader's auto-restore can bring the stack back once conditions allow,
-  // instead of staying down until a manual re-toggle. Runtime only:
-  // never persisted, so a fresh boot starts with Bluetooth off (boot-time BLE
-  // reservation was rejected as too costly for non-BLE users).
+  // "Bluetooth wanted" flag. Set when the user turns the remote on (reader menu /
+  // settings toggle), cleared when they turn it off or Bluetooth is disallowed
+  // (autosync). It SURVIVES every system-driven teardown — a section-build
+  // memory pause, leaving and re-entering the reader, a WiFi sync — so the
+  // reader's auto-restore can bring the stack back once conditions allow,
+  // instead of staying down until a manual re-toggle.
+  //
+  // The flag lives here, but the INTENT outlives this object: deep sleep is a
+  // cold boot on this chip, so a RAM-only flag meant a paired remote was dead in
+  // the book after every sleep until the user re-toggled by hand. The owner
+  // persists it through the callback below and re-arms it at boot. That is not
+  // the rejected "reserve BLE at boot" idea — nothing is enabled at startup;
+  // the reader's auto-restore still decides when, and a device with no bonded
+  // remote never arms it at all.
   void setBluetoothWanted(bool wanted);
   bool isBluetoothWanted() const { return _bluetoothWanted; }
+  // Called when, and only when, that flag actually changes, so the owner can
+  // persist the user's intent. Plain function pointer for the same reason as
+  // setBondedAddressUpdatedCallback: no capture, no per-signature heap closure.
+  void setBluetoothWantedChangedCallback(void (*callback)(bool wanted));
 
   // Record that WiFi was just powered down (call at a sync's WiFi teardown).
   // Bringing the BT controller up too soon after esp_wifi_stop() hard-freezes
@@ -313,6 +323,7 @@ class BluetoothHIDManager {
   unsigned long _restoreDeferStampMs = 0;       // deferAutoRestore() stamp...
   unsigned long _restoreDeferForMs = 0;         // ...and hold-off duration (0 = none)
   void (*_bondedAddrUpdatedCallback)(const char*, uint8_t) = nullptr;
+  void (*_wantedChangedCallback)(bool) = nullptr;
   std::string _bondedDeviceAddress;
   // BLE_ADDR_PUBLIC/BLE_ADDR_RANDOM. A CONNECT_IND targeting a random static
   // address (e.g. ff:.. clickers) as PUBLIC is ignored by the peer, so the type

@@ -161,7 +161,6 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["bleBackSigValue"] = s.bleBackSigValue;
   doc["bleFwdSigIndex"] = s.bleFwdSigIndex;
   doc["bleFwdSigValue"] = s.bleFwdSigValue;
-  doc["bleWanted"] = s.bleWanted;
 
   // longPressAction and shortPwrBtn live in CrossPointSettings but appear in the
   // SettingsList as DynamicEnum (the UI display order doesn't match the storage
@@ -293,7 +292,6 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.bleBackSigValue = doc["bleBackSigValue"] | s.bleBackSigValue;
   s.bleFwdSigIndex = doc["bleFwdSigIndex"] | s.bleFwdSigIndex;
   s.bleFwdSigValue = doc["bleFwdSigValue"] | s.bleFwdSigValue;
-  s.bleWanted = doc["bleWanted"] | s.bleWanted;
 
   // Counterpart to the explicit save above: pull longPressAction / shortPwrBtn
   // directly because their SettingInfo entries are DynamicEnum (no valuePtr,

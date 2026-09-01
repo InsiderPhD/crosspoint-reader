@@ -178,6 +178,15 @@ constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
 
+// The user's standing "I am using a remote" intent, kept across a sleep only.
+// RTC_DATA is re-initialised from flash on every reset except a deep-sleep wake,
+// so a power-on, a reflash, a panic reboot and a silentRestart() all start with
+// Bluetooth OFF, while sleeping and waking mid-book keeps a paired remote alive.
+// On X3/X4 running on battery there is no distinction to make: deep sleep drives
+// GPIO13 low and disconnects the battery (HalPowerManager::startDeepSleep), so
+// RTC memory dies with the rail and every wake is a fresh boot by definition.
+RTC_DATA_ATTR uint8_t bleWantedAcrossSleep = 0;
+
 void silentRestart() {
   silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
@@ -192,23 +201,6 @@ void silentRestartToReader() {
   LOG_DBG("MAIN", "Silent restart (target=reader)");
   delay(50);
   ESP.restart();
-}
-
-// Set when a restart is taken specifically to win back the BLE controller's
-// >=30KB contiguous block. RTC_NOINIT survives ESP.restart() but not power loss,
-// which is exactly the lifetime wanted: the intent should not outlive the battery
-// being pulled. Consumed once in setup().
-RTC_NOINIT_ATTR uint32_t bleRestartMagic;
-constexpr uint32_t BLE_RESTART_MAGIC = 0xB1E0B007;
-// Plain static, not RTC: the guard only has to last the boot it was set on.
-static bool bleRestartUsedThisBoot = false;
-
-bool bluetoothRestartAvailable() { return !bleRestartUsedThisBoot; }
-
-void silentRestartToReaderForBluetooth() {
-  bleRestartMagic = BLE_RESTART_MAGIC;
-  LOG_INF("MAIN", "Silent restart to reclaim a contiguous block for Bluetooth");
-  silentRestartToReader();  // sets the reader target, then restarts
 }
 
 // Verify power button press duration on wake-up from deep sleep
@@ -456,11 +448,6 @@ void setup() {
   // Read-and-clear so a panic later in setup() doesn't loop into silent reboot.
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
-  // Consume the BLE-recovery flag in the same breath, so a later crash-reboot
-  // can never re-trigger the auto-enable.
-  const bool isBleRecoveryReboot = (bleRestartMagic == BLE_RESTART_MAGIC);
-  bleRestartMagic = 0;
-  bleRestartUsedThisBoot = isBleRecoveryReboot;
   const uint32_t snapshotTarget =
       (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_READER) ? silentRebootTarget : 0;
   silentRebootMagic = 0;
@@ -551,6 +538,25 @@ void setup() {
   });
   btMgr.setButtonMapping(SETTINGS.bleBackSigIndex, SETTINGS.bleBackSigValue, SETTINGS.bleFwdSigIndex,
                          SETTINGS.bleFwdSigValue);
+  // Hold the user's standing "I am using a remote" intent across a sleep. The
+  // stack itself is torn down constantly (leaving the reader, a section build, a
+  // sync, deep sleep) and what brings it back is this flag — keeping it only in
+  // the manager's RAM made a paired remote go dead in the book after every
+  // sleep. RTC memory, not settings.json: the intent must NOT outlive the power
+  // cycle (see bleWantedAcrossSleep above), and this costs no SPIFFS write.
+  btMgr.setBluetoothWantedChangedCallback([](bool wanted) { bleWantedAcrossSleep = wanted ? 1 : 0; });
+  // Re-arm that intent after a sleep, for a device that has a remote paired.
+  // Nothing is enabled here: the flag only tells the reader's
+  // maybeAutoRestoreBluetooth() it may bring the stack up once a book is open
+  // and its chapter layout is resident — the state that guarantees the
+  // controller's contiguous block exists. On a fresh boot bleWantedAcrossSleep
+  // reads 0, so Bluetooth stays off until the user asks for it.
+  if (bleWantedAcrossSleep && SETTINGS.bleBondedDeviceAddr[0] != '\0') {
+    LOG_INF("MAIN", "Remote %s was in use before sleep; arming auto-restore", SETTINGS.bleBondedDeviceAddr);
+    btMgr.setBluetoothWanted(true);
+  } else {
+    LOG_DBG("MAIN", "Fresh boot: Bluetooth starts off");
+  }
 
   const auto wakeupReason = gpio.getWakeupReason();
   switch (wakeupReason) {
@@ -645,16 +651,6 @@ void setup() {
 
   READING_STATS.loadFromFile();
   BF_TOKEN_STORE.loadFromFile();
-
-  if (isBleRecoveryReboot) {
-    // The restart was taken because enable() was refused on a fragmented heap.
-    // Re-arm the intent rather than enabling here: maybeAutoRestoreBluetooth()
-    // only fires once a chapter is resident, which is the state that guarantees
-    // the controller's contiguous block exists. Enabling straight from setup()
-    // would skip that guarantee.
-    LOG_INF("MAIN", "Rebooted for Bluetooth; re-arming auto-restore");
-    BluetoothHIDManager::getInstance().setBluetoothWanted(true);
-  }
 
   // Silent NTP attempt against the last-connected WiFi network, on a background
   // task — non-blocking. Up to 3 SNTP retries, ~10s worst case, no UI shown.

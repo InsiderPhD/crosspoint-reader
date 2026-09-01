@@ -468,18 +468,10 @@ class CrossPointSettings {
   uint8_t bleBackSigValue = 0;
   uint8_t bleFwdSigIndex = 0xFF;
   uint8_t bleFwdSigValue = 0;
-  // The user's standing "I am using a remote" intent, 1 = wanted. Persisted
-  // because the stack itself never is: the main loop powers it down whenever the
-  // current screen has no use for it, the reader tears it down for section
-  // builds and syncs, and deep sleep is a cold boot on this chip. What brings it
-  // back in the reader is BluetoothHIDManager's in-RAM "wanted" flag, so before
-  // this field existed a paired remote was dead in the book after every sleep or
-  // reboot until the user re-toggled Bluetooth by hand.
-  //
-  // Only meaningful alongside a bonded remote (bleBondedDeviceAddr); main.cpp
-  // ignores it otherwise rather than spending ~56KB on a stack with nothing to
-  // connect to.
-  uint8_t bleWanted = 0;
+  // NOTE: the user's standing "I am using a remote" intent is deliberately NOT a
+  // setting. Bluetooth is off on every fresh boot; the intent lives only in RTC
+  // memory (bleWantedAcrossSleep in main.cpp) so it survives a sleep and dies
+  // with the power cycle.
   // "Browse Files" view: FOLDERS = the SD directory tree (default), TAGS = whole-library
   // tag folders (each book tag presented as a folder).
   uint8_t folderView = FOLDER_VIEW_FOLDERS;
