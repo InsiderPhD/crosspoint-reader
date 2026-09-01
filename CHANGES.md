@@ -6,6 +6,56 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ## Unreleased
 
+### Paragraph gaps that survive a rotation
+
+Two layout faults, compounding, worst in landscape.
+
+CSS **collapses** the margins of adjacent siblings: the gap between two blocks is `max(previous margin-bottom, this margin-top)`, never their sum. The parser added both, so the near-universal `p { margin: 1em 0 }` paid twice — and with the Paragraph Spacing setting on top, that put roughly two and a half line heights between every paragraph. On a ~27-line portrait page that reads as merely loose; on a ~15-line landscape page the gaps dominate the screen, which is where it was noticed. The previous block's bottom margin is already in the page's running Y, so only the *excess* the next block's top margin asks for is added now. Anything that is not a text block — an image, a rule, a page break — resets the carry, so nothing collapses across it, and padding (which never collapses in CSS) stays a plain addition.
+
+Percentage **vertical** margins resolved against the viewport width. That is the CSS rule, and it is the wrong one here: the same book reflows into a column roughly 440px wide in portrait and 760px in landscape, so a `margin-bottom: 2%` paragraph gap grew by ~70% in the orientation with the least vertical room to spare. They now resolve against the column's **short axis** — the width in portrait, so portrait renders exactly as before, and the height in landscape. On a rotated panel those are the same number, which is what makes the spacing survive the rotation. Horizontal percentages still resolve against the real column width, where the CSS rule is what the author meant.
+
+Section cache format **v42** and **v43**.
+
+**Files changed**: `lib/Epub/Epub/blocks/BlockStyle.h`, `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.*`, `lib/Epub/Epub/Section.cpp`, `docs/file-formats.md`.
+
+### One page counter, in one place, on every screen that pages
+
+A scroll bar is easy to miss. Two screens already said "3 / 7" in words, each with its own hard-coded 30px strip and its own idea of where it went. Every scrollable surface now gives up the **same** bottom strip of its content rect for a centred `n / m`: reserved unconditionally, so a list that grows past one page never shoves its own rows up, and painted only when there is more than one page.
+
+The mechanism sits in `BaseTheme`, so `drawList` carries it for free in both themes and windows its rows above the strip. The screens that page their own content — the cover grid, the TOC, the clipping list, the reader menu, the stats tabs — draw it into the same rect they laid that content out in. BookFusion keeps its own wording, because a server that did not say how many pages there are needs to render "7+".
+
+Two things had to move with it, or a screen would page by one count and draw by another. Every hand-rolled `rect.height / rowHeight` now goes through the theme's `listGeometry()` — which is also what the Full Touch tap hit-test uses, so a swipe moves by exactly the rows that were drawn. And the fixed forms (manual date, session date edit, reading date selection, book reading adjustment) size their rect with `listRectHeightForRows()`, because they have exactly as many rows as fields and an unaccounted-for strip would have cost them a field rather than a page.
+
+`UITheme::getHintReserve()` replaces the reader menu's open-coded orientation switch with one answer to "which edges do the button hints occupy": portrait bottom, inverted top, a side band in landscape — and on the X4 Pro just the action bar's height, in every orientation, because that bar is drawn in the logical frame.
+
+**Files changed**: `src/components/{UITheme,ActionBar}.*`, `src/components/themes/BaseTheme.*`, `src/components/themes/lyra/LyraTheme.*`, and the list, grid and form screens.
+
+### X4 Pro: one click, one action
+
+Logical Left/Right on this board are the action bar's **outer slots** — what the mapping table and Reader Controls' own "Left"/"Right" rows both say they are. The reader bound them to Up/Down instead, on the theory that those slots stood for the vertical swipes. They cannot: a vertical swipe injects the **side key's** own index here, so one press ran the Left/Right binding *and* the side binding. Nothing short-circuited it, because most reader actions — Sync, Open Menu, Bookmark, Refresh, Skip Chapter Back — report "not handled". A single remote click could turn the page twice, or turn the page and start a WiFi sync.
+
+Two label fixes ride along, both from the same root: a slot on this board is a **tap target**, not a caption under a physical button. The action bar now drops a slot whose label is a bare direction ("Left"/"Right" name a button that does not exist here, and the pair only duplicated the side keys' scrolling), while a slot carrying a real action — Renew, Retry — is untouched. The date and number spinners label their pair **"-"** and **"+"**, which is what the tap does, and skip the orientation swap that would otherwise print the signs backwards.
+
+**Files changed**: `src/activities/reader/EpubReaderActivity.cpp`, `src/MappedInputManager.cpp`, `src/components/ActionBar.cpp`, the four spinner screens.
+
+### A paired remote survives sleep
+
+The standing "I am using a remote" intent is what brings the BLE stack back after every system-driven teardown, and it lived only in RAM. Deep sleep is a cold boot on this chip, so a paired remote was dead in the book after every sleep until the user re-toggled Bluetooth by hand.
+
+It now rides in **RTC memory**, written through a change callback on the manager and re-armed at boot when a bonded remote exists. Deliberately not a setting: RTC data is re-initialised from flash on every reset *except* a deep-sleep wake, so a power-on, a reflash, a panic reboot and a silent restart all start with Bluetooth off — which is what a device with no remote should get — and it costs no SPIFFS write. Nothing is enabled at boot either; the flag only tells the reader's auto-restore that it *may* bring the stack up once a chapter is resident. (On X3/X4 running on battery there is nothing to preserve: deep sleep disconnects the battery, so RTC memory dies with the rail and every wake is a fresh boot by definition.)
+
+Auto-restore also stops retrying a **memory** refusal on the five-second clock. That path has already freed everything it owns, so the retry only freed the chapter and reloaded the book once per cycle for nothing; it now holds off for the same long interval the degraded-heap render guard uses.
+
+**Files changed**: `src/main.cpp`, `lib/hal/BluetoothHIDManager.*`, `src/{CrossPointSettings.h,JsonSettingsIO.cpp}`, `src/activities/reader/EpubReaderActivity.cpp`.
+
+### Cover artwork from a file beside the book
+
+A library loan is encrypted, so the cover inside it decodes to nothing and loans sat in the library as blank tiles; plenty of sideloaded EPUBs carry no artwork at all. Both are answered the same way: whoever put the book on the card fetches the cover from the catalogue that has it and drops it next to the book — `/Libby/Title.epub` → `/Libby/Title.jpg` — and the thumbnail builder falls back to that file (`.jpg`, `.jpeg`, `.png`) once the embedded cover has failed. A book that does carry usable artwork keeps using its own.
+
+The zero-byte "no cover here" sentinel needed a way out for this to work. It exists so a book with no artwork is not re-examined on every paint, but the Libby page writes its sidecar long after the book was first listed, and the sentinel would have hidden it forever. An empty thumb now costs one stat and a sidecar re-check rather than being final.
+
+**Files changed**: `lib/Epub/Epub.*`.
+
 ### The X4 Pro action bar stops offering "Select"
 
 Full Touch turned the bottom hint strip into real tap targets, and every menu
