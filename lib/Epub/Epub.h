@@ -76,6 +76,18 @@ class Epub {
   std::string getThumbBmpPath() const;
   std::string getThumbBmpPath(int height) const;
   bool generateThumbBmp(int height) const;
+  // Path of the cover image file that may sit beside the book
+  // ("/Books/Title.epub" -> "/Books/Title.jpg"), for `ext` including the dot.
+  std::string sidecarCoverPath(const char* ext) const;
+  // Build the thumbnail from that sidecar, if one is there and converts.
+  //
+  // A book cannot be assumed to carry usable artwork of its own: plenty of
+  // sideloaded EPUBs simply have none, or name a cover that does not decode.
+  // Whoever put the book on the card (a BookFusion download, the user) can
+  // fetch the artwork from the catalogue that has it and drop it next to the
+  // book. Tried only after the embedded cover has failed, so a book that IS
+  // optimised for the device keeps using its own.
+  bool generateThumbBmpFromSidecar(int height) const;
   uint8_t* readItemContentsToBytes(const std::string& itemHref, size_t* size = nullptr,
                                    bool trailingNullByte = false) const;
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize) const;
