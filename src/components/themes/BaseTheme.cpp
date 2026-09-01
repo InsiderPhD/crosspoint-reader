@@ -350,16 +350,63 @@ void BaseTheme::drawPowerButtonHint(GfxRenderer& renderer, const char* label) co
   renderer.drawTextRotated90CW(UI_10_FONT_ID, textX, textY, label);
 }
 
+Rect BaseTheme::pageIndicatorRect(const Rect& rect) const {
+  const int stripHeight = themeMetrics().pageIndicatorHeight;
+  // Never eat more than half the rect: on a surface that short the counter
+  // would cost more than the scroll bar it explains.
+  if (stripHeight <= 0 || rect.height < stripHeight * 2) {
+    return Rect{rect.x, rect.y + rect.height, rect.width, 0};
+  }
+  return Rect{rect.x, rect.y + rect.height - stripHeight, rect.width, stripHeight};
+}
+
+int BaseTheme::listRectHeightForRows(int rowCount, bool hasSubtitle) const {
+  const ThemeMetrics& m = themeMetrics();
+  const int rowHeight = hasSubtitle ? m.listWithSubtitleRowHeight : m.listRowHeight;
+  return rowCount * rowHeight + m.pageIndicatorHeight;
+}
+
+int BaseTheme::contentHeightWithoutIndicator(const Rect& rect) const {
+  return rect.height - pageIndicatorRect(rect).height;
+}
+
+void BaseTheme::drawPageIndicator(const GfxRenderer& renderer, const Rect& rect, int currentPage,
+                                  int totalPages) const {
+  if (totalPages <= 1) {
+    return;
+  }
+  char indicator[24];
+  snprintf(indicator, sizeof(indicator), "%d / %d", currentPage, totalPages);
+  drawPageIndicatorText(renderer, rect, indicator);
+}
+
+void BaseTheme::drawPageIndicatorText(const GfxRenderer& renderer, const Rect& rect, const char* text) const {
+  if (text == nullptr || text[0] == '\0') {
+    return;
+  }
+  const Rect strip = pageIndicatorRect(rect);
+  if (strip.height <= 0) {
+    return;
+  }
+  const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, text);
+  renderer.drawText(SMALL_FONT_ID, strip.x + (strip.width - textWidth) / 2, strip.y + (strip.height - lineHeight) / 2,
+                    text, true);
+}
+
 BaseTheme::ListGeometry BaseTheme::listGeometry(const Rect& rect, int selectedIndex, bool hasSubtitle) const {
   const ThemeMetrics& m = themeMetrics();
   const int rowHeight = hasSubtitle ? m.listWithSubtitleRowHeight : m.listRowHeight;
-  int pageItems = rect.height / rowHeight;
+  // Rows lay out above the page-counter strip, in every theme and on every
+  // screen -- that is what keeps the counter in one fixed place.
+  const int contentHeight = contentHeightWithoutIndicator(rect);
+  int pageItems = contentHeight / rowHeight;
   if (pageItems < 1) pageItems = 1;
   // selectedIndex may be -1 (list drawn unfocused, e.g. while a tab bar holds
   // the selection); matches drawList's historical -1/pageItems truncation to
   // page 0.
   const int pageStart = selectedIndex <= 0 ? 0 : selectedIndex / pageItems * pageItems;
-  return {rowHeight, pageItems, pageStart};
+  return {rowHeight, pageItems, pageStart, contentHeight};
 }
 
 int BaseTheme::hitTestList(const Rect& rect, int itemCount, int selectedIndex, bool hasSubtitle, int lx, int ly) const {
@@ -496,12 +543,19 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<std::string(int index)>& rowSubtitle,
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
-                         const std::function<bool(int index)>& rowDimmed) const {
+                         const std::function<bool(int index)>& rowDimmed, const char* pageIndicatorOverride) const {
   const ListGeometry geo = listGeometry(rect, selectedIndex, rowSubtitle != nullptr);
   const int rowHeight = geo.rowHeight;
   const int pageItems = geo.pageItems;
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
+  // The page count, in the one place every screen puts it. The rows below are
+  // windowed to geo.contentHeight, so they never reach the strip.
+  if (pageIndicatorOverride != nullptr) {
+    drawPageIndicatorText(renderer, rect, pageIndicatorOverride);
+  } else {
+    drawPageIndicator(renderer, rect, (selectedIndex <= 0 ? 0 : selectedIndex / pageItems) + 1, totalPages);
+  }
   if (totalPages > 1) {
     constexpr int indicatorWidth = 20;
     constexpr int arrowSize = 6;
@@ -509,7 +563,7 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 
     const int centerX = rect.x + rect.width - indicatorWidth / 2 - margin;
     const int indicatorTop = rect.y;  // Offset to avoid overlapping side button hints
-    const int indicatorBottom = rect.y + rect.height - arrowSize;
+    const int indicatorBottom = rect.y + geo.contentHeight - arrowSize;
 
     // Draw up arrow at top (^) - narrow point at top, wide base at bottom
     for (int i = 0; i < arrowSize; ++i) {

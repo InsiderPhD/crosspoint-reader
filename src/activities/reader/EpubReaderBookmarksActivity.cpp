@@ -21,9 +21,10 @@ constexpr int DELETE_MODE_DISPLAY = 1;
 constexpr int DELETE_MODE_CONFIRM = 2;
 constexpr int LINE_HEIGHT = 60;
 
-int getPageItemsForBookmarkList(const GfxRenderer& renderer, const int listHeight) {
-  const int rowHeight = std::max(1, UITheme::getInstance().getMetrics().listWithSubtitleRowHeight);
-  return std::max(1, listHeight / rowHeight);
+// Rows the theme will actually draw in `rect` — page counter strip already
+// taken out, so a page step moves by exactly what is on screen.
+int getPageItemsForBookmarkList(const Rect& rect) {
+  return std::max(1, GUI.listGeometry(rect, 0, /*hasSubtitle=*/true).pageItems);
 }
 }  // namespace
 
@@ -184,20 +185,20 @@ void EpubReaderBookmarksActivity::loop() {
   });
 
   // Full Touch: a vertical swipe turns a page, matching the held side key.
-  if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(bookmarks.size()),
-                              getPageItemsForBookmarkList(renderer, getListHeight(renderer)), selectorIndex)) {
+  if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(bookmarks.size()), getPageItemsForBookmarkList(listRect()),
+                              selectorIndex)) {
     requestUpdate();
     return;
   }
 
   buttonNavigator.onNextContinuous([this] {
-    const int pageItems = getPageItemsForBookmarkList(renderer, getListHeight(renderer));
+    const int pageItems = getPageItemsForBookmarkList(listRect());
     selectorIndex = ButtonNavigator::nextPageIndex(selectorIndex, static_cast<int>(bookmarks.size()), pageItems);
     requestUpdate();
   });
 
   buttonNavigator.onPreviousContinuous([this] {
-    const int pageItems = getPageItemsForBookmarkList(renderer, getListHeight(renderer));
+    const int pageItems = getPageItemsForBookmarkList(listRect());
     selectorIndex = ButtonNavigator::previousPageIndex(selectorIndex, static_cast<int>(bookmarks.size()), pageItems);
     requestUpdate();
   });

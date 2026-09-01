@@ -1134,8 +1134,11 @@ Rect ReadingStatsActivity::listRect() const {
     listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
     rowsPerPage = BOOKS_PER_PAGE;
   }
+  // The cap is rowsPerPage rows PLUS the page-counter strip drawList takes out
+  // of the bottom of whatever rect it is given — without it the strip would
+  // cost one of the four rows these tabs are supposed to show.
   const int listHeight =
-      std::min(std::max(0, contentBottom - listTop), metrics.listWithSubtitleRowHeight * rowsPerPage);
+      std::min(std::max(0, contentBottom - listTop), GUI.listRectHeightForRows(rowsPerPage, /*hasSubtitle=*/true));
   return Rect{0, listTop, renderer.getScreenWidth(), listHeight};
 }
 
@@ -1156,10 +1159,13 @@ void ReadingStatsActivity::render(RenderLock&&) {
   const int sidePadding = metrics.contentSidePadding;
   const int contentWidth = pageWidth - sidePadding * 2;
   // Tab bar lives directly below the header. Page content starts after the tab
-  // bar; the bottom-of-screen N/N indicator is gone now so we no longer
-  // reserve PAGE_INDICATOR_HEIGHT — only buttonHints and a small gap.
+  // bar and runs to contentBottom — buttonHints and a small gap.
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
   const int contentBottom = pageHeight - metrics.buttonHintsHeight - 4;
+  // The two SCROLLING tabs (Overview/Weekly) give their bottom strip to the
+  // page counter, the same strip every list screen reserves — a scroll bar
+  // alone is too easy to miss. The fixed tabs draw to contentBottom as before.
+  const int scrollBottom = contentBottom - metrics.pageIndicatorHeight;
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS),
                  nullptr);
@@ -1176,7 +1182,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
   // viewport, repaint the pinned header/tab bar, and draw a right-edge
   // scrollbar. Call after drawing the page's scroll-offset content.
   auto drawScrollChrome = [&]() {
-    renderer.fillRect(0, contentBottom, pageWidth, pageHeight - contentBottom, false);
+    renderer.fillRect(0, scrollBottom, pageWidth, pageHeight - scrollBottom, false);
     if (scrollOffset > 0) {
       renderer.fillRect(0, 0, pageWidth, contentTop, false);
       GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READING_STATS),
@@ -1186,12 +1192,21 @@ void ReadingStatsActivity::render(RenderLock&&) {
     if (maxScroll > 0) {
       const int trackX = pageWidth - 5;
       const int trackTop = contentTop;
-      const int trackH = contentBottom - contentTop;
+      const int trackH = scrollBottom - contentTop;
       const int totalContent = trackH + maxScroll;
       const int thumbH = std::max(20, trackH * trackH / totalContent);
       const int thumbY = trackTop + (trackH - thumbH) * scrollOffset / maxScroll;
       renderer.drawLine(trackX + 1, trackTop, trackX + 1, trackTop + trackH);
       renderer.fillRect(trackX, thumbY, 3, thumbH, true);
+
+      // Say in words what the thumb says in pixels. Continuous scroll, so a
+      // "page" is one viewport-worth: the same unit Up/Down move by.
+      if (trackH > 0) {
+        const int totalPages = (totalContent + trackH - 1) / trackH;
+        const int currentPageNo = std::min(totalPages, scrollOffset / trackH + 1);
+        GUI.drawPageIndicator(renderer, Rect{0, contentTop, pageWidth, contentBottom - contentTop}, currentPageNo,
+                              totalPages);
+      }
     }
   };
 
@@ -1205,7 +1220,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
     // so it scrolls. Everything is laid out in virtual coordinates from 0 and
     // drawn at (contentTop + virtualY - scroll); content that lands above/below
     // the viewport is masked after drawing. (The annual chart moved to Sessions.)
-    const int viewportHeight = contentBottom - contentTop;
+    const int viewportHeight = scrollBottom - contentTop;
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
     constexpr int PROFILE_NAME_HEIGHT = 22;
     constexpr int PROFILE_DIM_GAP = 8;
@@ -1378,7 +1393,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
     constexpr int WEEK_CHART_HEIGHT = 300;
     const int weekBlockHeight = weekAnchored ? weekCell + SUMMARY_GAP * 2 : 0;
 
-    const int viewportHeight = contentBottom - contentTop;
+    const int viewportHeight = scrollBottom - contentTop;
     const int totalHeight = weekBlockHeight + SUMMARY_ROW_HEIGHT * 5 + SUMMARY_GAP * 2 + CHART_HEADER_HEIGHT +
                             CHART_TOP_GAP + WEEK_CHART_HEIGHT;
     maxScroll = std::max(0, totalHeight - viewportHeight);
@@ -1540,9 +1555,6 @@ void ReadingStatsActivity::render(RenderLock&&) {
                       formatAnnualReadingTitle(annualYear).c_str(), nullptr);
     drawReadingChart(renderer, Rect{sidePadding, chartTop, contentWidth, chartHeight}, annualBars, false);
   }
-
-  // The bottom-of-screen "N/N" indicator is gone — the tab bar at the top is
-  // the canonical position indicator now.
 
   // Confirm advances the tab whenever the ribbon (selectedItemIndex == 0) is
   // focused, so its hint is the next tab's name — same convention as

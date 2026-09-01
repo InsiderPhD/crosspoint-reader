@@ -69,7 +69,7 @@ void DictionarySelectActivity::loop() {
     requestUpdate();
   });
 
-  const int pageItems = listRect().height / UITheme::getInstance().getMetrics().listRowHeight;
+  const int pageItems = GUI.listGeometry(listRect(), 0, /*hasSubtitle=*/false).pageItems;
   if (TouchListNav::pageSwipe(mappedInput, totalItems(), pageItems, selectedIndex)) {
     requestUpdate();
     return;

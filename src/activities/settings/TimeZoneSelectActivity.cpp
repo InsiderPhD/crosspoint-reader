@@ -64,8 +64,9 @@ void TimeZoneSelectActivity::loop() {
   });
 
   // Full Touch: a vertical swipe turns a page, matching the held side key.
-  // pageItems mirrors drawList's windowing of listRect() (rect.height / rowHeight).
-  const int pageItems = listRect().height / UITheme::getInstance().getMetrics().listRowHeight;
+  // pageItems comes from the theme's own windowing of listRect(), so a page
+  // swipe always moves by exactly the rows drawList drew.
+  const int pageItems = GUI.listGeometry(listRect(), 0, /*hasSubtitle=*/false).pageItems;
   if (TouchListNav::pageSwipe(mappedInput, totalItems, pageItems, selectedIndex)) {
     requestUpdate();
     return;

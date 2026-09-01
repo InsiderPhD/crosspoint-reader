@@ -20,20 +20,19 @@ int EpubReaderChapterSelectionActivity::listTopY() const {
   return 60 + hintGutterHeight - 2;
 }
 
-int EpubReaderChapterSelectionActivity::getPageItems() const {
-  // Layout constants used in renderScreen
-  constexpr int lineHeight = ROW_H;
-
-  const int screenHeight = renderer.getScreenHeight();
-  const auto orientation = renderer.getOrientation();
-  // In inverted portrait, the button hints are drawn near the logical top.
-  // Reserve vertical space so list items do not collide with the hints.
-  const bool isPortraitInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
+// The band the rows live in: below the title, above the hint row. Its bottom
+// strip carries the page count, the same as on every other scrollable screen
+// (BaseTheme::pageIndicatorRect).
+Rect EpubReaderChapterSelectionActivity::listAreaRect() const {
+  const bool isPortraitInverted = renderer.getOrientation() == GfxRenderer::Orientation::PortraitInverted;
   const int hintGutterHeight = isPortraitInverted ? 50 : 0;
   const int startY = 60 + hintGutterHeight;
-  const int availableHeight = screenHeight - startY - lineHeight;
+  return Rect{0, startY, renderer.getScreenWidth(), renderer.getScreenHeight() - startY - ROW_H};
+}
+
+int EpubReaderChapterSelectionActivity::getPageItems() const {
   // Clamp to at least one item to avoid division by zero and empty paging.
-  return std::max(1, availableHeight / lineHeight);
+  return std::max(1, GUI.contentHeightWithoutIndicator(listAreaRect()) / ROW_H);
 }
 
 void EpubReaderChapterSelectionActivity::onEnter() {
@@ -180,6 +179,12 @@ void EpubReaderChapterSelectionActivity::render(RenderLock&&) {
 
     renderer.drawText(UI_10_FONT_ID, indentSize, displayY, chapterName.c_str(), !isSelected);
   }
+
+  // Page count, in the strip every scrollable screen reserves for it. A TOC is
+  // the longest list on the device -- the one place a silent scroll bar costs
+  // the most.
+  GUI.drawPageIndicator(renderer, listAreaRect(), selectorIndex / pageItems + 1,
+                        (totalItems + pageItems - 1) / pageItems);
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

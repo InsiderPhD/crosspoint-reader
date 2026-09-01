@@ -48,14 +48,10 @@ constexpr Category CATEGORIES[] = {
 };
 constexpr int NUM_CATEGORIES = sizeof(CATEGORIES) / sizeof(CATEGORIES[0]);
 
-// Height of the "N / M" strip drawn just above the button hints. Used by
-// both loop() (when sizing one visual page for long-press jumps) and render()
-// (when reserving content area for the indicator) — must agree.
-constexpr int categoryPageIndicatorH = 30;
-
-// Same strip height for the BROWSING list's indicator. Shared by render() and
-// listRect() so paint and tap hit-testing agree.
-constexpr int browsePageIndicatorH = 30;
+// The "N / M" strip both lists sit above is the theme's now
+// (BaseTheme::pageIndicatorRect): drawList reserves it out of the rect it is
+// handed and paints the count, so neither render() nor the page maths in
+// loop() reserves anything of its own for it.
 
 // The device only has an EPUB reader (the file browser allow-list is
 // EPUB/XTC/TXT/MD/BMP — see FileBrowserActivity.cpp). Other BookFusion
@@ -602,7 +598,7 @@ void BookFusionBrowserActivity::loop() {
     const int total = NUM_CATEGORIES + (showShelves ? bookshelves.count : 0);
     // Visual page size — same calculation drawList uses internally — so a
     // long-press jump matches one screen of items exactly.
-    const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false, categoryPageIndicatorH);
+    const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false);
 
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       handleCategorySelection();
@@ -861,7 +857,9 @@ void BookFusionBrowserActivity::drawDownloadDynamic(const int statusY) {
 Rect BookFusionBrowserActivity::listRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - browsePageIndicatorH;
+  // No explicit indicator reserve: drawList takes the counter strip out of the
+  // rect it is handed (BaseTheme::pageIndicatorRect).
+  const int contentHeight = renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight;
   return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
 }
 
@@ -896,7 +894,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
 
   if (state == CATEGORY_SELECTION) {
     const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-    const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight - categoryPageIndicatorH;
+    const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight;
 
     // Unified menu layout:
     //   [0..NUM_CATEGORIES-1] → functional categories (book/star/arrow/check/library icons)
@@ -921,20 +919,9 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
         },
         nullptr, true);
 
-    // Page indicator (same "N / M" format as BROWSING). The category list is
-    // fully in memory so M is known exactly — no '+' suffix needed.
-    const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false, categoryPageIndicatorH);
-    const int totalPages = (pageItems > 0) ? (total + pageItems - 1) / pageItems : 1;
-    if (totalPages > 1) {
-      const int currentVisualPage = (pageItems > 0) ? (selectedCategory / pageItems) + 1 : 1;
-      char indicator[24];
-      snprintf(indicator, sizeof(indicator), "%d / %d", currentVisualPage, totalPages);
-      const int titleLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-      const int indStripTop = pageHeight - metrics.buttonHintsHeight - categoryPageIndicatorH;
-      const int indY = indStripTop + (categoryPageIndicatorH - titleLineHeight) / 2;
-      const int indW = renderer.getTextWidth(SMALL_FONT_ID, indicator);
-      renderer.drawText(SMALL_FONT_ID, (pageWidth - indW) / 2, indY, indicator, true);
-    }
+    // The page count is drawn by drawList itself, in the strip every screen
+    // reserves for it — the category list pages by its own rows, so nothing
+    // here needs to say it differently.
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -1085,44 +1072,14 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   }
 
   // BROWSING state — subtitle list with title + author + BookFusion icon (matches
-  // RecentBooksActivity), plus a "current / total(+?)" page indicator strip just
-  // above the button hints (matches LibraryActivity's pagination footer).
+  // RecentBooksActivity).
   const Rect contentRect = listRect();
 
-  GUI.drawList(
-      renderer, contentRect, searchResult.count, selectedIndex,
-      [this](int index) -> std::string { return std::string(searchResult.books[index].title); },
-      [this](int index) -> std::string { return std::string(searchResult.books[index].authors); },
-      [this](int index) { return downloadedFlags[index] ? UIIcon::Check : UIIcon::BookFusion; }, nullptr, false);
-
-  // Overlay a strike-through on rows whose book isn't an EPUB so the user can
-  // see the book exists but at a glance knows it can't be opened here. We
-  // replicate drawList's internal pagination math (BaseTheme/LyraTheme line
-  // layout: title at itemY+7, subtitle at itemY+30) so the lines land on the
-  // rows that were just drawn. If the theme ever changes those offsets this
-  // overlay drifts and is the only thing to update.
-  {
-    const int rowHeight = metrics.listWithSubtitleRowHeight;
-    const int pageItems = (rowHeight > 0) ? contentRect.height / rowHeight : 0;
-    if (pageItems > 0) {
-      const int pageStartIndex = (selectedIndex / pageItems) * pageItems;
-      const int titleStrikeY = 7 + renderer.getLineHeight(UI_10_FONT_ID) / 2;
-      const int subtitleStrikeY = 30 + renderer.getLineHeight(SMALL_FONT_ID) / 2;
-      const int strikeLeft = metrics.contentSidePadding + 8;
-      const int strikeRight = pageWidth - metrics.contentSidePadding - 8;
-      for (int i = pageStartIndex; i < searchResult.count && i < pageStartIndex + pageItems; ++i) {
-        if (bookFusionFormatIsEpub(searchResult.books[i])) continue;
-        const int itemY = contentRect.y + (i % pageItems) * rowHeight;
-        renderer.drawLine(strikeLeft, itemY + titleStrikeY, strikeRight, itemY + titleStrikeY, true);
-        renderer.drawLine(strikeLeft, itemY + subtitleStrikeY, strikeRight, itemY + subtitleStrikeY, true);
-      }
-    }
-  }
-
-  // Prefer the exact page count when BookFusion returned a `Total-Count`
-  // response header (we read it into searchResult.totalCount in the client).
-  // If the header is missing for some reason, fall back to the `+` suffix so
-  // the user at least knows more pages exist.
+  // These pages are the SERVER's, not this rect's rows, so the shared counter
+  // strip gets our wording. Prefer the exact count when BookFusion returned a
+  // `Total-Count` response header (we read it into searchResult.totalCount in
+  // the client); if the header is missing, fall back to the `+` suffix so the
+  // user at least knows more pages exist.
   char indicator[24];
   if (searchResult.totalCount > 0) {
     const int perPage = BookFusionSearchResult::MAX_BOOKS;
@@ -1133,11 +1090,33 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   } else {
     snprintf(indicator, sizeof(indicator), "%d / %d", currentPage, currentPage);
   }
-  const int titleLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  const int indStripTop = pageHeight - metrics.buttonHintsHeight - browsePageIndicatorH;
-  const int indY = indStripTop + (browsePageIndicatorH - titleLineHeight) / 2;
-  const int indW = renderer.getTextWidth(SMALL_FONT_ID, indicator);
-  renderer.drawText(SMALL_FONT_ID, (pageWidth - indW) / 2, indY, indicator, true);
+
+  GUI.drawList(
+      renderer, contentRect, searchResult.count, selectedIndex,
+      [this](int index) -> std::string { return std::string(searchResult.books[index].title); },
+      [this](int index) -> std::string { return std::string(searchResult.books[index].authors); },
+      [this](int index) { return downloadedFlags[index] ? UIIcon::Check : UIIcon::BookFusion; }, nullptr, false,
+      nullptr, indicator);
+
+  // Overlay a strike-through on rows whose book isn't an EPUB so the user can
+  // see the book exists but at a glance knows it can't be opened here. The rows
+  // come from the theme's own geometry (so the overlay cannot page differently
+  // from the list it marks up); only the in-row line offsets (title at itemY+7,
+  // subtitle at itemY+30) are replicated here, and they are the one thing to
+  // update if a theme ever moves them.
+  {
+    const auto geo = GUI.listGeometry(contentRect, selectedIndex, /*hasSubtitle=*/true);
+    const int titleStrikeY = 7 + renderer.getLineHeight(UI_10_FONT_ID) / 2;
+    const int subtitleStrikeY = 30 + renderer.getLineHeight(SMALL_FONT_ID) / 2;
+    const int strikeLeft = metrics.contentSidePadding + 8;
+    const int strikeRight = pageWidth - metrics.contentSidePadding - 8;
+    for (int i = geo.pageStart; i < searchResult.count && i < geo.pageStart + geo.pageItems; ++i) {
+      if (bookFusionFormatIsEpub(searchResult.books[i])) continue;
+      const int itemY = contentRect.y + (i % geo.pageItems) * geo.rowHeight;
+      renderer.drawLine(strikeLeft, itemY + titleStrikeY, strikeRight, itemY + titleStrikeY, true);
+      renderer.drawLine(strikeLeft, itemY + subtitleStrikeY, strikeRight, itemY + subtitleStrikeY, true);
+    }
+  }
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_DOWNLOAD), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

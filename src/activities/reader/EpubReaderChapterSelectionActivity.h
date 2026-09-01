@@ -6,6 +6,8 @@
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 class EpubReaderChapterSelectionActivity final : public Activity {
   std::shared_ptr<Epub> epub;
   std::string epubPath;
@@ -16,6 +18,8 @@ class EpubReaderChapterSelectionActivity final : public Activity {
   // Number of items that fit on a page, derived from logical screen height.
   // This adapts automatically when switching between portrait and landscape.
   int getPageItems() const;
+  // Band the rows are laid out in; its bottom strip holds the page count.
+  Rect listAreaRect() const;
 
   // Total TOC items count
   int getTotalItems() const;

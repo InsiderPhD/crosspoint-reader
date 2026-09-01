@@ -35,7 +35,6 @@ constexpr char MODULE[] = "LIBRARY";
 constexpr int hPaddingInSelection = 8;
 constexpr int cornerRadius = 6;
 constexpr int rowVGap = 16;
-constexpr int pageIndicatorHeight = 30;
 
 struct GridLayout {
   int sidePadding;
@@ -254,7 +253,7 @@ LibraryActivity::SlotRect LibraryActivity::slotRect(int slotIndexInPage) const {
   // it after one verticalSpacing of breathing room — matches RecentBooksActivity.cpp:199-202.
   const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
-                                     pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
+                                     metrics.pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
 
   int tileX, tileY;
   tileOrigin(slotIndexInPage, L, tileX, tileY);
@@ -520,7 +519,7 @@ void LibraryActivity::renderPageFromScratch() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
-                                     pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
+                                     metrics.pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
 
   // Make sure currentPageMeta reflects on-disk state. Cheap — only reads
   // book.bin entries that already exist; never parses an EPUB from scratch.
@@ -659,7 +658,7 @@ void LibraryActivity::drawOverlay() {
   // it after one verticalSpacing of breathing room — matches RecentBooksActivity.cpp:199-202.
   const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
-                                     pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
+                                     metrics.pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
 
   const size_t page = currentPage();
   const size_t pageStart = page * pageSize();
@@ -717,18 +716,16 @@ void LibraryActivity::drawOverlay() {
     }
   }
 
-  // Page indicator at the bottom — just the page count. The "loading vs broken"
-  // distinction is communicated via the centered Loading popup that
+  // Page count, in the strip every scrollable screen reserves for it: the grid
+  // pages the same way a list does, so it says so the same way. The "loading vs
+  // broken" distinction is communicated via the centered Loading popup that
   // renderPageFromScratch shows during active generation.
   const int ps = pageSize();
   const size_t pages = (bookPaths.size() + ps - 1) / ps;
-  char indicator[40];
-  snprintf(indicator, sizeof(indicator), "%zu / %zu", page + 1, pages > 0 ? pages : 1);
-  const int indW = renderer.getTextWidth(SMALL_FONT_ID, indicator);
-  // Page indicator sits in its own strip just above the button-hints bar.
-  const int indStripTop = screenH - metrics.buttonHintsHeight - pageIndicatorHeight;
-  const int indY = indStripTop + (pageIndicatorHeight - titleLineHeight) / 2;
-  renderer.drawText(SMALL_FONT_ID, (screenW - indW) / 2, indY, indicator, true);
+  // The rect the grid was laid out in, ending where the hint bar starts —
+  // drawPageIndicator takes its strip out of the bottom of that.
+  const Rect gridRect{0, L.topY, screenW, screenH - metrics.buttonHintsHeight - L.topY};
+  GUI.drawPageIndicator(renderer, gridRect, static_cast<int>(page) + 1, static_cast<int>(pages));
 
   // Scrollbar on the right edge, alongside the grid. Position + thumb height
   // matches LyraTheme::drawList (LyraTheme.cpp:236-245): vertical track line +
@@ -738,7 +735,7 @@ void LibraryActivity::drawOverlay() {
   const int totalItems = static_cast<int>(bookPaths.size());
   if (totalP > 1 && totalItems > 0) {
     const int barAreaTop = L.topY;
-    const int barAreaBottom = screenH - metrics.buttonHintsHeight - pageIndicatorHeight;
+    const int barAreaBottom = screenH - metrics.buttonHintsHeight - metrics.pageIndicatorHeight;
     const int barAreaHeight = barAreaBottom - barAreaTop;
     const int barHeight = std::max(8, (barAreaHeight * ps) / totalItems);
     const int barY = barAreaTop + ((barAreaHeight - barHeight) * static_cast<int>(page)) / (totalP - 1);

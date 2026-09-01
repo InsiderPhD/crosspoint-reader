@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../Activity.h"
+#include "components/UITheme.h"
 #include "util/ButtonNavigator.h"
 #include "util/ProgressAutoSync.h"
 
@@ -64,6 +65,14 @@ class EpubReaderMenuActivity final : public Activity {
 
   static std::vector<MenuItem> buildMenuItems(bool hasFootnotes, ProgressAutoSync::Provider syncProvider);
 
+  // Edges the button hints occupy in the current orientation, so render(),
+  // menuTopY() and visibleMenuRows() all lay out against the same numbers.
+  UITheme::HintReserve hintReserve() const {
+    return UITheme::getHintReserve(renderer, HINT_SIDE_GUTTER, HINT_INVERTED_TOP_GUTTER);
+  }
+  static constexpr int HINT_SIDE_GUTTER = 30;
+  static constexpr int HINT_INVERTED_TOP_GUTTER = 50;
+
   // Menu row pitch; row i spans [menuTopY() + i*MENU_ROW_H, + MENU_ROW_H).
   // Shared by render() and the Full Touch tap hit-testing in loop().
   static constexpr int MENU_ROW_H = 30;
@@ -72,6 +81,8 @@ class EpubReaderMenuActivity final : public Activity {
   // list pages by this window (render, tap hit-testing, and swipe paging all
   // derive from it, so they can never disagree).
   int visibleMenuRows() const;
+  // Rect the menu rows are laid out in; its bottom strip holds the page count.
+  Rect menuRect() const;
   // The Confirm action for the selected row (in-place cycling rows cycle;
   // everything else closes the menu with a MenuResult). Also fired by a Full
   // Touch tap on the selected row.

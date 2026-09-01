@@ -155,7 +155,9 @@ void ReadingDateSelectionActivity::loop() {
 Rect ReadingDateSelectionActivity::listRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  return Rect{0, contentTop, renderer.getScreenWidth(), metrics.listWithSubtitleRowHeight * FIELD_COUNT};
+  // Height covers the fields AND the page-counter strip every list rect gives
+  // up at its bottom — without it the strip would eat a field.
+  return Rect{0, contentTop, renderer.getScreenWidth(), GUI.listRectHeightForRows(FIELD_COUNT, /*hasSubtitle=*/true)};
 }
 
 void ReadingDateSelectionActivity::render(RenderLock&&) {
@@ -182,12 +184,17 @@ void ReadingDateSelectionActivity::render(RenderLock&&) {
       },
       [](int) { return UIIcon::Recent; }, nullptr, false);
 
-  const int hintTop = fieldsRect.y + fieldsRect.height + metrics.verticalSpacing;
+  // Below the FIELDS, not below the rect: the rect's bottom strip belongs to the
+  // page counter (unused on a form this short).
+  const int hintTop = fieldsRect.y + GUI.contentHeightWithoutIndicator(fieldsRect) + metrics.verticalSpacing;
   const int hintWidth = pageWidth - sidePadding * 2;
   const std::string hint = renderer.truncatedText(UI_10_FONT_ID, tr(STR_SET_DATE_HINT), hintWidth);
   renderer.drawText(UI_10_FONT_ID, sidePadding, hintTop, hint.c_str());
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
+  // The Left/Right pair adjusts the selected field, so it is labelled by what it
+  // does rather than "Left"/"Right": the X4 Pro has no such buttons (the labels are
+  // its tap targets), and signs beat direction names on the boards that do.
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), "-", "+", /*directional=*/false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
   renderer.displayBuffer();
 }

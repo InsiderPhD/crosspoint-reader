@@ -6,6 +6,8 @@
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 class XtcReaderChapterSelectionActivity final : public Activity {
   std::shared_ptr<Xtc> xtc;
   ButtonNavigator buttonNavigator;
@@ -13,6 +15,8 @@ class XtcReaderChapterSelectionActivity final : public Activity {
   int selectorIndex = 0;
 
   int getPageItems() const;
+  // Band the rows are laid out in; its bottom strip holds the page count.
+  Rect listAreaRect() const;
   int findChapterIndexForPage(uint32_t page) const;
 
   // Row pitch; row i spans [listTopY() + i*ROW_H, + ROW_H). Shared by render()

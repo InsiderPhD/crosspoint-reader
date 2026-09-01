@@ -252,45 +252,42 @@ void EpubReaderMenuActivity::loop() {
 }
 
 int EpubReaderMenuActivity::menuTopY() const {
-  // Mirrors render()'s vertical flow: title block (45 + inverted-portrait
-  // gutter), summary line, status line, 10px gap. Any change to those offsets
-  // in render() must be reflected here or taps land on the wrong row.
-  const bool isPortraitInverted = renderer.getOrientation() == GfxRenderer::Orientation::PortraitInverted;
-  const int contentY = isPortraitInverted ? 50 : 0;
+  // Mirrors render()'s vertical flow: title block (45 + whatever the hints
+  // reserve above it), summary line, status line, 10px gap. Any change to those
+  // offsets in render() must be reflected here or taps land on the wrong row.
+  const int contentY = hintReserve().top;
   const int summaryLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const int summaryY = 45 + contentY;
   const int statusY = summaryY + summaryLineHeight + 2;
   return statusY + summaryLineHeight + 10;
 }
 
+Rect EpubReaderMenuActivity::menuRect() const {
+  // The rows' own rect: from the first row down to whatever the hints reserve
+  // at the bottom. The page counter lives in its bottom strip, exactly as it
+  // does on every list screen (BaseTheme::pageIndicatorRect).
+  const int top = menuTopY();
+  return Rect{hintReserve().left, top, renderer.getScreenWidth() - hintReserve().left - hintReserve().right,
+              renderer.getScreenHeight() - hintReserve().bottom - top};
+}
+
 int EpubReaderMenuActivity::visibleMenuRows() const {
-  // Mirrors render()'s vertical layout: the hint bar occupies the bottom edge
-  // only in upright portrait — landscape puts hints in a side gutter and
-  // inverted portrait reserves the top inside menuTopY().
-  const int bottomReserve = renderer.getOrientation() == GfxRenderer::Orientation::Portrait
-                                ? UITheme::getInstance().getMetrics().buttonHintsHeight
-                                : 0;
-  const int usable = renderer.getScreenHeight() - menuTopY() - bottomReserve;
+  // Mirrors render()'s vertical layout. Only the bottom edge matters here; the
+  // top reserve is already inside menuTopY() and the side ones cost no rows.
+  const int usable = GUI.contentHeightWithoutIndicator(menuRect());
   return usable >= MENU_ROW_H ? usable / MENU_ROW_H : 1;
 }
 
 void EpubReaderMenuActivity::render(RenderLock&&) {
   renderer.clearScreen();
   const auto pageWidth = renderer.getScreenWidth();
-  const auto orientation = renderer.getOrientation();
-  // Landscape orientation: button hints are drawn along a vertical edge, so we
-  // reserve a horizontal gutter to prevent overlap with menu content.
-  const bool isLandscapeCw = orientation == GfxRenderer::Orientation::LandscapeClockwise;
-  const bool isLandscapeCcw = orientation == GfxRenderer::Orientation::LandscapeCounterClockwise;
-  // Inverted portrait: button hints appear near the logical top, so we reserve
-  // vertical space to keep the header and list clear.
-  const bool isPortraitInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
-  const int hintGutterWidth = (isLandscapeCw || isLandscapeCcw) ? 30 : 0;
-  // Landscape CW places hints on the left edge; CCW keeps them on the right.
-  const int contentX = isLandscapeCw ? hintGutterWidth : 0;
-  const int contentWidth = pageWidth - hintGutterWidth;
-  const int hintGutterHeight = isPortraitInverted ? 50 : 0;
-  const int contentY = hintGutterHeight;
+  // Keep the menu clear of wherever this board actually draws its hints: a side
+  // gutter in landscape and a top one in inverted portrait on the front-button
+  // boards, the bottom action bar in every orientation on the X4 Pro.
+  const auto reserve = hintReserve();
+  const int contentX = reserve.left;
+  const int contentWidth = pageWidth - reserve.left - reserve.right;
+  const int contentY = reserve.top;
 
   // Title
   const std::string truncTitle =
@@ -378,14 +375,13 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   const size_t pageStart = static_cast<size_t>(selectedIndex / rowsPerPage * rowsPerPage);
   const size_t pageEnd = menuItems.size() < pageStart + rowsPerPage ? menuItems.size() : pageStart + rowsPerPage;
 
-  if (menuItems.size() > static_cast<size_t>(rowsPerPage)) {
-    // Page indicator, right-aligned on the status line: the hidden rows are
-    // otherwise invisible on a menu this long.
-    char pageBuf[8];
+  // Page count, in the same strip at the bottom of the rows that every other
+  // scrollable screen uses — the hidden rows are otherwise invisible on a menu
+  // this long, and a counter that moves from screen to screen is one nobody
+  // learns to look for.
+  {
     const int totalPages = (static_cast<int>(menuItems.size()) + rowsPerPage - 1) / rowsPerPage;
-    snprintf(pageBuf, sizeof(pageBuf), "%d/%d", selectedIndex / rowsPerPage + 1, totalPages);
-    const auto pageW = renderer.getTextWidth(UI_10_FONT_ID, pageBuf);
-    renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - pageW, statusY, pageBuf);
+    GUI.drawPageIndicator(renderer, menuRect(), selectedIndex / rowsPerPage + 1, totalPages);
   }
 
   for (size_t i = pageStart; i < pageEnd; ++i) {

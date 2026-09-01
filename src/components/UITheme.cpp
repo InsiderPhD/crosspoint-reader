@@ -74,7 +74,11 @@ int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader
   if (hasButtonHints) {
     reservedHeight += metrics.verticalSpacing + metrics.buttonHintsHeight;
   }
-  const int availableHeight = renderer.getScreenHeight() - reservedHeight - extraReservedHeight;
+  // Every list gives its bottom strip to the page counter (BaseTheme::
+  // pageIndicatorRect), so the screen-side page maths has to give it up too --
+  // otherwise a screen pages by one count and drawList draws by another.
+  const int availableHeight =
+      renderer.getScreenHeight() - reservedHeight - extraReservedHeight - metrics.pageIndicatorHeight;
   int rowHeight = hasSubtitle ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
   return availableHeight / rowHeight;
 }
@@ -283,4 +287,28 @@ int UITheme::getProgressBarHeight() {
   const bool showProgressBar =
       SETTINGS.statusBarProgressBar != CrossPointSettings::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS;
   return (showProgressBar ? (((SETTINGS.statusBarProgressBarThickness + 1) * 2) + metrics.progressBarMarginTop) : 0);
+}
+
+UITheme::HintReserve UITheme::getHintReserve(const GfxRenderer& renderer, const int sideGutter,
+                                             const int invertedTopGutter) {
+#if FREEINK_DEVICE_X4PRO
+  // The action bar is drawn in the logical frame, so it is at the bottom in
+  // every orientation. Reserving a side gutter here would be dead space.
+  (void)sideGutter;
+  (void)invertedTopGutter;
+  return {0, 0, 0, UITheme::getInstance().getMetrics().buttonHintsHeight};
+#else
+  const int barHeight = UITheme::getInstance().getMetrics().buttonHintsHeight;
+  switch (renderer.getOrientation()) {
+    case GfxRenderer::Orientation::Portrait:
+      return {0, 0, 0, barHeight};
+    case GfxRenderer::Orientation::PortraitInverted:
+      return {0, 0, invertedTopGutter, 0};
+    case GfxRenderer::Orientation::LandscapeClockwise:
+      return {sideGutter, 0, 0, 0};
+    case GfxRenderer::Orientation::LandscapeCounterClockwise:
+      return {0, sideGutter, 0, 0};
+  }
+  return {0, 0, 0, 0};
+#endif
 }
