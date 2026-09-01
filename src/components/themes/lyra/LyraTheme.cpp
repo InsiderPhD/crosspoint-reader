@@ -277,14 +277,21 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
                          const std::function<std::string(int index)>& rowSubtitle,
                          const std::function<UIIcon(int index)>& rowIcon,
                          const std::function<std::string(int index)>& rowValue, bool highlightValue,
-                         const std::function<bool(int index)>& rowDimmed) const {
+                         const std::function<bool(int index)>& rowDimmed, const char* pageIndicatorOverride) const {
   const ListGeometry geo = listGeometry(rect, selectedIndex, rowSubtitle != nullptr);
   const int rowHeight = geo.rowHeight;
   const int pageItems = geo.pageItems;
 
   const int totalPages = (itemCount + pageItems - 1) / pageItems;
+  // Same strip, same wording, same place as the Classic theme -- see
+  // BaseTheme::pageIndicatorRect.
+  if (pageIndicatorOverride != nullptr) {
+    drawPageIndicatorText(renderer, rect, pageIndicatorOverride);
+  } else {
+    drawPageIndicator(renderer, rect, (selectedIndex <= 0 ? 0 : selectedIndex / pageItems) + 1, totalPages);
+  }
   if (totalPages > 1) {
-    const int scrollAreaHeight = rect.height;
+    const int scrollAreaHeight = geo.contentHeight;
 
     // Draw scroll bar
     const int scrollBarHeight = (scrollAreaHeight * pageItems) / itemCount;

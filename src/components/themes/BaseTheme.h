@@ -44,6 +44,9 @@ struct ThemeMetrics {
 
   int scrollBarWidth;
   int scrollBarRightOffset;
+  // Height of the strip every scrollable surface gives up at the bottom of its
+  // content rect for the "n / m" page count (see BaseTheme::pageIndicatorRect).
+  int pageIndicatorHeight;
 
   int homeTopPadding;
   int homeCoverHeight;
@@ -115,6 +118,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .tabBarHeight = 50,
                                  .scrollBarWidth = 4,
                                  .scrollBarRightOffset = 5,
+                                 .pageIndicatorHeight = 30,
                                  .homeTopPadding = 40,
                                  .homeCoverHeight = 400,
                                  .homeCoverTileHeight = 400,
@@ -174,10 +178,46 @@ class BaseTheme {
   // hitTestList so the two can never drift.
   struct ListGeometry {
     int rowHeight;
-    int pageItems;  // rows per page, >= 1
-    int pageStart;  // first visible item index
+    int pageItems;      // rows per page, >= 1
+    int pageStart;      // first visible item index
+    int contentHeight;  // rect.height minus the page-indicator strip
   };
   ListGeometry listGeometry(const Rect& rect, int selectedIndex, bool hasSubtitle) const;
+
+  // --- The page counter -------------------------------------------------
+  //
+  // A scroll bar is easy to miss, so every surface that pages also says so in
+  // words, and always in the SAME place: the bottom strip of its content rect,
+  // centred, "3 / 7". The strip is reserved unconditionally -- a list that
+  // grows past one page must not shove its own rows up -- and painted only
+  // when there is more than one page.
+  //
+  // drawList does this for itself, so a list screen gets the counter for free
+  // and its rows already sit clear of the strip (listGeometry takes it out).
+  // Screens that page their own content (the cover grid, the reader menu, the
+  // stats pages) call drawPageIndicator with the SAME rect they laid that
+  // content out in, and must reserve pageIndicatorRect(rect).height themselves.
+  //
+  // Returns a zero-height rect when `rect` is too short to give up the space;
+  // nothing is then reserved and nothing is drawn.
+  Rect pageIndicatorRect(const Rect& rect) const;
+
+  // Height a list rect needs to show `rowCount` rows AND carry the strip. The
+  // fixed forms (the date spinners) size themselves with this: they have
+  // exactly as many rows as fields, so an unaccounted-for strip would cost
+  // them a field rather than a page.
+  int listRectHeightForRows(int rowCount, bool hasSubtitle) const;
+
+  // Height left for content once the strip is taken out of `rect`.
+  int contentHeightWithoutIndicator(const Rect& rect) const;
+
+  // No-op when totalPages <= 1 (there is nothing to tell the user).
+  void drawPageIndicator(const GfxRenderer& renderer, const Rect& rect, int currentPage, int totalPages) const;
+
+  // Same strip, caller's wording -- for screens whose pages are not this
+  // rect's rows (BookFusion pages over the network, and needs a "7+" when the
+  // server did not say how many there are). Empty/null text draws nothing.
+  void drawPageIndicatorText(const GfxRenderer& renderer, const Rect& rect, const char* text) const;
 
   // Item index under a logical-frame point (Full Touch tap dispatch), or -1 on
   // a miss. rect/selectedIndex/hasSubtitle MUST match the concurrent drawList
@@ -217,12 +257,16 @@ class BaseTheme {
   // rotated 90° (sideways), drawn on the left edge. Used by list screens where a Power
   // short-press opens the sort menu. No-op for empty labels.
   virtual void drawPowerButtonHint(GfxRenderer& renderer, const char* label) const;
+  // pageIndicatorOverride: what to print in the page-counter strip instead of
+  // this list's own "page of pages" (see drawPageIndicatorText). nullptr = the
+  // computed count, "" = draw nothing there.
   virtual void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                         const std::function<std::string(int index)>& rowTitle,
                         const std::function<std::string(int index)>& rowSubtitle = nullptr,
                         const std::function<UIIcon(int index)>& rowIcon = nullptr,
                         const std::function<std::string(int index)>& rowValue = nullptr, bool highlightValue = false,
-                        const std::function<bool(int index)>& rowDimmed = nullptr) const;
+                        const std::function<bool(int index)>& rowDimmed = nullptr,
+                        const char* pageIndicatorOverride = nullptr) const;
   // powerButtonHintLabel: when non-null, the caller also draws the side Power-button hint with this
   // label (e.g. "Sort"). On the X3 that hint box sits in the top-right corner where the battery
   // renders, so the theme shifts the battery clear of the box (sized to this label). Null = no hint.

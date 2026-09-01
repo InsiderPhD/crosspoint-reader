@@ -20,19 +20,19 @@ int XtcReaderChapterSelectionActivity::listTopY() const {
   return 60 + hintGutterHeight - 2;
 }
 
-int XtcReaderChapterSelectionActivity::getPageItems() const {
-  constexpr int lineHeight = ROW_H;
-
-  const int screenHeight = renderer.getScreenHeight();
-  const auto orientation = renderer.getOrientation();
-  // In inverted portrait, the hint row is drawn near the logical top.
-  // Reserve vertical space so the list starts below the hints.
-  const bool isPortraitInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
+// The band the rows live in: below the title, above the hint row. Its bottom
+// strip carries the page count, the same as on every other scrollable screen
+// (BaseTheme::pageIndicatorRect).
+Rect XtcReaderChapterSelectionActivity::listAreaRect() const {
+  const bool isPortraitInverted = renderer.getOrientation() == GfxRenderer::Orientation::PortraitInverted;
   const int hintGutterHeight = isPortraitInverted ? 50 : 0;
   const int startY = 60 + hintGutterHeight;
-  const int availableHeight = screenHeight - startY - lineHeight;
+  return Rect{0, startY, renderer.getScreenWidth(), renderer.getScreenHeight() - startY - ROW_H};
+}
+
+int XtcReaderChapterSelectionActivity::getPageItems() const {
   // Clamp to at least one item to prevent empty page math.
-  return std::max(1, availableHeight / lineHeight);
+  return std::max(1, GUI.contentHeightWithoutIndicator(listAreaRect()) / ROW_H);
 }
 
 int XtcReaderChapterSelectionActivity::findChapterIndexForPage(uint32_t page) const {
@@ -180,6 +180,13 @@ void XtcReaderChapterSelectionActivity::render(RenderLock&&) {
     const auto& chapter = chapters[i];
     const char* title = chapter.name.empty() ? tr(STR_UNNAMED) : chapter.name.c_str();
     renderer.drawText(UI_10_FONT_ID, contentX + 20, listTop + 2 + (i % pageItems) * ROW_H, title, i != selectorIndex);
+  }
+
+  // Page count, in the strip every scrollable screen reserves for it.
+  {
+    const int totalItems = static_cast<int>(chapters.size());
+    GUI.drawPageIndicator(renderer, listAreaRect(), selectorIndex / pageItems + 1,
+                          (totalItems + pageItems - 1) / pageItems);
   }
 
   // Skip button hints in landscape CW mode (they overlap content)

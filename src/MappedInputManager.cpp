@@ -409,8 +409,15 @@ MappedInputManager::Labels MappedInputManager::mapLabels(const char* back, const
   // buttons they act on -- and these slots are the Full Touch action bar's tap
   // targets (ActionBar::kSlotButtons), not passive labels under fixed hardware.
   // Return them in the fixed Back/Confirm/Left/Right order that mapping uses.
+  //
+  // The orientation swap is skipped for the same reason: it exists so a label
+  // stays under the physical button that moves that way, and these slots are not
+  // under anything. Slot 3 injects Button::Left in every orientation, so it must
+  // keep the caller's `previous` label or a sign ("-"/"+") would read backwards.
   (void)labelForHardware;
-  return {back, confirm, leftLabel, rightLabel};
+  (void)leftLabel;
+  (void)rightLabel;
+  return {back, confirm, previous, next};
 #else
   return {labelForHardware(HalGPIO::BTN_BACK), labelForHardware(HalGPIO::BTN_CONFIRM),
           labelForHardware(HalGPIO::BTN_LEFT), labelForHardware(HalGPIO::BTN_RIGHT)};

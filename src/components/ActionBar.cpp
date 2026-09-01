@@ -3,7 +3,10 @@
 #if FREEINK_DEVICE_X4PRO
 
 #include <GfxRenderer.h>
+#include <I18n.h>
 #include <freertos/FreeRTOS.h>
+
+#include <cstring>
 
 namespace {
 
@@ -36,6 +39,21 @@ constexpr int BAR_TOP_PAD = 4;
 
 bool hasLabel(const char* s) { return s != nullptr && s[0] != '\0'; }
 
+// The outer two slots ARE this board's Left/Right pair -- there is no key and no
+// swipe behind them (see the mapping table in MappedInputManager.cpp). A slot
+// labelled with the bare direction is therefore telling the reader to press
+// something that does not exist, and on the screens that do it the pair only
+// duplicates the side keys' scrolling anyway, so drop it and let the labels that
+// remain share out its width. A slot whose Left/Right carries a real ACTION
+// (Renew, Retry, "-" / "+") is untouched: it names what the tap does rather than
+// which button to press. Compared against the translated strings rather than the
+// English literals so the rule holds in every language.
+const char* dropIfBareDirection(const char* s) {
+  if (!hasLabel(s)) return s;
+  if (strcmp(s, tr(STR_DIR_LEFT)) == 0 || strcmp(s, tr(STR_DIR_RIGHT)) == 0) return "";
+  return s;
+}
+
 // Set from the render task just before the activity paints (ActivityManager),
 // read by the paint itself. Both run on the render task, so no locking here --
 // unlike the slot table, which the input task also reads.
@@ -53,7 +71,7 @@ void ActionBar::draw(GfxRenderer& renderer, const int barHeight, const int fontI
   // Slot 1 is Confirm (kSlotButtons). Screens whose highlighted row or tile
   // already runs Confirm when tapped drop it here rather than at every call
   // site, and the labels that remain share out its width below.
-  const char* labels[4] = {btn1, confirmRedundant ? "" : btn2, btn3, btn4};
+  const char* labels[4] = {btn1, confirmRedundant ? "" : btn2, dropIfBareDirection(btn3), dropIfBareDirection(btn4)};
   int shown = 0;
   for (const char* label : labels) {
     if (hasLabel(label)) shown++;

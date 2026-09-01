@@ -7,6 +7,8 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
+struct Rect;
+
 // Lists the current book's saved clippings. Up/Down scroll, Confirm opens a paged detail view
 // (Confirm again jumps to the clipping's location), Back exits, and holding Confirm asks to
 // delete the selected clipping. Returns a ClippingJumpResult when the user jumps.
@@ -40,6 +42,8 @@ class EpubReaderClippingListActivity final : public Activity {
   bool detailMode = false;
 
   int getPageItems() const;
+  // Band the rows are laid out in; its bottom strip holds the page count.
+  Rect listAreaRect() const;
   // Top edge of the first list row band; row i spans
   // [listTopY() + i*ROW_HEIGHT, + ROW_HEIGHT). Shared by render() and the Full
   // Touch tap hit-testing in loop().

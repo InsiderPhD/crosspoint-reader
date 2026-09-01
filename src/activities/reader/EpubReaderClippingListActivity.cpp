@@ -146,13 +146,18 @@ void buildWrappedDetailLines(const GfxRenderer& renderer, const int fontId, cons
 }
 }  // namespace
 
-int EpubReaderClippingListActivity::getPageItems() const {
-  const auto orientation = renderer.getOrientation();
-  const bool isPortraitInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
+// The band the rows live in: below the title, above the hint row. Its bottom
+// strip carries the page count, the same as on every other scrollable screen
+// (BaseTheme::pageIndicatorRect).
+Rect EpubReaderClippingListActivity::listAreaRect() const {
+  const bool isPortraitInverted = renderer.getOrientation() == GfxRenderer::Orientation::PortraitInverted;
   const int hintGutterHeight = isPortraitInverted ? 50 : 0;
   const int startY = LIST_START_Y + hintGutterHeight;
-  const int available = renderer.getScreenHeight() - startY - ROW_HEIGHT;
-  return std::max(1, available / ROW_HEIGHT);
+  return Rect{0, startY, renderer.getScreenWidth(), renderer.getScreenHeight() - startY - ROW_HEIGHT};
+}
+
+int EpubReaderClippingListActivity::getPageItems() const {
+  return std::max(1, GUI.contentHeightWithoutIndicator(listAreaRect()) / ROW_HEIGHT);
 }
 
 // Top edge of the first row band. Mirrors render()'s
@@ -524,6 +529,9 @@ void EpubReaderClippingListActivity::render(RenderLock&&) {
     const std::string chapterTrunc = renderer.truncatedText(SMALL_FONT_ID, chapter, contentWidth - 40);
     renderer.drawText(SMALL_FONT_ID, marginLeft, rowY + 31, chapterTrunc.c_str(), !isSelected);
   }
+
+  // Page count, in the strip every scrollable screen reserves for it.
+  GUI.drawPageIndicator(renderer, listAreaRect(), selectedIndex / pageItems + 1, (total + pageItems - 1) / pageItems);
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

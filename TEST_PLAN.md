@@ -297,6 +297,17 @@ Session log:
       dialog) from a Full-Touch screen — tap-activates-the-highlighted-option comes
       **back** inside the modal, then reverts on close.
 - [ ] Home-key-tap-is-Confirm still works on Full-Touch screens.
+- [ ] **Action bar drops the redundant Confirm**: on the tappable menus above the
+      bottom bar shows one full-width **Back** and no "Select"/"Open"/"Toggle" —
+      tapping the highlighted row still activates it.
+      - [ ] Home shows no bar at all (it has no Back), and tiles still open on the
+            second tap.
+      - [ ] Screens where Confirm is the ONLY way to commit still show it:
+            manual date, session date edit, reading date selection, book reading
+            adjustment, clip selection. Tapping the highlighted field there steps
+            the value and the bar's Confirm saves.
+      - [ ] Opening a modal/context menu on a Full-Touch screen brings the Confirm
+            slot back (it is tap-anywhere-Confirm again inside the modal).
 - [ ] Buttons still work everywhere with Full Touch on (touch is additive, not exclusive).
 - [ ] Toggle Full Touch off — all screens revert to tap-anywhere-Confirm.
 
