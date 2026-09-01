@@ -467,6 +467,7 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
       return;
     }
     currentPageNextY = 0;
+    previousBlockBottomMargin = 0;
   }
 
   const int16_t lineHeight = static_cast<int16_t>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
@@ -493,6 +494,7 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
       return;
     }
     currentPageNextY = 0;
+    previousBlockBottomMargin = 0;
   }
 
   currentPageNextY += topSpacing;
@@ -505,6 +507,7 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
   }
   currentPage->elements.push_back(std::move(pageRule));
   currentPageNextY = static_cast<int16_t>(currentPageNextY + ruleThickness + bottomSpacing);
+  previousBlockBottomMargin = 0;
 
   if (!pendingAnchorId.empty()) {
     anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
@@ -944,6 +947,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                     return;
                   }
                   self->currentPageNextY = 0;
+                  self->previousBlockBottomMargin = 0;
                 } else if (!self->currentPage) {
                   self->currentPage.reset(new (std::nothrow) Page());
                   if (!self->currentPage) {
@@ -951,6 +955,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                     return;
                   }
                   self->currentPageNextY = 0;
+                  self->previousBlockBottomMargin = 0;
                 }
 
                 // Apply top margin from container block
@@ -970,6 +975,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 }
                 self->currentPage->elements.push_back(std::move(pageImage));
                 self->currentPageNextY += displayHeight + imageMarginBottom;
+                self->previousBlockBottomMargin = 0;
 
                 // The image consumed the empty block's accumulated vertical spacing.
                 // Reset the block so the Vertical merge in startNewTextBlock doesn't
@@ -1081,10 +1087,11 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
   const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
   const auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
-      cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
+      cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth, self->viewportHeight);
 
   if (strcmp(name, "hr") == 0) {
-    auto hrBlockStyle = BlockStyle::fromCssStyle(cssStyle, emSize, CssTextAlign::Left, self->viewportWidth);
+    auto hrBlockStyle =
+        BlockStyle::fromCssStyle(cssStyle, emSize, CssTextAlign::Left, self->viewportWidth, self->viewportHeight);
     if (!self->embeddedStyle) {
       hrBlockStyle.marginLeft = 0;
       hrBlockStyle.marginRight = 0;
@@ -1104,7 +1111,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
 
   if (matches(name, HEADER_TAGS, NUM_HEADER_TAGS)) {
     self->currentCssStyle = cssStyle;
-    auto headerBlockStyle = BlockStyle::fromCssStyle(cssStyle, emSize, CssTextAlign::Center, self->viewportWidth);
+    auto headerBlockStyle =
+        BlockStyle::fromCssStyle(cssStyle, emSize, CssTextAlign::Center, self->viewportWidth, self->viewportHeight);
     headerBlockStyle.textAlignDefined = true;
     if (self->embeddedStyle && cssStyle.hasTextAlign()) {
       headerBlockStyle.alignment = cssStyle.textAlign;
@@ -1912,6 +1920,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
   if (!currentPage) {
     currentPage.reset(new (std::nothrow) Page());
     currentPageNextY = 0;
+    previousBlockBottomMargin = 0;
   }
 
   // Compute word total including this line to know which pending footnotes arrive with it.
@@ -1962,6 +1971,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
     completedPageCount++;
     currentPage.reset(new (std::nothrow) Page());
     currentPageNextY = 0;
+    previousBlockBottomMargin = 0;
   }
 
   // Track cumulative words to assign footnotes to the page containing their anchor
@@ -2053,14 +2063,34 @@ void ChapterHtmlSlimParser::makePages() {
   if (!currentPage) {
     currentPage.reset(new (std::nothrow) Page());
     currentPageNextY = 0;
+    previousBlockBottomMargin = 0;
   }
 
   const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
 
-  // Apply top spacing before the paragraph (stored in pixels)
+  // Apply top spacing before the paragraph (stored in pixels).
+  //
+  // Adjacent siblings COLLAPSE their margins in CSS: the gap between two blocks
+  // is max(previous marginBottom, this marginTop), never their sum. This used to
+  // add both, which doubled the gap for the extremely common `p { margin: 1em 0 }`
+  // -- and with the Paragraph Spacing setting on top that put roughly two and a
+  // half line heights between every paragraph. On a ~27-line portrait page that
+  // reads as merely loose; on a ~15-line landscape page the gaps dominate the
+  // screen, which is where it was first noticed.
+  //
+  // The previous block's marginBottom is already in currentPageNextY, so add only
+  // what this block's marginTop asks for beyond it. Doing it as an excess rather
+  // than deferring the bottom margin keeps the page-break behaviour identical:
+  // a gap that overruns the page is still discarded by the reset in
+  // addLineToPage(), exactly as before.
+  //
+  // Padding never collapses in CSS, so it stays a plain addition.
   const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
-  if (blockStyle.marginTop > 0) {
-    currentPageNextY += blockStyle.marginTop;
+  const int16_t collapsedTopMargin =
+      static_cast<int16_t>(std::max(0, blockStyle.marginTop - previousBlockBottomMargin));
+  previousBlockBottomMargin = 0;
+  if (collapsedTopMargin > 0) {
+    currentPageNextY += collapsedTopMargin;
   }
   if (blockStyle.paddingTop > 0) {
     currentPageNextY += blockStyle.paddingTop;
@@ -2085,9 +2115,11 @@ void ChapterHtmlSlimParser::makePages() {
     pendingFootnotes.clear();
   }
 
-  // Apply bottom spacing after the paragraph (stored in pixels)
+  // Apply bottom spacing after the paragraph (stored in pixels). Remembered as
+  // well as applied, so the next block collapses its top margin against it.
   if (blockStyle.marginBottom > 0) {
     currentPageNextY += blockStyle.marginBottom;
+    previousBlockBottomMargin = blockStyle.marginBottom;
   }
   if (blockStyle.paddingBottom > 0) {
     currentPageNextY += blockStyle.paddingBottom;

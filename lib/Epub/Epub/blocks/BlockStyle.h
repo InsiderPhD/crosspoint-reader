@@ -92,18 +92,34 @@ struct BlockStyle {
   // emSize is the current font line height, used for em/rem unit conversion
   // paragraphAlignment is the user's paragraphAlignment setting preference
   static BlockStyle fromCssStyle(const CssStyle& cssStyle, const float emSize, const CssTextAlign paragraphAlignment,
-                                 const uint16_t viewportWidth = 0) {
+                                 const uint16_t viewportWidth = 0, const uint16_t viewportHeight = 0) {
     BlockStyle blockStyle;
     const float vw = viewportWidth;
+    // Percentage basis for the VERTICAL margins and padding.
+    //
+    // CSS resolves those against the containing block's width, which is the
+    // right call for a page that only ever scrolls: width is the dimension that
+    // holds still. Here the same book reflows into a column roughly 440px wide
+    // in portrait and 760px wide in landscape, so a "margin-bottom: 2%"
+    // paragraph gap grew by ~70% in the orientation with the least vertical
+    // room to spare -- landscape read as though every paragraph had been pushed
+    // apart. The column's SHORT axis holds still instead: it is the viewport
+    // width in portrait (so portrait renders exactly as it did before) and the
+    // viewport height in landscape, and on a rotated panel those are the same
+    // number, which is what makes the spacing survive a rotation.
+    //
+    // Horizontal percentages keep resolving against the real column width,
+    // where the CSS rule is what the author actually meant.
+    const float vBasis = (viewportHeight > 0 && viewportHeight < viewportWidth) ? viewportHeight : vw;
     const auto maxHorizontalInsetPx = static_cast<int16_t>(emSize * MAX_HORIZONTAL_INSET_EM);
     // Resolve all CssLength values to pixels using the current font's em size and viewport width
-    blockStyle.marginTop = cssStyle.marginTop.toPixelsInt16(emSize, vw);
-    blockStyle.marginBottom = cssStyle.marginBottom.toPixelsInt16(emSize, vw);
+    blockStyle.marginTop = cssStyle.marginTop.toPixelsInt16(emSize, vBasis);
+    blockStyle.marginBottom = cssStyle.marginBottom.toPixelsInt16(emSize, vBasis);
     blockStyle.marginLeft = std::min(cssStyle.marginLeft.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
     blockStyle.marginRight = std::min(cssStyle.marginRight.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
 
-    blockStyle.paddingTop = cssStyle.paddingTop.toPixelsInt16(emSize, vw);
-    blockStyle.paddingBottom = cssStyle.paddingBottom.toPixelsInt16(emSize, vw);
+    blockStyle.paddingTop = cssStyle.paddingTop.toPixelsInt16(emSize, vBasis);
+    blockStyle.paddingBottom = cssStyle.paddingBottom.toPixelsInt16(emSize, vBasis);
     blockStyle.paddingLeft = std::min(cssStyle.paddingLeft.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
     blockStyle.paddingRight = std::min(cssStyle.paddingRight.toPixelsInt16(emSize, vw), maxHorizontalInsetPx);
 
