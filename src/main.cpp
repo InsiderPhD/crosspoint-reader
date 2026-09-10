@@ -561,32 +561,33 @@ void setup() {
   const auto wakeupReason = gpio.getWakeupReason();
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:
-#if FREEINK_DEVICE_X4PRO
-      // NOT verified on the X4 Pro: the check would deep-sleep the device on
-      // every battery boot, and it could never get back out.
+      // A power-button wake is taken at face value on every board.
       //
-      // verifyPowerButtonWakeup() sleeps the device unless the power button is
-      // STILL held when it runs — ~700ms into boot, plus up to 1s of polling.
-      // On X3/X4 that holds by construction: deep sleep drives GPIO13 low to
-      // disconnect the battery through the protection MOSFET, so the rail is up
-      // only while the button is pressed and firmware cannot reach this line
-      // otherwise. The X4 Pro has no such latch (GPIO13 is the display CS —
-      // see HalPowerManager::startDeepSleep), so a normal short press is long
-      // released by now and reads as a spurious wake.
+      // verifyPowerButtonWakeup() used to gate this, and it sleeps the device
+      // again unless the button is STILL held when the check runs. That check
+      // sits here, at the end of setup()'s hardware bring-up — after serial's
+      // 200ms CDC settle, gpio.begin()'s fingerprint probe, the SD mount and
+      // two JSON loads — so "still held" means held for one to two seconds,
+      // plus up to another second of polling. On the X4 that is exactly what
+      // a user feels as "I have to hold it for ages, or press it twice": the
+      // second press lands inside the 1s poll window and is what actually
+      // gets the device up.
       //
-      // The failure is self-sustaining: with no battery cut, the sleep it
-      // triggers is answered by another cold POWERON, which lands here again.
-      // Symptom is a device that boots on USB and is dead on battery.
+      // It was already dead as a duration gate — getPowerButtonDuration()
+      // returns 10ms, having been cut from 400ms for this same reason — so all
+      // that remained was an accidental hold gate measured in boot time, which
+      // no setting describes and no user asked for.
       //
-      // Cold power-on is therefore taken at face value here. The anti-pocket-wake
-      // guard this gives up needs a hold gate that survives to the check —
-      // latching the press in HalGPIO at boot, not re-reading the pin later.
-      LOG_DBG("MAIN", "Cold boot on battery: power button press taken as intentional");
-#else
-      LOG_DBG("MAIN", "Verifying power button press duration");
-      gpio.verifyPowerButtonWakeup(SETTINGS.getPowerButtonDuration(),
-                                   SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
-#endif
+      // On the X4 Pro it was worse than unresponsive: with no battery-cut latch
+      // there (GPIO13 is the display CS — see HalPowerManager::startDeepSleep)
+      // a released short press read as spurious, the sleep it triggered was
+      // answered by another cold POWERON, and the device booted on USB while
+      // appearing dead on battery.
+      //
+      // Reinstating an anti-pocket-wake guard needs a hold gate that survives
+      // to the check — latch the press in HalGPIO at boot, do not re-read the
+      // pin once bring-up has already burned the hold time.
+      LOG_DBG("MAIN", "Wakeup reason: power button; taken as intentional");
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
       // If USB power caused a cold boot, go back to sleep
