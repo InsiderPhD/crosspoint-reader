@@ -31,6 +31,7 @@
 #include "components/icons/image24.h"
 #include "components/icons/library.h"
 #include "components/icons/recent.h"
+#include "components/icons/search24.h"
 #include "components/icons/settings2.h"
 #include "components/icons/star24.h"
 #include "components/icons/text24.h"
@@ -100,6 +101,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return Check24Icon;
       case UIIcon::Files:
         return Files24Icon;
+      case UIIcon::Search:
+        return Search24Icon;
       default:
         return nullptr;
     }

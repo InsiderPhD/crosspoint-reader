@@ -330,13 +330,22 @@ MappedInputManager::TapZone MappedInputManager::wasTapZone() const {
     return TapZone::None;
   }
 
-  // Only the x coordinate matters for left/middle/right thirds.
   const LogicalTouchPoint p = toLogicalPoint(nx, ny);
-  const TapZone zone = (p.x < p.width / 3)        ? TapZone::Left
-                       : (p.x >= 2 * p.width / 3) ? TapZone::Right
-                                                  : TapZone::Middle;
-  LOG_DBG("INPUT", "Tap logical=(%d,%d)/%d -> zone %u", p.x, p.y, p.width, static_cast<unsigned>(zone));
+  const TapZone zone = classifyZone(p);
+  LOG_DBG("INPUT", "Tap logical=(%d,%d) of %dx%d -> zone %u", p.x, p.y, p.width, p.height, static_cast<unsigned>(zone));
   return zone;
+}
+
+// Thirds of the logical screen, cut along the axis the user chose. The point is
+// already in the active orientation's frame, so "top" is the top of the page as
+// drawn, in every rotation.
+MappedInputManager::TapZone MappedInputManager::classifyZone(const LogicalTouchPoint& p) {
+  if (SETTINGS.readerTapZoneLayout == CrossPointSettings::TAP_ZONES_TOP_BOTTOM) {
+    // Top band takes the Left slot and the bottom band the Right slot, so the
+    // defaults stay "back, then forward" and a layout switch rebinds nothing.
+    return (p.y < p.height / 3) ? TapZone::Left : (p.y >= 2 * p.height / 3) ? TapZone::Right : TapZone::Middle;
+  }
+  return (p.x < p.width / 3) ? TapZone::Left : (p.x >= 2 * p.width / 3) ? TapZone::Right : TapZone::Middle;
 }
 
 MappedInputManager::TapZone MappedInputManager::wasTouchLongPressZone(int& lx, int& ly) const {
@@ -351,7 +360,7 @@ MappedInputManager::TapZone MappedInputManager::wasTouchLongPressZone(int& lx, i
   lx = p.x;
   ly = p.y;
   // Same thirds classification as wasTapZone().
-  return (p.x < p.width / 3) ? TapZone::Left : (p.x >= 2 * p.width / 3) ? TapZone::Right : TapZone::Middle;
+  return classifyZone(p);
 }
 #endif
 

@@ -36,6 +36,16 @@ class KeyboardEntryActivity : public Activity {
   // The keyboard hit-tests taps itself; a tap on a key must not also inject
   // Confirm (X4 Pro tap-anywhere-is-Confirm).
   bool consumesTouchInput() const override { return true; }
+  // Every key is already a tap target, Ok included, and a held key types its
+  // alternative character just like a held Confirm — so the action bar's
+  // Confirm slot is only a second way to press the highlighted key. Drop it and
+  // let Back take the full width.
+  //
+  // The default (handlesDirectTouch(), false here) is wrong for this screen:
+  // the keyboard hit-tests through consumesTouchInput() instead, so it opts out
+  // of BOTH Confirm injections rather than just the tap one, and never picks up
+  // the "my drawn UI is the Confirm" default that the list screens get for free.
+  bool tapActivatesConfirm() const override { return true; }
 
  private:
   std::string title;

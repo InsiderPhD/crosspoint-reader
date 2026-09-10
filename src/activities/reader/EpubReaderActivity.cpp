@@ -39,6 +39,7 @@
 #include "EpubReaderClippingListActivity.h"
 #include "EpubReaderFootnotesActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
+#include "EpubReaderUtils.h"
 #include "JsonSettingsIO.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
@@ -46,6 +47,7 @@
 #include "KOReaderSyncClient.h"
 #include "KOReaderSyncStateStore.h"
 #include "MappedInputManager.h"
+#include "NearbyBookPositionSyncActivity.h"
 #include "ProgressMapper.h"
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
@@ -56,6 +58,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/FontLayoutPreviewActivity.h"
 #include "activities/settings/ReaderControlsActivity.h"  // for ReaderControlsActivity::actionName()
+#include "activities/settings/ReaderMenuSettingsActivity.h"
 #include "clippings/ClippingsManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -1124,6 +1127,53 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       onGoHome();
       return;
     }
+    case EpubReaderMenuActivity::MenuAction::NEARBY_POSITION_SYNC: {
+      const int currentPage = section ? section->currentPage : nextPageNumber;
+      const int totalPages = section ? section->pageCount : std::max(1, cachedChapterTotalPageCount);
+      std::optional<uint16_t> paragraphIndex;
+      if (section && currentPage >= 0 && currentPage < section->pageCount) {
+        if (const auto pIdx = section->getParagraphIndexForPage(static_cast<uint16_t>(currentPage))) {
+          paragraphIndex = *pIdx;
+        }
+      }
+
+      CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPages};
+      if (paragraphIndex.has_value()) {
+        localPos.paragraphIndex = *paragraphIndex;
+        localPos.hasParagraphIndex = true;
+      }
+      KOReaderPosition localKoPos = ProgressMapper::toKOReader(epub, localPos);
+      const int tocIdx = epub->getTocIndexForSpineIndex(currentSpineIndex);
+      std::string localChapterName = (tocIdx >= 0) ? epub->getTocItem(tocIdx).title : "";
+      const std::string savedEpubPath = epub->getPath();
+
+      // Land the current position before handing over: the sync screen reboots
+      // back into the book on the way out, so anything still only in memory here
+      // would be lost even when the user cancels.
+      saveProgress(currentSpineIndex, currentPage, totalPages);
+
+      // ESP-NOW brings the WiFi stack up (~40KB) inside a reader that is already
+      // holding a laid-out section. Drop the section first.
+      LOG_DBG("NBPS", "Releasing section for nearby position sync (heap before: %u)", (unsigned)ESP.getFreeHeap());
+      {
+        RenderLock lock(*this);
+        if (section) {
+          nextPageNumber = section->currentPage;
+        }
+        section.reset();
+      }
+      LOG_DBG("NBPS", "Section released for nearby position sync (heap after: %u)", (unsigned)ESP.getFreeHeap());
+
+      // No result handler: the sync screen writes any accepted position to
+      // progress.bin itself and silent-reboots into the book (onExit runs before
+      // a popped activity's handler, so a SyncResult would never be delivered).
+      startActivityForResult(
+          std::make_unique<NearbyBookPositionSyncActivity>(
+              renderer, mappedInput, epub, savedEpubPath, currentSpineIndex, currentPage, totalPages,
+              std::move(localKoPos), std::move(localChapterName), KOREADER_STORE.getMatchMethod(), paragraphIndex),
+          nullptr);
+      break;
+    }
     case EpubReaderMenuActivity::MenuAction::DELETE_CACHE: {
       {
         RenderLock lock(*this);
@@ -1157,6 +1207,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                              [this](const ActivityResult&) {
                                requestUpdate();  // button mappings may have changed — refresh hint labels
                              });
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::CUSTOMISE_MENU: {
+      // The menu is rebuilt from SETTINGS.readerMenuVisible every time it opens,
+      // so there is nothing to refresh here beyond the reader behind it.
+      startActivityForResult(std::make_unique<ReaderMenuSettingsActivity>(renderer, mappedInput),
+                             [this](const ActivityResult&) { requestUpdate(); });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::FONT_LAYOUT: {
@@ -2080,20 +2137,9 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
 }
 
 void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {
-  FsFile f;
-  if (Storage.openFileForWrite("ERS", epub->getCachePath() + "/progress.bin", f)) {
-    uint8_t data[6];
-    data[0] = currentSpineIndex & 0xFF;
-    data[1] = (currentSpineIndex >> 8) & 0xFF;
-    data[2] = currentPage & 0xFF;
-    data[3] = (currentPage >> 8) & 0xFF;
-    data[4] = pageCount & 0xFF;
-    data[5] = (pageCount >> 8) & 0xFF;
-    f.write(data, 6);
-    LOG_DBG("ERS", "Progress saved: Chapter %d, Page %d", spineIndex, currentPage);
-  } else {
-    LOG_ERR("ERS", "Could not save progress!");
-  }
+  // progress.bin + Recent Books live in EpubReaderUtils so the nearby position
+  // sync screen can land a received position without coming back through here.
+  EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount);
 
   const float chapterProgress =
       (pageCount > 0) ? static_cast<float>(currentPage) / static_cast<float>(pageCount) : 0.0f;
@@ -2107,7 +2153,6 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
         static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)), progressPercent >= 90, "",
         static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f), 0, 100)));
   }
-  RECENT_BOOKS.updateProgress(epub->getPath(), progressPercent);
 }
 
 EpubReaderActivity::BookmarkToggleResult EpubReaderActivity::addBookmark() {

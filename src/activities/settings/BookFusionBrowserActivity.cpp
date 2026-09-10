@@ -24,6 +24,7 @@
 #include "activities/home/LibraryActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/reader/TlsFramebufferBorrow.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/BookFusionCoverCache.h"
@@ -47,6 +48,24 @@ constexpr Category CATEGORIES[] = {
     {StrId::STR_BF_ALL_BOOKS, nullptr, nullptr, UIIcon::Files},
 };
 constexpr int NUM_CATEGORIES = sizeof(CATEGORIES) / sizeof(CATEGORIES[0]);
+
+// Unified category-menu layout: [Search, categories..., shelves...]. Search sits
+// at the top because it's the only row that isn't a fixed list — everything
+// below it is browsable by paging, this one needs typing, so it gets the
+// landing position.
+constexpr int MENU_SEARCH_INDEX = 0;
+constexpr int MENU_CATEGORY_BASE = MENU_SEARCH_INDEX + 1;
+constexpr int MENU_SHELF_BASE = MENU_CATEGORY_BASE + NUM_CATEGORIES;
+
+// "All Books" — no list filter, default sort. A free-text search runs against
+// this category so the query is the only filter, matching the plugin, which
+// opens search results with an empty filter table (bf_browser.lua
+// showBookSearchDialog -> openBookList(_("Search: ") .. query, {}, query)).
+constexpr int CATEGORY_ALL_BOOKS = NUM_CATEGORIES - 1;
+
+// Longest query we'll let the user type. The buffer is fixed (searchQuery[64])
+// and the keyboard enforces the cap itself, so nothing downstream truncates.
+constexpr size_t MAX_SEARCH_QUERY_LEN = 63;
 
 // The "N / M" strip both lists sit above is the theme's now
 // (BaseTheme::pageIndicatorRect): drawList reserves it out of the rect it is
@@ -115,21 +134,67 @@ void BookFusionBrowserActivity::onEnter() {
 }
 
 void BookFusionBrowserActivity::handleCategorySelection() {
-  // Route selection to either a functional category or a user shelf.
-  // The unified-menu layout (see render()) is [categories, shelves] — the
-  // folder icon visually delimits the shelves, so no separator row is needed.
-  if (selectedCategory < NUM_CATEGORIES) {
-    currentCategory = selectedCategory;
+  // Route selection to the search prompt, a functional category, or a user
+  // shelf. The unified-menu layout (see render()) is [Search, categories,
+  // shelves] — the icon changes (magnifier / category / folder) are themselves
+  // the visual delimiters, so no separator rows are needed.
+  if (selectedCategory == MENU_SEARCH_INDEX) {
+    promptForSearch();
+    return;
+  }
+
+  // Picking any category or shelf drops the previous search: the two are
+  // alternative entry points, not filters that stack. searchQuery itself is
+  // kept so re-opening Search still prefills the last term.
+  if (selectedCategory < MENU_SHELF_BASE) {
+    currentCategory = selectedCategory - MENU_CATEGORY_BASE;
     currentBookshelfId = 0;
     currentBookshelfName[0] = '\0';
   } else if (bookshelvesLoaded) {
-    const int shelfIdx = selectedCategory - NUM_CATEGORIES;
+    const int shelfIdx = selectedCategory - MENU_SHELF_BASE;
     currentBookshelfId = bookshelves.shelves[shelfIdx].id;
     strlcpy(currentBookshelfName, bookshelves.shelves[shelfIdx].name, sizeof(currentBookshelfName));
     currentCategory = -1;  // unused while a shelf filter is active
   } else {
     return;
   }
+  // Not a search browse — header comes from the category/shelf and the query
+  // stops filtering (searchQuery itself survives, for the next prefill).
+  searchActive = false;
+  searchHeader[0] = '\0';
+  beginBrowse();
+}
+
+void BookFusionBrowserActivity::promptForSearch() {
+  // Prefilled with the previous term so refining a search is an edit, not a
+  // retype. The keyboard is pushed on top of this activity, so WiFi (and the
+  // already-fetched shelf list) survive the detour.
+  startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_BF_SEARCH_BOOKS),
+                                                                 searchQuery, MAX_SEARCH_QUERY_LEN, InputType::Text),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) return;
+                           const auto& kb = std::get<KeyboardResult>(result.data);
+                           strlcpy(searchQuery, kb.text.c_str(), sizeof(searchQuery));
+                           if (searchQuery[0] == '\0') {
+                             // Cleared the box and confirmed — treat it as "cancel the search"
+                             // and stay in the menu rather than fetching an unfiltered page the
+                             // All Books row already offers.
+                             searchActive = false;
+                             searchHeader[0] = '\0';
+                             return;
+                           }
+                           // A search is a whole-library query: drop any shelf filter and browse
+                           // the unfiltered "All Books" list so the term is the only filter.
+                           currentCategory = CATEGORY_ALL_BOOKS;
+                           currentBookshelfId = 0;
+                           currentBookshelfName[0] = '\0';
+                           searchActive = true;
+                           snprintf(searchHeader, sizeof(searchHeader), tr(STR_BF_SEARCH_HEADER), searchQuery);
+                           beginBrowse();
+                         });
+}
+
+void BookFusionBrowserActivity::beginBrowse() {
   currentPage = 1;
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -206,12 +271,14 @@ void BookFusionBrowserActivity::loadPage(int page) {
   // sends `bookshelf_id` so the server returns books from that shelf only.
   const char* listParam = (currentBookshelfId != 0) ? nullptr : CATEGORIES[currentCategory].list;
   const char* sortParam = (currentBookshelfId != 0) ? nullptr : CATEGORIES[currentCategory].sort;
+  // Resent on every page so server-side pagination stays inside the result set.
+  const char* queryParam = searchActive ? searchQuery : nullptr;
   auto err = BookFusionSyncClient::NETWORK_ERROR;
   {
     // Borrow the framebuffer for the TLS session. "Loading…" is already
     // on screen; nothing renders during the call.
     TlsFramebufferBorrow borrow(renderer);
-    err = BookFusionSyncClient::searchBooks(page, searchResult, listParam, sortParam, currentBookshelfId);
+    err = BookFusionSyncClient::searchBooks(page, searchResult, listParam, sortParam, currentBookshelfId, queryParam);
   }
 
   if (err != BookFusionSyncClient::OK) {
@@ -228,7 +295,7 @@ void BookFusionBrowserActivity::loadPage(int page) {
     {
       RenderLock lock(*this);
       state = ERROR;
-      strlcpy(errorMsg, tr(STR_BF_NO_BOOKS), sizeof(errorMsg));
+      strlcpy(errorMsg, queryParam != nullptr ? tr(STR_BF_NO_SEARCH_RESULTS) : tr(STR_BF_NO_BOOKS), sizeof(errorMsg));
     }
     requestUpdate();
     return;
@@ -595,10 +662,27 @@ void BookFusionBrowserActivity::loop() {
     }
 
     const bool showShelves = bookshelvesLoaded && bookshelves.count > 0;
-    const int total = NUM_CATEGORIES + (showShelves ? bookshelves.count : 0);
+    const int total = MENU_SHELF_BASE + (showShelves ? bookshelves.count : 0);
     // Visual page size — same calculation drawList uses internally — so a
     // long-press jump matches one screen of items exactly.
     const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, false);
+
+    // Full Touch: tap a row to select it, tap it again to open it. Same rect
+    // and hasSubtitle the drawList call below uses, so the hit-test cannot
+    // page differently from the menu it is testing against.
+    int tappedCategory;
+    switch (TouchListNav::tapRow(mappedInput, listRect(), total, selectedCategory,
+                                 /*hasSubtitle=*/false, tappedCategory)) {
+      case TouchListNav::TapResult::SelectionMoved:
+        selectedCategory = tappedCategory;
+        requestUpdate();
+        return;
+      case TouchListNav::TapResult::Activated:
+        handleCategorySelection();
+        return;
+      case TouchListNav::TapResult::None:
+        break;
+    }
 
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       handleCategorySelection();
@@ -851,9 +935,10 @@ void BookFusionBrowserActivity::drawDownloadDynamic(const int statusY) {
   renderer.drawCenteredText(UI_10_FONT_ID, statusY, status, true, EpdFontFamily::BOLD);
 }
 
-// List body of the BROWSING state, between the header and the page-indicator
-// strip. Shared by render() and the loop()'s tap hit-testing so the two can
-// never disagree.
+// List body between the header and the page-indicator strip. Shared by
+// render() and the loop()'s tap hit-testing so the two can never disagree, and
+// by both list states — the category menu and the BROWSING book list occupy the
+// same band, and differ only in whether their rows carry a subtitle.
 Rect BookFusionBrowserActivity::listRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
@@ -884,6 +969,9 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   const char* headerTitle;
   if (state == CATEGORY_SELECTION) {
     headerTitle = tr(STR_BF_BROWSE_LIBRARY);
+  } else if (searchActive && searchHeader[0] != '\0') {
+    // Browsing search results — header reads 'Search: <term>'.
+    headerTitle = searchHeader;
   } else if (currentBookshelfId != 0) {
     // Browsing inside a user shelf — header reads the shelf's own name.
     headerTitle = currentBookshelfName;
@@ -893,28 +981,31 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle);
 
   if (state == CATEGORY_SELECTION) {
-    const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-    const int contentHeight = pageHeight - contentTop - metrics.buttonHintsHeight;
+    // Same rect the loop()'s tap hit-testing uses — see listRect().
+    const Rect menuRect = listRect();
 
     // Unified menu layout:
-    //   [0..NUM_CATEGORIES-1] → functional categories (book/star/arrow/check/library icons)
-    //   [NUM_CATEGORIES..end] → user shelves (folder icon)
-    // No textual "── Bookshelves ──" separator: the icon change between
-    // categories and shelves is itself the visual delimiter.
+    //   [MENU_SEARCH_INDEX]                 → free-text search (magnifier icon)
+    //   [MENU_CATEGORY_BASE..MENU_SHELF_BASE) → functional categories (book/star/arrow/check/library icons)
+    //   [MENU_SHELF_BASE..end]              → user shelves (folder icon)
+    // No textual "── Bookshelves ──" separator: the icon changes between the
+    // three groups are themselves the visual delimiters.
     const bool showShelves = bookshelvesLoaded && bookshelves.count > 0;
-    const int total = NUM_CATEGORIES + (showShelves ? bookshelves.count : 0);
+    const int total = MENU_SHELF_BASE + (showShelves ? bookshelves.count : 0);
 
     GUI.drawList(
-        renderer, Rect{0, contentTop, pageWidth, contentHeight}, total, selectedCategory,
+        renderer, menuRect, total, selectedCategory,
         [this](int index) -> std::string {
-          if (index < NUM_CATEGORIES) {
-            return std::string(I18N.get(CATEGORIES[index].nameId));
+          if (index == MENU_SEARCH_INDEX) return std::string(tr(STR_BF_SEARCH));
+          if (index < MENU_SHELF_BASE) {
+            return std::string(I18N.get(CATEGORIES[index - MENU_CATEGORY_BASE].nameId));
           }
-          return std::string(bookshelves.shelves[index - NUM_CATEGORIES].name);
+          return std::string(bookshelves.shelves[index - MENU_SHELF_BASE].name);
         },
         nullptr,
         [](int index) -> UIIcon {
-          if (index < NUM_CATEGORIES) return CATEGORIES[index].icon;
+          if (index == MENU_SEARCH_INDEX) return UIIcon::Search;
+          if (index < MENU_SHELF_BASE) return CATEGORIES[index - MENU_CATEGORY_BASE].icon;
           return UIIcon::Folder;
         },
         nullptr, true);

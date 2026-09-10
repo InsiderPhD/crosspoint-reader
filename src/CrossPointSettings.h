@@ -113,6 +113,13 @@ class CrossPointSettings {
   // Swapped: Next, Previous
   enum SIDE_BUTTON_LAYOUT { PREV_NEXT = 0, NEXT_PREV = 1, SIDE_BUTTON_LAYOUT_COUNT };
 
+  // X4 Pro reader screen tap zones: which axis the three zones are cut along.
+  // SIDES splits the screen into left/middle/right columns (the original
+  // layout); TOP_BOTTOM splits it into top/middle/bottom bands for a reader
+  // whose hands rest at the bottom of the panel. The three action slots
+  // (readerTap*/readerHold*) are the same either way -- see the note there.
+  enum TAP_ZONE_LAYOUT { TAP_ZONES_SIDES = 0, TAP_ZONES_TOP_BOTTOM = 1, TAP_ZONE_LAYOUT_COUNT };
+
   // Font family options (built-in fonts only; SD card fonts use sdFontFamilyName)
   enum FONT_FAMILY { BOOKERLY = 0, INTER = 1, OPENDYSLEXIC = 2, MONOSPACE = 3, FONT_FAMILY_COUNT };
   static constexpr uint8_t BUILTIN_FONT_COUNT = FONT_FAMILY_COUNT;
@@ -375,6 +382,9 @@ class CrossPointSettings {
   // bar). 0 = classic layout; capped at STATUS_BAR_TOP_MARGIN_MAX.
   static constexpr uint8_t STATUS_BAR_TOP_MARGIN_MAX = 20;
   static constexpr uint8_t STATUS_BAR_TOP_MARGIN_STEP = 4;
+
+  // Every reader-menu row visible, including bits no row has claimed yet.
+  static constexpr uint32_t READER_MENU_VISIBLE_ALL = 0xFFFFFFFFu;
   uint8_t statusBarTopMargin = 0;
   // Clock display in status bar (X3 only, requires DS3231 RTC)
   uint8_t statusBarClock = 0;
@@ -498,12 +508,11 @@ class CrossPointSettings {
   // Reader button-hint bar mode (BUTTON_HINTS_MODE): Off / Short-press / Long-press labels.
   // Reserves layout space, so changing it reflows the current chapter. Reader-only.
   uint8_t showButtonHints = BUTTON_HINTS_OFF;
-  // Reader-menu entry visibility (1 = shown). For users who bind these functions
-  // to reader controls and don't want the duplicate menu rows.
-  uint8_t readerMenuClippings = 1;  // Save Clipping / View Clippings
-  uint8_t readerMenuBookmarks = 1;  // Add Bookmark / Bookmarks
-  uint8_t readerMenuSync = 1;       // Sync Push / Sync Pull
-  uint8_t readerMenuBluetooth = 1;  // Bluetooth Remote toggle
+  // Reader-menu entry visibility: one bit per row, 1 = shown. Bit positions are
+  // owned by ReaderMenuVisibility::kRows and are PERSISTED -- never renumber
+  // them. Defaulting every bit (not just the assigned ones) means a row added in
+  // a later firmware shows up without a migration.
+  uint32_t readerMenuVisible = READER_MENU_VISIBLE_ALL;
   // Silent background progress sync while reading (AUTOSYNC enum).
   uint8_t autosyncMode = AUTOSYNC_OFF;
   // Long press confirm button action (0 = refresh, 1 = sync, 2 = none, 3 = bookmark)
@@ -536,9 +545,14 @@ class CrossPointSettings {
   uint8_t readerShortPressSideDown = READER_ACTION_PAGE_FORWARD;
   uint8_t readerLongPressSideDown = READER_ACTION_SKIP_CHAPTER_FORWARD;
   uint8_t readerShortPressPower = READER_ACTION_PAGE_FORWARD;
-  // X4 Pro touch: screen tap zones (left/middle/right thirds) and the
-  // capacitive home key. Fields exist on every build for settings.json
-  // round-trip; only the X4 Pro reader dispatches them.
+  // X4 Pro touch: screen tap zones (thirds of the screen) and the capacitive
+  // home key. Fields exist on every build for settings.json round-trip; only
+  // the X4 Pro reader dispatches them.
+  //
+  // The Left/Right names follow readerTapZoneLayout's SIDES layout. Under
+  // TAP_ZONES_TOP_BOTTOM the same two slots become the TOP and BOTTOM bands
+  // (Left = top, Right = bottom), so the defaults still read "back before,
+  // forward after" and switching layout never silently rebinds an action.
   uint8_t readerTapLeft = READER_ACTION_PAGE_BACK;
   uint8_t readerTapMiddle = READER_ACTION_OPEN_MENU;
   uint8_t readerTapRight = READER_ACTION_PAGE_FORWARD;
@@ -547,6 +561,8 @@ class CrossPointSettings {
   uint8_t readerHoldLeft = READER_ACTION_CREATE_CLIPPING;
   uint8_t readerHoldMiddle = READER_ACTION_CREATE_CLIPPING;
   uint8_t readerHoldRight = READER_ACTION_CREATE_CLIPPING;
+  // Which axis the tap/hold zones above are cut along (TAP_ZONE_LAYOUT).
+  uint8_t readerTapZoneLayout = TAP_ZONES_SIDES;
   uint8_t readerShortPressHome = READER_ACTION_GO_HOME;
   uint8_t readerLongPressHome = READER_ACTION_OPEN_MENU;
   // Migration flag: 0 = old settings not yet applied to new per-button fields.

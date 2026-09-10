@@ -177,8 +177,18 @@ void ClipSelectionActivity::render(RenderLock&&) {
   const auto confirmLabel = singleWordMode ? tr(STR_LOOKUP) : (startMarkIdx == -1 ? tr(STR_SELECT) : tr(STR_DONE));
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+
   // Up/Down side buttons move the cursor by line; label each box with its direction.
+  //
+  // Rendered in portrait like EpubReaderActivity::renderButtonHints(): the side boxes use
+  // portrait-fixed coords (BaseTheme::drawSideButtonHints) but, unlike drawButtonHints, do
+  // not force the frame themselves. Left in the reader's landscape frame they land on the
+  // physical bottom edge on top of the front hint bar -- hiding its Back label -- and the
+  // lower box (y 345..505) runs past the 480px landscape height and is clipped.
+  const auto origOrientation = renderer.getOrientation();
+  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
   GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  renderer.setOrientation(origOrientation);
 
   renderer.displayBuffer();
 }

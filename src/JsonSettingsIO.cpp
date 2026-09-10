@@ -17,6 +17,7 @@
 #include "RecentBooksStore.h"
 #include "SettingsList.h"
 #include "WifiCredentialStore.h"
+#include "activities/reader/ReaderMenuVisibility.h"
 
 // Convert legacy settings.
 void applyLegacyStatusBarSettings(CrossPointSettings& settings) {
@@ -152,6 +153,10 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["frontButtonRight"] = s.frontButtonRight;
   doc["readingSpeedSecondsPerPage"] = s.readingSpeedSecondsPerPage;
 
+  // Reader-menu row visibility bitmask — managed by ReaderMenuSettingsActivity,
+  // not SettingsList (one entry per row would put 25 toggles back in Settings).
+  doc["readerMenuVisible"] = s.readerMenuVisible;
+
   // Bluetooth bonded remote metadata is not represented in SettingsList, but it
   // must survive reboot so the firmware can reconnect to the remembered device.
   doc["bleBondedDeviceAddr"] = s.bleBondedDeviceAddr;
@@ -191,6 +196,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["readerHoldLeft"] = s.readerHoldLeft;
   doc["readerHoldMiddle"] = s.readerHoldMiddle;
   doc["readerHoldRight"] = s.readerHoldRight;
+  doc["readerTapZoneLayout"] = s.readerTapZoneLayout;
   doc["readerShortPressHome"] = s.readerShortPressHome;
   doc["readerLongPressHome"] = s.readerLongPressHome;
   doc["readerActionsMigrated"] = s.readerActionsMigrated;
@@ -344,11 +350,26 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
                                    S::READER_ACTION_CREATE_CLIPPING);
   s.readerHoldRight =
       clampAction(doc["readerHoldRight"] | (uint8_t)S::READER_ACTION_CREATE_CLIPPING, S::READER_ACTION_CREATE_CLIPPING);
+  s.readerTapZoneLayout =
+      clamp(doc["readerTapZoneLayout"] | (uint8_t)S::TAP_ZONES_SIDES, S::TAP_ZONE_LAYOUT_COUNT, S::TAP_ZONES_SIDES);
   s.readerShortPressHome =
       clampAction(doc["readerShortPressHome"] | (uint8_t)S::READER_ACTION_GO_HOME, S::READER_ACTION_GO_HOME);
   s.readerLongPressHome =
       clampAction(doc["readerLongPressHome"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
   s.readerActionsMigrated = doc["readerActionsMigrated"] | (uint8_t)0;
+
+  // Reader-menu visibility. Predating the per-row bitmask, a settings file
+  // carries only the four coarse group toggles; fold those into the mask and
+  // flag a resave. The legacy keys are gone from the settings list, so they have
+  // to be read straight from the doc — absent means "was shown".
+  if (doc["readerMenuVisible"].isNull()) {
+    s.readerMenuVisible = ReaderMenuVisibility::maskFromLegacyToggles(
+        doc["readerMenuBookmarks"] | static_cast<uint8_t>(1), doc["readerMenuClippings"] | static_cast<uint8_t>(1),
+        doc["readerMenuBluetooth"] | static_cast<uint8_t>(1), doc["readerMenuSync"] | static_cast<uint8_t>(1));
+    if (needsResave) *needsResave = true;
+  } else {
+    s.readerMenuVisible = doc["readerMenuVisible"].as<uint32_t>();
+  }
 
   // Status-bar position migration: a settings file that predates the per-element
   // position fields won't carry them. Derive each statusBar*Pos from the legacy

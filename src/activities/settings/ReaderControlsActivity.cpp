@@ -35,11 +35,18 @@ constexpr uint8_t kFixedRow = 13;
 #if FREEINK_DEVICE_X4PRO
 // X4 Pro: rows 0/2/4/6 configure the four screen swipes (left/right/up/down
 // reuse the Back/Confirm/Left/Right short-press action slots). A swipe cannot
-// be long-pressed, so the corresponding long-press rows are hidden. Rows 14-16
+// be long-pressed, so the corresponding long-press rows are hidden. Row 22
+// picks the axis the tap zones are cut along and so leads them. Rows 14-16
 // are the screen tap zones with 19-21 their hold (long-press) variants shown
 // as tap/hold pairs, 17/18 the home key tap and long press; the side keys and
 // Power keep their short/long pairs.
-constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 14, 19, 15, 20, 16, 21, 17, 18, 8, 9, 10, 11, 12, 13};
+constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 22, 14, 19, 15, 20, 16, 21, 17, 18, 8, 9, 10, 11, 12, 13};
+
+// Row 22 is a layout choice, not a bindable action: it has no entry in
+// fieldForRow() and toggles in place instead of opening the action picker.
+constexpr uint8_t kTapZoneLayoutRow = 22;
+
+bool tapZonesAreBands() { return SETTINGS.readerTapZoneLayout == CrossPointSettings::TAP_ZONES_TOP_BOTTOM; }
 #else
 constexpr uint8_t kRowIds[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
 #endif
@@ -137,19 +144,24 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
   static char buf[48];
   if (row >= kTotalRows) return "";
 #if FREEINK_DEVICE_X4PRO
+  // The first and last zone are named for the axis in force, so the rows read
+  // the way the screen is actually divided. The slots behind them do not move
+  // (see MappedInputManager::TapZone).
   switch (row) {
     case 14:
-      return tr(STR_TAP_LEFT);
+      return tapZonesAreBands() ? tr(STR_TAP_TOP) : tr(STR_TAP_LEFT);
     case 15:
       return tr(STR_TAP_MIDDLE);
     case 16:
-      return tr(STR_TAP_RIGHT);
+      return tapZonesAreBands() ? tr(STR_TAP_BOTTOM) : tr(STR_TAP_RIGHT);
     case 19:
-      return tr(STR_HOLD_LEFT);
+      return tapZonesAreBands() ? tr(STR_HOLD_TOP) : tr(STR_HOLD_LEFT);
     case 20:
       return tr(STR_HOLD_MIDDLE);
     case 21:
-      return tr(STR_HOLD_RIGHT);
+      return tapZonesAreBands() ? tr(STR_HOLD_BOTTOM) : tr(STR_HOLD_RIGHT);
+    case kTapZoneLayoutRow:
+      return tr(STR_TAP_ZONES);
     case 17:
       snprintf(buf, sizeof(buf), "%s %s", tr(STR_HOME_BUTTON), tr(STR_SHORT_PRESS));
       return buf;
@@ -239,6 +251,11 @@ const char* ReaderControlsActivity::getRowActionName(const uint8_t row) const {
     // CrossPointSettings::effectiveReaderLongPressHome).
     return tr(STR_READER_ACTION_OPEN_MENU);
   }
+#if FREEINK_DEVICE_X4PRO
+  if (row == kTapZoneLayoutRow) {
+    return tapZonesAreBands() ? tr(STR_TAP_ZONES_TOP_BOTTOM) : tr(STR_TAP_ZONES_SIDES);
+  }
+#endif
   const auto action = getActionForRow(row);
   return actionName(action);
 }
@@ -363,6 +380,15 @@ CrossPointSettings::READER_ACTION ReaderControlsActivity::getActionForRow(const 
 
 void ReaderControlsActivity::activateRow(const uint8_t row) {
 #if FREEINK_DEVICE_X4PRO
+  if (row == kTapZoneLayoutRow) {
+    // Two values: a tap flips it in place rather than opening a picker, and the
+    // re-render immediately relabels the tap/hold rows below it.
+    SETTINGS.readerTapZoneLayout =
+        tapZonesAreBands() ? CrossPointSettings::TAP_ZONES_SIDES : CrossPointSettings::TAP_ZONES_TOP_BOTTOM;
+    isDirty = true;
+    requestUpdate();
+    return;
+  }
   openActionPicker(row);
 #else
   cycleActionForRow(row);

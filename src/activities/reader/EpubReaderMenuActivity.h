@@ -25,6 +25,7 @@ class EpubReaderMenuActivity final : public Activity {
     FRONTLIGHT_WARMTH,
     FONT_LAYOUT,
     READER_CONTROLS,
+    CUSTOMISE_MENU,
     BOOKMARKS,
     ADD_BOOKMARK,
     SAVE_CLIPPING,
@@ -37,6 +38,7 @@ class EpubReaderMenuActivity final : public Activity {
     AUTOSYNC,
     SYNC_PUSH,
     SYNC_PULL,
+    NEARBY_POSITION_SYNC,
     DELETE_CACHE
   };
 

@@ -128,8 +128,10 @@ class BookFusionSyncClient {
   // --- Library Browse & Download ---
   // bookshelfId, when non-zero, restricts the search to a specific user bookshelf
   // (sent as `bookshelf_id` in the request body alongside list/sort/page).
+  // query, when non-null and non-empty, is a free-text search over the library
+  // (sent as `query`; server-side matching, same param the KOReader plugin uses).
   static Error searchBooks(int page, BookFusionSearchResult& out, const char* list = nullptr,
-                           const char* sort = nullptr, uint32_t bookshelfId = 0);
+                           const char* sort = nullptr, uint32_t bookshelfId = 0, const char* query = nullptr);
   static Error getDownloadUrl(uint32_t bookId, char* outUrl, size_t maxLen);
 
   // Close the shared keep-alive connection. Call when a sync/browse session is

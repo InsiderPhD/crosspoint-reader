@@ -24,6 +24,7 @@
 #include "MappedInputManager.h"
 #include "OtaUpdateActivity.h"
 #include "ReaderControlsActivity.h"
+#include "ReaderMenuSettingsActivity.h"
 #include "RecacheMetadataActivity.h"
 #include "RefreshBookFusionMetadataActivity.h"
 #include "ResetStatsActivity.h"
@@ -173,6 +174,7 @@ void SettingsActivity::onEnter() {
   readerSettings.push_back(SettingInfo::Action(StrId::STR_FONT_DOWNLOAD, SettingAction::FontDownload));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_READER_CONTROLS, SettingAction::ReaderControls));
+  readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_READER_MENU, SettingAction::ReaderMenu));
   // Dictionary: only listed when at least one usable dictionary folder exists,
   // so a device with nothing under /dictionaries never shows a row whose only
   // possible value is "None". Rescanned on every rebuild — one directory
@@ -399,6 +401,9 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::ReaderControls:
         startActivityForResult(std::make_unique<ReaderControlsActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::ReaderMenu:
+        startActivityForResult(std::make_unique<ReaderMenuSettingsActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::CustomiseStatusBar:
         startActivityForResult(std::make_unique<StatusBarSettingsActivity>(renderer, mappedInput), resultHandler);

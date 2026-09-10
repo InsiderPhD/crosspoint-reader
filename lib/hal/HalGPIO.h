@@ -158,9 +158,9 @@ class HalGPIO {
   // gesture calibration and any future drag consumer.
   bool isTouchHeldAt(float& nx, float& ny) const;
 
-  // Any touch contact this frame. Needed by the sleep timer: a touch-only
-  // session produces no button press or release, so without this the device
-  // would sleep under the user's finger.
+  // Any touch contact this frame, home-pad contacts included. Needed by the
+  // sleep timer: a touch-only session produces no button press or release, so
+  // without this the device would sleep under the user's finger.
   bool wasTouchActivity() const;
 
   // Drop the remainder of the current contact. Call after consuming a gesture so

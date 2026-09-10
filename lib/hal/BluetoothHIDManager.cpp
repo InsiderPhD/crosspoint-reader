@@ -64,21 +64,33 @@ constexpr uint32_t BLE_CONNECT_TIMEOUT_MS = 10000;
 constexpr uint32_t BLE_CONTROLLER_MIN_BLOCK = 20 * 1024;
 // Free heap the caller must still have AFTER the stack is up.
 //
-// Starting the controller + host costs ~52KB (measured on an X4: 86,244 free
-// before enable(), 34,224 after), and every caller has real work to do the
-// moment enable() returns — the reader reloads the Epub and its chapter layout
-// immediately. No pre-init gate can model that honestly, because the cost is
-// only known once it has been paid: an enable at 86,244 free cleared every
-// check above, took its 52KB, and the Epub::load() that followed OOM-aborted at
-// 34,224 free (serial capture, 2026-08-31).
+// Starting the controller + host costs ~52KB, and every caller has real work to
+// do the moment enable() returns — the reader reloads the Epub and its chapter
+// layout immediately. No pre-init gate can model that honestly, because the
+// cost is only known once it has been paid. So this floor is checked against
+// the result rather than predicted: below it the stack is handed straight back
+// and the caller is told there was not enough memory — a refusal it can render,
+// instead of an abort() it cannot.
 //
-// So this floor is checked against the result rather than predicted. Below it
-// the stack is handed straight back and the caller is told there was not enough
-// memory — a refusal it can render, instead of an abort() it cannot. Sized as
-// the observed fatal point (~34KB) plus the working set a reader still needs
-// after reloading: per-page glyph groups (~3KB each, seen failing at ~9.5KB
-// free) and the render pass itself.
-constexpr uint32_t BLE_POST_ENABLE_FREE_FLOOR = 46 * 1024;
+// The SIZE of it is the delicate part, and the first attempt got it wrong. Two
+// serial captures, both X4, both from the reader after it has already freed the
+// section, the Epub and the glyph cache:
+//
+//   free 86,244 -> 34,224 after init: the Epub::load() that followed
+//                  OOM-abort()ed (2026-08-31, a large book).
+//   free 89,500 -> 37,512 after init: refused by a 46KB floor, on a device
+//                  where the remote had been working for weeks (2026-09-10).
+//
+// 52KB is what the stack costs; the reader simply does not reach the high 80s
+// of free heap with a book open, so a 46KB floor is not "strict", it is
+// unreachable — it turned a working feature off on every X4 rather than
+// catching the one book that could not fit. The floor therefore sits between
+// the only two measurements that exist: high enough to still refuse the heap
+// that actually aborted, low enough to admit the heap that worked. It is not a
+// safety margin, and it should not grow into one. If a book aborts above this
+// line the answer is to make the post-enable reload survive a failed
+// allocation, not to raise the number until nothing can enable.
+constexpr uint32_t BLE_POST_ENABLE_FREE_FLOOR = 35 * 1024;
 // --- Press detector tuning ---
 // Nothing here decodes keycodes. The detector answers "did a button just go
 // down?" structurally; which button it was is a separate signature match.
@@ -252,6 +264,12 @@ bool BluetoothHIDManager::enable() {
     lastStatus = BtStatus::NotEnoughMemory;
     return false;
   }
+  // Log the survivors too, not just the refusals. The floor above is drawn
+  // between two data points; every successful enable that is followed by a
+  // clean reload is another one, and the only way the number ever stops being a
+  // guess is if both sides of it show up in serial.
+  LOG_INF("BT", "Started into %u free (largest %u), stack cost %u", postInitFree, ESP.getMaxAllocHeap(),
+          freeHeap > postInitFree ? freeHeap - postInitFree : 0);
 
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);  // +9dBm
   NimBLEDevice::setDefaultPhy(BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_1M_MASK);

@@ -798,7 +798,8 @@ BookFusionSyncClient::Error BookFusionSyncClient::setProgress(uint32_t bookId, c
 // --- Library Browse & Download ---
 
 BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusionSearchResult& out, const char* list,
-                                                              const char* sort, uint32_t bookshelfId) {
+                                                              const char* sort, uint32_t bookshelfId,
+                                                              const char* query) {
   if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
 
   char url[128];
@@ -823,6 +824,13 @@ BookFusionSyncClient::Error BookFusionSyncClient::searchBooks(int page, BookFusi
   }
   if (bookshelfId != 0) {
     reqBody["bookshelf_id"] = bookshelfId;
+  }
+  // Free-text search, sent alongside (not instead of) any list/shelf filter.
+  // Omitted when empty rather than sent as `query: ""` — the KOReader plugin
+  // guards it the same way (bf_browser.lua loadNextBookPage), and an empty
+  // filter has no defined meaning in the API we can rely on.
+  if (query != nullptr && query[0] != '\0') {
+    reqBody["query"] = query;
   }
   String bodyStr;
   serializeJson(reqBody, bodyStr);

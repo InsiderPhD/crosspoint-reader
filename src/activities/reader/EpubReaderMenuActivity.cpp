@@ -8,6 +8,7 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "ReaderMenuVisibility.h"
 #include "ReadingStatsStore.h"
 #include "activities/settings/FrontlightBrightnessActivity.h"
 #include "components/UITheme.h"
@@ -39,59 +40,67 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(
     bool hasFootnotes, ProgressAutoSync::Provider syncProvider) {
   std::vector<MenuItem> items;
-  items.reserve(23);  // 10 fixed + footnotes + frontlight + bookmarks/clippings/autosync+sync + 2 dev-mode items
-  items.push_back({MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER});
+  items.reserve(ReaderMenuVisibility::kRowCount);
+
+  // Every row goes through here, so a row the user switched off in
+  // Settings > Reader > Customise Reader Menu can never leak back in. The
+  // conditions below are the ones the user has no say over -- a dictionary that
+  // isn't configured, a remote that isn't paired, a book with no sync backend.
+  const auto add = [&items](const MenuAction action, const StrId label) {
+    if (ReaderMenuVisibility::isVisible(action)) items.push_back({action, label});
+  };
+
+  add(MenuAction::SELECT_CHAPTER, StrId::STR_SELECT_CHAPTER);
   if (hasFootnotes) {
-    items.push_back({MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES});
+    add(MenuAction::FOOTNOTES, StrId::STR_FOOTNOTES);
   }
-  items.push_back({MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION});
-  items.push_back({MenuAction::BUTTON_HINTS, StrId::STR_SHOW_BUTTON_HINTS});
-  items.push_back({MenuAction::DARK_MODE, StrId::STR_READER_DARK_MODE});
+  add(MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION);
+  add(MenuAction::BUTTON_HINTS, StrId::STR_SHOW_BUTTON_HINTS);
+  add(MenuAction::DARK_MODE, StrId::STR_READER_DARK_MODE);
 #if FREEINK_CAP_FRONTLIGHT
   // Frontlight rows (X4 Pro): cycle in place and light the panel immediately.
   if (halFrontlight.present()) {
-    items.push_back({MenuAction::FRONTLIGHT_BRIGHTNESS, StrId::STR_FRONTLIGHT_BRIGHTNESS});
+    add(MenuAction::FRONTLIGHT_BRIGHTNESS, StrId::STR_FRONTLIGHT_BRIGHTNESS);
     if (halFrontlight.hasWarmth()) {
-      items.push_back({MenuAction::FRONTLIGHT_WARMTH, StrId::STR_FRONTLIGHT_WARMTH});
+      add(MenuAction::FRONTLIGHT_WARMTH, StrId::STR_FRONTLIGHT_WARMTH);
     }
   }
 #endif
-  items.push_back({MenuAction::FONT_LAYOUT, StrId::STR_FONT_LAYOUT_PREVIEW});
-  items.push_back({MenuAction::READER_CONTROLS, StrId::STR_READER_CONTROLS});
-  items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});
-  items.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
-  // Bookmarks / clippings / sync rows can be hidden by users who bind these
-  // functions to reader controls instead (Settings > Reader).
-  if (SETTINGS.readerMenuBookmarks) {
-    items.push_back({MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS});
-    items.push_back({MenuAction::ADD_BOOKMARK, StrId::STR_CREATE_BOOKMARK});
-  }
-  if (SETTINGS.readerMenuClippings) {
-    items.push_back({MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING});
-    items.push_back({MenuAction::VIEW_CLIPPINGS, StrId::STR_VIEW_CLIPPINGS});
-  }
+  add(MenuAction::FONT_LAYOUT, StrId::STR_FONT_LAYOUT_PREVIEW);
+  add(MenuAction::READER_CONTROLS, StrId::STR_READER_CONTROLS);
+  // The row that trims this menu. Hideable like the rest once the user is done
+  // with it -- the same screen is always reachable from Settings > Reader.
+  add(MenuAction::CUSTOMISE_MENU, StrId::STR_CUSTOMISE_READER_MENU);
+  add(MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN);
+  add(MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT);
+  add(MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS);
+  add(MenuAction::ADD_BOOKMARK, StrId::STR_CREATE_BOOKMARK);
+  add(MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING);
+  add(MenuAction::VIEW_CLIPPINGS, StrId::STR_VIEW_CLIPPINGS);
   // Only offered once a dictionary is actually configured: the row would
   // otherwise lead straight to a "No dictionary set" popup.
   if (SETTINGS.dictionaryName[0] != '\0') {
-    items.push_back({MenuAction::LOOK_UP, StrId::STR_LOOKUP});
+    add(MenuAction::LOOK_UP, StrId::STR_LOOKUP);
   }
   // Screenshot is a developer/testing action — only surface it in Dev Mode.
   if (SETTINGS.devMode) {
-    items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
+    add(MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON);
   }
   // Bluetooth remote toggle: only shown once a remote has been paired
-  // (pairing itself lives in Settings > Bluetooth Page Turner), and hideable
-  // like the bookmarks/clippings/sync rows (Settings > Reader).
-  if (SETTINGS.readerMenuBluetooth && SETTINGS.bleBondedDeviceAddr[0] != '\0') {
-    items.push_back({MenuAction::TOGGLE_BLUETOOTH, StrId::STR_BT_REMOTE_TOGGLE});
+  // (pairing itself lives in Settings > Bluetooth Page Turner).
+  if (SETTINGS.bleBondedDeviceAddr[0] != '\0') {
+    add(MenuAction::TOGGLE_BLUETOOTH, StrId::STR_BT_REMOTE_TOGGLE);
   }
-  items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
+  add(MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR);
+  // Reader-to-reader position sync over ESP-NOW. Needs no account and no backend
+  // linked to this book, only a second reader in the room with the same EPUB open.
+  add(MenuAction::NEARBY_POSITION_SYNC, StrId::STR_NEARBY_POSITION_SYNC);
   // Sync rows. Gated on the backend that would actually handle a Push/Pull for
   // THIS book (ProgressAutoSync::providerFor, resolved by the reader and passed
-  // in) — not just on the "Sync in Menu" toggle. A book with no linked backend
-  // has nothing to sync to, and the reader's SYNC_PUSH/SYNC_PULL handler simply
-  // falls out of its if/else and returns: the rows used to be shown anyway and
-  // did nothing at all when pressed, with no error and no log line.
+  // in). A book with no linked backend has nothing to sync to, and the reader's
+  // SYNC_PUSH/SYNC_PULL handler simply falls out of its if/else and returns: the
+  // rows used to be shown anyway and did nothing at all when pressed, with no
+  // error and no log line.
   //
   // Naming the destination also removes the guesswork about WHICH service a
   // generic "Push Local Progress" was about to talk to. Autosync rides the same
@@ -99,20 +108,26 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   // fire for this book either. Its mode is still reachable in Settings > Reader,
   // and pendingAutosyncMode is seeded from SETTINGS regardless of whether the
   // row exists, so hiding it never writes the setting back.
-  if (SETTINGS.readerMenuSync && syncProvider != ProgressAutoSync::Provider::None) {
+  if (syncProvider != ProgressAutoSync::Provider::None) {
     const bool isBookFusion = (syncProvider == ProgressAutoSync::Provider::BookFusion);
-    items.push_back({MenuAction::AUTOSYNC, StrId::STR_AUTOSYNC});
-    items.push_back(
-        {MenuAction::SYNC_PUSH, isBookFusion ? StrId::STR_SYNC_PUSH_BOOKFUSION : StrId::STR_SYNC_PUSH_KOREADER});
-    items.push_back(
-        {MenuAction::SYNC_PULL, isBookFusion ? StrId::STR_SYNC_PULL_BOOKFUSION : StrId::STR_SYNC_PULL_KOREADER});
+    add(MenuAction::AUTOSYNC, StrId::STR_AUTOSYNC);
+    add(MenuAction::SYNC_PUSH, isBookFusion ? StrId::STR_SYNC_PUSH_BOOKFUSION : StrId::STR_SYNC_PUSH_KOREADER);
+    add(MenuAction::SYNC_PULL, isBookFusion ? StrId::STR_SYNC_PULL_BOOKFUSION : StrId::STR_SYNC_PULL_KOREADER);
   }
   // Delete Book Cache is a testing aid — only surface it in Dev Mode.
   if (SETTINGS.devMode) {
-    items.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
+    add(MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE);
   }
   // Go Home sits last so it's always the final entry in the menu.
-  items.push_back({MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON});
+  add(MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON);
+
+  // Every row switched off leaves a menu that renders as a blank list and does
+  // nothing. Rather than make any single row non-hideable, put back the two that
+  // lead somewhere useful — the way out of the book, and the way to undo this.
+  if (items.empty()) {
+    items.push_back({MenuAction::CUSTOMISE_MENU, StrId::STR_CUSTOMISE_READER_MENU});
+    items.push_back({MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON});
+  }
   return items;
 }
 

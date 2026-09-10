@@ -94,6 +94,7 @@ enum UIIcon {
   Arrow,
   Check,
   Files,
+  Search,
   None,  // Render nothing — the row reserves icon space but draws blank.
 };
 

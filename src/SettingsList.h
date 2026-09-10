@@ -212,16 +212,6 @@ inline void appendReaderBehaviourSettings(std::vector<SettingInfo>& v) {
                                  {StrId::STR_NONE_OPT, StrId::STR_SHORT_PRESS, StrId::STR_LONG_PRESS,
                                   StrId::STR_HINTS_FRONT_SHORT, StrId::STR_HINTS_FRONT_LONG},
                                  "showButtonHints", StrId::STR_CAT_READER),
-               // Reader-menu entry visibility — for users who bind these functions to
-               // reader controls and don't need the duplicate menu rows.
-               SettingInfo::Toggle(StrId::STR_MENU_CLIPPINGS, &CrossPointSettings::readerMenuClippings,
-                                   "readerMenuClippings", StrId::STR_CAT_READER),
-               SettingInfo::Toggle(StrId::STR_MENU_BOOKMARKS, &CrossPointSettings::readerMenuBookmarks,
-                                   "readerMenuBookmarks", StrId::STR_CAT_READER),
-               SettingInfo::Toggle(StrId::STR_MENU_BLUETOOTH, &CrossPointSettings::readerMenuBluetooth,
-                                   "readerMenuBluetooth", StrId::STR_CAT_READER),
-               SettingInfo::Toggle(StrId::STR_MENU_SYNC, &CrossPointSettings::readerMenuSync, "readerMenuSync",
-                                   StrId::STR_CAT_READER),
                // Silent background progress push. Coexists with a Bluetooth remote:
                // when a push fires the BLE stack is torn down for the WiFi session and
                // auto-restored afterwards (see EpubReaderActivity::runAutosyncNow).

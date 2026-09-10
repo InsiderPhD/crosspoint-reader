@@ -28,10 +28,12 @@ class BookFusionBrowserActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool preventAutoSleep() override { return true; }
-  // Full Touch tap dispatch only covers the BROWSING book list. Every other
-  // state (category menu, confirm/complete screens) keeps the global
-  // tap-is-Confirm injection, which activates the highlighted option.
-  bool handlesDirectTouch() const override { return state == BROWSING; }
+  // Full Touch tap dispatch covers the two list states — the category menu and
+  // the BROWSING book list — both of which hit-test taps against listRect().
+  // The remaining states (confirm / downloading / complete / error) are single
+  // prompts with no rows to aim at, so they keep the global tap-is-Confirm
+  // injection, which activates the highlighted option.
+  bool handlesDirectTouch() const override { return state == BROWSING || state == CATEGORY_SELECTION; }
 
  private:
   enum State {
@@ -54,8 +56,8 @@ class BookFusionBrowserActivity final : public Activity {
   int currentPage = 1;
 
   // Category menu: which item is highlighted, and which one we're browsing.
-  // The menu is a unified list of [5 categories, separator, N shelves]; indices
-  // map via menuIndexIsShelf() / menuIndexToShelf() below.
+  // The menu is a unified list of [Search, 5 categories, N shelves]; indices
+  // map via the MENU_* bases in the .cpp.
   int selectedCategory = 0;
   int currentCategory = 0;
 
@@ -75,6 +77,19 @@ class BookFusionBrowserActivity final : public Activity {
   // a normal category-driven browse.
   uint32_t currentBookshelfId = 0;
   char currentBookshelfName[48] = {};  // header label when browsing a shelf
+
+  // Free-text search over the whole library, sent as `query` to
+  // /api/user/books/search. Empty means "not searching". Kept between visits to
+  // the menu so re-opening Search prefills the last query (the KOReader plugin
+  // does the same), and re-sent on every page fetch so pagination stays in the
+  // result set.
+  char searchQuery[64] = {};
+  char searchHeader[80] = {};  // Pre-formatted 'Search: foo' header label
+  // Whether searchQuery is actually filtering the current browse. Separate from
+  // searchQuery being non-empty: the term is deliberately retained after the
+  // user leaves the results (so re-opening Search prefills it) but must NOT be
+  // sent once they pick a category or shelf instead.
+  bool searchActive = false;
 
   // Large enough for pre-signed S3 URLs with safety margin (can be >2000 chars).
   char downloadUrl[4096] = {};
@@ -102,14 +117,20 @@ class BookFusionBrowserActivity final : public Activity {
 
   char errorMsg[128] = {};
 
-  // List body of the BROWSING state. Shared by render() and the loop()'s tap
-  // hit-testing so the two can never disagree.
+  // List body shared by both list states (category menu and BROWSING book
+  // list) and by render() + the loop()'s tap hit-testing, so no two of them
+  // can disagree about where the rows are.
   Rect listRect() const;
   // Download the highlighted book (via the large-download confirm gate) — the
   // Confirm press body, also fired by a Full Touch tap on the selected row.
   void activateSelectedBook();
   void onWifiSelectionComplete(bool success);
   void handleCategorySelection();
+  // Prompt for a search term on the keyboard, then browse the results.
+  void promptForSearch();
+  // Fetch page 1 of whatever category / shelf / query is currently selected,
+  // re-prompting for WiFi first if it dropped while we were in the menu.
+  void beginBrowse();
   void loadShelvesAndShowMenu();
   void loadPage(int page);
   void startDownload(int bookIndex);

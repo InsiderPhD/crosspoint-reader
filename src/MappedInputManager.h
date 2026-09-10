@@ -18,7 +18,12 @@ class MappedInputManager {
   explicit MappedInputManager(HalGPIO& gpio) : gpio(gpio) {}
 
 #if FREEINK_DEVICE_X4PRO
-  // Screen tap zones: logical-frame thirds of the screen width.
+  // Screen tap zones: thirds of the logical frame, cut along the axis chosen by
+  // SETTINGS.readerTapZoneLayout. The names follow the default SIDES layout
+  // (columns); under TAP_ZONES_TOP_BOTTOM the same three zones become bands and
+  // Left is the TOP one, Right the BOTTOM one. Keeping the names means the
+  // reader's three action slots (readerTap*/readerHold*) are the same slots in
+  // either layout, so switching axis never rebinds an action.
   enum class TapZone : uint8_t { None, Left, Middle, Right };
 
   // Orientation source for swipe direction classification. Set once in setup();
@@ -152,6 +157,10 @@ class MappedInputManager {
 
   // Normalised GT911 point (native panel frame) -> logical screen point.
   LogicalTouchPoint toLogicalPoint(float nx, float ny) const;
+
+  // Thirds classification shared by wasTapZone() and wasTouchLongPressZone(),
+  // so a tap and a hold can never disagree about which zone was touched.
+  static TapZone classifyZone(const LogicalTouchPoint& p);
 
   // Polls the SDK swipe/home-key detectors and injects the matching synthesized
   // button presses (see the X4 Pro mapping table in MappedInputManager.cpp).

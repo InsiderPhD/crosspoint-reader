@@ -18,6 +18,7 @@ enum class SettingAction {
   None,
   RemapFrontButtons,
   ReaderControls,
+  ReaderMenu,
   CustomiseStatusBar,
   KOReaderSync,
   BookFusionSync,

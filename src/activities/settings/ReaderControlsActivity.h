@@ -25,10 +25,10 @@ class ReaderControlsActivity final : public Activity {
   Rect listRect() const;
 
 #if FREEINK_DEVICE_X4PRO
-  // Rows 14-18 are the X4 Pro touch extras: tap left/middle/right, home key
+  // Rows 14-18 are the X4 Pro touch extras: the three tap zones, home key
   // short and long press. Rows 19-21 are the hold (long-press) variants of the
-  // three tap zones.
-  static constexpr uint8_t kTotalRows = 22;
+  // three tap zones, and row 22 picks the axis those zones are cut along.
+  static constexpr uint8_t kTotalRows = 23;
 #else
   static constexpr uint8_t kConfigurableRows = 13;  // 13 user-configurable + 1 fixed
   static constexpr uint8_t kTotalRows = 14;
