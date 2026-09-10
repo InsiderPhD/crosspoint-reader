@@ -105,6 +105,14 @@ void ActivityManager::loop() {
     currentActivity->loop();
   }
 
+  processPendingActions();
+}
+
+// Drains queued push/pop/replace requests and flushes a pending render request.
+// Split out of loop() so a caller that has just queued an activity change can
+// commit it WITHOUT first running the outgoing activity's loop() again -- see
+// goToSleep(), where doing so recursed until the loop task's stack ran out.
+void ActivityManager::processPendingActions() {
   while (pendingAction != PendingAction::None) {
     if (pendingAction == PendingAction::Pop) {
       RenderLock lock;
@@ -255,8 +263,28 @@ void ActivityManager::goToReader(std::string path) {
 }
 
 void ActivityManager::goToSleep(bool fromTimeout) {
+  // Re-entrancy guard. Both sleep entry points (main.cpp's enterDeepSleep and
+  // the reader's own enterDeepSleepFromReaderAction) are triggered by a HELD
+  // button, and the outgoing activity keeps seeing that button held. Without
+  // this, a second sleep request raised from inside the first one's teardown
+  // nests instead of being dropped.
+  if (sleepInProgress) {
+    LOG_DBG("ACT", "goToSleep re-entered during teardown; ignoring");
+    return;
+  }
+  sleepInProgress = true;
+
   replaceActivity(std::make_unique<SleepActivity>(renderer, mappedInput, fromTimeout));
-  loop();  // Important: sleep screen must be rendered immediately, the caller will go to sleep right after this returns
+  // Commit the replace now: the sleep screen must be on the panel before the
+  // caller powers the device down. processPendingActions() rather than loop()
+  // -- loop() runs currentActivity->loop() FIRST, and at this point that is
+  // still the OUTGOING activity, which has not yet been swapped out. The reader
+  // re-fired its power-button sleep action from there while the button was
+  // still held, re-entering here ~8 times a second until the loop task's 8KB
+  // stack was gone (stack protection fault inside the Lock ctor's log call).
+  processPendingActions();
+
+  sleepInProgress = false;
 }
 
 void ActivityManager::goToBoot() { replaceActivity(std::make_unique<BootActivity>(renderer, mappedInput)); }

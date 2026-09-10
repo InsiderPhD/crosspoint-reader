@@ -62,6 +62,13 @@ class ActivityManager {
   // Whether to trigger a render after the current loop()
   // This variable must only be set by the main loop, to avoid race conditions
   bool requestedUpdate = false;
+  // Set for the duration of goToSleep()'s teardown so a sleep request raised
+  // from inside it (a still-held power button) is dropped instead of nesting.
+  bool sleepInProgress = false;
+
+  // Commit queued activity changes without running the outgoing activity's
+  // loop() first. loop() and goToSleep() both drain through here.
+  void processPendingActions();
 
  public:
   explicit ActivityManager(GfxRenderer& renderer, MappedInputManager& mappedInput)
