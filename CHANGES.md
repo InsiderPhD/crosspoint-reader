@@ -4,7 +4,73 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ---
 
-## Unreleased
+## 1.7.9 — September 2026
+
+*(1.7.7 and 1.7.8 were pre-release betas; everything logged below shipped in 1.7.9.)*
+
+### Hand a position to the reader next to you
+
+Two people reading the same book on two readers, or one person with two devices, had no way to move a position between them that did not involve an account and a server. Both open the book, both open **Nearby Position Sync** from the reader menu, one presses Share — the other is shown the incoming position beside its own and confirms before anything is applied.
+
+It runs on ESP-NOW, so there is no network to join and no credentials to hold: the two radios talk directly. The wire format is CrossInk's (`CIBP`, protocol 1), so a CrossPoint reader and a CrossInk X3/X4/X4 Pro will exchange positions with each other. Books are matched by document hash, and a mismatch is named rather than silently ignored — "Different book" and "Version mismatch" are distinct outcomes on screen.
+
+The accepted position is written to `progress.bin` by the sync screen itself and the device then silent-reboots back into the book. That is deliberate: bringing the radio up fragments the heap far past what resuming a laid-out chapter in place can survive on the C3. Writing the file first is what makes the reboot safe, and it is why the screen does not hand a result back to the reader the way every other popped activity does — the activity manager runs `onExit()`, and therefore the reboot, before a result handler would see it. A paired Bluetooth remote is dropped for the duration; ESP-NOW needs both the radio and the ~56KB the NimBLE stack was holding.
+
+**Files changed**: `src/activities/reader/{NearbyBookPositionSyncActivity.*,EpubReaderUtils.*}`, `src/activities/reader/EpubReaderActivity.cpp`.
+
+### Every reader-menu row, hidden or shown, one at a time
+
+Four coarse toggles — Clippings, Bookmarks, Sync, Bluetooth — covered eight of the menu's rows and left the other eighteen unmanageable. **Settings → Reader → Customise Reader Menu** now lists every row the menu can build and switches each one independently.
+
+The choices live in a single persisted `uint32` bitmask rather than twenty-six settings fields. Bit numbers are owned by `ReaderMenuVisibility::kRows` and are **persisted**: append with the next free bit, never renumber. Every bit defaults on, including ones no row has claimed yet, so a row added in a later firmware appears without needing a settings migration.
+
+Visibility is only ever a **veto**. A row switched on here still has to clear the menu's own conditions — a dictionary configured, a bonded remote, a sync backend linked to this book — before it shows. Rows the hardware cannot offer at all (frontlight brightness, warmth) are left out of the customise list too, because there is nothing to decide about a light the board does not have. Sync is now two rows, Push Progress and Pull Progress, which is what the menu was already doing under one label.
+
+**Files changed**: `src/activities/reader/ReaderMenuVisibility.*`, `src/activities/settings/ReaderMenuSettingsActivity.*`, `src/activities/reader/EpubReaderMenuActivity.*`, `src/{CrossPointSettings.h,JsonSettingsIO.cpp,SettingsList.h}`.
+
+### Search a BookFusion library instead of paging it
+
+Browsing was list-and-sort only, so finding one known book in a large library meant walking pages of covers. The browser takes a free-text query and sends it as `query` — server-side matching, the same parameter the KOReader plugin uses — with the header showing what was searched and an explicit "No books match that search" rather than an empty grid.
+
+**Files changed**: `lib/BookFusionSync/BookFusionSyncClient.*`, `src/activities/settings/BookFusionBrowserActivity.*`, `src/activities/util/KeyboardEntryActivity.h`, `src/components/icons/search24.h`.
+
+### X4 Pro: tap zones along whichever axis suits your grip
+
+The reader's three tap zones were always columns — left, middle, right. **Tap zones** in Reader Controls now also cuts them as bands: top, middle, bottom, for hands that rest at the bottom of the panel.
+
+The three action slots are the same slots in either layout, so switching the axis rebinds nothing: the top band takes what the left column had and the bottom band what the right column had, which keeps the defaults reading "back before, forward after". Tap and hold share one `classifyZone()`, so the two can never disagree about which zone was touched, and the point is classified in the active orientation's frame — "top" is the top of the page as drawn, in every rotation.
+
+**Files changed**: `src/MappedInputManager.*`, `src/CrossPointSettings.h`, `src/activities/settings/ReaderControlsActivity.*`.
+
+### Holding power in a book sleeps it instead of crashing
+
+Holding the power button while reading crashed with a stack protection fault. The decoded dump showed roughly twenty-two nested copies of one frame, each carrying `HalPowerManager::Lock`'s "already held" log call, with the twenty-third `vfprintf` running past the canary.
+
+`goToSleep()` queued the sleep-screen swap and then called `loop()`, whose first statement runs the *current* activity. The swap is deferred — a manager cannot delete the activity that is calling it — so that ran the **outgoing** activity again. The reader saw the power button still held, re-fired its sleep action, and recursed about eight times a second until the 8KB loop task stack was gone. Auto-sleep never tripped it, because nothing is held when an inactivity timeout fires.
+
+The pending-action drain is now split out of `loop()`, so a caller that has just queued an activity change never re-runs the outgoing activity. A re-entrancy guard sits behind it: both sleep entry points are triggered by a held button, so a sleep request raised from inside the first one's teardown is dropped rather than nested.
+
+### A short press wakes the X4
+
+Waking wanted the power button held for a second or two, or pressed several times.
+
+`verifyPowerButtonWakeup()` puts the device straight back to sleep unless the button still reads as pressed when it runs, and the call sat at the *end* of `setup()`'s hardware bring-up — after serial's CDC settle, the input fingerprint probe, the SD mount and two JSON loads. "Still held" therefore meant held for as long as bring-up happened to take. A normal press was long released by then and the device slept again, which reads as nothing having happened; pressing again worked only because the second press landed inside the one-second poll window. As a *duration* gate it was already dead — the threshold had been cut to 10ms for this same complaint — so what remained was an accidental hold gate measured in boot time that no setting describes.
+
+A power-button wake is now taken at face value on every board, as the X4 Pro branch already did. This gives up the anti-pocket-wake guard; reinstating one needs the press latched in `HalGPIO` at boot rather than the pin re-read after bring-up has already spent the hold.
+
+### Sleep entry stops stalling, and the panel powers down properly
+
+"The X4 will not turn on" turned out to be sleep *entry*, not wake. A power command issued to an already-powered-down controller never produces a BUSY edge, so the wait ran to its ceiling: 30 seconds on every X4 sleep, spent with the sleep image already on the glass and the loop task still inside `enterDeepSleep()` polling no input — indistinguishable, from the outside, from a device ignoring its power button. The X3 hit the same bug as a 1000ms stall on a redundant `POWER_ON`. X4 sleep entry drops from 39.4s to 10.6s.
+
+The booster park before deep sleep was restored alongside it, after an X4 Pro lost 3% of its battery in an hour asleep: clearing the screen-on flag on an activation that had *not* powered the panel down made the power-off path skip the park, leaving the charge pump biased behind the Pro's held-up master rail.
+
+### The home pad counts as touching the screen
+
+`wasTouchActivity()` is the coarse "the user touched the panel" signal that resets the idle timer and restores CPU frequency, and it only reported screen contacts. A home-pad contact never becomes one — both the GT911 and GSLX680 paths route a bar touch to the home-key events and clear the press — so a session driven only by the home pad, on a reader with a home-key action bound, reset nothing and slept under the user's finger.
+
+### Clip selection keeps its Back label in landscape
+
+The side-button hint boxes use portrait-fixed coordinates but, unlike the front hints, do not force the frame themselves. Left in the reader's landscape frame they landed on the physical bottom edge on top of the front hint bar, hiding its Back label, with the lower box running past the 480px landscape height and clipping. They are now drawn in portrait explicitly, like the reader does it.
 
 ### Paragraph gaps that survive a rotation
 
