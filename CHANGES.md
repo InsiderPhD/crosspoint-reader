@@ -4,9 +4,9 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ---
 
-## 1.7.9 — September 2026
+## 1.8.0 — September 2026
 
-*(1.7.7 and 1.7.8 were pre-release betas; everything logged below shipped in 1.7.9.)*
+*(1.7.7 and 1.7.8 were pre-release betas; 1.7.9 was withdrawn and re-cut as this release. Everything logged below shipped in 1.8.0.)*
 
 ### Hand a position to the reader next to you
 
