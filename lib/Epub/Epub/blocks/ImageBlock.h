@@ -33,6 +33,18 @@ class ImageBlock final : public Block {
   // grayscale band passes, not to blank it permanently.
   static void clearRenderFailures();
 
+  // A page render draws its image ~13 times (the BW pass plus every grayscale
+  // band) and each draw streamed the whole .pxc off SD. The first draw now
+  // caches the pixel payload in RAM — chunked, heap-gated, falling back to
+  // streaming when it does not fit. The reader calls this once the page render
+  // completes so nothing stays resident between pages.
+  static void releaseRenderCache();
+
+  // Turn the RAM cache off for pages that still have an image to decode: the
+  // decoders need 36KB (JPEG) to 60KB (PNG) and must not lose it to the cache.
+  // Disabling also drops anything already held.
+  static void setRenderCacheAllowed(bool allowed);
+
   BlockType getType() override { return IMAGE_BLOCK; }
   bool isEmpty() override { return false; }
 

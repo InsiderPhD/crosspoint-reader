@@ -479,6 +479,9 @@ void EpubReaderActivity::onExit() {
     }
   }
 
+  // Belt and braces: the render guard already frees this at the end of every
+  // page render, but the autosync push below wants every spare byte for TLS.
+  ImageBlock::releaseRenderCache();
   section.reset();
   epub.reset();
 
@@ -2518,6 +2521,13 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   // gets another chance on the next page instead of staying blank for the boot.
   ImageBlock::clearRenderFailures();
 
+  // The cached-pixel RAM slot belongs to one page render. Release it on every
+  // exit path — including the early returns below — so it is never still
+  // holding up to ~84KB when the next page starts building.
+  struct PxcSlotGuard {
+    ~PxcSlotGuard() { ImageBlock::releaseRenderCache(); }
+  } pxcSlotGuard;
+
   const int viewportBottom = renderer.getScreenHeight() - orientedMarginBottom;
   const int viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
 
@@ -2571,6 +2581,13 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   // intermediate display + re-render on the inverted framebuffer would cancel out
   // to a blank page (text and background both end up white).
   const bool pageHasImages = page.hasImages();
+  const bool imagesNeedDecode = pageHasImages && !renderer.areImagesSuppressed() && page.hasImagesNeedingDecode();
+  // The cached-pixel RAM slot competes with the decoders for the same heap, and
+  // the decoders lose badly (36KB for JPEG, 60KB for PNG, against a slot of up
+  // to ~84KB). On a page that still has something to decode, skip the slot and
+  // stream from SD as before; by the next visit everything is cached and the
+  // slot is free to take.
+  ImageBlock::setRenderCacheAllowed(!imagesNeedDecode);
   const bool needsImageGrayscale = pageHasImages && !SETTINGS.darkMode && !renderer.areImagesSuppressed();
   const bool needsTextGrayscale = SETTINGS.textAntiAliasing && !SETTINGS.darkMode;
   const bool needsAnyGrayscale = needsTextGrayscale || needsImageGrayscale;
@@ -2593,7 +2610,7 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   // outline boxes where the images go, so the reader gets a readable page
   // immediately instead of the previous one while a multi-second decode runs.
   // Costs one extra FAST_REFRESH, and only until the .pxc exists.
-  if (pageHasImages && !renderer.areImagesSuppressed() && page.hasImagesNeedingDecode()) {
+  if (imagesNeedDecode) {
     page.renderWithImagePlaceholders(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
     if (ReaderUtils::footnotesOnPage())
       page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);

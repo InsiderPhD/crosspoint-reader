@@ -3,10 +3,13 @@
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
+#include <memory>
 #include <new>
 
 #include "Epub/converters/DirectPixelWriter.h"
@@ -132,8 +135,126 @@ std::string getCachePath(const std::string& imagePath) {
   return imagePath + ".pxc";
 }
 
+// --- Per-page-render RAM slot for the pixel cache ----------------------------
+// An image page draws its image ~13 times (the BW pass plus every band of both
+// gray planes) and each pass streamed the whole .pxc off SD again — ~100ms per
+// pass for a full-page image, and the dominant cost of showing one. The first
+// pass now pulls the payload into RAM and the rest render from it.
+//
+// Chunked: a single ~84KB block (the full-viewport worst case, 2bpp) rarely
+// survives a fragmented mid-render heap, whereas 16KB pieces usually do. Every
+// chunk is heap-gated and any failure falls back to the streaming path below,
+// unchanged. The reader releases the slot when the page render completes, so
+// nothing stays resident across page turns.
+constexpr size_t PXC_CHUNK_SHIFT = 14;  // 16 KB chunks
+constexpr size_t PXC_CHUNK_SIZE = 1u << PXC_CHUNK_SHIFT;
+constexpr size_t PXC_MAX_CHUNKS = 6;  // 96 KB, comfortably above the ~84 KB worst case
+// Headroom to leave for the rest of the page render once the slot is taken. The
+// grayscale strip scratch (gwBytes * 80 = 8KB, with smaller degraded fallbacks)
+// is the only sizeable allocation still to come. Decoders are deliberately NOT
+// in this budget: the reader disables the slot for any page that still has an
+// image to decode, so a 36KB JPEG or 60KB PNG decode never competes with it.
+constexpr size_t PXC_HEAP_RESERVE = 24 * 1024;
+constexpr size_t PXC_MAX_ALLOC_RESERVE = 8 * 1024;
+// Rows can straddle a chunk boundary and are reassembled into a stack buffer.
+// (800 + 3) / 4 = 201 for the widest panel, so this stays under the 256-byte
+// stack-local limit.
+constexpr int PXC_MAX_BYTES_PER_ROW = 208;
+
+std::unique_ptr<uint8_t[]> pxcChunks[PXC_MAX_CHUNKS];
+uint64_t pxcSlotHash = 0;
+uint16_t pxcSlotWidth = 0;
+uint16_t pxcSlotHeight = 0;
+// Cleared by the reader on a page that still has an image to decode, so the
+// slot never takes heap the decoder is about to need.
+bool pxcSlotAllowed = true;
+
+void releasePxcSlot() {
+  for (auto& chunk : pxcChunks) chunk.reset();
+  pxcSlotHash = 0;
+  pxcSlotWidth = 0;
+  pxcSlotHeight = 0;
+}
+
+const uint8_t* pxcRowPtr(const size_t rowStart, const int bytesPerRow, uint8_t* tempRow) {
+  const size_t chunk = rowStart >> PXC_CHUNK_SHIFT;
+  const size_t offset = rowStart & (PXC_CHUNK_SIZE - 1);
+  if (offset + bytesPerRow <= PXC_CHUNK_SIZE) {
+    return pxcChunks[chunk].get() + offset;
+  }
+  const size_t firstPart = PXC_CHUNK_SIZE - offset;
+  memcpy(tempRow, pxcChunks[chunk].get() + offset, firstPart);
+  memcpy(tempRow + firstPart, pxcChunks[chunk + 1].get(), bytesPerRow - firstPart);
+  return tempRow;
+}
+
+// cacheFile must be positioned just past the header. True when the slot holds
+// the whole pixel payload for this cache path afterwards.
+bool loadPxcSlot(const uint64_t cacheHash, HalFile& cacheFile, const uint16_t cachedWidth, const uint16_t cachedHeight,
+                 const int bytesPerRow) {
+  releasePxcSlot();
+  if (bytesPerRow > PXC_MAX_BYTES_PER_ROW) return false;
+
+  size_t remaining = static_cast<size_t>(bytesPerRow) * cachedHeight;
+  const size_t chunkCount = (remaining + PXC_CHUNK_SIZE - 1) >> PXC_CHUNK_SHIFT;
+  if (chunkCount == 0 || chunkCount > PXC_MAX_CHUNKS) return false;
+
+  for (size_t i = 0; i < chunkCount; i++) {
+    const size_t want = remaining < PXC_CHUNK_SIZE ? remaining : PXC_CHUNK_SIZE;
+    if (ESP.getFreeHeap() < remaining + PXC_HEAP_RESERVE || ESP.getMaxAllocHeap() < want + PXC_MAX_ALLOC_RESERVE) {
+      releasePxcSlot();
+      return false;
+    }
+    pxcChunks[i] = makeUniqueNoThrow<uint8_t[]>(want);
+    if (!pxcChunks[i] || cacheFile.read(pxcChunks[i].get(), want) != static_cast<int>(want)) {
+      releasePxcSlot();
+      return false;
+    }
+    remaining -= want;
+  }
+  pxcSlotHash = cacheHash;
+  pxcSlotWidth = cachedWidth;
+  pxcSlotHeight = cachedHeight;
+  return true;
+}
+
+void renderFromPxcSlot(GfxRenderer& renderer, const CachedImageClip& clip, const int x, const int y) {
+  const int bytesPerRow = (pxcSlotWidth + 3) / 4;
+  uint8_t tempRow[PXC_MAX_BYTES_PER_ROW];
+
+  DirectPixelWriter pw;
+  pw.init(renderer);
+
+  for (int row = clip.y0; row < clip.y1; row++) {
+    const uint8_t* rowBuffer = pxcRowPtr(static_cast<size_t>(row) * bytesPerRow, bytesPerRow, tempRow);
+    pw.beginRow(y + row);
+    for (int col = clip.x0; col < clip.x1; col++) {
+      const int byteIdx = col >> 2;            // col / 4
+      const int bitShift = 6 - (col & 3) * 2;  // MSB first within byte
+      pw.writePixel(x + col, (rowBuffer[byteIdx] >> bitShift) & 0x03);
+    }
+  }
+}
+
+bool renderFromCacheFile(GfxRenderer& renderer, const std::string& cachePath, uint64_t cacheHash, int x, int y,
+                         int expectedWidth, int expectedHeight);
+
 bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x, int y, int expectedWidth,
                      int expectedHeight) {
+  // A later pass of the same page render: the payload is already in RAM, so
+  // skip the file entirely.
+  const uint64_t cacheHash = imagePathHash(cachePath);
+  if (pxcSlotHash == cacheHash && pxcSlotWidth != 0) {
+    const auto clip = cachedImageClip(renderer, x, y, pxcSlotWidth, pxcSlotHeight);
+    if (!clip.empty()) renderFromPxcSlot(renderer, clip, x, y);
+    return true;
+  }
+
+  return renderFromCacheFile(renderer, cachePath, cacheHash, x, y, expectedWidth, expectedHeight);
+}
+
+bool renderFromCacheFile(GfxRenderer& renderer, const std::string& cachePath, const uint64_t cacheHash, int x, int y,
+                         int expectedWidth, int expectedHeight) {
   HalFile cacheFile;
   if (!Storage.openFileForRead("IMG", cachePath, cacheFile)) {
     return false;
@@ -147,8 +268,29 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
 
   // Cached dimensions are the actual decoded size; clip against those.
   const auto clip = cachedImageClip(renderer, x, y, cachedWidth, cachedHeight);
+
+  const int bytesPerRowForSlot = (cachedWidth + 3) / 4;
+
+  // First pass of a page render: try to pull the payload into the RAM slot so
+  // the remaining ~12 passes skip SD entirely. Attempted even when this pass is
+  // fully clipped out, because a later band will want it.
+  //
+  // Only an EMPTY slot is claimed. The slot lives until the page render
+  // completes, so a populated slot with a different hash means another image on
+  // this page owns it; evicting would make a two-image page reload both from SD
+  // on every pass — all the SD traffic of streaming plus the allocation churn.
+  // Later images simply take the streaming path, exactly as before.
+  if (pxcSlotAllowed && pxcSlotHash == 0 &&
+      loadPxcSlot(cacheHash, cacheFile, cachedWidth, cachedHeight, bytesPerRowForSlot)) {
+    LOG_DBG("IMG", "Cached payload now in RAM: %s (%dx%d)", cachePath.c_str(), cachedWidth, cachedHeight);
+    if (!clip.empty()) renderFromPxcSlot(renderer, clip, x, y);
+    return true;
+  }
+
   if (clip.empty()) return true;  // nothing of this image is in the visible band
 
+  // No rewind needed after a failed slot load: the streaming path below seeks to
+  // an absolute offset, so wherever the partial read left the handle is moot.
   LOG_DBG("IMG", "Loading from cache: %s (%dx%d)", cachePath.c_str(), cachedWidth, cachedHeight);
 
   // Read several rows per SD access. A full-page image is re-rendered on every
@@ -233,6 +375,13 @@ bool ImageBlock::hasValidCache() const {
 bool ImageBlock::needsDecode() const { return !imageFailedThisRender(imagePath) && !hasValidCache(); }
 
 void ImageBlock::clearRenderFailures() { failedImageCount = 0; }
+
+void ImageBlock::releaseRenderCache() { releasePxcSlot(); }
+
+void ImageBlock::setRenderCacheAllowed(const bool allowed) {
+  pxcSlotAllowed = allowed;
+  if (!allowed) releasePxcSlot();
+}
 
 void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int y) const {
   // B/W only. In a grayscale plane pass the scratch is cleared to 0x00 and a
