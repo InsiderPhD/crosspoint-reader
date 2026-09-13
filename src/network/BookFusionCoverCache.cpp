@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "components/UITheme.h"
 #include "network/HttpDownloader.h"
 
 namespace {
@@ -113,6 +114,15 @@ bool convertBookFusionCoverImage(const std::string& srcPath, const std::string& 
   return true;
 }
 
+// One thumbnail at one theme cover height. Width is the same 3:5 bound
+// Epub::generateThumbBmp uses; the converter fits within it and preserves the
+// source aspect, so this is a bounding box and not the output size.
+bool convertThumbAtHeight(const std::string& srcPath, const Epub& epub, int height) {
+  if (height <= 0) return false;
+  return convertBookFusionCoverImage(srcPath, epub.getThumbBmpPath(height), true, static_cast<int>(height * 0.6f),
+                                     height, true);
+}
+
 }  // namespace
 
 namespace BookFusionCoverCache {
@@ -137,11 +147,21 @@ bool download(const std::string& coverUrlRaw, const Epub& epub) {
 bool convert(const Epub& epub, int coverHeight, char* outThumbPath, size_t outThumbPathLen) {
   const std::string tempCoverPath = epub.getCachePath() + "/.bookfusion-cover";
 
-  const int thumbTargetWidth = coverHeight * 0.6f;
-  const int thumbTargetHeight = coverHeight;
   const std::string thumbPath = epub.getThumbBmpPath(coverHeight);
-  const bool thumbOk =
-      convertBookFusionCoverImage(tempCoverPath, thumbPath, true, thumbTargetWidth, thumbTargetHeight, true);
+  const bool thumbOk = convertThumbAtHeight(tempCoverPath, epub, coverHeight);
+
+  // Prime the thumbnail for every other theme's cover height too, while the
+  // downloaded image is still on disk. These books have no usable artwork
+  // inside the EPUB, so a height that is missing when the user later switches
+  // theme cannot be regenerated: Epub::generateThumbBmp finds nothing, writes
+  // its zero-byte "already tried" sentinel, and the cover is stuck blank until
+  // the next refresh. Each height is one more decode of the same file, which
+  // is why this is done here and not on demand.
+  const int* heights = UITheme::getCoverThumbHeights();
+  for (size_t i = 0; i < UITheme::COVER_THUMB_HEIGHT_COUNT; ++i) {
+    if (heights[i] == coverHeight) continue;
+    convertThumbAtHeight(tempCoverPath, epub, heights[i]);
+  }
 
   // Prime both sleep-screen variants while WiFi is already on. SleepActivity
   // will later pick the one matching the user's cover mode.

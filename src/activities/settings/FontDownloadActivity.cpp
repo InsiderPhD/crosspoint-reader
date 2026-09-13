@@ -12,6 +12,7 @@
 
 #include <cstring>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SdCardFontGlobals.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -556,6 +557,7 @@ void FontDownloadActivity::loop() {
           requestUpdate();
           return;
         case TouchListNav::TapResult::Activated:
+          selectedIndex_ = tappedIndex;
           activateSelected();
           return;
         case TouchListNav::TapResult::None:
@@ -707,5 +709,6 @@ void FontDownloadActivity::render(RenderLock&&) {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

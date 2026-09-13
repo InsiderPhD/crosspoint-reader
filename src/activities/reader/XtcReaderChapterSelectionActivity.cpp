@@ -89,11 +89,12 @@ void XtcReaderChapterSelectionActivity::loop() {
         const int pageStartIndex = selectorIndex / pageItems * pageItems;
         const int itemIndex = pageStartIndex + row;
         if (itemIndex < totalItems) {
-          if (itemIndex != selectorIndex) {
-            selectorIndex = itemIndex;
-            requestUpdate();
-          } else {
+          const bool activate = TouchListNav::tapActivates(itemIndex, selectorIndex);
+          selectorIndex = itemIndex;
+          if (activate) {
             activateSelectedChapter();
+          } else {
+            requestUpdate();
           }
           return;
         }

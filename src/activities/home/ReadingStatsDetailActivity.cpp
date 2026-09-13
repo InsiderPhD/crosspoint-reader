@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "CrossPointSettings.h"
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -538,6 +539,7 @@ void ReadingStatsDetailActivity::render(RenderLock&&) {
                       tr(STR_NO_READING_STATS));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -652,5 +654,8 @@ void ReadingStatsDetailActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
+  // The base screen was stored above in normal polarity, so every render
+  // restores an un-inverted frame and this single invert is never doubled.
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

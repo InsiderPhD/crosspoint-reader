@@ -7,6 +7,7 @@
 #include <Logging.h>
 #include <esp_ota_ops.h>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "activities/home/FileBrowserActivity.h"
 #include "activities/util/ConfirmationActivity.h"
@@ -250,5 +251,6 @@ void SdFirmwareUpdateActivity::render(RenderLock&&) {
     }
   }
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

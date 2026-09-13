@@ -24,6 +24,7 @@
 #include "SilentRestart.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TouchListNav.h"
 
 // Largest-free-block floor below which arriving home triggers a defrag restart.
 // See the checkpoint comment in onEnter() for how this value was chosen.
@@ -377,17 +378,31 @@ void HomeActivity::loop() {
   }
 
 #if FREEINK_DEVICE_X4PRO
+  // Full Touch: horizontal swipes step through the cover slots, wrapping — the
+  // carousel gesture, and useful on any multi-cover home.
+  //
+  // A leftward swipe arrives as Back, because that is the only Back the X4 Pro
+  // has (TouchListNav::tabSwipeNext declines to repurpose it for that reason).
+  // Home is the exception: it is the root screen, so Back closes nothing here
+  // and its hint label is already blank. The context-menu branch above returns
+  // before this point, so the menu keeps its own Back.
+  if (SETTINGS.fullTouchUi) {
+    if (mappedInput.wasSwipe() == MappedInputManager::Swipe::Right && rotateCoverSelection(1)) return;
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back) && rotateCoverSelection(-1)) return;
+  }
+
   // Full Touch: first tap on a tile moves the selector, a second tap opens it.
   if (SETTINGS.fullTouchUi) {
     int lx, ly;
     if (mappedInput.wasTapPoint(lx, ly)) {
       const int tile = tileIndexAt(lx, ly);
       if (tile >= 0) {
-        if (tile != selectorIndex) {
-          selectorIndex = tile;
-          requestUpdate();
-        } else {
+        const bool activate = TouchListNav::tapActivates(tile, selectorIndex);
+        selectorIndex = tile;
+        if (activate) {
           activateSelectedTile();
+        } else {
+          requestUpdate();
         }
         return;
       }
@@ -413,6 +428,23 @@ void HomeActivity::loop() {
     activateSelectedTile();
   }
 }
+
+#if FREEINK_DEVICE_X4PRO
+bool HomeActivity::rotateCoverSelection(const int delta) {
+  const int coverCount = static_cast<int>(recentBooks.size());
+  if (coverCount <= 1) return false;
+
+  if (selectorIndex >= coverCount) {
+    // Coming from the icon row: enter at the end the rotation is heading away
+    // from, so the first step shows a cover rather than skipping one.
+    selectorIndex = delta > 0 ? 0 : coverCount - 1;
+  } else {
+    selectorIndex = (selectorIndex + delta % coverCount + coverCount) % coverCount;
+  }
+  requestUpdate();
+  return true;
+}
+#endif
 
 Rect HomeActivity::coverStripRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();

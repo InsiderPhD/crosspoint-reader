@@ -110,4 +110,88 @@ bool resolveBasePath(const char* folderName, std::string& basePathOut) {
   return false;
 }
 
+// --- Install support --------------------------------------------------------
+
+namespace {
+
+// Shared character rule for both validators: the set that can appear in a
+// catalog-supplied path component. Deliberately narrow — every one of these is
+// concatenated into an SD path.
+bool isSafePathChar(const char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+}
+
+// Length caps. A folder name has to round-trip through
+// CrossPointSettings::dictionaryName (char[32]), so a longer one would install
+// but come back truncated and unresolvable — reject it up front instead.
+// Filenames only have to fit the path Dictionary.h budgets (~137 chars for
+// folder + stem before the longest ".dict.dz" suffix).
+constexpr size_t MAX_NAME_LEN = 31;
+constexpr size_t MAX_FILENAME_LEN = 64;
+
+bool isValidComponent(const char* name, const size_t maxLen) {
+  if (!name || name[0] == '\0' || name[0] == '.') return false;
+  size_t len = 0;
+  for (const char* p = name; *p; ++p, ++len) {
+    if (!isSafePathChar(*p)) return false;
+  }
+  return len <= maxLen;
+}
+
+}  // namespace
+
+bool isValidName(const char* name) {
+  // A folder name additionally carries no dots: it is compared against
+  // SETTINGS.dictionaryName and shown in the picker.
+  if (!isValidComponent(name, MAX_NAME_LEN)) return false;
+  return strchr(name, '.') == nullptr;
+}
+
+bool isValidFileName(const char* name) { return isValidComponent(name, MAX_FILENAME_LEN); }
+
+bool ensureInstallDir(const char* name, std::string& dirOut) {
+  if (!isValidName(name)) {
+    LOG_ERR("DREG", "Rejected dictionary name: %s", name ? name : "(null)");
+    return false;
+  }
+
+  // An existing install keeps its root, so updating a dictionary the user
+  // moved to /.dictionaries does not silently create a second copy in the
+  // visible root that would then shadow it in discover()'s root order.
+  for (const char* dictRoot : DICT_ROOTS) {
+    std::string existing = std::string(dictRoot) + "/" + name;
+    if (Storage.exists(existing.c_str())) {
+      dirOut = std::move(existing);
+      return true;
+    }
+  }
+
+  // New install: the visible root, created on demand (a fresh card has neither).
+  dirOut = std::string(DICT_ROOTS[0]) + "/" + name;
+  if (!Storage.mkdir(dirOut.c_str())) {
+    LOG_ERR("DREG", "Failed to create %s", dirOut.c_str());
+    return false;
+  }
+  return true;
+}
+
+bool removeDictionary(const char* name) {
+  if (!isValidName(name)) return false;
+
+  bool foundAny = false;
+  for (const char* dictRoot : DICT_ROOTS) {
+    const std::string folderPath = std::string(dictRoot) + "/" + name;
+    if (!Storage.exists(folderPath.c_str())) continue;
+    foundAny = true;
+    // removeDir is recursive in HalStorage; the dictionary folder is flat, but
+    // a stray AppleDouble subfolder must not block the delete.
+    if (!Storage.removeDir(folderPath.c_str())) {
+      LOG_ERR("DREG", "Failed to remove %s", folderPath.c_str());
+      return false;
+    }
+    LOG_DBG("DREG", "Removed dictionary %s", folderPath.c_str());
+  }
+  return foundAny;
+}
+
 }  // namespace DictionaryRegistry

@@ -214,10 +214,14 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
     return 1;
   }
 
-  // === Bilinear interpolation (upscale: fineScale > 1.0) ===
+  // === Bilinear interpolation (upscale on either axis: fineScale > 1.0) ===
   // Smooths block boundaries that would otherwise create visible banding
   // on progressive JPEG DC-only decode (1/8 resolution upscaled to target).
-  if (fineScaleFPX > FP_ONE && fineScaleFPY > FP_ONE) {
+  // Either axis is enough: with useExactDimensions the output aspect can differ
+  // from the source, so one axis may upscale while the other downscales, and
+  // requiring both sent that case to the nearest-neighbour path below — visibly
+  // blocky along whichever axis was being stretched.
+  if (fineScaleFPX > FP_ONE || fineScaleFPY > FP_ONE) {
     // Pre-compute safe X range where lx0 and lx0+1 are both in [0, validW-1].
     // Only the left/right edge pixels (typically 0-2 and 1-8 respectively) need clamping.
     int safeXStart = (int)(((int64_t)blockX * fineScaleFPX + FP_MASK) >> FP_SHIFT);

@@ -234,11 +234,12 @@ void EpubReaderMenuActivity::loop() {
       // (the same window render() draws, so paint and touch cannot disagree).
       const int row = selectedIndex / rowsPerPage * rowsPerPage + rowInPage;
       if (ly >= top && rowInPage >= 0 && rowInPage < rowsPerPage && row < static_cast<int>(menuItems.size())) {
-        if (row != selectedIndex) {
-          selectedIndex = row;
-          requestUpdate();
-        } else {
+        const bool activate = TouchListNav::tapActivates(row, selectedIndex);
+        selectedIndex = row;
+        if (activate) {
           activateSelectedItem();
+        } else {
+          requestUpdate();
         }
         return;
       }

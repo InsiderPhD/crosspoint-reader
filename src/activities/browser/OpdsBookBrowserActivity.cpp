@@ -122,11 +122,12 @@ void OpdsBookBrowserActivity::loop() {
         if (ly >= top && row >= 0 && row < PAGE_ITEMS) {
           const int itemIndex = selectorIndex / PAGE_ITEMS * PAGE_ITEMS + row;
           if (itemIndex < static_cast<int>(entries.size())) {
-            if (itemIndex != selectorIndex) {
-              selectorIndex = itemIndex;
-              requestUpdate();
-            } else {
+            const bool activate = TouchListNav::tapActivates(itemIndex, selectorIndex);
+            selectorIndex = itemIndex;
+            if (activate) {
               activateSelectedEntry();
+            } else {
+              requestUpdate();
             }
             return;
           }

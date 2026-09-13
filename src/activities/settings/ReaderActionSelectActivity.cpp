@@ -120,6 +120,7 @@ void ReaderActionSelectActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedIndex = tappedIndex;
       confirmSelection();
       return;
     case TouchListNav::TapResult::None:

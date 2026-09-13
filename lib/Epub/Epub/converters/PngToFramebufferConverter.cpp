@@ -249,7 +249,11 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   for (int dstY = firstDstY; dstY < endDstY; dstY++) {
     ctx->lastDstY = dstY;
     const int outY = ctx->config->y + dstY;
-    if (outY >= ctx->screenHeight) continue;
+    // Both ends: an image may start above the viewport now that a partially
+    // offscreen image is clipped rather than rejected. DirectPixelWriter clips
+    // rows but not columns, and which logical axis becomes a physical column
+    // depends on orientation, so out-of-range coordinates must not reach it.
+    if (outY < 0 || outY >= ctx->screenHeight) continue;
 
     pw.beginRow(outY);
 
@@ -274,7 +278,7 @@ int pngDrawCallback(PNGDRAW* pDraw) {
 
     for (int dstX = 0; dstX < dstWidth; dstX++) {
       const int outX = outXBase + dstX;
-      if (outX < screenWidth) {
+      if (outX >= 0 && outX < screenWidth) {
         const uint8_t gray = ctx->grayLineBuffer[srcX];
 
         uint8_t ditheredGray;

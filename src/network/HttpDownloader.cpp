@@ -102,7 +102,7 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent) {
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool allowConfiguredAuth,
-                                                             size_t expectedSize) {
+                                                             size_t expectedSize, const volatile bool* cancelFlag) {
   freeink::SecureHttpClient http;
   configureRequest(http, url, allowConfiguredAuth);
 
@@ -135,6 +135,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   bool fileOpen = false;
   bool fileError = false;
   size_t downloaded = 0;
+  bool cancelled = false;
 
 #if CROSSPOINT_DOWNLOAD_WRITE_BUFFER > 0
   // Write coalescing (roomy boards only — see CROSSPOINT_DOWNLOAD_WRITE_BUFFER).
@@ -169,6 +170,13 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   const int httpCode = http.GET([&](const uint8_t* data, size_t len) {
     esp_task_wdt_reset();                      // download length is network-bound; feed the loop WDT per chunk
     if (http.getStatus() != 200) return true;  // drain error body
+    // Polled here rather than in the progress callback: the callback only fires
+    // once a chunk has been delivered, and returning false from the sink is the
+    // one path the transport already treats as "stop reading the body".
+    if (cancelFlag && *cancelFlag) {
+      cancelled = true;
+      return false;
+    }
     if (!fileOpen) {
       if (Storage.exists(destPath.c_str())) {
         Storage.remove(destPath.c_str());
@@ -232,6 +240,14 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
             (unsigned long)((downloaded >> 10) * 1000UL / elapsedMs));
   }
 #endif
+
+  if (cancelled) {
+    LOG_INF("HTTP", "Download cancelled after %zu bytes", downloaded);
+    if (fileOpen) {
+      Storage.remove(destPath.c_str());
+    }
+    return ABORTED;
+  }
 
   if (fileError) {
     LOG_ERR("HTTP", "Write failed during download");

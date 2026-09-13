@@ -7,8 +7,9 @@
 
 // Full Touch (X4 Pro) tap dispatch for the standard drawList screens.
 // Two-tap model: a tap on an unselected row only moves the cursor there; a
-// second tap on the now-selected row activates it. Usage in an activity's
-// loop(), before the Confirm handling:
+// second tap on the now-selected row activates it. With Yolo Selection on
+// (SETTINGS.yoloSelection) the first tap on any row activates it. Usage in an
+// activity's loop(), before the Confirm handling:
 //
 //   int tappedIndex;
 //   switch (TouchListNav::tapRow(mappedInput, listRect(), itemCount, selectedIndex,
@@ -18,6 +19,8 @@
 //       requestUpdate();
 //       return;
 //     case TouchListNav::TapResult::Activated:
+//       selectedIndex = tappedIndex;  // REQUIRED: under Yolo Selection this is
+//                                     // not the row that was selected before
 //       handleSelection();  // the same function the Confirm branch calls
 //       return;
 //     case TouchListNav::TapResult::None:
@@ -32,6 +35,15 @@ namespace TouchListNav {
 enum class TapResult { None, SelectionMoved, Activated };
 
 #if FREEINK_DEVICE_X4PRO
+// The single two-tap vs one-tap decision for every Full Touch surface, including
+// the hand-rolled hit-tests (popups, Home tiles, Library grid, chapter lists).
+// With Yolo Selection on, any hit activates; otherwise only a tap on the item
+// that is already selected does. Call sites that activate must still move their
+// cursor to tappedIndex first, since the activation acts on the selection.
+inline bool tapActivates(const int tappedIndex, const int selectedIndex) {
+  return SETTINGS.yoloSelection || tappedIndex == selectedIndex;
+}
+
 // A tap on dead space (header, gaps, below the last row) returns None and is
 // dropped — gestures still work there.
 inline TapResult tapRow(const MappedInputManager& mappedInput, const Rect& rect, int itemCount, int selectedIndex,
@@ -48,7 +60,7 @@ inline TapResult tapRow(const MappedInputManager& mappedInput, const Rect& rect,
     return TapResult::None;
   }
   outIndex = index;
-  return index == selectedIndex ? TapResult::Activated : TapResult::SelectionMoved;
+  return tapActivates(index, selectedIndex) ? TapResult::Activated : TapResult::SelectionMoved;
 }
 
 // Full Touch page paging for any list that actually paginates: a vertical swipe
@@ -128,6 +140,7 @@ inline bool tabSwipeNext(const MappedInputManager& mappedInput) {
 }
 #else
 // Non-touch boards: compiles to a constant so call sites need no #if fence.
+inline bool tapActivates(const int tappedIndex, const int selectedIndex) { return tappedIndex == selectedIndex; }
 inline TapResult tapRow(const MappedInputManager&, const Rect&, int, int, bool, int&) { return TapResult::None; }
 inline bool pageSwipe(const MappedInputManager&, int, int, int&) { return false; }
 inline int pageSwipeDelta(const MappedInputManager&) { return 0; }

@@ -8,6 +8,7 @@
 #include <ctime>
 #include <string>
 
+#include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "ReadingStatsStore.h"
 #include "AppMetricCard.h"
@@ -523,5 +524,6 @@ void ReadingHeatmapActivity::render(RenderLock&&) {
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }

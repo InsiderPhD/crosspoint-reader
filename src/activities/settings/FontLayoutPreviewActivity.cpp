@@ -243,6 +243,7 @@ void FontLayoutPreviewActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedIndex = tappedIndex;
       activateSelectedRow();
       return;
     case TouchListNav::TapResult::None:

@@ -427,6 +427,7 @@ void WifiSelectionActivity::loop() {
         requestUpdate();
         return;
       case TouchListNav::TapResult::Activated:
+        selectedNetworkIndex = static_cast<size_t>(tappedIndex);
         selectNetwork(selectedNetworkIndex);
         return;
       case TouchListNav::TapResult::None:

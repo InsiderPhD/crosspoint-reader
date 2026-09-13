@@ -38,9 +38,14 @@ class HttpDownloader {
    * @param expectedSize Optional expected file size in bytes (e.g. BookFusion's API
    *        download_size). When non-zero, a final file that falls well short of this
    *        is rejected as a truncated download. 0 = no cross-check.
+   * @param cancelFlag Optional abort switch, polled once per received chunk. When it
+   *        turns true the transfer stops, the partial file is deleted and ABORTED is
+   *        returned. The caller owns the flag; it is only read here. Written from the
+   *        progress callback on the same task (nothing here runs on another task), so
+   *        `volatile` is documentation of intent rather than a memory barrier.
    * @return DownloadError indicating success or failure type
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, bool allowConfiguredAuth = true,
-                                      size_t expectedSize = 0);
+                                      size_t expectedSize = 0, const volatile bool* cancelFlag = nullptr);
 };

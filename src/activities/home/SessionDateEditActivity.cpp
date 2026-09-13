@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <ctime>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
@@ -116,6 +117,7 @@ void SessionDateEditActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedField = tappedIndex;
       // Tapping the field already under the cursor steps its value, matching
       // the Right button. Committing is the action bar's Confirm — otherwise a
       // second tap would save instead of letting you set the value by touch.
@@ -192,5 +194,6 @@ void SessionDateEditActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), "-", "+", /*directional=*/false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

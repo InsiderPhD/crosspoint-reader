@@ -115,6 +115,8 @@ void BmpViewerActivity::onEnter() {
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       // Single pass for non-grayscale images
 
+      // Deliberately not inverted in dark mode: this previews the picture as it
+      // will appear when set as the sleep cover, so it must show true polarity.
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 
     } else {
@@ -123,6 +125,7 @@ void BmpViewerActivity::onEnter() {
       renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, "Invalid BMP File");
       const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+      if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     }
 
@@ -133,6 +136,7 @@ void BmpViewerActivity::onEnter() {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, "Could not open file");
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
   }
 }
@@ -140,6 +144,7 @@ void BmpViewerActivity::onEnter() {
 void BmpViewerActivity::onExit() {
   Activity::onExit();
   renderer.clearScreen();
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 

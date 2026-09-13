@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <string>
 
+#include "CrossPointSettings.h"
 #include "ReadingDateSelectionActivity.h"
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
@@ -219,6 +220,8 @@ void BookReadingAdjustmentActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedField = tappedIndex;
+      lastApplyFailed = false;  // matches the Up/Down field-change path
       touchActivateSelectedField();
       return;
     case TouchListNav::TapResult::None:
@@ -304,5 +307,6 @@ void BookReadingAdjustmentActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), selectedField == 1 ? tr(STR_SELECT) : tr(STR_CONFIRM), "-",
                                             "+", /*directional=*/false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

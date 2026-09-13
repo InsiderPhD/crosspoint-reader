@@ -331,7 +331,11 @@ void FileBrowserActivity::loop() {
         }
         const int row = (ly - bookOptionsOptionsTop) / bookOptionsRowH;
         const bool onRow = ly >= bookOptionsOptionsTop && row >= 0 && row < optionCount;
-        if (onRow && row != bookOptionsIndex) {
+        if (onRow && SETTINGS.yoloSelection) {
+          // Yolo Selection: highlight the tapped option and fall through, so
+          // the injected Confirm release below activates it on this one tap.
+          bookOptionsIndex = row;
+        } else if (onRow && row != bookOptionsIndex) {
           // First tap on an unselected option: move the highlight only.
           bookOptionsIndex = row;
           awaitingBookOptionsRelease = true;
@@ -470,12 +474,14 @@ void FileBrowserActivity::loop() {
       const int index =
           GUI.hitTestList(listRect(), static_cast<int>(files.size()), static_cast<int>(selectorIndex), false, lx, ly);
       if (index >= 0) {
-        // First tap moves the cursor; a second tap on the selected row opens it.
-        if (static_cast<size_t>(index) != selectorIndex) {
-          selectorIndex = static_cast<size_t>(index);
-          requestUpdate();
-        } else {
+        // First tap moves the cursor; a second tap on the selected row opens it
+        // (or the first tap opens it, with Yolo Selection on).
+        const bool activate = TouchListNav::tapActivates(index, static_cast<int>(selectorIndex));
+        selectorIndex = static_cast<size_t>(index);
+        if (activate) {
           activateSelectedEntry();
+        } else {
+          requestUpdate();
         }
         return;
       }

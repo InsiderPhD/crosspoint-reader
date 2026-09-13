@@ -40,7 +40,6 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "util/DictionaryRegistry.h"
 #include "util/TouchListNav.h"
 
 // Switch to a category tab: its list, its count, and the focus reset. Shared by
@@ -175,17 +174,11 @@ void SettingsActivity::onEnter() {
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_STATUS_BAR, SettingAction::CustomiseStatusBar));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_READER_CONTROLS, SettingAction::ReaderControls));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_CUSTOMISE_READER_MENU, SettingAction::ReaderMenu));
-  // Dictionary: only listed when at least one usable dictionary folder exists,
-  // so a device with nothing under /dictionaries never shows a row whose only
-  // possible value is "None". Rescanned on every rebuild — one directory
-  // listing, and it picks up dictionaries copied to the card since last visit.
-  {
-    std::vector<DictionaryEntry> dictionaries;
-    DictionaryRegistry::discover(dictionaries);
-    if (!dictionaries.empty()) {
-      readerSettings.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::Dictionary));
-    }
-  }
+  // Dictionary: always listed. It used to be hidden until a usable folder
+  // existed under /dictionaries, which was right when the only way to get one
+  // was to copy it there from a computer — but the picker now owns the
+  // downloader, so hiding the row hides the only route to a first dictionary.
+  readerSettings.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::Dictionary));
   // Font family (built-in + SD) is edited inside the Font & Layout preview,
   // so it is not listed separately here.
 
@@ -256,9 +249,9 @@ void SettingsActivity::loop() {
       // cursor there; a second tap on the selected row toggles/activates it.
       const int rowIndex = GUI.hitTestList(listRect(), settingsCount, selectedSettingIndex - 1, false, lx, ly);
       if (rowIndex >= 0) {
-        if (rowIndex + 1 != selectedSettingIndex) {
-          selectedSettingIndex = rowIndex + 1;
-        } else {
+        const bool activate = TouchListNav::tapActivates(rowIndex + 1, selectedSettingIndex);
+        selectedSettingIndex = rowIndex + 1;
+        if (activate) {
           toggleCurrentSetting();
         }
         requestUpdate();

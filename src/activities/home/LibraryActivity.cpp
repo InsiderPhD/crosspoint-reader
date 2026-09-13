@@ -976,8 +976,9 @@ void LibraryActivity::loop() {
       const int slot = slotIndexAt(lx, ly);
       if (slot >= 0) {
         const size_t logical = currentPage() * pageSize() + static_cast<size_t>(slot);
-        if (logical != selectorIndex) {
-          selectorIndex = logical;
+        const bool activate = TouchListNav::tapActivates(static_cast<int>(logical), static_cast<int>(selectorIndex));
+        selectorIndex = logical;
+        if (!activate) {
           requestUpdate();
         } else {
           const std::string path = currentPath();

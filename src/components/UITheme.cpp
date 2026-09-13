@@ -11,6 +11,7 @@
 #include "RecentBooksStore.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
+#include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraLibraryTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "fontIds.h"
@@ -48,6 +49,10 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
     case CrossPointSettings::UI_THEME::LYRA_LIBRARY:
       LOG_DBG("UI", "Using Lyra Library theme");
       currentTheme = std::make_unique<LyraLibraryTheme>();
+      break;
+    case CrossPointSettings::UI_THEME::LYRA_CAROUSEL:
+      LOG_DBG("UI", "Using Lyra Carousel theme");
+      currentTheme = std::make_unique<LyraCarouselTheme>();
       break;
     default:
       LOG_DBG("UI", "Unknown theme %d, falling back to Lyra", static_cast<int>(type));
@@ -90,6 +95,21 @@ std::string UITheme::getCoverThumbPath(std::string coverBmpPath, int coverHeight
   }
   return coverBmpPath;
 }
+
+namespace {
+// Derived from the metrics tables themselves so a theme's height cannot drift
+// out of this list silently. A new theme with a new homeCoverHeight must be
+// added here — the static_assert fires if the count stops matching.
+constexpr int kCoverThumbHeights[] = {
+    BaseMetrics::values.homeCoverHeight,
+    LyraMetrics::values.homeCoverHeight,
+    LyraCarouselMetrics::values.homeCoverHeight,
+};
+static_assert(sizeof(kCoverThumbHeights) / sizeof(kCoverThumbHeights[0]) == UITheme::COVER_THUMB_HEIGHT_COUNT,
+              "COVER_THUMB_HEIGHT_COUNT must match kCoverThumbHeights");
+}  // namespace
+
+const int* UITheme::getCoverThumbHeights() { return kCoverThumbHeights; }
 
 UIIcon UITheme::getFileIcon(const std::string& filename) {
   if (filename.back() == '/') {

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "AppMetricCard.h"
+#include "CrossPointSettings.h"
 #include "ReadingHeatmapActivity.h"
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
@@ -410,5 +411,6 @@ void ReadingStatsExtendedActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", scrollOffset > 0 ? tr(STR_DIR_UP) : "",
                                             scrollOffset < maxScrollOffset ? tr(STR_DIR_DOWN) : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

@@ -19,6 +19,7 @@
 #include "BookFusionBookIdStore.h"
 #include "BookFusionMetaStore.h"
 #include "BookFusionTokenStore.h"
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "activities/home/LibraryActivity.h"
@@ -678,6 +679,7 @@ void BookFusionBrowserActivity::loop() {
         requestUpdate();
         return;
       case TouchListNav::TapResult::Activated:
+        selectedCategory = tappedCategory;
         handleCategorySelection();
         return;
       case TouchListNav::TapResult::None:
@@ -785,6 +787,7 @@ void BookFusionBrowserActivity::loop() {
         requestUpdate();
         return;
       case TouchListNav::TapResult::Activated:
+        selectedIndex = tappedIndex;
         activateSelectedBook();
         return;
       case TouchListNav::TapResult::None:
@@ -956,7 +959,10 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   // SD read contends with the download's own writes on the HalStorage mutex).
   if (state == DOWNLOADING && downloadScreenPainted) {
     drawDownloadDynamic(downloadStatusY);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
+    // Back to normal polarity: the next tick draws over this persistent card.
+    if (SETTINGS.darkMode) renderer.invertScreen();
     return;
   }
 
@@ -1016,6 +1022,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -1024,6 +1031,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_LOADING));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -1032,6 +1040,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, errorMsg, true, EpdFontFamily::BOLD);
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -1062,6 +1071,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
 
     const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_DOWNLOAD), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -1127,7 +1137,10 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
     downloadStatusY = y;           // Shared with the fast-path partial repaint
     downloadScreenPainted = true;  // Card now lives in the persistent framebuffer
     drawDownloadDynamic(y);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
+    // Leave the persistent card in normal polarity for the fast-path ticks.
+    if (SETTINGS.darkMode) renderer.invertScreen();
     return;
   }
 
@@ -1158,6 +1171,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, textBaseY + 30, title.c_str());
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     return;
   }
@@ -1211,5 +1225,6 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_DOWNLOAD), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

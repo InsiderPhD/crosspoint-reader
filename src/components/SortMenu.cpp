@@ -57,7 +57,9 @@ bool SortMenu::handleInput(ButtonNavigator& nav, const MappedInputManager& input
       } else {
         const int row = (tapY - optionsTopY_) / OPTION_ROW_H;
         const bool onRow = tapY >= optionsTopY_ && row >= 0 && row < optionCount_;
-        if (onRow && row != cursorIndex_) {
+        if (onRow && SETTINGS.yoloSelection) {
+          cursorIndex_ = row;  // Yolo Selection: the injected Confirm selects/flips it now
+        } else if (onRow && row != cursorIndex_) {
           cursorIndex_ = row;
           swallowNextConfirm_ = true;
         } else if (!onRow) {

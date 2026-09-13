@@ -56,6 +56,12 @@ class EpubReaderActivity final : public Activity {
   bool showDictionaryMessage = false;
   StrId dictionaryMessage = StrId::STR_DICT_NOT_FOUND;
   unsigned long dictionaryMessageTime = 0UL;
+  // One-shot: draw the dictionary popup over whatever is already in the
+  // framebuffer instead of repainting the page under it. Set only by the
+  // pre-lookup busy popup, where the page on the panel is already correct and
+  // the alternative is a full page render (with both AA grayscale passes) that
+  // is thrown away a second later. Cleared by the render it triggers.
+  bool dictionaryPopupOverlayOnly = false;
   // Opened lazily on the first lookup and kept for the visit, so a second word
   // costs a lookup rather than another open + sidecar validate.
   DictionaryLookup dictionaryLookup;

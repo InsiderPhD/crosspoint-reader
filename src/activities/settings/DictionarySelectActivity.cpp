@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "CrossPointSettings.h"
+#include "DictionaryDownloadActivity.h"
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
 #include "fontIds.h"
@@ -48,6 +49,7 @@ void DictionarySelectActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedIndex = tappedIndex;
       handleSelection();
       return;
     case TouchListNav::TapResult::None:
@@ -77,6 +79,11 @@ void DictionarySelectActivity::loop() {
 }
 
 void DictionarySelectActivity::handleSelection() {
+  if (selectedIndex == downloadRowIndex()) {
+    openDownloader();
+    return;
+  }
+
   {
     RenderLock lock(*this);
     if (selectedIndex == 0) {
@@ -92,6 +99,18 @@ void DictionarySelectActivity::handleSelection() {
   }
 
   onBack();
+}
+
+// The downloader owns the WiFi lifecycle itself; all this screen has to do is
+// re-scan on return, because a dictionary may have been installed or deleted
+// while it was away.
+void DictionarySelectActivity::openDownloader() {
+  startActivityForResult(std::make_unique<DictionaryDownloadActivity>(renderer, mappedInput),
+                         [this](const ActivityResult&) {
+                           DictionaryRegistry::discover(dictionaries);
+                           if (selectedIndex >= totalItems()) selectedIndex = totalItems() - 1;
+                           requestUpdate();
+                         });
 }
 
 // List body between the header and the button hints. Shared by render() and
@@ -116,18 +135,23 @@ void DictionarySelectActivity::render(RenderLock&&) {
   GUI.drawList(
       renderer, listRect(), totalItems(), selectedIndex,
       [this](int index) -> std::string {
-        return index == 0 ? tr(STR_NONE_OPT) : dictionaries[static_cast<size_t>(index) - 1].name;
+        if (index == 0) return tr(STR_NONE_OPT);
+        if (index == downloadRowIndex()) return tr(STR_DICT_DOWNLOAD);
+        return dictionaries[static_cast<size_t>(index) - 1].name;
       },
       nullptr, nullptr,
       [this, noneActive](int index) -> std::string {
         if (index == 0) return noneActive ? tr(STR_SELECTED) : "";
+        if (index == downloadRowIndex()) return "";
         const bool active = !noneActive && strncmp(dictionaries[static_cast<size_t>(index) - 1].name.c_str(),
                                                    SETTINGS.dictionaryName, sizeof(SETTINGS.dictionaryName) - 1) == 0;
         return active ? tr(STR_SELECTED) : "";
       },
       true);
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), selectedIndex == downloadRowIndex() ? tr(STR_OPEN) : tr(STR_SELECT),
+                            tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   if (SETTINGS.darkMode) renderer.invertScreen();

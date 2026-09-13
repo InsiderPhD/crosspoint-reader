@@ -131,7 +131,11 @@ bool BookContextMenu::handleInput(ButtonNavigator& nav, const MappedInputManager
     if (SETTINGS.fullTouchUi) {
       const int row = (tapY - optionsTopY_) / OPTION_ROW_H;
       const bool onRow = tapY >= optionsTopY_ && row >= 0 && row < actionCount;
-      if (onRow && row != selectedIndex_) {
+      if (onRow && SETTINGS.yoloSelection) {
+        // Yolo Selection: highlight the tapped row and let the injected
+        // Confirm release below activate it on this one tap.
+        selectedIndex_ = row;
+      } else if (onRow && row != selectedIndex_) {
         selectedIndex_ = row;
         awaitingRelease_ = true;  // swallow this tap's injected Confirm release
         return false;

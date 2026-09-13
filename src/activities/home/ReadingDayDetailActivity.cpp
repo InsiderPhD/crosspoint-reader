@@ -6,6 +6,7 @@
 #include <string>
 
 #include "AppMetricCard.h"
+#include "CrossPointSettings.h"
 #include "ReadingStatsDetailActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -75,6 +76,7 @@ void ReadingDayDetailActivity::loop() {
         requestUpdate();
         return;
       case TouchListNav::TapResult::Activated:
+        selectedIndex = tappedIndex;
         openSelectedBook();
         return;
       case TouchListNav::TapResult::None:
@@ -170,5 +172,6 @@ void ReadingDayDetailActivity::render(RenderLock&&) {
   const auto labels =
       mappedInput.mapLabels(tr(STR_BACK), entries.empty() ? "" : tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

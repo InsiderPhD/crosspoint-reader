@@ -179,6 +179,10 @@ class GfxRenderer {
   uint8_t* getWriteTarget() const { return _stripActive ? _stripBuf : frameBuffer; }
   int getWriteOriginY() const { return _stripActive ? _stripY0 : 0; }
   int getWriteRows() const { return _stripActive ? _stripRows : panelHeight; }
+  // Distinguishes "no strip" from "a strip that happens to span the panel", which
+  // getWriteOriginY/getWriteRows alone cannot. Callers that skip whole SD reads
+  // for off-band rows need the real answer, not the equivalent-looking one.
+  bool isStripTargetActive() const { return _stripActive; }
 
   // Drawing
   void drawPixel(int x, int y, bool state = true) const;
@@ -200,6 +204,19 @@ class GfxRenderer {
   void drawBitmap(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight, float cropX = 0,
                   float cropY = 0) const;
   void drawBitmap1Bit(const Bitmap& bitmap, int x, int y, int maxWidth, int maxHeight) const;
+  // Draws bitmap into a trapezoid w px wide whose left edge is hL tall and right
+  // edge hR tall, both vertically centred on max(hL, hR). Used for the angled
+  // side covers of the Lyra Carousel home theme.
+  void drawPerspectiveBitmap(const Bitmap& bitmap, int x, int y, int w, int hL, int hR) const;
+  // Precomputed per-destination-column geometry for drawPerspectiveBitmap.
+  struct PerspectiveColumn {
+    int16_t height;
+    int16_t top;
+    int16_t srcX;
+  };
+  // Paints over the four corner squares of an already-drawn rect so artwork
+  // blitted by drawBitmap picks up rounded corners.
+  void maskRoundedRectOutsideCorners(int x, int y, int width, int height, int radius, Color color) const;
   void fillPolygon(const int* xPoints, const int* yPoints, int numPoints, bool state = true) const;
 
   // Text

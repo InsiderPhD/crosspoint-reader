@@ -88,6 +88,7 @@ void NetworkModeSelectionActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedIndex = tappedIndex;
       handleSelection();
       return;
     case TouchListNav::TapResult::None:

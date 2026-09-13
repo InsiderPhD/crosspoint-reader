@@ -123,6 +123,17 @@ void CrossPointSettings::migrateReaderActions(CrossPointSettings& settings) {
   }
 }
 
+void CrossPointSettings::migrateFullTouchDefault(CrossPointSettings& settings) {
+#if FREEINK_DEVICE_X4PRO
+  if (settings.fullTouchDefaultMigrated) return;
+  settings.fullTouchDefaultMigrated = 1;
+  settings.fullTouchUi = 1;
+#else
+  // Leave the flag unset so the card still migrates when it reaches an X4 Pro.
+  (void)settings;
+#endif
+}
+
 void CrossPointSettings::migrateStatusBarPositions(CrossPointSettings& settings) {
   // Battery: on -> left, off -> hidden (its classic cluster).
   settings.statusBarBatteryPos = settings.statusBarBattery ? SB_POS_LEFT : SB_POS_HIDE;
@@ -200,6 +211,7 @@ bool CrossPointSettings::loadFromFile() {
       bool result = JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
       if (result) {
         migrateReaderActions(*this);
+        migrateFullTouchDefault(*this);
         resave = true;
       }
       if (result && resave) {

@@ -8,6 +8,7 @@
 #include <ctime>
 #include <string>
 
+#include "CrossPointSettings.h"
 #include "ReadingStatsStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -123,6 +124,7 @@ void ReadingDateSelectionActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedField = tappedIndex;
       // Tapping the field already under the cursor steps its value, matching
       // the Right button; the action bar's Confirm is what commits.
       adjustSelectedField(1);
@@ -196,5 +198,6 @@ void ReadingDateSelectionActivity::render(RenderLock&&) {
   // its tap targets), and signs beat direction names on the boards that do.
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CONFIRM), "-", "+", /*directional=*/false);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }

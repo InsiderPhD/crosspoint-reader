@@ -56,6 +56,8 @@ class PageImage final : public PageElement {
   PageImage(std::unique_ptr<ImageBlock> block, const int16_t xPos, const int16_t yPos)
       : PageElement(xPos, yPos), imageBlock(std::move(block)) {}
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
+  // Outline box in the image's reserved layout space, for the pre-decode pass.
+  void renderPlaceholder(GfxRenderer& renderer, int xOffset, int yOffset) const;
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
   static std::unique_ptr<PageImage> deserialize(FsFile& file);
@@ -102,6 +104,14 @@ class Page {
   }
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
+  // Images only. The grayscale planes use this when text anti-aliasing is off:
+  // the page still needs its images composed into both planes, but re-rendering
+  // every glyph per band would cost the full AA price for no AA.
+  void renderImages(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
+  // Text as usual, outline boxes where the images will land. Displayed once
+  // before a decode so the reader sees the page instead of the previous one
+  // while a multi-second decode runs.
+  void renderWithImagePlaceholders(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
   // Renders footnote rule + text at the bottom of the viewport (no-op if no footnotes have text)
   void renderFootnotes(GfxRenderer& renderer, int fontId, int xOffset, int viewportBottom, int viewportWidth) const;
   // Returns the number of display lines needed to word-wrap `text` into `maxWidth` pixels
@@ -116,6 +126,16 @@ class Page {
   bool hasImages() const {
     return std::any_of(elements.begin(), elements.end(),
                        [](const std::unique_ptr<PageElement>& el) { return el->getTag() == TAG_PageImage; });
+  }
+
+  // True when at least one image still has to be decoded (no usable .pxc yet),
+  // i.e. this page view will pay a multi-second decode and is worth showing
+  // placeholders for first. Touches the SD once per image, so call it once per
+  // page render, not per pass.
+  bool hasImagesNeedingDecode() const {
+    return std::any_of(elements.begin(), elements.end(), [](const std::unique_ptr<PageElement>& el) {
+      return el->getTag() == TAG_PageImage && static_cast<const PageImage&>(*el).getImageBlock().needsDecode();
+    });
   }
 
   // Get bounding box of all images on the page (union of image rects)

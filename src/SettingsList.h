@@ -141,7 +141,7 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
                                  "refreshFrequency", StrId::STR_CAT_DISPLAY),
                SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
                                  {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                                  StrId::STR_THEME_LYRA_LIBRARY},
+                                  StrId::STR_THEME_LYRA_LIBRARY, StrId::STR_THEME_LYRA_CAROUSEL},
                                  "uiTheme", StrId::STR_CAT_DISPLAY),
                SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                                    StrId::STR_CAT_DISPLAY),
@@ -291,6 +291,14 @@ inline void appendControlSettings(std::vector<SettingInfo>& v) {
 #if FREEINK_DEVICE_X4PRO
                                    // Touch panel exists only on the X4 Pro: show the toggle there,
                                    // round-trip the JSON key everywhere else (no category = hidden).
+                                   ,
+                                   StrId::STR_CAT_SYSTEM
+#endif
+                                   ),
+               SettingInfo::Toggle(StrId::STR_YOLO_SELECTION, &CrossPointSettings::yoloSelection,
+                                   "yoloSelection"
+#if FREEINK_DEVICE_X4PRO
+                                   // Only meaningful under Full Touch, which is X4 Pro only.
                                    ,
                                    StrId::STR_CAT_SYSTEM
 #endif

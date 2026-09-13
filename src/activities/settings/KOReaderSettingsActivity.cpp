@@ -42,6 +42,7 @@ void KOReaderSettingsActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedIndex = static_cast<size_t>(tappedIndex);
       handleSelection();
       return;
     case TouchListNav::TapResult::None:

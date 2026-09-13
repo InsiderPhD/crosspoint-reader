@@ -155,6 +155,7 @@ void EpubReaderBookmarksActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectorIndex = tappedIndex;
       openSelectedBookmark();
       return;
     case TouchListNav::TapResult::None:

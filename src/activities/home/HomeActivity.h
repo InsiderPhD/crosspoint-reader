@@ -55,6 +55,12 @@ class HomeActivity final : public Activity {
   // The Confirm short-press action for the selected tile; also fired by a tap
   // on the already-selected tile.
   void activateSelectedTile();
+#if FREEINK_DEVICE_X4PRO
+  // Steps the selector through the cover slots by delta, wrapping. Entering
+  // from the icon row lands on the first cover going forward, the last going
+  // back. Returns false when there is nothing to rotate.
+  bool rotateCoverSelection(int delta);
+#endif
   bool storeCoverBuffer();    // Store frame buffer for cover image
   bool restoreCoverBuffer();  // Restore frame buffer from stored cover
   void freeCoverBuffer();     // Free the stored cover buffer

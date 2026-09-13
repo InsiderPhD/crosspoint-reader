@@ -79,6 +79,7 @@ void ReaderControlsActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedRow = static_cast<uint8_t>(tappedIndex);
       activateRow(kRowIds[selectedRow]);
       return;
     case TouchListNav::TapResult::None:

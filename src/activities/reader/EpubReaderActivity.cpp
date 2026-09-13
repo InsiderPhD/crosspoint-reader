@@ -1726,9 +1726,15 @@ void EpubReaderActivity::performDictionaryLookup(const std::string& word) {
   dictionaryMessage = dictionaryLookup.needsIndexing() ? StrId::STR_DICT_INDEXING : StrId::STR_DICT_LOOKING_UP;
   showDictionaryMessage = true;
   dictionaryMessageTime = millis();
+  // Overlay it rather than repainting the page underneath: see the fast path at
+  // the top of render(). Not taken in dark mode (double-invert).
+  dictionaryPopupOverlayOnly = !SETTINGS.darkMode;
   requestUpdateAndWait();
 
+  const auto tLookupStart = millis();
   const auto outcome = dictionaryLookup.run(renderer, word.c_str());
+  LOG_DBG("ERS", "Dictionary lookup '%s': %lums (%s)", word.c_str(), millis() - tLookupStart,
+          outcome.found ? "hit" : "miss");
 
   // run() borrowed the framebuffer as its inflate window, so whatever is in it
   // now is inflate scratch, not the page. Every path below therefore ends in a
@@ -1849,6 +1855,30 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
 
 void EpubReaderActivity::render(RenderLock&& lock) {
   if (!epub) {
+    return;
+  }
+
+  // Busy-popup fast path: the page under the popup has not changed, so draw the
+  // popup straight onto the framebuffer and drive the panel once. The full path
+  // below re-renders the page first — on an AA page that is a BW render plus two
+  // whole-page grayscale passes and three panel drives (measured at 1163ms on an
+  // X4 Pro), all of it discarded when the definition screen opens a second later.
+  //
+  // Safe because this only ever runs BEFORE DictionaryLookup::run(): after run()
+  // the framebuffer holds inflate scratch on the C3 (InflateScratchLease) and
+  // must be fully repainted, which is what every post-lookup path still does.
+  //
+  // Excluded in dark mode: the frame already in the buffer has been inverted by
+  // the render that drew it, and a second invertScreen() here would flip the
+  // whole page back to light — the popup would have to be drawn pre-inverted.
+  // Dark mode skips the AA passes anyway, so it has far less to save.
+  if (dictionaryPopupOverlayOnly) {
+    dictionaryPopupOverlayOnly = false;
+    if (showDictionaryMessage) {
+      // I18N.get, not tr(): the message is chosen at runtime.
+      GUI.drawPopup(renderer, I18N.get(dictionaryMessage));
+      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    }
     return;
   }
 
@@ -2483,6 +2513,11 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   auto* fcm = renderer.getFontCacheManager();
   fcm->resetStats();
 
+  // The image failure list dedupes across this page's BW and band passes only.
+  // Clearing it here means an image that failed under transient heap pressure
+  // gets another chance on the next page instead of staying blank for the boot.
+  ImageBlock::clearRenderFailures();
+
   const int viewportBottom = renderer.getScreenHeight() - orientedMarginBottom;
   const int viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
 
@@ -2522,18 +2557,51 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   LOG_DBG("ERS", "Heap: before=%lu after=%lu delta=%ld", heapBefore, heapAfter,
           (int32_t)heapAfter - (int32_t)heapBefore);
 
-  // Force special handling for pages with images when anti-aliasing is on.
-  // Skipped when images are suppressed (e.g. Bluetooth holds the heap): the image
-  // area is blank, so the slow blank+double-refresh+gray-cleanup dance would only
-  // burn several CPU-bound seconds per page for nothing. That stall is what makes
-  // a BLE clicker feel dead on image pages — its one-shot press pulses collapse or
-  // debounce away while the render task churns. Blank image => render like plain
-  // text, and page turns stay responsive.
-  // Also skipped in dark mode: the grayscale pass this dance prepares for is skipped
-  // there, and the intermediate display + re-render on the inverted framebuffer would
-  // cancel out to a blank page (text and background both end up white).
-  bool imagePageWithAA =
-      page.hasImages() && SETTINGS.textAntiAliasing && !SETTINGS.darkMode && !renderer.areImagesSuppressed();
+  // Images want the grayscale planes whether or not TEXT anti-aliasing is on —
+  // a photo dithered to pure black and white loses most of its detail, and that
+  // is independent of how the reader likes their glyphs rendered.
+  //
+  // Both are skipped when images are suppressed (e.g. Bluetooth holds the heap):
+  // the image area is blank, so the slow blank+double-refresh+gray-cleanup dance
+  // would only burn several CPU-bound seconds per page for nothing. That stall is
+  // what makes a BLE clicker feel dead on image pages — its one-shot press pulses
+  // collapse or debounce away while the render task churns. Blank image => render
+  // like plain text, and page turns stay responsive.
+  // Also skipped in dark mode: the AA LUT is computed for black-on-white, and the
+  // intermediate display + re-render on the inverted framebuffer would cancel out
+  // to a blank page (text and background both end up white).
+  const bool pageHasImages = page.hasImages();
+  const bool needsImageGrayscale = pageHasImages && !SETTINGS.darkMode && !renderer.areImagesSuppressed();
+  const bool needsTextGrayscale = SETTINGS.textAntiAliasing && !SETTINGS.darkMode;
+  const bool needsAnyGrayscale = needsTextGrayscale || needsImageGrayscale;
+
+  // What each grayscale plane pass has to draw. With text AA on that is the whole
+  // page (glyphs carry the anti-aliasing); with it off only the images do, and
+  // re-rendering every glyph per band would pay the full AA cost for no AA.
+  // Footnotes are text, so they follow needsTextGrayscale too.
+  const auto renderGrayscalePass = [&]() {
+    if (needsTextGrayscale) {
+      page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+      if (ReaderUtils::footnotesOnPage())
+        page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+    } else {
+      page.renderImages(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+    }
+  };
+
+  // First visit to a page whose images aren't cached yet: show the text with
+  // outline boxes where the images go, so the reader gets a readable page
+  // immediately instead of the previous one while a multi-second decode runs.
+  // Costs one extra FAST_REFRESH, and only until the .pxc exists.
+  if (pageHasImages && !renderer.areImagesSuppressed() && page.hasImagesNeedingDecode()) {
+    page.renderWithImagePlaceholders(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+    if (ReaderUtils::footnotesOnPage())
+      page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+    renderStatusBar();
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    renderer.clearScreen();
+  }
 
   page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
   if (ReaderUtils::footnotesOnPage())
@@ -2542,7 +2610,7 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
 
-  if (imagePageWithAA) {
+  if (needsImageGrayscale) {
     // Double FAST_REFRESH with selective image blanking (pablohc's technique):
     // HALF_REFRESH sets particles too firmly for the grayscale LUT to adjust.
     // Instead, blank only the image area and do two fast refreshes.
@@ -2551,7 +2619,6 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
     int16_t imgX, imgY, imgW, imgH;
     if (page.getImageBoundingBox(imgX, imgY, imgW, imgH)) {
       renderer.fillRect(imgX + orientedMarginLeft, imgY + orientedMarginTop, imgW, imgH, false);
-      if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 
       // Re-render page content to restore images into the blanked area
@@ -2560,10 +2627,8 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
       if (ReaderUtils::footnotesOnPage())
         page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
       renderStatusBar();
-      if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     } else {
-      if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     }
     // The image's own page is handled above and doesn't count toward the full
@@ -2586,8 +2651,8 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   // per plane, but renderCharImpl culls out-of-band glyphs before decode so the
   // cost stays close to one render. Both text (drawPixel) and images
   // (DirectPixelWriter) honor the active strip target.
-  // Skipped in dark mode — AA LUT is computed for black-on-white.
-  if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode && renderer.supportsStripGrayscale()) {
+  // Runs for anti-aliased text, for images, or both — see needsAnyGrayscale.
+  if (needsAnyGrayscale && renderer.supportsStripGrayscale()) {
     const int gh = renderer.getDisplayHeight();
     const int gwBytes = renderer.getDisplayWidthBytes();
 
@@ -2617,9 +2682,7 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
         const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(0x00);
-        page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-        if (ReaderUtils::footnotesOnPage())
-          page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+        renderGrayscalePass();
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(true, scratch.get(), y, rows);
       }
@@ -2631,9 +2694,7 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
         const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(0x00);
-        page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-        if (ReaderUtils::footnotesOnPage())
-          page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+        renderGrayscalePass();
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(false, scratch.get(), y, rows);
       }
@@ -2657,9 +2718,8 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
     }
   } else {
     // Fallback path for a controller without strip support. grayscale rendering
-    // Skipped in dark mode — AA LUT is computed for black-on-white.
     // TODO: Only do this if font supports it
-    if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode) {
+    if (needsAnyGrayscale) {
       // Save the BW frame before the grayscale passes overwrite it, restore
       // after. Only needed when grayscale actually renders.
       renderer.storeBwBuffer();
@@ -2667,18 +2727,14 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
 
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-      page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-      if (ReaderUtils::footnotesOnPage())
-        page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+      renderGrayscalePass();
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
 
       // Render and copy to MSB buffer
       renderer.clearScreen(0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-      page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
-      if (ReaderUtils::footnotesOnPage())
-        page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+      renderGrayscalePass();
       renderer.copyGrayscaleMsbBuffers();
       const auto tGrayMsb = millis();
 

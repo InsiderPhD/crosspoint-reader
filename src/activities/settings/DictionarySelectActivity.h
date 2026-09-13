@@ -20,6 +20,10 @@ class MappedInputManager;
  * under /dictionaries and /.dictionaries. The chosen folder NAME is what
  * persists, so adding or removing a dictionary cannot silently repoint the
  * setting at a different one.
+ *
+ * The last row opens DictionaryDownloadActivity. It is what makes this screen
+ * reachable on a device with no dictionaries at all, so it is always present —
+ * see totalItems() / downloadRowIndex().
  */
 class DictionarySelectActivity final : public Activity {
  public:
@@ -34,8 +38,11 @@ class DictionarySelectActivity final : public Activity {
 
  private:
   void handleSelection();
+  void openDownloader();
   Rect listRect() const;
-  int totalItems() const { return static_cast<int>(dictionaries.size()) + 1; }
+  // "None" + one row per installed dictionary + the download row.
+  int totalItems() const { return static_cast<int>(dictionaries.size()) + 2; }
+  int downloadRowIndex() const { return totalItems() - 1; }
 
   void onBack() { finish(); }
 

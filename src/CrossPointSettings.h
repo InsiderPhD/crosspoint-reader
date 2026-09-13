@@ -172,7 +172,7 @@ class CrossPointSettings {
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, LYRA_LIBRARY = 3 };
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, LYRA_LIBRARY = 3, LYRA_CAROUSEL = 4 };
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
@@ -498,7 +498,17 @@ class CrossPointSettings {
   // select and activate it) instead of injecting Confirm on the current
   // selection. Gestures keep working either way. Field exists on every build so
   // settings.json round-trips; only the X4 Pro main loop and activities read it.
+  // Default-on for the X4 Pro; see migrateFullTouchDefault() for existing files.
+#if FREEINK_DEVICE_X4PRO
+  uint8_t fullTouchUi = 1;
+#else
   uint8_t fullTouchUi = 0;
+#endif
+  // Yolo Selection (Full Touch only): a single tap activates the row/tile/option
+  // under the finger instead of the default two-tap model (first tap moves the
+  // cursor, second tap on the selected item activates). Read only through
+  // TouchListNav::tapActivates().
+  uint8_t yoloSelection = 0;
   // Image rendering mode in EPUB reader
   uint8_t imageRendering = IMAGES_DISPLAY;
   // Footnote display mode (0 = render at bottom of page, 1 = show in popup menu)
@@ -567,6 +577,15 @@ class CrossPointSettings {
   uint8_t readerLongPressHome = READER_ACTION_OPEN_MENU;
   // Migration flag: 0 = old settings not yet applied to new per-button fields.
   uint8_t readerActionsMigrated = 0;
+  // Migration flag for the Full Touch default flip. Defaults are inverted on
+  // purpose: a fresh X4 Pro file already carries fullTouchUi = 1, so it starts
+  // migrated (opting out sticks); a file first created on another board starts
+  // unmigrated, so it still gets the flip the first time it boots on an X4 Pro.
+#if FREEINK_DEVICE_X4PRO
+  uint8_t fullTouchDefaultMigrated = 1;
+#else
+  uint8_t fullTouchDefaultMigrated = 0;
+#endif
 
   // Home-key hold is hard-wired to the reader menu: with every other slot
   // remappable, the menu (and its Go Home row) must stay reachable from at
@@ -629,6 +648,11 @@ class CrossPointSettings {
   // One-time migration: applies legacy per-action settings (longPressAction, shortPwrBtn,
   // longPressChapterSkip, sideButtonLayout) to the new per-button action fields.
   static void migrateReaderActions(CrossPointSettings& settings);
+
+  // One-time migration (X4 Pro only): turns Full Touch on for settings files
+  // written while it defaulted off. Every registered setting is always saved,
+  // so an existing file pins fullTouchUi = 0 and the new default alone is a no-op.
+  static void migrateFullTouchDefault(CrossPointSettings& settings);
 
   // One-time migration: derives the per-element statusBar*Pos fields from the
   // legacy status-bar show/hide toggles and Book/Chapter enums. Called when a

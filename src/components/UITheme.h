@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 
@@ -21,6 +22,14 @@ class UITheme {
   static int getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,
                                      bool hasSubtitle, int extraReservedHeight = 0);
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
+
+  // Every distinct homeCoverHeight across the themes, i.e. every thumbnail a
+  // theme switch can later ask for. A cover source that cannot be re-read
+  // later (the BookFusion API) must prime all of them while it has the image:
+  // Epub::generateThumbBmp has nothing to regenerate from for those books, so
+  // it writes its zero-byte "already tried" sentinel and the cover stays blank.
+  static constexpr size_t COVER_THUMB_HEIGHT_COUNT = 3;
+  static const int* getCoverThumbHeights();
   static UIIcon getFileIcon(const std::string& filename);
   static int getStatusBarHeight();
   static int getProgressBarHeight();

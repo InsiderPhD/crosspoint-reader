@@ -63,11 +63,12 @@ void EpubReaderFootnotesActivity::loop() {
       if (ly >= top && row >= 0 && row < visibleRows()) {
         const int itemIndex = scrollOffset + row;
         if (itemIndex < static_cast<int>(footnotes.size())) {
-          if (itemIndex != selectedIndex) {
-            selectedIndex = itemIndex;
-            requestUpdate();
-          } else {
+          const bool activate = TouchListNav::tapActivates(itemIndex, selectedIndex);
+          selectedIndex = itemIndex;
+          if (activate) {
             activateSelectedFootnote();
+          } else {
+            requestUpdate();
           }
           return;
         }

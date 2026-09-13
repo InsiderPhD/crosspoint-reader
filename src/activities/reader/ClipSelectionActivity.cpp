@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "activities/ActivityResult.h"
 #include "clippings/ClipTextBuilder.h"
@@ -190,6 +191,7 @@ void ClipSelectionActivity::render(RenderLock&&) {
   GUI.drawSideButtonHints(renderer, tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   renderer.setOrientation(origOrientation);
 
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
 

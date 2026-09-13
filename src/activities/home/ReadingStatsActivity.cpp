@@ -870,8 +870,9 @@ void ReadingStatsActivity::loop() {
         // row highlighted).
         const int rowIndex = GUI.hitTestList(listRect(), currentPageItemCount(), selectedItemIndex - 1, true, lx, ly);
         if (rowIndex >= 0) {
-          if (rowIndex + 1 != selectedItemIndex) {
-            selectedItemIndex = rowIndex + 1;
+          const bool activate = TouchListNav::tapActivates(rowIndex + 1, selectedItemIndex);
+          selectedItemIndex = rowIndex + 1;
+          if (!activate) {
             requestUpdate();
           } else if (currentPage == PAGE_STARTED_BOOKS) {
             openSelectedBook();
@@ -1596,5 +1597,6 @@ void ReadingStatsActivity::render(RenderLock&&) {
   // tab change effectively redrew the whole screen via the bottom N/N
   // pagination; with the top tab bar in place the diff between pages is
   // small enough that FAST keeps the e-ink updates snappy without ghosting.
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer(refreshMode);
 }

@@ -66,6 +66,7 @@ void FrontlightBrightnessActivity::loop() {
       moveTo(tappedIndex);
       return;
     case TouchListNav::TapResult::Activated:
+      moveTo(tappedIndex);
       confirmSelection();
       return;
     case TouchListNav::TapResult::None:

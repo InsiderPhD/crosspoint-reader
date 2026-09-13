@@ -180,6 +180,7 @@ void StatusBarSettingsActivity::loop() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedIndex = tappedIndex;
       handleSelection();
       requestUpdate();
       return;

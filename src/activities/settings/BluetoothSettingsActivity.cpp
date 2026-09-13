@@ -166,6 +166,7 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedIndex = tappedIndex;
       activateMainMenuItem();
       return;
     case TouchListNav::TapResult::None:
@@ -349,6 +350,7 @@ void BluetoothSettingsActivity::handleDeviceListInput() {
       requestUpdate();
       return;
     case TouchListNav::TapResult::Activated:
+      selectedIndex = tappedIndex;
       connectToSelected();
       return;
     case TouchListNav::TapResult::None:

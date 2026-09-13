@@ -699,6 +699,55 @@ void GfxRenderer::fillArc(const int maxRadius, const int cx, const int cy, const
   }
 }
 
+void GfxRenderer::maskRoundedRectOutsideCorners(const int x, const int y, const int width, const int height,
+                                                const int radius, const Color color) const {
+  if (radius <= 0 || color == Color::Clear || width <= 0 || height <= 0) {
+    return;
+  }
+  // Only the corner squares are touched, so cost is 4 * radius^2 regardless of
+  // the rect size. Used to round off artwork already blitted into the buffer
+  // (drawBitmap has no corner mask of its own).
+  const int rr = radius - 1;
+  const int rr2 = rr * rr;
+  for (int dy = 0; dy < radius; dy++) {
+    for (int dx = 0; dx < radius; dx++) {
+      const int tx = rr - dx;
+      const int ty = rr - dy;
+      if (tx * tx + ty * ty <= rr2) continue;
+
+      const int left = x + dx;
+      const int right = x + width - 1 - dx;
+      const int top = y + dy;
+      const int bottom = y + height - 1 - dy;
+      switch (color) {
+        case Color::White:
+        case Color::Black: {
+          const bool state = color == Color::Black;
+          drawPixel(left, top, state);
+          drawPixel(right, top, state);
+          drawPixel(left, bottom, state);
+          drawPixel(right, bottom, state);
+          break;
+        }
+        case Color::LightGray:
+          drawPixelDither<Color::LightGray>(left, top);
+          drawPixelDither<Color::LightGray>(right, top);
+          drawPixelDither<Color::LightGray>(left, bottom);
+          drawPixelDither<Color::LightGray>(right, bottom);
+          break;
+        case Color::DarkGray:
+          drawPixelDither<Color::DarkGray>(left, top);
+          drawPixelDither<Color::DarkGray>(right, top);
+          drawPixelDither<Color::DarkGray>(left, bottom);
+          drawPixelDither<Color::DarkGray>(right, bottom);
+          break;
+        default:
+          break;
+      }
+    }
+  }
+}
+
 void GfxRenderer::fillRoundedRect(const int x, const int y, const int width, const int height, const int cornerRadius,
                                   const Color color) const {
   fillRoundedRect(x, y, width, height, cornerRadius, true, true, true, true, color);
@@ -850,6 +899,24 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     return;
   }
 
+  // Source-x -> screen-x, computed once per image instead of once per pixel.
+  // The ESP32-C3 is RV32IMC with no FPU, so the `floor(screenX * scale)` this
+  // replaces was four soft-float calls (__floatsisf/__mulsf3/__fixsfsi) for
+  // every source pixel -- ~1M of them for a 440x600 cover, which dominated the
+  // draw. Values are identical to the per-pixel form, so output is unchanged.
+  // int16_t because the result is a screen coordinate; the span is a runtime
+  // size well past the 256 B stack budget, so it is a heap temporary freed with
+  // the row buffers. A failed alloc falls back to the per-pixel float path.
+  const int xSpan = std::max(0, bitmap.getWidth() - 2 * cropPixX);
+  auto* xMap = static_cast<int16_t*>(xSpan > 0 ? malloc(xSpan * sizeof(int16_t)) : nullptr);
+  if (xMap) {
+    for (int i = 0; i < xSpan; i++) {
+      xMap[i] = static_cast<int16_t>((isScaled ? static_cast<int>(std::floor(i * scale)) : i) + x);
+    }
+  } else if (xSpan > 0) {
+    LOG_DBG("GFX", "x-map alloc failed (%d entries); using the per-pixel path", xSpan);
+  }
+
   for (int bmpY = 0; bmpY < (bitmap.getHeight() - cropPixY); bmpY++) {
     // The BMP's (0, 0) is the bottom-left corner (if the height is positive, top-left if negative).
     // Screen's (0, 0) is the top-left corner.
@@ -866,6 +933,7 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       LOG_ERR("GFX", "Failed to read row %d from bitmap", bmpY);
       free(outputRow);
       free(rowBytes);
+      free(xMap);
       return;
     }
 
@@ -879,11 +947,14 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
     }
 
     for (int bmpX = cropPixX; bmpX < bitmap.getWidth() - cropPixX; bmpX++) {
-      int screenX = bmpX - cropPixX;
-      if (isScaled) {
-        screenX = std::floor(screenX * scale);
+      const int xIndex = bmpX - cropPixX;
+      int screenX;
+      if (xMap) {
+        screenX = xMap[xIndex];
+      } else {
+        screenX = isScaled ? static_cast<int>(std::floor(xIndex * scale)) : xIndex;
+        screenX += x;  // the offset should not be scaled
       }
-      screenX += x;  // the offset should not be scaled
       if (screenX >= getScreenWidth()) {
         break;
       }
@@ -905,6 +976,7 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
 
   free(outputRow);
   free(rowBytes);
+  free(xMap);
 }
 
 void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y, const int maxWidth,
@@ -974,6 +1046,92 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
 
   free(outputRow);
   free(rowBytes);
+}
+
+void GfxRenderer::drawPerspectiveBitmap(const Bitmap& bitmap, const int x, const int y, const int w, const int hL,
+                                        const int hR) const {
+  if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
+  if (w <= 0 || hL <= 0 || hR <= 0) return;
+
+  const int srcW = bitmap.getWidth();
+  const int srcH = bitmap.getHeight();
+  if (srcW <= 0 || srcH <= 0) return;
+
+  const int hMax = std::max(hL, hR);
+  const int screenW = getScreenWidth();
+  const int screenH = getScreenHeight();
+  const bool topDown = bitmap.isTopDown();
+
+  // Same two row buffers drawBitmap() uses: outputRow is 2bpp packed
+  // (srcW / 4 bytes, ~85 B for a 340 px cover) and rowBytes is one source
+  // scanline. Both are far past the 256 B stack budget for a full-size cover
+  // and their size is only known at runtime, so they are heap temporaries
+  // freed before return on every path.
+  const int outputRowSize = (srcW + 3) / 4;
+  auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
+  auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
+  // Per-column geometry, computed once instead of once per (row, column). Each
+  // entry replaced three integer divides in the inner loop, and RISC-V div is
+  // multi-cycle -- for a 600-row source that was ~135k divides per cover.
+  auto* columns = static_cast<PerspectiveColumn*>(malloc(w * sizeof(PerspectiveColumn)));
+  if (!outputRow || !rowBytes || !columns) {
+    LOG_ERR("GFX", "!! Failed to allocate perspective BMP buffers (%d + %d + %d bytes)", outputRowSize,
+            static_cast<int>(bitmap.getRowBytes()), static_cast<int>(w * sizeof(PerspectiveColumn)));
+    free(outputRow);
+    free(rowBytes);
+    free(columns);
+    return;
+  }
+
+  for (int dx = 0; dx < w; dx++) {
+    const int colH = (w == 1) ? hL : (hL + (hR - hL) * dx / (w - 1));
+    columns[dx].height = static_cast<int16_t>(colH);
+    columns[dx].top = static_cast<int16_t>((hMax - colH) / 2);
+    columns[dx].srcX = static_cast<int16_t>((dx * srcW) / w);
+  }
+
+  // Walk the source top-to-bottom once (readNextRow is forward-only) and, for
+  // each destination column, squeeze that row into the column's own height.
+  for (int srcY = 0; srcY < srcH; srcY++) {
+    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
+      LOG_ERR("GFX", "Failed to read row %d from bitmap (perspective)", srcY);
+      free(outputRow);
+      free(rowBytes);
+      free(columns);
+      return;
+    }
+    const int srcRowIndex = topDown ? srcY : (srcH - 1 - srcY);
+
+    for (int dx = 0; dx < w; dx++) {
+      const int colH = columns[dx].height;
+      if (colH <= 0) continue;
+      const int colTop = columns[dx].top;
+      const int screenX = x + dx;
+      if (screenX < 0 || screenX >= screenW) continue;
+
+      const int srcX = columns[dx].srcX;
+      const uint8_t val = (outputRow[srcX / 4] >> (6 - ((srcX * 2) % 8))) & 0x3;
+
+      const int dstYStart = (srcRowIndex * colH) / srcH;
+      const int dstYEnd = ((srcRowIndex + 1) * colH) / srcH;
+      for (int dy = dstYStart; dy < dstYEnd; ++dy) {
+        const int screenY = y + colTop + dy;
+        if (screenY < 0 || screenY >= screenH) continue;
+
+        if (renderMode == BW && val < 3) {
+          drawPixel(screenX, screenY);
+        } else if (renderMode == GRAYSCALE_MSB && (val == 1 || val == 2)) {
+          drawPixel(screenX, screenY, false);
+        } else if (renderMode == GRAYSCALE_LSB && val == 1) {
+          drawPixel(screenX, screenY, false);
+        }
+      }
+    }
+  }
+
+  free(outputRow);
+  free(rowBytes);
+  free(columns);
 }
 
 void GfxRenderer::fillPolygon(const int* xPoints, const int* yPoints, int numPoints, bool state) const {

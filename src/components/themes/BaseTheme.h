@@ -232,13 +232,18 @@ class BaseTheme {
                     int ly) const;
 
   // Tile index under the point for the menu drawButtonMenu painted, or -1.
-  int hitTestButtonMenu(const Rect& rect, int buttonCount, int lx, int ly) const;
+  // Virtual: the default splits rect into vertical rows, which is wrong for a
+  // theme that lays its menu out horizontally (Lyra Carousel).
+  virtual int hitTestButtonMenu(const Rect& rect, int buttonCount, int lx, int ly) const;
 
   // Cover slot under the point within the strip drawRecentBookCover painted, or
   // -1. Single-cover themes (homeRecentBooksCount == 1) treat the whole strip as
   // slot 0; multi-cover themes split it into that many equal columns inset by
   // contentSidePadding, matching Lyra3CoversTheme's tile layout.
-  int hitTestRecentBookCover(const Rect& rect, int slotCount, int lx, int ly) const;
+  // Virtual: Lyra Carousel's cover slots overlap and the centre one is far wider
+  // than 1/homeRecentBooksCount of the strip, so equal columns resolve taps to
+  // the wrong book there.
+  virtual int hitTestRecentBookCover(const Rect& rect, int slotCount, int lx, int ly) const;
 
   // Component drawing methods
   virtual void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total) const;

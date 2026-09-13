@@ -619,6 +619,7 @@ void GroupBrowserActivity::loop() {
         requestUpdate();
         return;
       case TouchListNav::TapResult::Activated:
+        selectorIndex = static_cast<size_t>(tappedIndex);
         activateSelectedRow();
         return;
       case TouchListNav::TapResult::None:

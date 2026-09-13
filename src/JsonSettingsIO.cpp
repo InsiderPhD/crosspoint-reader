@@ -200,6 +200,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["readerShortPressHome"] = s.readerShortPressHome;
   doc["readerLongPressHome"] = s.readerLongPressHome;
   doc["readerActionsMigrated"] = s.readerActionsMigrated;
+  doc["fullTouchDefaultMigrated"] = s.fullTouchDefaultMigrated;
 
   String json;
   serializeJson(doc, json);
@@ -357,6 +358,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.readerLongPressHome =
       clampAction(doc["readerLongPressHome"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
   s.readerActionsMigrated = doc["readerActionsMigrated"] | (uint8_t)0;
+  // Explicit 0, not the struct default: a file predating this key is exactly
+  // the file that still needs migrateFullTouchDefault().
+  s.fullTouchDefaultMigrated = doc["fullTouchDefaultMigrated"] | (uint8_t)0;
 
   // Reader-menu visibility. Predating the per-row bitmask, a settings file
   // carries only the four coarse group toggles; fold those into the mask and
