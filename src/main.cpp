@@ -766,6 +766,9 @@ void loop() {
   const bool bleRecentActivity = btMgr.isEnabled() && btMgr.hasRecentActivity();
 
   renderer.setFadingFix(SETTINGS.fadingFix);
+  // The renderer needs to know dark mode is coming so it can exempt content
+  // images from the whole-screen invert that applies it.
+  renderer.setDarkMode(SETTINGS.darkMode != 0);
   // Suppress images whenever Bluetooth is in play — the stack being UP *or* the user
   // wanting it (auto-restore may have it momentarily down for a section build). Two
   // reasons: (1) a connected remote leaves ~10-20KB free and the JPEG decoder wants

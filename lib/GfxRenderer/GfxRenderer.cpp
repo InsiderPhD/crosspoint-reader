@@ -1406,6 +1406,38 @@ static bool logicalRectToPhysicalBounds(GfxRenderer::Orientation orientation, in
   return true;
 }
 
+void GfxRenderer::preserveImagePolarity(const int x, const int y, const int width, const int height) const {
+  // Only meaningful for the B/W frame that invertScreen() is about to flip. The
+  // grayscale planes are separate mask buffers that the invert never touches, and
+  // during a strip pass the live target is the band scratch, not frameBuffer.
+  if (!darkModeActive || renderMode != BW || _stripActive || !frameBuffer) return;
+
+  int x0, y0, x1, y1;
+  if (!logicalRectToPhysicalBounds(orientation, x, y, width, height, panelWidth, panelHeight, &x0, &y0, &x1, &y1)) {
+    return;
+  }
+
+  // Pixel-exact, unlike the byte-aligned region helpers: widening to whole bytes
+  // here would flip up to seven columns of page background either side of the
+  // image, which after the screen invert reads as bright fringes down its edges.
+  for (int row = y0; row <= y1; row++) {
+    uint8_t* rowData = frameBuffer + static_cast<uint32_t>(row) * panelWidthBytes;
+    int col = x0;
+    while (col <= x1 && (col & 7) != 0) {
+      rowData[col >> 3] ^= static_cast<uint8_t>(0x80U >> (col & 7));
+      col++;
+    }
+    while (col + 7 <= x1) {
+      rowData[col >> 3] ^= 0xFF;
+      col += 8;
+    }
+    while (col <= x1) {
+      rowData[col >> 3] ^= static_cast<uint8_t>(0x80U >> (col & 7));
+      col++;
+    }
+  }
+}
+
 size_t GfxRenderer::getRegionByteSize(int lx, int ly, int lw, int lh) const {
   int x0, y0, x1, y1;
   if (!logicalRectToPhysicalBounds(orientation, lx, ly, lw, lh, panelWidth, panelHeight, &x0, &y0, &x1, &y1)) {

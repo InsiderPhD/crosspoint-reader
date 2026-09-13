@@ -37,6 +37,7 @@ class GfxRenderer {
   Orientation orientation;
   bool fadingFix;
   bool imagesSuppressed = false;
+  bool darkModeActive = false;
   uint8_t* frameBuffer = nullptr;
   uint16_t panelWidth = HalDisplay::DISPLAY_WIDTH;
   uint16_t panelHeight = HalDisplay::DISPLAY_HEIGHT;
@@ -139,6 +140,19 @@ class GfxRenderer {
   // passes, that is roughly ten guaranteed failures per page.
   void setImagesSuppressed(const bool suppressed) { imagesSuppressed = suppressed; }
   bool areImagesSuppressed() const { return imagesSuppressed; }
+
+  // Dark mode is applied by inverting the whole framebuffer just before display,
+  // so the renderer itself has to know it is coming in order to exempt content
+  // images from it (see preserveImagePolarity). Mirrored here rather than read
+  // from settings because lib/ must not depend on src/.
+  void setDarkMode(const bool dark) { darkModeActive = dark; }
+  bool isDarkMode() const { return darkModeActive; }
+
+  // Pre-invert a content image's rectangle so the whole-screen dark-mode invert
+  // that follows cancels out over it, leaving the photo the right way round
+  // while the page around it turns light-on-dark. No-op unless dark mode is on
+  // and we are drawing the B/W frame. Coordinates are LOGICAL screen space.
+  void preserveImagePolarity(int x, int y, int width, int height) const;
 
   // Screen ops
   int getScreenWidth() const;

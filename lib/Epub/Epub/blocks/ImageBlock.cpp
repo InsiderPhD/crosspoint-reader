@@ -470,6 +470,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // Try to render from cache first
   std::string cachePath = getCachePath(imagePath);
   if (renderFromCache(renderer, cachePath, x, y, width, height)) {
+    renderer.preserveImagePolarity(x, y, width, height);
     return;  // Successfully rendered from cache
   }
 
@@ -525,6 +526,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
     return;
   }
 
+  renderer.preserveImagePolarity(x, y, width, height);
   LOG_DBG("IMG", "Decode successful");
 }
 
