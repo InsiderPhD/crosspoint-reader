@@ -127,7 +127,18 @@ bool convertThumbAtHeight(const std::string& srcPath, const Epub& epub, int heig
 
 namespace BookFusionCoverCache {
 
-bool download(const std::string& coverUrlRaw, const Epub& epub) {
+std::string withResizeParams(const std::string& url, const int width, const int height) {
+  if (url.empty() || width <= 0 || height <= 0) return url;
+  // Leave a URL that already carries sizing hints alone.
+  if (url.find("width=") != std::string::npos || url.find("height=") != std::string::npos) return url;
+
+  char params[48];
+  snprintf(params, sizeof(params), "%cwidth=%d&height=%d", url.find('?') == std::string::npos ? '?' : '&', width,
+           height);
+  return url + params;
+}
+
+bool download(const std::string& coverUrlRaw, const Epub& epub, const int maxWidth, const int maxHeight) {
   const std::string coverUrl = normalizeBookFusionCoverUrl(coverUrlRaw.c_str());
   if (coverUrl.empty()) {
     LOG_DBG("BFC", "No BookFusion cover URL to refresh for %s", epub.getCachePath().c_str());
@@ -135,9 +146,25 @@ bool download(const std::string& coverUrlRaw, const Epub& epub) {
   }
 
   const std::string tempCoverPath = epub.getCachePath() + "/.bookfusion-cover";
-  LOG_DBG("BFC", "Downloading BookFusion API cover into %s", epub.getCachePath().c_str());
-  const auto downloadResult = HttpDownloader::downloadToFile(coverUrl, tempCoverPath, nullptr, false);
-  if (downloadResult != HttpDownloader::OK) {
+  // Ask for a server-scaled cover. The original artwork on some titles is large
+  // enough that JpegToBmpConverter rejects it outright (source capped at
+  // 2048x3072, JpegToBmpConverter.cpp:564), leaving those books with no usable
+  // cover at all; a scaled fetch avoids that and saves the bytes too.
+  const std::string resizedUrl = withResizeParams(coverUrl, maxWidth, maxHeight);
+
+  // Preferred: the pre-scaled cover. Falls back to the original so an
+  // unsupported resize parameter costs one failed request, never a missing
+  // cover.
+  if (resizedUrl != coverUrl) {
+    LOG_DBG("BFC", "Downloading resized BookFusion cover: %s", resizedUrl.c_str());
+    if (HttpDownloader::downloadToFile(resizedUrl, tempCoverPath, nullptr, false) == HttpDownloader::OK) {
+      return true;
+    }
+    LOG_DBG("BFC", "Resized cover request failed; falling back to the full-size URL");
+  }
+
+  LOG_DBG("BFC", "Downloading BookFusion API cover into %s (%s)", epub.getCachePath().c_str(), coverUrl.c_str());
+  if (HttpDownloader::downloadToFile(coverUrl, tempCoverPath, nullptr, false) != HttpDownloader::OK) {
     LOG_ERR("BFC", "Failed to download BookFusion API cover into %s", epub.getCachePath().c_str());
     return false;
   }
@@ -180,7 +207,7 @@ bool convert(const Epub& epub, int coverHeight, char* outThumbPath, size_t outTh
 
 bool refresh(const std::string& coverUrlRaw, const Epub& epub, int coverHeight, char* outThumbPath,
              size_t outThumbPathLen) {
-  if (!download(coverUrlRaw, epub)) return false;
+  if (!download(coverUrlRaw, epub, kCoverFetchWidth, kCoverFetchHeight)) return false;
   return convert(epub, coverHeight, outThumbPath, outThumbPathLen);
 }
 

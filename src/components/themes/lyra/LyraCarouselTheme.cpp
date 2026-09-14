@@ -9,10 +9,12 @@
 #include <string>
 #include <vector>
 
+#include "BookFusionBookIdStore.h"
 #include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "components/icons/book.h"
+#include "components/icons/bookfusion24.h"
 #include "components/icons/cover.h"
 #include "components/icons/folder.h"
 #include "components/icons/library.h"
@@ -52,15 +54,18 @@ constexpr int kNearCoverInset = 10;
 // Dot row + progress footer
 constexpr int kDotSize = 8;
 constexpr int kDotGap = 6;
-constexpr int kDotsTopGap = 8;
-constexpr int kFooterTopGap = 10;
 constexpr int kFooterBarHeight = 5;
 constexpr int kFooterPercentTopGap = 2;
+constexpr int kBookFusionIconSize = 24;
 
 // Icon menu row, anchored to the screen bottom rather than the rect it is
 // handed: the carousel owns the whole strip above it.
 constexpr int kMenuIconSize = 32;  // must match the bitmap dimensions; drawIcon does not scale
-constexpr int kMenuIconPad = 14;   // symmetric, so tile height is 60
+constexpr int kMenuIconPad = 9;    // symmetric, so tile height is 50
+// Trimming the tile padding drops the whole menu block ~10px without moving its
+// bottom edge, so the button hints keep their clearance. That's room given back
+// to the footer above: drawButtonMenu clears a full-width band at labelY, which
+// was painting over the bottom of the BookFusion badge row.
 constexpr int kMenuHighlightPad = 7;
 constexpr int kMenuLabelTopGap = 3;
 constexpr int kMenuBottomGap = 8;
@@ -150,23 +155,22 @@ const uint8_t* menuIcon(UIIcon icon) {
   }
 }
 
-// Largest rect fitting srcW x srcH inside box at the source's own aspect,
-// centred, and never scaled past the source's own pixels. The no-upscale cap is
-// deliberate: a small or odd-shaped cover is shown at its true size rather than
-// blown up to fill the slot.
-Rect fitInside(int srcW, int srcH, const Rect& box) {
+// Largest rect filling box at the source's own aspect, centred. Scales UP as
+// well as down, unlike GfxRenderer::drawBitmap, which refuses to enlarge: a
+// cover is photographic and is expected to fill its slot, and the side covers
+// already fill theirs, so capping the centre at its intrinsic pixels left it
+// floating small in the middle of the carousel. The aspect is always the
+// source's own -- nothing is stretched or cropped.
+Rect fitToBox(int srcW, int srcH, const Rect& box) {
   if (srcW <= 0 || srcH <= 0 || box.width <= 0 || box.height <= 0) {
     return Rect{box.x, box.y, 0, 0};
   }
-  int w = srcW;
-  int h = srcH;
+  // Height-bound candidate first, then fall back to width if that overflows.
+  int h = box.height;
+  int w = box.height * srcW / srcH;
   if (w > box.width) {
-    h = static_cast<int>(static_cast<int64_t>(h) * box.width / w);
     w = box.width;
-  }
-  if (h > box.height) {
-    w = static_cast<int>(static_cast<int64_t>(w) * box.height / h);
-    h = box.height;
+    h = box.width * srcH / srcW;
   }
   w = std::max(1, w);
   h = std::max(1, h);
@@ -266,11 +270,14 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
       if (Storage.openFileForRead("HOME", thumbPath, file)) {
         Bitmap bitmap(file);
         if (bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
-          drawn = fitInside(bitmap.getWidth(), bitmap.getHeight(), center);
+          drawn = fitToBox(bitmap.getWidth(), bitmap.getHeight(), center);
           // White ring first so the side artwork never touches the centre edge.
           renderer.fillRect(drawn.x - kCenterRingW, drawn.y - kCenterRingW, drawn.width + 2 * kCenterRingW,
                             drawn.height + 2 * kCenterRingW, false);
-          renderer.drawBitmap(bitmap, drawn.x, drawn.y, drawn.width, drawn.height);
+          // Equal left/right heights make this a plain rectangle. Used instead
+          // of drawBitmap because it honours the requested size exactly, in
+          // both directions; drawBitmap will not enlarge a small cover.
+          renderer.drawPerspectiveBitmap(bitmap, drawn.x, drawn.y, drawn.width, drawn.height, drawn.height);
           renderer.maskRoundedRectOutsideCorners(drawn.x, drawn.y, drawn.width, drawn.height, kCornerRadius,
                                                  Color::White);
           file.close();
@@ -351,34 +358,59 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
       titleY += titleLineHeight;
     }
 
-    // Position dots, one per recent book, filled for the centred one.
-    const int dotsY = center.y + center.height + kDotsTopGap;
-    const int totalDotsW = bookCount * kDotSize + (bookCount - 1) * kDotGap;
-    int dotX = center.x + (center.width - totalDotsW) / 2;
-    for (int i = 0; i < bookCount; ++i) {
-      if (i == centerIdx) {
-        renderer.fillRect(dotX, dotsY, kDotSize, kDotSize, true);
-      } else {
-        renderer.drawRect(dotX, dotsY, kDotSize, kDotSize, true);
-      }
-      dotX += kDotSize + kDotGap;
-    }
+    // Footer geometry first: the badge row is anchored to the BOTTOM of the
+    // strip rather than stacked downward from the title. The title block's
+    // height comes from the font, so accumulating downward pushed the footer
+    // past rect's bottom edge -- outside both the cleared region and the
+    // snapshot storeCoverBuffer captures -- and it rendered clipped.
+    const int labelLineHeight = renderer.getLineHeight(kFooterFontId);
+    const int badgeRowH = std::max(kBookFusionIconSize, labelLineHeight);
+    const int badgeRowY = rect.y + rect.height - badgeRowH;
+    const int barY = badgeRowY - kFooterPercentTopGap - kFooterBarHeight;
 
-    // Progress footer for the centred book.
+    // Footer for the centred book: progress bar, then a single row carrying the
+    // BookFusion badge on the left, the position dots centred, and the read
+    // percentage on the right.
     const int8_t progress = recentBooks[centerIdx].progressPercent;
+    const int barX = center.x;
+    const int barWidth = center.width;
+
     if (progress >= 0) {
-      const int barY = dotsY + kDotSize + kFooterTopGap;
-      const int barWidth = center.width;
-      const int barX = center.x;
       const int filledWidth = std::clamp(static_cast<int>(progress) * barWidth / 100, 0, barWidth);
       renderer.fillRectDither(barX, barY, barWidth, kFooterBarHeight, Color::LightGray);
       if (filledWidth > 0) {
         renderer.fillRect(barX, barY, filledWidth, kFooterBarHeight, true);
       }
+    }
+
+    // Marks the centred book as coming from BookFusion. Sits in the footer
+    // rather than overlaying the artwork, so it never covers part of the cover
+    // the way the corner badge on the other Lyra themes does.
+    if (BookFusionBookIdStore::hasBookId(recentBooks[centerIdx].path.c_str())) {
+      // drawImageTransparent truncates the display-y by an integer divide by 8,
+      // so a non-aligned y shifts the icon against anything drawn beside it.
+      const int iconY = ((badgeRowY + (badgeRowH - kBookFusionIconSize) / 2) / 8) * 8;
+      renderer.drawIcon(BookFusion24Icon, barX, iconY, kBookFusionIconSize, kBookFusionIconSize);
+    }
+
+    // Position dots, one per recent book, filled for the centred one.
+    const int totalDotsW = bookCount * kDotSize + (bookCount - 1) * kDotGap;
+    int dotX = barX + (barWidth - totalDotsW) / 2;
+    const int dotY = badgeRowY + (badgeRowH - kDotSize) / 2;
+    for (int i = 0; i < bookCount; ++i) {
+      if (i == centerIdx) {
+        renderer.fillRect(dotX, dotY, kDotSize, kDotSize, true);
+      } else {
+        renderer.drawRect(dotX, dotY, kDotSize, kDotSize, true);
+      }
+      dotX += kDotSize + kDotGap;
+    }
+
+    if (progress >= 0) {
       char progressLabel[8];
       snprintf(progressLabel, sizeof(progressLabel), "%d%%", static_cast<int>(progress));
       const int labelW = renderer.getTextWidth(kFooterFontId, progressLabel, EpdFontFamily::REGULAR);
-      renderer.drawText(kFooterFontId, barX + barWidth - labelW, barY + kFooterBarHeight + kFooterPercentTopGap,
+      renderer.drawText(kFooterFontId, barX + barWidth - labelW, badgeRowY + (badgeRowH - labelLineHeight) / 2,
                         progressLabel, true, EpdFontFamily::REGULAR);
     }
 

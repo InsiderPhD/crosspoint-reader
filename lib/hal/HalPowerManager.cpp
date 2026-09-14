@@ -5,13 +5,18 @@
 #include <PowerManager.h>
 #include <WiFi.h>
 #include <driver/gpio.h>
+#if CONFIG_IDF_TARGET_ESP32S3
+#include <driver/rtc_io.h>
+#endif
 #include <esp_bt.h>
 #include <esp_sleep.h>
 #include <soc/gpio_num.h>
 
 #include <cassert>
 
+#include "HalFrontlight.h"
 #include "HalGPIO.h"
+#include "HalStorage.h"
 
 // GPIO13 (SPIWP) drives a battery-protection MOSFET on the X4 hardware.
 // HIGH (default) = battery connected; LOW = battery disconnected.
@@ -113,7 +118,21 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // EpdBus) all gpio_hold_dis before re-driving those pins after the wake
   // reset. Cutting the touch rail forfeits touch-to-wake — fine here, wake is
   // the power button via ext1 below.
+  //
+  // The SD card goes first. Cutting its enable alone does not unpower it: the
+  // SDMMC host leaves CLK/CMD/D0 idling high on their internal pull-ups, which
+  // back-feed the card's VDD through its bus pins for the whole sleep (upstream
+  // measured 3.3 V on VDD with the enable driven off). shutdown() unmounts, stops
+  // the host and floats those pads; the isolation below keeps them floating.
+  Storage.shutdown();
   freeink::PowerManager::powerDownRailsForSleep();
+
+  // The frontlight driver sits behind the master rail held up below, so its PWM
+  // pads must be latched off too or they float high-Z for the whole sleep. Done
+  // here rather than in enterDeepSleep() so every sleep entry is covered,
+  // including the AfterUSBPower re-sleep in setup(), which runs after the saved
+  // brightness has already been applied.
+  halFrontlight.parkForDeepSleep();
 
   // The master peripheral rail (power.latch0, GPIO1) stays ON but must be
   // latched: an unheld output goes high-Z in deep sleep and would leave the
@@ -152,6 +171,17 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // has no such API and must go through the RTC's ext1 path instead. The X4 Pro's
   // power button (GPIO3) is RTC-capable, which ext1 requires.
 #if CONFIG_IDF_TARGET_ESP32S3
+  // The pinMode() pull-up above does NOT survive into deep sleep here. ext1 routes
+  // the pad to the RTC mux, and the S3's RTC pad pull is a separate register from
+  // the digital one (SOC_GPIO_SUPPORT_RTC_INDEPENDENT), so without this the wake
+  // pin floats all night. A floating ANY_LOW pin wakes the device at random, and
+  // since a power-button wake now boots straight through (see setup()), each one
+  // is a full boot with the frontlight restored, awake until the sleep timeout,
+  // then back to the sleep screen — invisible by morning. RTC_PERIPH is powered
+  // down in sleep, so IDF latches this pull with the pad hold on sleep entry.
+  const auto wakePin = static_cast<gpio_num_t>(InputManager::POWER_BUTTON_PIN);
+  rtc_gpio_pulldown_dis(wakePin);
+  rtc_gpio_pullup_en(wakePin);
   esp_sleep_enable_ext1_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_EXT1_WAKEUP_ANY_LOW);
 #else
   esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);

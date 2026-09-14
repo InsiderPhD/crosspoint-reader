@@ -392,7 +392,8 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
     bool fetched = false;
     {
       TlsFramebufferBorrow borrow(renderer);
-      fetched = BookFusionCoverCache::download(book.coverUrl, epub);
+      fetched = BookFusionCoverCache::download(book.coverUrl, epub, BookFusionCoverCache::kCoverFetchWidth,
+                                               BookFusionCoverCache::kCoverFetchHeight);
     }
     if (!fetched) {
       LOG_ERR("BFB", "API cover fetch attempt %d/%d failed for book_id=%lu", attempt, kMaxCoverAttempts,
@@ -571,7 +572,8 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
       bool fetched = false;
       {
         TlsFramebufferBorrow borrow(renderer);
-        fetched = BookFusionCoverCache::download(book.coverUrl, epub);
+        fetched = BookFusionCoverCache::download(book.coverUrl, epub, BookFusionCoverCache::kCoverFetchWidth,
+                                                 BookFusionCoverCache::kCoverFetchHeight);
         downloadScreenPainted = false;  // borrow scrambled the framebuffer (render task is blocked here)
       }
       if (fetched) {

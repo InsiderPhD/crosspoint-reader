@@ -14,8 +14,10 @@
 #include <cstdlib>
 #include <utility>
 
+#include "../settings/BookFusionCoverRefreshActivity.h"
 #include "../util/ConfirmationActivity.h"
 #include "BookDetailsActivity.h"
+#include "BookFusionBookIdStore.h"
 #include "CrossPointSettings.h"
 #include "LibraryScan.h"
 #include "MappedInputManager.h"
@@ -411,7 +413,13 @@ void GroupBrowserActivity::dispatchBookAction(BookContextMenu::Action action, co
       requestUpdate(true);
       break;
     case BookContextMenu::Action::RegenerateCover:
-      // Covers aren't shown in the list; nothing to redraw here.
+      // Covers aren't shown in the list, but a BookFusion book's cover is still
+      // worth re-downloading for Home, the Library grid and the sleep screen.
+      if (FsHelpers::hasEpubExtension(path) && BookFusionBookIdStore::hasBookId(path.c_str())) {
+        startActivityForResult(std::make_unique<BookFusionCoverRefreshActivity>(renderer, mappedInput, path, title),
+                               [this](const ActivityResult&) { requestUpdate(true); });
+        break;
+      }
       requestUpdate(true);
       break;
     case BookContextMenu::Action::Delete:

@@ -28,4 +28,12 @@ class HalFrontlight {
 
   // Force the light off (sleep/shutdown path). Persisted settings are untouched.
   void off();
+
+  // Turn the light off and latch its PWM pads at the off level so they cannot
+  // float through deep sleep. Call only as the last step before
+  // esp_deep_sleep_start(); begin() releases the latch on the next boot.
+  void parkForDeepSleep();
+
+ private:
+  bool _begun = false;
 };

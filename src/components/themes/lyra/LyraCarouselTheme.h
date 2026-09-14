@@ -14,7 +14,7 @@ namespace LyraCarouselMetrics {
 constexpr ThemeMetrics values = [] {
   ThemeMetrics v = LyraMetrics::values;
   v.homeCoverHeight = 600;      // thumbnail cache key; bounds artwork to 360x600
-  v.homeCoverTileHeight = 590;  // drawn strip height
+  v.homeCoverTileHeight = 600;  // drawn strip height; the 24px badge row needs more than the text-only footer did
   v.homeRecentBooksCount = 3;
   return v;
 }();

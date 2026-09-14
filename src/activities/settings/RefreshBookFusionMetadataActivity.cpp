@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <WiFi.h>
 
@@ -12,6 +13,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "BookFusionBookIdStore.h"
@@ -23,9 +25,28 @@
 #include "RecentBooksStore.h"
 #include "activities/home/LibraryScan.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/reader/TlsFramebufferBorrow.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/BookFusionCoverCache.h"
+
+namespace {
+// Word-wrap text to the content width and draw it as a block vertically
+// centred on centerY. The warning prompt is far wider than a portrait screen
+// on a single line, so drawCenteredText alone clips both ends.
+void drawWrappedCentered(const GfxRenderer& renderer, int fontId, int centerY, const char* text, bool black,
+                         EpdFontFamily::Style style = EpdFontFamily::REGULAR) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentWidth = renderer.getScreenWidth() - metrics.contentSidePadding * 2;
+  const int lineHeight = renderer.getLineHeight(fontId);
+  const auto lines = renderer.wrappedText(fontId, text, contentWidth, 5, style);
+  int y = centerY - (static_cast<int>(lines.size()) * lineHeight) / 2;
+  for (const auto& line : lines) {
+    renderer.drawCenteredText(fontId, y, line.c_str(), black, style);
+    y += lineHeight;
+  }
+}
+}  // namespace
 
 void RefreshBookFusionMetadataActivity::onEnter() {
   Activity::onEnter();
@@ -71,8 +92,26 @@ void RefreshBookFusionMetadataActivity::refreshOneBook(const BookFusionBook& boo
 
   // Cover: re-download and re-convert. A book with no API cover URL isn't a
   // failure — there's simply nothing to refresh.
+  //
+  // Split-phase rather than BookFusionCoverCache::refresh(), because the two
+  // halves want the same memory in turn: the TLS fetch lends the framebuffer to
+  // wolfSSL (TlsFramebufferBorrow) and the JPEG→BMP conversions lend it to the
+  // decoder (JpegScratchLease). The leases never overlap. Same dance as
+  // BookFusionCoverRefreshActivity::run().
   if (book.coverUrl[0] != '\0') {
-    if (BookFusionCoverCache::refresh(book.coverUrl, epub, coverHeight)) {
+    bool fetched = false;
+    {
+      TlsFramebufferBorrow borrow(renderer);
+      fetched = BookFusionCoverCache::download(book.coverUrl, epub, BookFusionCoverCache::kCoverFetchWidth,
+                                               BookFusionCoverCache::kCoverFetchHeight);
+    }
+    bool converted = false;
+    if (fetched) {
+      RenderLock lock(*this);
+      JpegScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
+      converted = BookFusionCoverCache::convert(epub, coverHeight);
+    }
+    if (converted) {
       coversOk++;
     } else {
       anyFail = true;
@@ -99,7 +138,15 @@ void RefreshBookFusionMetadataActivity::refreshOneBook(const BookFusionBook& boo
   const std::string progressPath = epub.getCachePath() + "/progress.bin";
   if (!Storage.exists(progressPath.c_str())) {
     BookFusionPosition remotePos{};
-    const auto syncErr = BookFusionSyncClient::getProgress(book.id, remotePos);
+    BookFusionSyncClient::Error syncErr;
+    {
+      // The framebuffer is the only block that stays contiguous enough for a
+      // handshake here. Scoped to the request alone: the epub.load() below is
+      // slow and heap-hungry, and the borrow holds the render lock for its
+      // whole scope.
+      TlsFramebufferBorrow borrow(renderer);
+      syncErr = BookFusionSyncClient::getProgress(book.id, remotePos);
+    }
     if (syncErr == BookFusionSyncClient::OK && remotePos.percentage > 0.0f) {
       // Validate the remote chapter index against the spine before writing.
       // book.bin usually already exists (downloaded / recached), so this load is
@@ -138,21 +185,30 @@ void RefreshBookFusionMetadataActivity::refreshAll() {
   LOG_DBG("BFR", "Refreshing BookFusion metadata...");
 
   // 1. Enumerate local books that came from BookFusion (sidecar present).
-  std::vector<std::string> bookPaths;
-  LibraryScan::enumerateBooks(bookPaths);
-
   struct LocalBook {
     uint32_t id;
     std::string path;
     bool done;
   };
   std::vector<LocalBook> localBooks;
-  localBooks.reserve(bookPaths.size());
-  for (const auto& path : bookPaths) {
-    if (!FsHelpers::hasEpubExtension(path)) continue;
-    const uint32_t id = BookFusionBookIdStore::loadBookId(path.c_str());
-    if (id != 0) localBooks.push_back({id, path, false});
+  {
+    // bookPaths is the WHOLE library, BookFusion or not, and every entry holds a
+    // heap-allocated path. It is scoped tightly and the kept paths are moved
+    // (not copied) out of it, so neither the full list nor a second copy of the
+    // BookFusion subset is still resident when the first TLS handshake runs —
+    // that handshake is the most memory-hungry moment of the pass.
+    std::vector<std::string> bookPaths;
+    LibraryScan::enumerateBooks(bookPaths);
+    localBooks.reserve(bookPaths.size());
+    for (auto& path : bookPaths) {
+      if (!FsHelpers::hasEpubExtension(path)) continue;
+      const uint32_t id = BookFusionBookIdStore::loadBookId(path.c_str());
+      if (id != 0) localBooks.push_back({id, std::move(path), false});
+    }
   }
+  // The reserve above sized for the whole library; give back what the
+  // BookFusion subset doesn't need before the walk starts.
+  localBooks.shrink_to_fit();
 
   totalLocal = static_cast<int>(localBooks.size());
   matched = coversOk = metaOk = positionsOk = failed = 0;
@@ -176,9 +232,20 @@ void RefreshBookFusionMetadataActivity::refreshAll() {
   int remaining = totalLocal;
   bool networkError = false;
 
+  // The page buffer is the searchResult member, as in BookFusionBrowserActivity.
+  // No per-page reset: searchBooks' stream zeroes count/hasMore itself, and a
+  // `searchResult = {}` would build an 8KB temporary on the stack.
+  BookFusionSearchResult& result = searchResult;
+
   while (page <= kMaxPages && remaining > 0) {
-    BookFusionSearchResult result;
-    const auto err = BookFusionSyncClient::searchBooks(page, result, nullptr, nullptr, 0);
+    BookFusionSyncClient::Error err;
+    {
+      // One borrow per request: the guard closes the kept-alive API connection
+      // on the way out, so it must not span the cover work below (which repaints
+      // the framebuffer the TLS session lives in). See TlsFramebufferBorrow.
+      TlsFramebufferBorrow borrow(renderer);
+      err = BookFusionSyncClient::searchBooks(page, result, nullptr, nullptr, 0);
+    }
     if (err != BookFusionSyncClient::OK) {
       // Fail hard only if the very first page failed (nothing done yet); a
       // later-page failure just ends the walk with whatever we managed.
@@ -279,13 +346,13 @@ void RefreshBookFusionMetadataActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_REFRESH_BF_METADATA));
 
   if (state == WARNING) {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 10, tr(STR_REFRESH_BF_METADATA_WARNING), true);
+    drawWrappedCentered(renderer, UI_10_FONT_ID, pageHeight / 2, tr(STR_REFRESH_BF_METADATA_WARNING), true);
     const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_CONFIRM), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state == WIFI_SELECTION || state == RUNNING) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_REFRESHING_BF_METADATA));
   } else if (state == ERROR) {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, errorMsg, true, EpdFontFamily::BOLD);
+    drawWrappedCentered(renderer, UI_10_FONT_ID, pageHeight / 2, errorMsg, true, EpdFontFamily::BOLD);
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else {  // SUCCESS

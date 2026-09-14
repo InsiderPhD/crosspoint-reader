@@ -15,6 +15,7 @@
 #include <memory>
 #include <utility>
 
+#include "../settings/BookFusionCoverRefreshActivity.h"
 #include "../util/ConfirmationActivity.h"
 #include "BookDetailsActivity.h"
 #include "BookFusionBookIdStore.h"
@@ -818,6 +819,12 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
       break;
     case BookContextMenu::Action::RegenerateCover:
       LOG_DBG(MODULE, "Manual cover regeneration: %s", path.c_str());
+      if (FsHelpers::hasEpubExtension(path) && BookFusionBookIdStore::hasBookId(path.c_str())) {
+        // BookFusion EPUB covers are unreliable; re-download the API cover instead.
+        startActivityForResult(std::make_unique<BookFusionCoverRefreshActivity>(renderer, mappedInput, path, title),
+                               [reloadAfterMutation](const ActivityResult&) { reloadAfterMutation(); });
+        break;
+      }
       if (FsHelpers::hasEpubExtension(path)) {
         Epub epub(path, "/.crosspoint");
         if (epub.load(false, true)) {

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "LibraryActivity.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -187,8 +188,10 @@ void BookDetailsActivity::loadMetadata() {
     if (bookshelf.empty()) bookshelf = bfMeta.bookshelves;
   }
 
-  // Cover at the Lyra Library grid size.
-  const int coverHeight = UITheme::getInstance().getMetrics().homeCoverHeight;
+  // Cover at the Library grid size. Not the theme's homeCoverHeight: that is
+  // 600 on Lyra Carousel (a near-full-width coverflow cover), far too big for a
+  // side panel. 226 is also one of the primed thumb heights, so no new thumbnail.
+  const int coverHeight = LibraryActivity::COVER_HEIGHT;
   const std::string thumbPath = epub.getThumbBmpPath(coverHeight);
   if (!Storage.exists(thumbPath.c_str())) {
     epub.generateThumbBmp(coverHeight);
@@ -327,7 +330,7 @@ void BookDetailsActivity::render(RenderLock&&) {
 
   // Cover (left), sized to the Lyra Library grid but capped so it can't crowd out the
   // description on short (landscape) viewports.
-  int coverHeight = metrics.homeCoverHeight;
+  int coverHeight = LibraryActivity::COVER_HEIGHT;
   coverHeight = std::min(coverHeight, std::max(80, viewportBottom - contentTop - 80));
   const int coverWidth = coverHeight * 3 / 5;  // matches the 0.6 thumbnail aspect
   const Rect coverRect{metrics.contentSidePadding, contentTop, coverWidth, coverHeight};

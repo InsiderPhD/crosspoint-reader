@@ -4,9 +4,8 @@
 #include <cstdint>
 #include <string>
 
+#include "BookFusionSyncClient.h"
 #include "activities/Activity.h"
-
-struct BookFusionBook;
 
 // Bulk action: for every locally-downloaded BookFusion book (those with a
 // bookfusion_<hash>.json sidecar), re-download the metadata that comes from the
@@ -47,6 +46,14 @@ class RefreshBookFusionMetadataActivity final : public Activity {
   int failed = 0;       // Books where at least one refresh step failed.
 
   char errorMsg[128] = {};
+
+  // One page of the library walk (~8KB: 10 books of ~800B, mostly the 384B
+  // cover URL and three 96B metadata lists). A member, as in
+  // BookFusionBrowserActivity, because the walk runs on the Arduino loop task,
+  // whose entire stack is 8KB: as a local in refreshAll() it ran the stack
+  // through its bottom into the neighbouring heap block, and the next heap walk
+  // faulted (X4 Pro LoadProhibited in tlsf_walk_pool, 2026-09-13).
+  BookFusionSearchResult searchResult;
 
   void startRun();
   void onWifiComplete(bool success);

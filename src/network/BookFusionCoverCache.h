@@ -32,7 +32,24 @@ bool refresh(const std::string& coverUrl, const Epub& epub, int coverHeight, cha
 // TlsFramebufferBorrow around download(), then a JpegScratchLease around
 // convert() — without the two leases ever aliasing the same memory.
 // refresh() == download() + convert().
-bool download(const std::string& coverUrl, const Epub& epub);
+// Single fetch size that serves every consumer with no upscaling anywhere: the
+// sleep-screen cover is generated at display size (480x800 portrait) and the
+// largest thumbnail box any theme asks for is 360x600 (Lyra Carousel). Also
+// comfortably inside JpegToBmpConverter's 2048x3072 source ceiling, which the
+// original full-size artwork on some titles exceeds outright.
+constexpr int kCoverFetchWidth = 600;
+constexpr int kCoverFetchHeight = 1000;
+
+// Appends BookFusion's resize hints to a cover URL, so the server scales the
+// artwork instead of us pulling the original and shrinking it here. Returns the
+// URL unchanged when it already carries sizing hints or the dimensions are
+// invalid. Exposed for the call sites that choose their own target size.
+std::string withResizeParams(const std::string& url, int width, int height);
+
+// `maxWidth`/`maxHeight` ask the server for a pre-scaled cover; pass 0 for
+// both to fetch the original. A resized request that fails falls back to the
+// unmodified URL, so an unsupported hint costs one request, never a cover.
+bool download(const std::string& coverUrl, const Epub& epub, int maxWidth = 0, int maxHeight = 0);
 bool convert(const Epub& epub, int coverHeight, char* outThumbPath = nullptr, size_t outThumbPathLen = 0);
 
 }  // namespace BookFusionCoverCache

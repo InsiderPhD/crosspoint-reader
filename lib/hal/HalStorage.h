@@ -15,6 +15,10 @@ class HalStorage {
   HalStorage();
   bool begin();
   bool ready() const;
+  // Unmount and power-quiesce the card for deep sleep (X4 Pro SDMMC: stops the
+  // host and floats the bus pads; a no-op on SPI boards). Call only after every
+  // file is closed; a deep-sleep wake remounts through begin().
+  void shutdown();
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
   // Read the entire file at `path` into a String. Returns empty string on failure.
   String readFile(const char* path);

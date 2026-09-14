@@ -14,6 +14,7 @@
 #include <cstring>
 #include <vector>
 
+#include "../settings/BookFusionCoverRefreshActivity.h"
 #include "../util/ConfirmationActivity.h"
 #include "BookDetailsActivity.h"
 #include "BookFusionBookIdStore.h"
@@ -78,6 +79,20 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
       if (!Storage.exists(coverPath.c_str())) {
         // If epub, try to load the metadata for title/author and cover
         if (FsHelpers::hasEpubExtension(book.path)) {
+          // A BookFusion book's artwork MUST come from the API image cached at
+          // download/refresh time. Their EPUBs carry unreliable embedded covers
+          // -- often broken, often far smaller than the slot -- and generating
+          // from one here would cache that bad image under the very thumb path
+          // the themes read, with no way to tell it apart afterwards. Leave the
+          // slot empty instead; the API path fills it (download, metadata
+          // refresh, or the per-book Regenerate Cover action above). Deliberately
+          // does NOT clear coverBmpPath: the path stays valid, the file is just
+          // not there yet.
+          if (BookFusionBookIdStore::hasBookId(book.path.c_str())) {
+            LOG_DBG("HOME", "Skipping EPUB-derived thumb for BookFusion book %s", book.path.c_str());
+            progress++;
+            continue;
+          }
           Epub epub(book.path, "/.crosspoint");
           // Skip loading css since we only need metadata here
           epub.load(false, true);
@@ -277,6 +292,12 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
       break;
     case BookContextMenu::Action::RegenerateCover:
       LOG_DBG("HAC", "Manual cover regeneration requested for: %s", path.c_str());
+      if (FsHelpers::hasEpubExtension(path) && BookFusionBookIdStore::hasBookId(path.c_str())) {
+        // BookFusion EPUB covers are unreliable; re-download the API cover instead.
+        startActivityForResult(std::make_unique<BookFusionCoverRefreshActivity>(renderer, mappedInput, path, title),
+                               [reloadRecents](const ActivityResult&) { reloadRecents(); });
+        break;
+      }
       if (FsHelpers::hasEpubExtension(path)) {
         Epub epub(path, "/.crosspoint");
         if (epub.load(false, true)) {  // buildIfMissing=false, skipLoadingCss=true

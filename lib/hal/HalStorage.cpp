@@ -36,6 +36,14 @@ class HalStorage::StorageLock {
   ~StorageLock() { xSemaphoreGiveRecursive(HalStorage::getInstance().storageMutex); }
 };
 
+void HalStorage::shutdown() {
+  // Under the lock, unlike begin(): this runs at sleep entry, when the render
+  // task may still be finishing an SD read for the sleep screen. Taking the lock
+  // waits that out instead of unmounting underneath it.
+  StorageLock lock;
+  SDCard.shutdown();
+}
+
 #define HAL_STORAGE_WRAPPED_CALL(method, ...) \
   HalStorage::StorageLock lock;               \
   return SDCard.method(__VA_ARGS__);
