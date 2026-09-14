@@ -11,6 +11,27 @@ uint8_t quantizeSimple(int gray);
 uint8_t quantize1bit(int gray, int x, int y);
 int adjustPixel(int gray);
 
+struct GrayPlanePixel {
+  bool write;  // false leaves the plane bit at its cleared value
+  bool black;  // drawPixel() semantics: true clears the bit, false sets it
+};
+
+// How one 2-bit level lands in a grayscale plane, for both encodings the
+// panels accept. level: 0=black, 1=dark, 2=light, 3=white.
+//
+// Overlay masks (the long-standing scheme): the planes are sparse *masks* over
+// a separately displayed B/W base. Only the two intermediate levels are marked;
+// black and white are left to the base, so nothing is written for them.
+//   (LSB, MSB) -> black/white = 00 (deferred to base), dark = 11, light = 01
+//
+// Absolute planes: the planes carry the whole image, base included, so every
+// pixel is written and the B/W frame is not consulted.
+//   (LSB, MSB) -> black = 00, dark = 10, light = 01, white = 11
+constexpr GrayPlanePixel grayPlanePixel(uint8_t level, bool msb, bool absolute) {
+  if (absolute) return {true, !(level == 3 || level == (msb ? 2 : 1))};
+  return {msb ? (level == 1 || level == 2) : level == 1, false};
+}
+
 enum class BmpRowOrder { BottomUp, TopDown };
 
 // Populates a 1-bit BMP header in the provided memory.

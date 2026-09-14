@@ -118,7 +118,21 @@ void HalDisplay::writeGrayscalePlaneStrip(bool lsbPlane, const uint8_t* rows, ui
                                        yStart, numRows);
 }
 
-bool HalDisplay::supportsStripGrayscale() const { return einkDisplay.supportsStripGrayscale(); }
+HalDisplay::Controller HalDisplay::getController() const { return BoardConfig::ACTIVE.displayController; }
+
+HalDisplay::GrayscaleCapabilities HalDisplay::grayscaleCapabilities(const GrayscaleMode mode) const {
+  return einkDisplay.grayscaleCapabilities(mode);
+}
+
+bool HalDisplay::displayGrayscaleBase(const GrayscaleMode mode, const RefreshMode fallback, const bool turnOffScreen) {
+  // Mirrors refreshDisplay(): the X3's UC8253 needs a resync request before a
+  // HALF so the differential baseline is rebuilt rather than diffed against
+  // stale controller RAM.
+  if (gpio.deviceIsX3() && fallback == HALF_REFRESH) einkDisplay.requestResync();
+  return einkDisplay.displayGrayscaleBase(mode, static_cast<EInkDisplay::RefreshMode>(fallback), turnOffScreen);
+}
+
+bool HalDisplay::supportsStripGrayscale() const { return grayscaleCapabilities().stripUploads; }
 
 uint16_t HalDisplay::getDisplayWidth() const { return einkDisplay.getDisplayWidth(); }
 

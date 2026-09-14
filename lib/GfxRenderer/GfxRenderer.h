@@ -34,6 +34,10 @@ class GfxRenderer {
 
   HalDisplay& display;
   RenderMode renderMode;
+  // True only between a successful displayGrayscaleBase(Absolute) and the
+  // displayGrayBuffer() that commits it. Mutable because the whole render path
+  // is const, like the strip-target state below.
+  mutable bool absoluteGrayPlanes = false;
   Orientation orientation;
   bool fadingFix;
   bool imagesSuppressed = false;
@@ -263,8 +267,26 @@ class GfxRenderer {
   int getTextHeight(int fontId) const;
 
   // Grayscale functions
-  void setRenderMode(const RenderMode mode) { this->renderMode = mode; }
+  // Out-of-line: switching back to BW mid-pass has to cancel an armed absolute
+  // pass, or the panel keeps waiting for planes that are never coming.
+  void setRenderMode(RenderMode mode);
   RenderMode getRenderMode() const { return renderMode; }
+
+  // What the panel can do for `mode`. fadingFix forces a synchronous base, so
+  // it is folded in here rather than at each call site.
+  HalDisplay::GrayscaleCapabilities grayscaleCapabilities(
+      HalDisplay::GrayscaleMode mode = HalDisplay::GrayscaleMode::Overlay) const;
+
+  // Arm the panel for `mode` and display the current B/W frame as its base.
+  // False means the panel refused; the caller must display normally and skip
+  // the grayscale pass.
+  bool displayGrayscaleBase(HalDisplay::GrayscaleMode mode,
+                            HalDisplay::RefreshMode fallback = HalDisplay::HALF_REFRESH) const;
+
+  // Which plane encoding the current pass must emit. Everything that writes a
+  // grayscale plane asks this, so the answer stays consistent across text,
+  // images and bitmaps within one pass.
+  bool grayPlanesAreAbsolute() const { return absoluteGrayPlanes; }
   void copyGrayscaleLsbBuffers() const;
   void copyGrayscaleMsbBuffers() const;
   void displayGrayBuffer() const;

@@ -15,7 +15,6 @@
 #include <Memory.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
-#include <esp_log.h>
 #include <esp_system.h>
 
 #include <algorithm>
@@ -33,6 +32,7 @@
 #include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "DeepSleep.h"
 #include "DictionaryDefinitionActivity.h"
 #include "EpubReaderBookmarksActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
@@ -97,37 +97,14 @@ constexpr uint32_t BT_RENDER_MIN_LARGEST_BLOCK = 4096;
 constexpr unsigned long BT_GUARD_RESTORE_DEFER_MS = 60000;
 
 void enterDeepSleepFromReaderAction() {
-  HalPowerManager::Lock powerLock;  // hold full CPU speed across the BLE teardown + sleep prep
-
-  // IDF/NimBLE logging routes through log_printfv -> newlib vfprintf, a ~2KB
-  // transient stack frame. The sleep sequence already runs loopTask near its 8KB
-  // limit (activity teardown -> progress/stats JSON -> SdFat SPI); an IDF log
-  // firing at that depth overflowed it by 4 bytes (stack protection fault,
-  // 2026-07-29 — only reachable with BLE up, which is the only source of IDF
-  // logs in this path). We're powering off: drop IDF logs for the remainder.
-  // Runtime-only; logging is back on the wake reboot.
-  esp_log_level_set("*", ESP_LOG_NONE);
-
-  // BLE cannot survive deep sleep; shut the stack down cleanly so the remote
-  // disconnects instead of timing out and NimBLE releases its heap. main.cpp's
-  // enterDeepSleep() already does this, but the reader's own sleep path did not —
-  // harmless while BLE was usually torn down by a section build, but auto-restore
-  // now leaves the stack up at sleep time, and sleeping with the NimBLE host still
-  // live hangs into a watchdog reset. Runs under powerLock so the disconnect's own
-  // HalPowerManager::Lock is a no-op and the CPU never drops to low-power mid-teardown.
-  auto& btMgr = BluetoothHIDManager::getInstance();
-  if (btMgr.isEnabled()) {
-    LOG_INF("BT", "Disabling Bluetooth before deep sleep (reader)");
-    btMgr.disable();
-  }
-
-  APP_STATE.lastSleepFromReader = true;
-  APP_STATE.saveToFile();
-
-  activityManager.goToSleep();
-  display.deepSleep();
+  // Delegates to main.cpp's sequence rather than keeping a copy. The copy that
+  // lived here had drifted: it never called halFrontlight.off() or
+  // halTiltSensor.deepSleep(), so holding Power in a book slept an X4 Pro with
+  // its frontlight PWM never driven to zero, and never honoured the seamless
+  // sleep-screen setting. lastSleepFromReader is still set: the caller is a
+  // reader activity, which is what enterDeepSleep() checks.
   LOG_DBG("READER", "Entering deep sleep from reader action");
-  powerManager.startDeepSleep(gpio);
+  enterDeepSleep();
 }
 
 int clampPercent(int percent) {
@@ -2592,18 +2569,34 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   const bool needsTextGrayscale = SETTINGS.textAntiAliasing && !SETTINGS.darkMode;
   const bool needsAnyGrayscale = needsTextGrayscale || needsImageGrayscale;
 
+  // Absolute planes carry the whole page — background included — instead of
+  // masking two intermediate levels over a separately displayed B/W base. That
+  // removes the panel's dependence on recovering the base from what is already
+  // on screen, which is what makes the overlay path need the blank/double-
+  // refresh dance below. Only offered where the controller accepts it.
+  const bool absoluteImageGrayscale = needsImageGrayscale && !gpio.deviceIsX3() &&
+                                      display.getController() == HalDisplay::Controller::UC8279 &&
+                                      renderer.grayscaleCapabilities(HalDisplay::GrayscaleMode::Absolute).supported();
+  // Strip support differs per mode, so ask about the mode actually chosen
+  // rather than using the overlay-only supportsStripGrayscale().
+  const auto grayCaps = renderer.grayscaleCapabilities(absoluteImageGrayscale ? HalDisplay::GrayscaleMode::Absolute
+                                                                              : HalDisplay::GrayscaleMode::Overlay);
+
   // What each grayscale plane pass has to draw. With text AA on that is the whole
   // page (glyphs carry the anti-aliasing); with it off only the images do, and
   // re-rendering every glyph per band would pay the full AA cost for no AA.
   // Footnotes are text, so they follow needsTextGrayscale too.
   const auto renderGrayscalePass = [&]() {
-    if (needsTextGrayscale) {
+    if (absoluteImageGrayscale || needsTextGrayscale) {
       page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
       if (ReaderUtils::footnotesOnPage())
         page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
     } else {
       page.renderImages(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
     }
+    // Absolute planes are the whole image, so anything omitted here renders as
+    // the cleared background rather than falling through to the B/W frame.
+    if (absoluteImageGrayscale) renderStatusBar();
   };
 
   // First visit to a page whose images aren't cached yet: show the text with
@@ -2627,7 +2620,19 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
 
-  if (needsImageGrayscale) {
+  if (absoluteImageGrayscale) {
+    // No blanking dance: the panel takes the B/W frame as an explicit base and
+    // then receives every pixel again in the planes, so there is nothing to
+    // recover from what is already on screen.
+    if (!renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Absolute, pagesUntilFullRefresh <= 1
+                                                                                ? HalDisplay::HALF_REFRESH
+                                                                                : HalDisplay::FAST_REFRESH)) {
+      LOG_ERR("ERS", "Absolute grayscale base refused; falling back to B/W");
+      ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+      return;
+    }
+    pagesUntilFullRefresh = 1;
+  } else if (needsImageGrayscale) {
     // Double FAST_REFRESH with selective image blanking (pablohc's technique):
     // HALF_REFRESH sets particles too firmly for the grayscale LUT to adjust.
     // Instead, blank only the image area and do two fast refreshes.
@@ -2669,7 +2674,7 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   // cost stays close to one render. Both text (drawPixel) and images
   // (DirectPixelWriter) honor the active strip target.
   // Runs for anti-aliased text, for images, or both — see needsAnyGrayscale.
-  if (needsAnyGrayscale && renderer.supportsStripGrayscale()) {
+  if (needsAnyGrayscale && grayCaps.stripUploads) {
     const int gh = renderer.getDisplayHeight();
     const int gwBytes = renderer.getDisplayWidthBytes();
 
@@ -2698,7 +2703,7 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
       for (int y = 0; y < gh; y += stripRows) {
         const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
         renderer.beginStripTarget(scratch.get(), y, rows);
-        renderer.clearScreen(0x00);
+        renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
         renderGrayscalePass();
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(true, scratch.get(), y, rows);
@@ -2710,15 +2715,19 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
       for (int y = 0; y < gh; y += stripRows) {
         const int rows = (gh - y < stripRows) ? (gh - y) : stripRows;
         renderer.beginStripTarget(scratch.get(), y, rows);
-        renderer.clearScreen(0x00);
+        renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
         renderGrayscalePass();
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(false, scratch.get(), y, rows);
       }
       const auto tGrayMsb = millis();
 
-      renderer.setRenderMode(GfxRenderer::BW);
+      // Commit the planes before leaving grayscale mode. setRenderMode(BW)
+      // cancels an armed absolute pass, so doing it first would throw the
+      // planes away. Harmless either way for overlay, which displayGrayBuffer()
+      // does not consult the render mode for.
       renderer.displayGrayBuffer();
+      renderer.setRenderMode(GfxRenderer::BW);
       const auto tGrayDisplay = millis();
 
       // BW framebuffer is intact; re-sync controller RAM for the next
@@ -2742,14 +2751,14 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
       renderer.storeBwBuffer();
       const auto tBwStore = millis();
 
-      renderer.clearScreen(0x00);
+      renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
       renderGrayscalePass();
       renderer.copyGrayscaleLsbBuffers();
       const auto tGrayLsb = millis();
 
       // Render and copy to MSB buffer
-      renderer.clearScreen(0x00);
+      renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
       renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
       renderGrayscalePass();
       renderer.copyGrayscaleMsbBuffers();

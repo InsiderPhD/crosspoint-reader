@@ -1,9 +1,25 @@
 #pragma once
 #include <Arduino.h>
+#include <BoardConfig.h>
 #include <EInkDisplay.h>
 
 class HalDisplay {
  public:
+  // Which panel controller the boot-time bus probe found. Lets a caller gate a
+  // behaviour on the actual silicon rather than on the device profile, which
+  // matters because one profile can ship with more than one panel.
+  using Controller = BoardConfig::DisplayController;
+  Controller getController() const;
+
+  using GrayscaleMode = freeink::GrayscaleMode;
+  using GrayscaleCapabilities = freeink::GrayscaleCapabilities;
+  using GrayscaleBase = freeink::GrayscaleBase;
+  using GrayscaleEncoding = freeink::GrayscaleEncoding;
+
+  // What this panel supports for a given grayscale mode. Querying selects
+  // nothing; displayGrayscaleBase() is what commits to a mode.
+  GrayscaleCapabilities grayscaleCapabilities(GrayscaleMode mode = GrayscaleMode::Overlay) const;
+
   // Constructor with pin configuration
   HalDisplay();
 
@@ -80,6 +96,11 @@ class HalDisplay {
   void cleanupGrayscaleBuffers(const uint8_t* bwBuffer);
 
   void displayGrayBuffer(bool turnOffScreen = false);
+
+  // Arm the panel for `mode` and display the B/W frame as its base. Returns
+  // false when the panel would not take the mode, in which case the caller must
+  // fall back to an ordinary display and skip the grayscale pass entirely.
+  bool displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback = HALF_REFRESH, bool turnOffScreen = false);
 
   // Tiled grayscale: stream one band of a plane (lsbPlane selects LSB/MSB RAM)
   // straight to the controller; supportsStripGrayscale() gates the path. See
