@@ -4,7 +4,7 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ---
 
-## 1.8.1 — September 2026
+## 1.9.0 — September 2026 (Cease and Desist Edition)
 
 ### Custom button combos for reader actions
 
