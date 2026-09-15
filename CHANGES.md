@@ -4,6 +4,30 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ---
 
+## 1.8.1 — September 2026
+
+### Custom button combos for reader actions
+
+**Reader Controls** gains chord bindings — two inputs held together run a reader action — with a capture wizard that records the chord rather than asking for it to be described. On the X4 Pro, which has no front buttons, a chord is a held screen zone (or the home key) plus a side key. Combo bit numbers are persisted, and dispatch swallows the whole chord so neither input's own binding also fires.
+
+**Files changed**: `src/util/ReaderCombos.*`, `src/activities/settings/{ReaderComboListActivity,ReaderComboWizardActivity,ReaderControlsActivity,ReaderActionSelectActivity}.*`, `src/MappedInputManager.*`, `lib/hal/HalGPIO.*`, `src/{CrossPointSettings.*,JsonSettingsIO.cpp}`, the Epub and XTC readers. SDK: `InputManager::isHomeKeyDown()`.
+
+### Image pages
+
+- **Grayscale images no longer depend on text anti-aliasing**, a page whose images are not cached yet paints text and placeholder boxes before the decode, and partially offscreen images are clipped instead of dropped.
+- **An image page reads its decoded payload from SD once per render** instead of once per grayscale band, held in 16KB chunks and falling back to streaming on a fragmented heap.
+- **Photos keep their polarity in dark mode**: the image rectangle is pre-inverted so the whole-screen invert cancels over it.
+- **Absolute grayscale planes on UC8279 panels**, so an image page no longer depends on what the panel displayed a moment earlier.
+
+### Display and battery
+
+- The SDK is merged with upstream `main`. Its Xteink boards default to a 10 MHz display SPI clock; `FREEINK_XTEINK_DISPLAY_SPI_HZ` restores the 20 MHz that 1.8.0 shipped with.
+- **X4 Pro sleep drain**: deep sleep now unmounts the SD card and floats its bus pads (the SDMMC pull-ups back-fed the card's VDD), and latches the frontlight PWM pads off (they floated while the held master rail kept the LED driver powered — measured 10% battery overnight). The wake path releases the frontlight pad hold, or the light would stay dark until a power cycle.
+
+### BookFusion
+
+- **Regenerate Cover** re-downloads one book's API cover and rebuilds every thumbnail height and the sleep-screen covers from it, since BookFusion EPUBs carry unreliable embedded covers.
+
 ## 1.8.0 — September 2026
 
 *(1.7.7 and 1.7.8 were pre-release betas; 1.7.9 was withdrawn and re-cut as this release. Everything logged below shipped in 1.8.0.)*
