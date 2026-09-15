@@ -173,6 +173,37 @@ void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings
   }
 }
 
+void CrossPointSettings::sanitizeReaderCombos(CrossPointSettings& settings) {
+  // Bits above the last known button came from a newer firmware (or a corrupt
+  // file); dropping them can only shrink a mask, never rebind it elsewhere.
+  constexpr uint16_t VALID_BITS = static_cast<uint16_t>((1u << COMBO_BUTTON_COUNT) - 1u);
+  for (uint8_t slot = 0; slot < READER_COMBO_SLOTS; slot++) {
+    uint16_t& mask = settings.readerComboButtons[slot];
+    uint8_t& action = settings.readerComboAction[slot];
+    mask &= VALID_BITS;
+    if (action >= READER_ACTION_COUNT || isRetiredReaderAction(action)) {
+      action = READER_ACTION_NONE;
+    }
+    // A chord is two or more keys by definition, and a slot bound to nothing
+    // would swallow its buttons for no gain — clear both halves together so
+    // "empty" has exactly one representation.
+    if (__builtin_popcount(mask) < 2 || action == READER_ACTION_NONE) {
+      mask = 0;
+      action = READER_ACTION_NONE;
+      continue;
+    }
+    // Duplicate masks: the first slot wins at dispatch, so the later one is
+    // dead weight that still swallows its buttons. Clear it.
+    for (uint8_t earlier = 0; earlier < slot; earlier++) {
+      if (settings.readerComboButtons[earlier] == mask) {
+        mask = 0;
+        action = READER_ACTION_NONE;
+        break;
+      }
+    }
+  }
+}
+
 void CrossPointSettings::sanitizeReaderActions(CrossPointSettings& settings) {
   // Static table of the assignable slots. Member pointers are compile-time
   // constants, so the array lives in flash rather than costing DRAM.

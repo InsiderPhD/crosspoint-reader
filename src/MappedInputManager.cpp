@@ -348,6 +348,21 @@ MappedInputManager::TapZone MappedInputManager::classifyZone(const LogicalTouchP
   return (p.x < p.width / 3) ? TapZone::Left : (p.x >= 2 * p.width / 3) ? TapZone::Right : TapZone::Middle;
 }
 
+MappedInputManager::TapZone MappedInputManager::heldTouchZone() const {
+  float nx, ny;
+  if (!gpio.isTouchHeldAt(nx, ny)) return TapZone::None;
+  const LogicalTouchPoint p = toLogicalPoint(nx, ny);
+  // A finger resting on an action-bar button is operating a control, not
+  // holding a part of the page. Asked of ActionBar rather than of the strip's
+  // geometry so only slots that were actually just drawn are excluded: a screen
+  // with no bar (the reader with its hints off) keeps every pixel.
+  Button barButton;
+  if (ActionBar::hitTest(p.x, p.y, barButton)) return TapZone::None;
+  // Same thirds classification as a tap, so a chord's zone and the zone whose
+  // action it replaces can never be two different thirds.
+  return classifyZone(p);
+}
+
 MappedInputManager::TapZone MappedInputManager::wasTouchLongPressZone(int& lx, int& ly) const {
   if (gpio.wasHomeKeyTapped() || gpio.wasHomeKeyLongPressed()) {
     return TapZone::None;

@@ -14,6 +14,7 @@
 
 #include "CrossPointSettings.h"
 #include "activities/Activity.h"
+#include "util/ReaderCombos.h"
 
 class XtcReaderActivity final : public Activity {
   std::shared_ptr<Xtc> xtc;
@@ -23,6 +24,8 @@ class XtcReaderActivity final : public Activity {
   unsigned long readingSpeedLastTurnMs = 0UL;
   unsigned long readingSessionStartMs = 0UL;
   uint32_t sessionPageTurns = 0;
+  // Custom combos (chords); see EpubReaderActivity for the ordering rule.
+  ReaderCombos readerCombos;
   bool longPressBackFired = false;
   bool longPressLeftFired = false;
   bool longPressRightFired = false;

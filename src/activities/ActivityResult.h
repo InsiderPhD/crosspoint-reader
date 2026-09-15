@@ -41,6 +41,14 @@ struct ReaderActionResult {
   uint8_t action = 0;
 };
 
+// Returned by ReaderComboWizardActivity: the chord the user held (a bitmask
+// over CrossPointSettings::COMBO_BTN_*) and the action picked for it. Like the
+// action picker above it persists nothing — the combo list writes the slot.
+struct ReaderComboResult {
+  uint16_t buttons = 0;
+  uint8_t action = 0;
+};
+
 struct ChapterResult {
   int spineIndex = 0;
 };
@@ -120,8 +128,8 @@ struct WordPickResult {
 
 using ResultVariant =
     std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, FrontlightResult, ReaderActionResult,
-                 ChapterResult, PercentResult, PageResult, SyncResult, NetworkModeResult, FootnoteResult,
-                 BookContextResult, FilePathResult, ClippingResult, ClippingJumpResult, WordPickResult>;
+                 ReaderComboResult, ChapterResult, PercentResult, PageResult, SyncResult, NetworkModeResult,
+                 FootnoteResult, BookContextResult, FilePathResult, ClippingResult, ClippingJumpResult, WordPickResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

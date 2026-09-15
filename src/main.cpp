@@ -43,6 +43,7 @@
 #include "images/LoadingIcon.h"
 #include "util/ButtonNavigator.h"
 #include "util/HeapReport.h"
+#include "util/ReaderCombos.h"
 #include "util/ScreenshotUtil.h"
 #include "util/WifiTimeSync.h"
 
@@ -823,9 +824,17 @@ void loop() {
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }
 
+  // POWER+DOWN (screenshot) and POWER+Confirm (RAM investigator) are DEFAULTS,
+  // not reservations: a user who binds either grip to a custom combo gets their
+  // binding instead. Only inside a reader, which is the only place a combo
+  // dispatches -- everywhere else the built-in stays, so the "take a reading on
+  // any screen, including mid-render states no menu can reach" property these
+  // chords exist for survives being remapped.
+  const bool userChordWins = activityManager.isReaderActivity() && ReaderCombos::userComboHeld(mappedInputManager);
+
   static bool screenshotButtonsReleased = true;
   static bool screenshotComboActive = false;
-  if (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.isPressed(HalGPIO::BTN_DOWN)) {
+  if (!userChordWins && gpio.isPressed(HalGPIO::BTN_POWER) && gpio.isPressed(HalGPIO::BTN_DOWN)) {
     screenshotComboActive = true;
     // Both POWER chords draw straight to the framebuffer rather than going
     // through the render task, so they need their own isRenderable() gate -- a
@@ -860,8 +869,8 @@ void loop() {
   // MappedInputManager so the chord follows the user's front-button remapping.
   static bool heapReportButtonsReleased = true;
   static bool heapReportComboActive = false;
-  const bool heapReportChordHeld =
-      gpio.isPressed(HalGPIO::BTN_POWER) && mappedInputManager.isPressed(MappedInputManager::Button::Confirm);
+  const bool heapReportChordHeld = !userChordWins && gpio.isPressed(HalGPIO::BTN_POWER) &&
+                                   mappedInputManager.isPressed(MappedInputManager::Button::Confirm);
   if (heapReportChordHeld) {
     heapReportComboActive = true;
     if (heapReportButtonsReleased && renderer.isRenderable()) {
@@ -899,8 +908,13 @@ void loop() {
   static constexpr unsigned long SLEEP_HOLD_MS = 500;
   if (millis() >= allowSleepAt && gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getHeldTime() > SLEEP_HOLD_MS) {
     // If a POWER chord is potentially being pressed (screenshot / RAM
-    // investigator), don't sleep.
-    if (gpio.isPressed(HalGPIO::BTN_DOWN) || mappedInputManager.isPressed(MappedInputManager::Button::Confirm)) {
+    // investigator, or a user-defined combo), don't sleep. The user combo has
+    // already run by now -- it fires within ~60ms -- but the keys are still
+    // down, and a chord must not turn into a sleep just because it was held a
+    // beat too long. ReaderCombos answers false unless a Power combo actually
+    // exists, so nothing changes for a device that has none.
+    if (gpio.isPressed(HalGPIO::BTN_DOWN) || mappedInputManager.isPressed(MappedInputManager::Button::Confirm) ||
+        ReaderCombos::powerComboHeld(mappedInputManager)) {
       return;
     }
     enterDeepSleep();

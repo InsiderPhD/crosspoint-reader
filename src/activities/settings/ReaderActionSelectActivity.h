@@ -1,7 +1,5 @@
 #pragma once
 
-#if FREEINK_DEVICE_X4PRO
-
 #include <GfxRenderer.h>
 
 #include <cstdint>
@@ -14,14 +12,19 @@ class MappedInputManager;
 struct Rect;
 
 /**
- * Picker for one reader action, opened from a Reader Controls row.
+ * Picker for one reader action.
  *
- * X4 Pro only, and deliberately so: on the X3/X4 a row cycles its action on
- * Confirm, which is one press per step but wears no button out faster than any
- * other menu. Turning that into open-menu/scroll/select would triple the
- * presses on hardware whose buttons are the thing we are trying to spare. The
- * X4 Pro has no front buttons — the same interaction is taps — so it gets the
- * list instead of a cycle that has to be tapped through blind.
+ * Reader Controls opens it per row on the X4 Pro only, and deliberately so: on
+ * the X3/X4 a row cycles its action on Confirm, which is one press per step but
+ * wears no button out faster than any other menu. Turning that into
+ * open-menu/scroll/select would triple the presses on hardware whose buttons
+ * are the thing we are trying to spare. The X4 Pro has no front buttons — the
+ * same interaction is taps — so it gets the list instead of a cycle that has to
+ * be tapped through blind.
+ *
+ * The Custom Combo wizard uses it on every board: a wizard step has no row to
+ * cycle in place, and picking blind from a chord you have just captured is the
+ * one case where the list is the cheaper interaction on buttons too.
  *
  * It owns no persistence: the caller passes the row's current action and gets
  * the chosen one back as a ReaderActionResult, so Reader Controls keeps its
@@ -55,5 +58,3 @@ class ReaderActionSelectActivity final : public Activity {
   int selectedIndex = 0;
   ButtonNavigator buttonNavigator;
 };
-
-#endif  // FREEINK_DEVICE_X4PRO

@@ -24,15 +24,15 @@ class ReaderControlsActivity final : public Activity {
  private:
   Rect listRect() const;
 
-#if FREEINK_DEVICE_X4PRO
+#if !FREEINK_DEVICE_X4PRO
+  static constexpr uint8_t kConfigurableRows = 13;  // 13 user-configurable + 1 fixed
+#endif
   // Rows 14-18 are the X4 Pro touch extras: the three tap zones, home key
   // short and long press. Rows 19-21 are the hold (long-press) variants of the
   // three tap zones, and row 22 picks the axis those zones are cut along.
-  static constexpr uint8_t kTotalRows = 23;
-#else
-  static constexpr uint8_t kConfigurableRows = 13;  // 13 user-configurable + 1 fixed
-  static constexpr uint8_t kTotalRows = 14;
-#endif
+  // Row 23 is Custom Combos on every board: not an action slot of its own, it
+  // opens the chord list.
+  static constexpr uint8_t kTotalRows = 24;
 
   uint8_t selectedRow = 0;
   bool isDirty = false;
@@ -45,6 +45,8 @@ class ReaderControlsActivity final : public Activity {
   // Confirm/tap on a row. X4 Pro opens the action picker; everywhere else the
   // row cycles in place — see openActionPicker()'s note on button wear.
   void activateRow(uint8_t row);
+  // Custom combo slots in use, for the Custom Combos row's value.
+  static uint8_t definedComboCount();
 #if FREEINK_DEVICE_X4PRO
   // Opens the action picker for the given row and stores what comes back.
   void openActionPicker(uint8_t row);

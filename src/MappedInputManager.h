@@ -98,9 +98,21 @@ class MappedInputManager {
   // Drop the remainder of the current contact after consuming a gesture.
   void suppressTouchContact() const { gpio.suppressTouchContact(); }
 
+  // Zone a finger is CURRENTLY resting in, or None when nothing is down. The
+  // level-state counterpart to wasTapZone()'s edge event, and the only touch
+  // state a chord can be built from: a custom combo asks "is this zone held
+  // while that key is down", which a one-shot tap event cannot answer.
+  //
+  // No tap-slop gate (it follows a moving finger) and no long-press threshold,
+  // so it reports from the moment of contact. False while the contact is
+  // suppressed or a second finger is down — see InputManager::isTouchHeldAt.
+  TapZone heldTouchZone() const;
+
   // Home-key events, for the readers' configurable actions.
   bool wasHomeKeyTapped() const { return gpio.wasHomeKeyTapped(); }
   bool wasHomeKeyLongPressed() const { return gpio.wasHomeKeyLongPressed(); }
+  // Held state of the same key, for chords (ReaderCombos).
+  bool isHomeKeyDown() const { return gpio.isHomeKeyDown(); }
 #endif
 
   void update() const {

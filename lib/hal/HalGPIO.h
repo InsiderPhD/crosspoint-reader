@@ -153,6 +153,9 @@ class HalGPIO {
   // finger is still down and suppresses the tap.
   bool wasHomeKeyTapped() const;
   bool wasHomeKeyLongPressed() const;
+  // Level, not an edge: true while the home key is held. Needed because a
+  // custom combo asks whether the key is down alongside another input.
+  bool isHomeKeyDown() const;
 
   // Live contact position while a finger is down (no tap-slop gate). Used for
   // gesture calibration and any future drag consumer.

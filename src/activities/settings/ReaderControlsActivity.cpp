@@ -4,8 +4,11 @@
 #include <HalGPIO.h>
 #include <I18n.h>
 
+#include <memory>
+
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "ReaderComboListActivity.h"
 #if FREEINK_DEVICE_X4PRO
 #include "ReaderActionSelectActivity.h"
 #endif
@@ -40,7 +43,7 @@ constexpr uint8_t kFixedRow = 13;
 // are the screen tap zones with 19-21 their hold (long-press) variants shown
 // as tap/hold pairs, 17/18 the home key tap and long press; the side keys and
 // Power keep their short/long pairs.
-constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 22, 14, 19, 15, 20, 16, 21, 17, 18, 8, 9, 10, 11, 12, 13};
+constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 22, 14, 19, 15, 20, 16, 21, 17, 18, 8, 9, 10, 11, 12, 13, 23};
 
 // Row 22 is a layout choice, not a bindable action: it has no entry in
 // fieldForRow() and toggles in place instead of opening the action picker.
@@ -48,8 +51,12 @@ constexpr uint8_t kTapZoneLayoutRow = 22;
 
 bool tapZonesAreBands() { return SETTINGS.readerTapZoneLayout == CrossPointSettings::TAP_ZONES_TOP_BOTTOM; }
 #else
-constexpr uint8_t kRowIds[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+constexpr uint8_t kRowIds[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 23};
 #endif
+
+// Last row everywhere: Custom Combos opens the chord list rather than binding
+// an action of its own, so it has no entry in fieldForRow().
+constexpr uint8_t kCustomCombosRow = 23;
 constexpr uint8_t kVisibleRows = sizeof(kRowIds);
 }  // namespace
 
@@ -144,6 +151,7 @@ void ReaderControlsActivity::render(RenderLock&&) {
 const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
   static char buf[48];
   if (row >= kTotalRows) return "";
+  if (row == kCustomCombosRow) return tr(STR_CUSTOM_COMBOS);
 #if FREEINK_DEVICE_X4PRO
   // The first and last zone are named for the axis in force, so the rows read
   // the way the screen is actually divided. The slots behind them do not move
@@ -243,6 +251,13 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
 }
 
 const char* ReaderControlsActivity::getRowActionName(const uint8_t row) const {
+  if (row == kCustomCombosRow) {
+    static char comboCountBuf[16];
+    const uint8_t defined = definedComboCount();
+    if (defined == 0) return tr(STR_NONE_OPT);
+    snprintf(comboCountBuf, sizeof(comboCountBuf), tr(STR_COMBOS_SET_FORMAT), static_cast<unsigned>(defined));
+    return comboCountBuf;
+  }
   if (row == kFixedRow) {
     // Power long press is always sleep; show with Fixed indicator.
     return tr(STR_SLEEP);
@@ -313,6 +328,8 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
       return tr(STR_READER_ACTION_STATUS_BAR);
     case CrossPointSettings::READER_ACTION_DICTIONARY:
       return tr(STR_LOOKUP);
+    case CrossPointSettings::READER_ACTION_HEAP_REPORT:
+      return tr(STR_READER_ACTION_HEAP);
     default:
       return tr(STR_NONE_OPT);
   }
@@ -379,7 +396,21 @@ CrossPointSettings::READER_ACTION ReaderControlsActivity::getActionForRow(const 
   return field ? static_cast<CrossPointSettings::READER_ACTION>(*field) : CrossPointSettings::READER_ACTION_NONE;
 }
 
+uint8_t ReaderControlsActivity::definedComboCount() {
+  uint8_t count = 0;
+  for (uint8_t slot = 0; slot < CrossPointSettings::READER_COMBO_SLOTS; slot++) {
+    if (SETTINGS.readerComboButtons[slot] != 0) count++;
+  }
+  return count;
+}
+
 void ReaderControlsActivity::activateRow(const uint8_t row) {
+  if (row == kCustomCombosRow) {
+    // The combo list owns its own save: its slots are not the per-row action
+    // fields this screen batches, and it can be left without touching them.
+    startActivityForResult(std::make_unique<ReaderComboListActivity>(renderer, mappedInput), nullptr);
+    return;
+  }
 #if FREEINK_DEVICE_X4PRO
   if (row == kTapZoneLayoutRow) {
     // Two values: a tap flips it in place rather than opening a picker, and the
@@ -424,14 +455,14 @@ void ReaderControlsActivity::openActionPicker(const uint8_t row) {
 void ReaderControlsActivity::cycleActionForRow(const uint8_t row) {
   uint8_t* field = fieldForRow(row);
   if (!field) return;
-  // Screenshot is a developer/testing action -- skip it while cycling unless Dev Mode
-  // is on (a button already set to it from a prior Dev session still works and cycles past).
-  // Retired values (Sleep, Mark Finished) are never offered.
+  // Retired values (Sleep, Mark Finished) are never offered, and the developer
+  // actions (Screenshot, RAM report) only while Dev Mode is on -- a button
+  // already set to one from a prior Dev session still works and cycles past.
   const bool dev = SETTINGS.devMode != 0;
   do {
     *field = (*field + 1) % static_cast<uint8_t>(CrossPointSettings::READER_ACTION_COUNT);
   } while (CrossPointSettings::isRetiredReaderAction(*field) ||
-           (!dev && *field == CrossPointSettings::READER_ACTION_SCREENSHOT));
+           (!dev && CrossPointSettings::isDeveloperReaderAction(*field)));
 }
 
 #endif  // FREEINK_DEVICE_X4PRO

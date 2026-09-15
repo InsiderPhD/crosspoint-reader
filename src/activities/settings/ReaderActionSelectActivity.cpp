@@ -1,7 +1,5 @@
 #include "ReaderActionSelectActivity.h"
 
-#if FREEINK_DEVICE_X4PRO
-
 #include <I18n.h>
 
 #include <cstdio>
@@ -62,6 +60,8 @@ const char* actionDescription(const uint8_t action) {
       return tr(STR_RA_DESC_STATUS_BAR);
     case A::READER_ACTION_DICTIONARY:
       return tr(STR_RA_DESC_DICTIONARY);
+    case A::READER_ACTION_HEAP_REPORT:
+      return tr(STR_RA_DESC_HEAP);
     default:
       return tr(STR_RA_DESC_NONE);
   }
@@ -77,15 +77,15 @@ ReaderActionSelectActivity::ReaderActionSelectActivity(GfxRenderer& renderer, Ma
 void ReaderActionSelectActivity::onEnter() {
   Activity::onEnter();
 
-  // Same filter the old cycling used: retired values are never offered, and
-  // Screenshot is a developer action. A slot already set to Screenshot from a
-  // prior Dev session still shows up, so it can be seen and changed.
+  // Retired values are never offered, and the developer actions (Screenshot,
+  // RAM report) only while Dev Mode is on. A slot already set to one still
+  // shows up, so it can be seen and changed.
   const bool dev = SETTINGS.devMode != 0;
   actionCount = 0;
   currentIndex = -1;
   for (uint8_t action = 0; action < CrossPointSettings::READER_ACTION_COUNT; action++) {
     if (CrossPointSettings::isRetiredReaderAction(action)) continue;
-    if (!dev && action == CrossPointSettings::READER_ACTION_SCREENSHOT && action != currentAction) continue;
+    if (!dev && CrossPointSettings::isDeveloperReaderAction(action) && action != currentAction) continue;
     if (action == currentAction) currentIndex = actionCount;
     actions[actionCount++] = action;
   }
@@ -183,5 +183,3 @@ void ReaderActionSelectActivity::render(RenderLock&&) {
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
-
-#endif  // FREEINK_DEVICE_X4PRO

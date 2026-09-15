@@ -12,6 +12,7 @@
 #include "activities/Activity.h"
 #include "util/DictionaryLookup.h"
 #include "util/ProgressAutoSync.h"
+#include "util/ReaderCombos.h"
 
 class EpubReaderActivity final : public Activity {
   std::shared_ptr<Epub> epub;
@@ -40,6 +41,10 @@ class EpubReaderActivity final : public Activity {
   bool skipNextButtonCheck = false;  // Skip button processing for one frame after subactivity exit
   bool automaticPageTurnActive = false;
   bool autoPageTurnMode = false;  // True when using calibrated reading speed
+  // Custom combos (chords). Runs ahead of the per-button dispatch below and
+  // swallows the chord's keys, so a combo never also fires the single-button
+  // bindings its own keys carry.
+  ReaderCombos readerCombos;
   bool longPressFeedbackShown = false;
   bool longPressBackFired = false;
   bool longPressLeftFired = false;

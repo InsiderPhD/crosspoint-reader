@@ -521,6 +521,24 @@ void EpubReaderActivity::loop() {
     requestUpdate();
   }
 
+  // ── Custom combos (chords) ───────────────────────────────────────────────
+  // Deliberately ahead of every per-button block below: a chord has to be
+  // recognised before its own keys are read as presses, and the frames where
+  // it is released have to be swallowed after, or the combo action runs and
+  // then so does every single-button binding its keys carry.
+  switch (readerCombos.update(mappedInput)) {
+    case ReaderCombos::Result::Fired:
+      // Return whatever the action reports: the chord is spent either way, and
+      // letting the frame fall through would re-read the keys still under the
+      // user's fingers.
+      executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(readerCombos.firedAction()));
+      return;
+    case ReaderCombos::Result::Consumed:
+      return;
+    case ReaderCombos::Result::None:
+      break;
+  }
+
   // ── Power: long press always sleeps; short press = configured action ──────
   if (mappedInput.isPressed(MappedInputManager::Button::Power) &&
       mappedInput.getHeldTime(MappedInputManager::Button::Power) >= skipChapterMs) {
@@ -3185,6 +3203,18 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
       pendingScreenshot = true;
       requestUpdate();
       return false;
+    }
+
+    case A::READER_ACTION_HEAP_REPORT: {
+      // Draws straight to the framebuffer like the POWER chord it replaces, so
+      // it needs the same renderable gate: a session that released the buffer
+      // (web server) has nothing to draw into.
+      if (!renderer.isRenderable()) return false;
+      {
+        RenderLock lock(*this);
+        HeapReport::dump(renderer);
+      }
+      return true;
     }
 
     case A::READER_ACTION_FOOTNOTES:

@@ -297,6 +297,10 @@ class CrossPointSettings {
     READER_ACTION_TOGGLE_BLUETOOTH = 22,
     READER_ACTION_HIDE_STATUS_BAR = 23,
     READER_ACTION_DICTIONARY = 24,
+    // The two former POWER chords, now bindable like anything else. They stay
+    // wired into main.cpp as defaults so a reading can still be taken on any
+    // screen; binding a combo to one is what overrides it (in the readers).
+    READER_ACTION_HEAP_REPORT = 25,
     READER_ACTION_COUNT
   };
 
@@ -305,6 +309,16 @@ class CrossPointSettings {
   // other action. Never reuse them; a stored slot holding one is rewritten to
   // READER_ACTION_NONE by sanitizeReaderActions() on load.
   static constexpr bool isRetiredReaderAction(const uint8_t action) { return action == 8 || action == 14; }
+
+  // Actions offered only while Dev Mode is on: both draw straight to the
+  // framebuffer for diagnostics and neither belongs in a reading session by
+  // accident. A slot already holding one still shows up in the picker, so a
+  // binding made in a Dev session can be seen and changed without turning Dev
+  // Mode back on. Single predicate because the picker and the X3/X4 row cycling
+  // both filter on it and must not drift.
+  static constexpr bool isDeveloperReaderAction(const uint8_t action) {
+    return action == READER_ACTION_SCREENSHOT || action == READER_ACTION_HEAP_REPORT;
+  }
 
   // Reader button-hint bar mode. Cycles Off -> Short -> Long -> Front-only Short -> Front-only Long.
   // The FRONT_* modes show only the front-button bar (no side/power hints).
@@ -575,6 +589,49 @@ class CrossPointSettings {
   uint8_t readerTapZoneLayout = TAP_ZONES_SIDES;
   uint8_t readerShortPressHome = READER_ACTION_GO_HOME;
   uint8_t readerLongPressHome = READER_ACTION_OPEN_MENU;
+
+  // ── Custom combos (chords) ───────────────────────────────────────────────
+  // Two or more inputs held together, bound to one reader action. Each slot is
+  // a bitmask over the COMBO_BTN_* bit positions plus the action it runs. A
+  // slot with fewer than two bits, or bound to READER_ACTION_NONE, is empty.
+  //
+  // The bit positions are PERSISTED in settings.json — never renumber them (a
+  // stored mask would silently rebind to different inputs). Every field exists
+  // on every build so settings.json round-trips; which BITS a board can
+  // actually produce differs (see ReaderCombos::eligibleMask).
+  static constexpr uint8_t READER_COMBO_SLOTS = 4;
+  enum COMBO_BUTTON : uint8_t {
+    COMBO_BTN_BACK = 0,
+    COMBO_BTN_CONFIRM = 1,
+    COMBO_BTN_LEFT = 2,
+    COMBO_BTN_RIGHT = 3,
+    COMBO_BTN_SIDE_UP = 4,
+    COMBO_BTN_SIDE_DOWN = 5,
+    // Power is combinable, with nothing carved out. Its other claims yield
+    // rather than reserve: main.cpp's 500ms sleep hold and its built-in
+    // POWER+Down / POWER+Confirm chords all stand aside for a combo that is
+    // actually held (ReaderCombos::powerComboHeld / userComboHeld), so even
+    // those two grips can be rebound.
+    COMBO_BTN_POWER = 6,
+    // X4 Pro: a finger resting in one of the reader's three tap zones, cut
+    // along the axis readerTapZoneLayout chooses — the same thirds the tap and
+    // hold actions use, so "hold the left third and press a side key" replaces
+    // that zone's own action for the duration of the chord rather than fighting
+    // it. Bits, not a separate field, so a chord is one mask everywhere.
+    COMBO_BTN_ZONE_LEFT = 7,
+    COMBO_BTN_ZONE_MIDDLE = 8,
+    COMBO_BTN_ZONE_RIGHT = 9,
+    // X4 Pro: the capacitive home key, held. Its own GT911 status bit rather
+    // than a screen contact, so it stays down while a finger is also on the
+    // glass and can be chorded with a zone as well as with a side key.
+    COMBO_BTN_HOME = 10,
+    COMBO_BUTTON_COUNT
+  };
+  // uint16_t because the zone bits take the mask past 8.
+  uint16_t readerComboButtons[READER_COMBO_SLOTS] = {0, 0, 0, 0};
+  uint8_t readerComboAction[READER_COMBO_SLOTS] = {READER_ACTION_NONE, READER_ACTION_NONE, READER_ACTION_NONE,
+                                                   READER_ACTION_NONE};
+
   // Migration flag: 0 = old settings not yet applied to new per-button fields.
   uint8_t readerActionsMigrated = 0;
   // Migration flag for the Full Touch default flip. Defaults are inverted on
@@ -644,6 +701,11 @@ class CrossPointSettings {
   // READER_ACTION_NONE, so a settings.json from an older firmware can't leave a
   // button bound to an action that no longer dispatches.
   static void sanitizeReaderActions(CrossPointSettings& settings);
+
+  // Same for the custom combo slots: drops unknown bits, clears a slot that no
+  // longer names at least two buttons or whose action is gone, and clears a
+  // duplicate mask so one chord can never mean two things.
+  static void sanitizeReaderCombos(CrossPointSettings& settings);
 
   // One-time migration: applies legacy per-action settings (longPressAction, shortPwrBtn,
   // longPressChapterSkip, sideButtonLayout) to the new per-button action fields.

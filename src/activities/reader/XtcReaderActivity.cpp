@@ -26,6 +26,8 @@
 #include "activities/home/ReadingStatsDetailActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/HeapReport.h"
+#include "util/ScreenshotUtil.h"
 
 namespace {
 constexpr unsigned long skipPageMs = 700;
@@ -184,6 +186,23 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
           [this](const ActivityResult&) { requestUpdate(); });
       return false;
 
+    case A::READER_ACTION_SCREENSHOT:
+      // Straight to the framebuffer rather than the Epub reader's deferred
+      // pendingScreenshot: this reader has no post-render hook to hang it on,
+      // and the page is already painted by the time an action runs.
+      if (renderer.isRenderable()) {
+        RenderLock lock(*this);
+        ScreenshotUtil::takeScreenshot(renderer);
+      }
+      return true;
+
+    case A::READER_ACTION_HEAP_REPORT:
+      if (renderer.isRenderable()) {
+        RenderLock lock(*this);
+        HeapReport::dump(renderer);
+      }
+      return true;
+
     default:
       return false;
   }
@@ -191,6 +210,19 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
 
 void XtcReaderActivity::loop() {
   READING_STATS.tickActiveSession();
+
+  // ── Custom combos (chords) ───────────────────────────────────────────────
+  // Ahead of every per-button block below, and swallowing the chord's release
+  // frames after — see EpubReaderActivity for why the order matters.
+  switch (readerCombos.update(mappedInput)) {
+    case ReaderCombos::Result::Fired:
+      executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(readerCombos.firedAction()));
+      return;
+    case ReaderCombos::Result::Consumed:
+      return;
+    case ReaderCombos::Result::None:
+      break;
+  }
 
   // ── Power: long press always sleeps; short press = configured action ──────
   if (mappedInput.isPressed(MappedInputManager::Button::Power) &&
@@ -364,8 +396,7 @@ void XtcReaderActivity::loop() {
       break;
   }
   if (mappedInput.wasHomeKeyLongPressed()) {
-    if (executeReaderAction(
-            static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.effectiveReaderLongPressHome())))
+    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.effectiveReaderLongPressHome())))
       return;
   } else if (mappedInput.wasHomeKeyTapped()) {
     if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressHome))) return;

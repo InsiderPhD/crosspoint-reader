@@ -19,6 +19,16 @@
 #include "WifiCredentialStore.h"
 #include "activities/reader/ReaderMenuVisibility.h"
 
+namespace {
+// JSON keys for the custom combo slots, one pair per slot. String literals
+// rather than a snprintf'd key: ArduinoJson stores a `const char*` key by
+// reference, and these live in flash for the life of the firmware.
+constexpr const char* kComboButtonsKeys[CrossPointSettings::READER_COMBO_SLOTS] = {
+    "readerCombo0Buttons", "readerCombo1Buttons", "readerCombo2Buttons", "readerCombo3Buttons"};
+constexpr const char* kComboActionKeys[CrossPointSettings::READER_COMBO_SLOTS] = {
+    "readerCombo0Action", "readerCombo1Action", "readerCombo2Action", "readerCombo3Action"};
+}  // namespace
+
 // Convert legacy settings.
 void applyLegacyStatusBarSettings(CrossPointSettings& settings) {
   switch (static_cast<CrossPointSettings::STATUS_BAR_MODE>(settings.statusBar)) {
@@ -199,6 +209,10 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["readerTapZoneLayout"] = s.readerTapZoneLayout;
   doc["readerShortPressHome"] = s.readerShortPressHome;
   doc["readerLongPressHome"] = s.readerLongPressHome;
+  for (uint8_t slot = 0; slot < CrossPointSettings::READER_COMBO_SLOTS; slot++) {
+    doc[kComboButtonsKeys[slot]] = s.readerComboButtons[slot];
+    doc[kComboActionKeys[slot]] = s.readerComboAction[slot];
+  }
   doc["readerActionsMigrated"] = s.readerActionsMigrated;
   doc["fullTouchDefaultMigrated"] = s.fullTouchDefaultMigrated;
 
@@ -357,6 +371,14 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
       clampAction(doc["readerShortPressHome"] | (uint8_t)S::READER_ACTION_GO_HOME, S::READER_ACTION_GO_HOME);
   s.readerLongPressHome =
       clampAction(doc["readerLongPressHome"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
+  // Custom combos. Absent keys leave the slot empty; sanitizeReaderCombos()
+  // then drops unknown bits, one-button masks and duplicates, so nothing below
+  // has to re-check a stored mask.
+  for (uint8_t slot = 0; slot < S::READER_COMBO_SLOTS; slot++) {
+    s.readerComboButtons[slot] = doc[kComboButtonsKeys[slot]] | (uint16_t)0;
+    s.readerComboAction[slot] = doc[kComboActionKeys[slot]] | (uint8_t)S::READER_ACTION_NONE;
+  }
+  CrossPointSettings::sanitizeReaderCombos(s);
   s.readerActionsMigrated = doc["readerActionsMigrated"] | (uint8_t)0;
   // Explicit 0, not the struct default: a file predating this key is exactly
   // the file that still needs migrateFullTouchDefault().
