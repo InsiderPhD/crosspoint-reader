@@ -60,8 +60,8 @@ void applyLegacyFrontButtonLayout(CrossPointSettings& settings) {
 
 }  // namespace
 
-void CrossPointSettings::migrateReaderActions(CrossPointSettings& settings) {
-  if (settings.readerActionsMigrated) return;
+bool CrossPointSettings::migrateReaderActions(CrossPointSettings& settings) {
+  if (settings.readerActionsMigrated) return false;
   settings.readerActionsMigrated = 1;
 
   // Map legacy longPressAction → readerLongPressConfirm
@@ -121,16 +121,20 @@ void CrossPointSettings::migrateReaderActions(CrossPointSettings& settings) {
     settings.readerLongPressSideUp = READER_ACTION_NONE;
     settings.readerLongPressSideDown = READER_ACTION_NONE;
   }
+
+  return true;
 }
 
-void CrossPointSettings::migrateFullTouchDefault(CrossPointSettings& settings) {
+bool CrossPointSettings::migrateFullTouchDefault(CrossPointSettings& settings) {
 #if FREEINK_DEVICE_X4PRO
-  if (settings.fullTouchDefaultMigrated) return;
+  if (settings.fullTouchDefaultMigrated) return false;
   settings.fullTouchDefaultMigrated = 1;
   settings.fullTouchUi = 1;
+  return true;
 #else
   // Leave the flag unset so the card still migrates when it reaches an X4 Pro.
   (void)settings;
+  return false;
 #endif
 }
 
@@ -241,9 +245,18 @@ bool CrossPointSettings::loadFromFile() {
       bool resave = false;
       bool result = JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
       if (result) {
-        migrateReaderActions(*this);
-        migrateFullTouchDefault(*this);
-        resave = true;
+        // Only write back when something actually changed. This used to set
+        // resave unconditionally, which re-serialised the whole settings
+        // document and wrote settings.json to the SD card on EVERY boot — a
+        // write on a path where nothing had changed, against the project's own
+        // write-throttling rule. Both migrations self-gate on a "migrated" flag
+        // that a loaded file already carries, so on a normal boot neither does
+        // any work and there is nothing to save.
+        // Note the ordering: both migrations must run, so they cannot be
+        // short-circuited by ||.
+        const bool migratedActions = migrateReaderActions(*this);
+        const bool migratedFullTouch = migrateFullTouchDefault(*this);
+        resave = resave || migratedActions || migratedFullTouch;
       }
       if (result && resave) {
         if (saveToFile()) {
