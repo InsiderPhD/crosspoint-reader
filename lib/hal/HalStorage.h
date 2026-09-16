@@ -20,7 +20,9 @@ class HalStorage {
   // file is closed; a deep-sleep wake remounts through begin().
   void shutdown();
   std::vector<String> listFiles(const char* path = "/", int maxFiles = 200);
-  // Read the entire file at `path` into a String. Returns empty string on failure.
+  // Read the entire file at `path` into a String. Returns an empty string on failure,
+  // which includes a file larger than the 50KB ceiling — oversized files are refused
+  // and logged rather than truncated into content the caller cannot parse.
   String readFile(const char* path);
   // Low-memory helpers:
   // Stream the file contents to a `Print` (e.g. `Serial`, or any `Print`-derived object).

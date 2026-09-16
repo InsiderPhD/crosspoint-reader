@@ -52,7 +52,71 @@ std::vector<String> HalStorage::listFiles(const char* path, int maxFiles) {
   HAL_STORAGE_WRAPPED_CALL(listFiles, path, maxFiles);
 }
 
-String HalStorage::readFile(const char* path) { HAL_STORAGE_WRAPPED_CALL(readFile, path); }
+// Deliberately NOT forwarded to SDCardManager::readFile(). That implementation
+// reads the file one byte at a time and appends each byte to the String, and
+// Arduino's String grows its buffer in 16-byte steps — so it costs one
+// FsFile::read() per byte plus one realloc()+copy per 16 bytes. Every JSON store
+// on the boot path goes through here (settings, app state, recent books, WiFi
+// credentials, KOReader creds, reading stats), and reading_stats.json is the
+// largest file the firmware reads this way: at 40KB that is ~40,000 single-byte
+// reads and ~2,500 reallocs copying ~50MB in aggregate, all of it before the
+// device is responsive. Reading in blocks with the capacity reserved up front
+// makes it one allocation and ~320 reads.
+//
+// The size ceiling is also enforced up front now. The old path silently stopped
+// at 50,000 bytes, which turns an oversized reading_stats.json into a JSON parse
+// error with no clue as to why; refusing it with a log line is diagnosable.
+String HalStorage::readFile(const char* path) {
+  static constexpr size_t MAX_READ_FILE_BYTES = 50000;
+  // 128 bytes keeps this frame inside the 256-byte stack budget while still
+  // cutting the read count by two orders of magnitude.
+  static constexpr size_t BLOCK_BYTES = 128;
+
+  StorageLock lock;
+
+  FsFile file;
+  if (!SDCard.openFileForRead("SD", path, file)) {
+    return {""};
+  }
+
+  const uint64_t fileBytes = file.fileSize();
+  if (fileBytes == 0) {
+    file.close();
+    return {""};
+  }
+  if (fileBytes > MAX_READ_FILE_BYTES) {
+    LOG_ERR("SD", "readFile: %s is %u bytes, over the %u byte limit", path, static_cast<unsigned>(fileBytes),
+            static_cast<unsigned>(MAX_READ_FILE_BYTES));
+    file.close();
+    return {""};
+  }
+
+  const size_t total = static_cast<size_t>(fileBytes);
+  String content;
+  if (!content.reserve(total)) {
+    LOG_ERR("SD", "readFile: cannot reserve %u bytes for %s", static_cast<unsigned>(total), path);
+    file.close();
+    return {""};
+  }
+
+  char block[BLOCK_BYTES];
+  size_t remaining = total;
+  while (remaining > 0) {
+    const size_t want = remaining < BLOCK_BYTES ? remaining : BLOCK_BYTES;
+    const int got = file.read(block, want);
+    if (got <= 0) break;
+    content.concat(block, static_cast<unsigned int>(got));
+    remaining -= static_cast<size_t>(got);
+  }
+  file.close();
+
+  if (remaining != 0) {
+    LOG_ERR("SD", "readFile: short read on %s (%u of %u bytes)", path, static_cast<unsigned>(total - remaining),
+            static_cast<unsigned>(total));
+    return {""};
+  }
+  return content;
+}
 
 bool HalStorage::readFileToStream(const char* path, Print& out, size_t chunkSize) {
   HAL_STORAGE_WRAPPED_CALL(readFileToStream, path, out, chunkSize);
