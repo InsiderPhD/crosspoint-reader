@@ -271,6 +271,7 @@ bool syncBookFusionTimeWithNTP() {
 }
 
 void EpubReaderActivity::buildBookPageCache() {
+  const unsigned long startMs = millis();
   const int spineCount = epub->getSpineItemsCount();
   spinePageCountCache.clear();
   spinePageCountCache.reserve(spineCount);
@@ -278,6 +279,7 @@ void EpubReaderActivity::buildBookPageCache() {
 
   // First pass: read actual page counts from each cached section file header
   int totalKnownPages = 0;
+  int cachedSpines = 0;
   size_t totalKnownBytes = 0;
   for (int i = 0; i < spineCount; i++) {
     const std::string path = epub->getCachePath() + "/sections/" + std::to_string(i) + ".bin";
@@ -286,11 +288,14 @@ void EpubReaderActivity::buildBookPageCache() {
       const size_t prevSize = (i > 0) ? epub->getCumulativeSpineItemSize(i - 1) : 0;
       totalKnownPages += spinePageCountCache[i];
       totalKnownBytes += epub->getCumulativeSpineItemSize(i) - prevSize;
+      cachedSpines++;
     }
   }
 
   if (totalKnownBytes == 0) {
-    return;  // No rendered chapters yet; time-left will fall back to old method
+    // No rendered chapters yet; time-left will fall back to old method.
+    LOG_INF("ERS", "Book page cache: %lu ms for %d spines (none cached)", millis() - startMs, spineCount);
+    return;
   }
 
   // Second pass: estimate uncached spines using pages-per-byte from known spines, sum total
@@ -304,8 +309,12 @@ void EpubReaderActivity::buildBookPageCache() {
     }
     cachedTotalBookPages += spinePageCountCache[i];
   }
-  LOG_DBG("ERS", "Book page cache built: %d total pages across %d spines (%d known)", cachedTotalBookPages, spineCount,
-          totalKnownPages);
+  // One SD open + header read per spine item, on the path between the boot
+  // screen and the first page of a resumed book. LOG_INF because a book with
+  // hundreds of spine items is a candidate answer to "why was boot so slow",
+  // and that answer has to be visible without a debug build.
+  LOG_INF("ERS", "Book page cache: %lu ms for %d spines (%d cached, %d total pages)", millis() - startMs, spineCount,
+          cachedSpines, cachedTotalBookPages);
 }
 
 uint32_t EpubReaderActivity::computeBookTimeLeftSeconds() const {
