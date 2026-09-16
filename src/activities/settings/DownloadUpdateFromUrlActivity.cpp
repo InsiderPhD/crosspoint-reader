@@ -15,6 +15,7 @@
 #include "fontIds.h"
 #include "network/FirmwareFlasher.h"
 #include "network/HttpDownloader.h"
+#include "util/HardcoverSync.h"
 
 namespace {
 // Same SD temp slot the GitHub OTA install uses; removed on exit / after flash.
@@ -61,6 +62,7 @@ void DownloadUpdateFromUrlActivity::onUrlEntered(const ActivityResult& result) {
     RenderLock lock(*this);
     state = State::CONNECTING_WIFI;
   }
+  HardcoverSync::preempt();
   WiFi.mode(WIFI_STA);
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
                          [this](const ActivityResult& res) { onWifiSelectionComplete(!res.isCancelled); });

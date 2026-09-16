@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
+#include <HardcoverTokenStore.h>
 #include <I18n.h>
 
 #include <algorithm>
@@ -17,6 +18,7 @@
 #include "ReadingStatsDetailActivity.h"
 #include "ReadingStatsStore.h"
 #include "SessionDateEditActivity.h"
+#include "activities/settings/HardcoverPushActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/ActionBar.h"
 #include "components/UITheme.h"
@@ -33,26 +35,32 @@
 #include "components/icons/recent.h"
 #include "components/icons/streak24.h"
 #include "fontIds.h"
+#include "util/HardcoverSync.h"
 #include "util/ReadingStatsAnalytics.h"
 #include "util/TimeUtils.h"
 #include "util/TouchListNav.h"
 
 namespace {
 constexpr unsigned long BOOK_LONG_PRESS_MS = 1000;
-constexpr int TOTAL_STATS_PAGES = 6;
+constexpr int TOTAL_STATS_PAGES = 7;
 constexpr int PAGE_OVERVIEW = 0;
-constexpr int PAGE_STARTED_BOOKS = 1;
-constexpr int PAGE_WEEKLY = 2;
-constexpr int PAGE_MONTHLY = 3;
-constexpr int PAGE_SESSIONS = 4;
-constexpr int PAGE_YEAR = 5;
+constexpr int PAGE_PROFILE = 1;
+constexpr int PAGE_STARTED_BOOKS = 2;
+constexpr int PAGE_WEEKLY = 3;
+constexpr int PAGE_MONTHLY = 4;
+constexpr int PAGE_SESSIONS = 5;
+constexpr int PAGE_YEAR = 6;
 
 // Tab labels in display order — index matches the PAGE_* enum values above.
-// The Reading Profile is shown on the Overview tab (not a dedicated tab). The
-// tab bar auto-scrolls to keep the selected tab's full label readable.
+// The tab bar auto-scrolls to keep the selected tab's full label readable.
 constexpr StrId TAB_NAMES[TOTAL_STATS_PAGES] = {
-    StrId::STR_STATS_TAB_OVERVIEW, StrId::STR_STATS_TAB_BOOKS, StrId::STR_STATS_TAB_WEEKLY, StrId::STR_MONTH,
-    StrId::STR_STATS_TAB_SESSIONS, StrId::STR_STATS_TAB_YEAR,
+    StrId::STR_STATS_TAB_OVERVIEW,
+    StrId::STR_STATS_TAB_PROFILE,
+    StrId::STR_STATS_TAB_BOOKS,
+    StrId::STR_STATS_TAB_WEEKLY,
+    StrId::STR_MONTH,
+    StrId::STR_STATS_TAB_SESSIONS,
+    StrId::STR_STATS_TAB_YEAR,
 };
 
 // Sessions tab is capped at one screenful like the Books tab.
@@ -85,6 +93,9 @@ std::vector<size_t> collectUndatedSessionIndices() {
 
 constexpr int SUMMARY_ROW_HEIGHT = 34;
 constexpr int SUMMARY_GAP = 8;
+// Overview's Hardcover block: a sync-status row, then the push button.
+constexpr int HARDCOVER_BUTTON_GAP = 6;
+constexpr int HARDCOVER_BUTTON_HEIGHT = 36;
 constexpr int LIST_HEADER_HEIGHT = 34;
 constexpr int LIST_HEADER_BOTTOM_GAP = 12;
 constexpr int BOOK_ROW_HEIGHT = 82;
@@ -864,6 +875,14 @@ void ReadingStatsActivity::loop() {
         requestUpdate();
         return;
       }
+      if (currentPage == PAGE_OVERVIEW) {
+        const Rect button = hardcoverButtonRect();
+        if (lx >= button.x && lx < button.x + button.width && ly >= button.y && ly < button.y + button.height &&
+            ly >= tabBarRect().y + tabBarRect().height) {
+          openHardcoverPush();
+          return;
+        }
+      }
       if (currentPage == PAGE_STARTED_BOOKS || currentPage == PAGE_SESSIONS) {
         // selectedItemIndex - 1 mirrors what render() passes to drawList, so
         // the hit-test sees the same visible page (-1 = ribbon focused, no
@@ -904,6 +923,10 @@ void ReadingStatsActivity::loop() {
       changePage(1);
       return;
     }
+    if (currentPage == PAGE_OVERVIEW) {
+      openHardcoverPush();
+      return;
+    }
     if (currentPage == PAGE_STARTED_BOOKS) {
       if (mappedInput.getHeldTime() >= BOOK_LONG_PRESS_MS) {
         confirmRemoveSelectedBook();
@@ -916,7 +939,7 @@ void ReadingStatsActivity::loop() {
       openSelectedSessionEditor();
       return;
     }
-    // Pages without per-item actions (Overview/Weekly/Monthly): no-op on
+    // Pages without per-item actions (Profile/Weekly/Monthly/Year): no-op on
     // content positions. selectedItemIndex stays at 0 on those pages anyway
     // because currentPageItemCount() returns 0.
     return;
@@ -957,10 +980,34 @@ void ReadingStatsActivity::loop() {
     }
   }
 
+  // Overview's one selectable item is the Push to Hardcover button pinned to the
+  // top of its content. It sits between the ribbon and the scrolled content: at
+  // the top of the page Down focuses it, and Down again leaves it and scrolls.
+  if (currentPage == PAGE_OVERVIEW) {
+    const bool down = mappedInput.wasReleased(MappedInputManager::Button::Down) ||
+                      mappedInput.wasReleased(MappedInputManager::Button::Right);
+    const bool up = mappedInput.wasReleased(MappedInputManager::Button::Up) ||
+                    mappedInput.wasReleased(MappedInputManager::Button::Left);
+    if (selectedItemIndex == 1 && (down || up)) {
+      selectedItemIndex = 0;
+      if (down) {
+        scrollOffset = std::min(STATS_SCROLL_STEP, maxScroll);
+      }
+      requestUpdate();
+      return;
+    }
+    if (selectedItemIndex == 0 && scrollOffset == 0 && down) {
+      selectedItemIndex = 1;
+      requestUpdate();
+      return;
+    }
+  }
+
   // Overview and Weekly scroll vertically when their content overflows. Short
   // Up/Down OR Left/Right step the scroll offset; long-press still cycles tabs
   // via the navigator below. maxScroll is set during render.
-  const bool scrollablePage = (currentPage == PAGE_OVERVIEW || currentPage == PAGE_WEEKLY);
+  const bool scrollablePage =
+      (currentPage == PAGE_OVERVIEW || currentPage == PAGE_PROFILE || currentPage == PAGE_WEEKLY);
   if (scrollablePage && selectedItemIndex == 0 && maxScroll > 0) {
     // Full Touch: a vertical swipe scrolls a screenful, in the same content-drag
     // sense as the paginated lists (swipe up reveals what is below). Without
@@ -1037,6 +1084,8 @@ void ReadingStatsActivity::loop() {
 
 int ReadingStatsActivity::currentPageItemCount() const {
   switch (currentPage) {
+    case PAGE_OVERVIEW:
+      return 1;  // Push to Hardcover
     case PAGE_STARTED_BOOKS: {
       const int totalBooks = static_cast<int>(getUnfinishedBooks().size());
       return std::min(totalBooks, BOOKS_PER_PAGE);
@@ -1048,6 +1097,22 @@ int ReadingStatsActivity::currentPageItemCount() const {
     default:
       return 0;
   }
+}
+
+void ReadingStatsActivity::openHardcoverPush() {
+  startActivityForResult(std::make_unique<HardcoverPushActivity>(renderer, mappedInput), [this](const ActivityResult&) {
+    guardBackReturn();
+    requestUpdate();
+  });
+}
+
+// Screen rect of the Overview's Push to Hardcover button, which scrolls with the
+// content below the sync-status row. Shared by render() and tap hit-testing.
+Rect ReadingStatsActivity::hardcoverButtonRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
+  return Rect{metrics.contentSidePadding, contentTop - scrollOffset + SUMMARY_ROW_HEIGHT + HARDCOVER_BUTTON_GAP,
+              renderer.getScreenWidth() - metrics.contentSidePadding * 2, HARDCOVER_BUTTON_HEIGHT};
 }
 
 void ReadingStatsActivity::openSelectedBook() {
@@ -1163,7 +1228,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
   // bar and runs to contentBottom — buttonHints and a small gap.
   const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
   const int contentBottom = pageHeight - metrics.buttonHintsHeight - 4;
-  // The two SCROLLING tabs (Overview/Weekly) give their bottom strip to the
+  // The SCROLLING tabs (Overview/Profile/Weekly) give their bottom strip to the
   // page counter, the same strip every list screen reserves — a scroll bar
   // alone is too easy to miss. The fixed tabs draw to contentBottom as before.
   const int scrollBottom = contentBottom - metrics.pageIndicatorHeight;
@@ -1175,7 +1240,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
   buildTabs(tabs);
   GUI.drawTabBar(renderer, tabBarRect(), tabs, selectedItemIndex == 0);
 
-  // Reset each render; scrollable tabs (Overview/Weekly) set it from their
+  // Reset each render; scrollable tabs (Overview/Profile/Weekly) set it from their
   // measured content height so loop() knows whether Up/Down/Left/Right scroll.
   maxScroll = 0;
 
@@ -1215,63 +1280,44 @@ void ReadingStatsActivity::render(RenderLock&&) {
     const uint64_t todayReadingMs = READING_STATS.getTodayReadingMs();
     const std::string dailyGoalValue = ReadingStatsAnalytics::formatDurationHm(todayReadingMs) + " / " +
                                        ReadingStatsAnalytics::formatDurationHm(getDailyReadingGoalMs());
-    const auto profile = ReadingStatsAnalytics::buildReadingProfileSummary();
 
-    // The Overview content (stat rows + Reading Profile) can exceed a screenful,
-    // so it scrolls. Everything is laid out in virtual coordinates from 0 and
-    // drawn at (contentTop + virtualY - scroll); content that lands above/below
-    // the viewport is masked after drawing. (The annual chart moved to Sessions.)
+    // Laid out in virtual coordinates from 0 and drawn at (contentTop + virtualY
+    // - scroll), masked after drawing. Normally a screenful; scrolls if a
+    // landscape orientation or a larger theme metric makes it overflow.
     const int viewportHeight = scrollBottom - contentTop;
-    const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-    constexpr int PROFILE_NAME_HEIGHT = 22;
-    constexpr int PROFILE_DIM_GAP = 8;
-
-    // Pre-wrap the four dimension descriptions so we can measure total height.
-    const StrId dimNameIds[4] = {StrId::STR_HABIT, StrId::STR_STABILITY, StrId::STR_ENGAGEMENT, StrId::STR_DEPTH};
-    const StrId dimDescIds[4] = {StrId::STR_HABIT_DESC, StrId::STR_STABILITY_DESC, StrId::STR_ENGAGEMENT_DESC,
-                                 StrId::STR_DEPTH_DESC};
-    const int dimScores[4] = {profile.habit.score, profile.stability.score, profile.engagement.score,
-                              profile.depth.score};
-    std::array<std::vector<std::string>, 4> dimDescLines;
-    std::array<std::vector<std::string>, 4> dimBreakLines;
-    if (profile.hasData) {
-      // Labelled per-dimension breakdown (the raw numbers behind each score).
-      const std::string breaks[4] = {
-          std::string(I18N.get(StrId::STR_DAYS_READ)) + " " + profile.habit.primaryValue + "   " +
-              I18N.get(StrId::STR_GOALS_MET) + " " + profile.habit.secondaryValue,
-          std::string(I18N.get(StrId::STR_READ_STREAK)) + " " + profile.stability.primaryValue + "   " +
-              I18N.get(StrId::STR_BEST_DAY_SHARE) + " " + profile.stability.secondaryValue,
-          std::string(I18N.get(StrId::STR_SESSIONS)) + " " + profile.engagement.primaryValue + "   " +
-              I18N.get(StrId::STR_PER_READ_DAY) + " " + profile.engagement.secondaryValue,
-          std::string(I18N.get(StrId::STR_SESSIONS_UNDER_10M)) + " " + profile.depth.primaryValue + "   " +
-              I18N.get(StrId::STR_SESSIONS_10M_TO_29M) + " " + profile.depth.secondaryValue + "   " +
-              I18N.get(StrId::STR_SESSIONS_30M_PLUS) + " " + profile.depth.tertiaryValue,
-      };
-      for (int i = 0; i < 4; ++i) {
-        dimBreakLines[i] = renderer.wrappedText(UI_10_FONT_ID, breaks[i].c_str(), contentWidth, 2);
-        dimDescLines[i] = renderer.wrappedText(UI_10_FONT_ID, I18N.get(dimDescIds[i]), contentWidth, 3);
-      }
-    }
 
     // ---- Measure pass: total virtual content height ----
     constexpr int SUMMARY_ROW_COUNT = 9;
-    int totalHeight = SUMMARY_ROW_HEIGHT * SUMMARY_ROW_COUNT;
-    if (profile.hasData) {
-      totalHeight += SUMMARY_GAP + CHART_HEADER_HEIGHT + 4;  // Profile sub-header
-      for (int i = 0; i < 4; ++i) {
-        totalHeight += PROFILE_NAME_HEIGHT +
-                       static_cast<int>(dimBreakLines[i].size() + dimDescLines[i].size()) * lineHeight +
-                       PROFILE_DIM_GAP;
-      }
-    }
-    totalHeight += SUMMARY_GAP;  // small bottom margin
+    constexpr int HARDCOVER_BLOCK_HEIGHT =
+        SUMMARY_ROW_HEIGHT + HARDCOVER_BUTTON_GAP + HARDCOVER_BUTTON_HEIGHT + SUMMARY_GAP;
+    const int totalHeight = HARDCOVER_BLOCK_HEIGHT + SUMMARY_ROW_HEIGHT * SUMMARY_ROW_COUNT + SUMMARY_GAP;
 
     maxScroll = std::max(0, totalHeight - viewportHeight);
     scrollOffset = std::clamp(scrollOffset, 0, maxScroll);
 
     // ---- Draw pass ----
-    const int dy = contentTop - scrollOffset;
-    int y = dy;
+    int y = contentTop - scrollOffset;
+
+    // Hardcover: how this device syncs, and the manual push. A board without the
+    // background push only ever syncs from this button.
+    {
+      const char* mode = tr(STR_HARDCOVER_NOT_SET_UP);
+      if (HC_TOKEN_STORE.hasToken()) {
+        mode = CROSSPOINT_HARDCOVER_AUTO_SYNC ? tr(STR_HARDCOVER_AUTO) : tr(STR_HARDCOVER_MANUAL);
+      }
+      drawMetricRow(renderer, Rect{sidePadding, y, contentWidth, SUMMARY_ROW_HEIGHT}, Receipttotal24Icon,
+                    tr(STR_HARDCOVER_SYNC_STATUS), mode);
+      const Rect button = hardcoverButtonRect();
+      const bool focused = selectedItemIndex == 1;
+      if (focused) {
+        renderer.fillRect(button.x, button.y, button.width, button.height, true);
+      } else {
+        renderer.drawRect(button.x, button.y, button.width, button.height, true);
+      }
+      const int textY = button.y + (button.height - renderer.getLineHeight(UI_10_FONT_ID)) / 2;
+      renderer.drawCenteredText(UI_10_FONT_ID, textY, tr(STR_PUSH_TO_HARDCOVER), !focused, EpdFontFamily::BOLD);
+      y += HARDCOVER_BLOCK_HEIGHT;
+    }
 
     // "Sessions today" row also shows the lifetime average sessions per reading
     // day, e.g. "3  (2.1/day)". Guard against zero reading days.
@@ -1311,8 +1357,57 @@ void ReadingStatsActivity::render(RenderLock&&) {
       y += SUMMARY_ROW_HEIGHT;
     }
 
-    if (profile.hasData) {
-      y += SUMMARY_GAP;
+    drawScrollChrome();
+  } else if (currentPage == PAGE_PROFILE) {
+    const auto profile = ReadingStatsAnalytics::buildReadingProfileSummary();
+    if (!profile.hasData) {
+      renderer.drawCenteredText(UI_10_FONT_ID, (contentTop + contentBottom) / 2, tr(STR_NO_READING_STATS));
+    } else {
+      // Four dimensions with wrapped breakdowns and descriptions: longer than a
+      // screenful, so the tab scrolls like Weekly.
+      const int viewportHeight = scrollBottom - contentTop;
+      const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+      constexpr int PROFILE_NAME_HEIGHT = 22;
+      constexpr int PROFILE_DIM_GAP = 8;
+
+      const StrId dimNameIds[4] = {StrId::STR_HABIT, StrId::STR_STABILITY, StrId::STR_ENGAGEMENT, StrId::STR_DEPTH};
+      const StrId dimDescIds[4] = {StrId::STR_HABIT_DESC, StrId::STR_STABILITY_DESC, StrId::STR_ENGAGEMENT_DESC,
+                                   StrId::STR_DEPTH_DESC};
+      const int dimScores[4] = {profile.habit.score, profile.stability.score, profile.engagement.score,
+                                profile.depth.score};
+      // Labelled per-dimension breakdown (the raw numbers behind each score).
+      const std::string breaks[4] = {
+          std::string(I18N.get(StrId::STR_DAYS_READ)) + " " + profile.habit.primaryValue + "   " +
+              I18N.get(StrId::STR_GOALS_MET) + " " + profile.habit.secondaryValue,
+          std::string(I18N.get(StrId::STR_READ_STREAK)) + " " + profile.stability.primaryValue + "   " +
+              I18N.get(StrId::STR_BEST_DAY_SHARE) + " " + profile.stability.secondaryValue,
+          std::string(I18N.get(StrId::STR_SESSIONS)) + " " + profile.engagement.primaryValue + "   " +
+              I18N.get(StrId::STR_PER_READ_DAY) + " " + profile.engagement.secondaryValue,
+          std::string(I18N.get(StrId::STR_SESSIONS_UNDER_10M)) + " " + profile.depth.primaryValue + "   " +
+              I18N.get(StrId::STR_SESSIONS_10M_TO_29M) + " " + profile.depth.secondaryValue + "   " +
+              I18N.get(StrId::STR_SESSIONS_30M_PLUS) + " " + profile.depth.tertiaryValue,
+      };
+      std::array<std::vector<std::string>, 4> dimDescLines;
+      std::array<std::vector<std::string>, 4> dimBreakLines;
+      for (int i = 0; i < 4; ++i) {
+        dimBreakLines[i] = renderer.wrappedText(UI_10_FONT_ID, breaks[i].c_str(), contentWidth, 2);
+        dimDescLines[i] = renderer.wrappedText(UI_10_FONT_ID, I18N.get(dimDescIds[i]), contentWidth, 3);
+      }
+
+      // ---- Measure pass ----
+      int totalHeight = CHART_HEADER_HEIGHT + 4;  // score sub-header
+      for (int i = 0; i < 4; ++i) {
+        totalHeight += PROFILE_NAME_HEIGHT +
+                       static_cast<int>(dimBreakLines[i].size() + dimDescLines[i].size()) * lineHeight +
+                       PROFILE_DIM_GAP;
+      }
+      totalHeight += SUMMARY_GAP;  // small bottom margin
+
+      maxScroll = std::max(0, totalHeight - viewportHeight);
+      scrollOffset = std::clamp(scrollOffset, 0, maxScroll);
+
+      // ---- Draw pass ----
+      int y = contentTop - scrollOffset;
       GUI.drawSubHeader(renderer, Rect{0, y, pageWidth, CHART_HEADER_HEIGHT}, tr(STR_STATS_TAB_PROFILE),
                         std::to_string(profile.totalScore).c_str());
       y += CHART_HEADER_HEIGHT + 4;
@@ -1330,9 +1425,9 @@ void ReadingStatsActivity::render(RenderLock&&) {
         }
         y += PROFILE_DIM_GAP;
       }
-    }
 
-    drawScrollChrome();
+      drawScrollChrome();
+    }
   } else if (currentPage == PAGE_STARTED_BOOKS) {
     const auto books = getUnfinishedBooks();
     const int totalBooks = static_cast<int>(books.size());
@@ -1566,7 +1661,12 @@ void ReadingStatsActivity::render(RenderLock&&) {
   std::string btn2;
   std::string btn3;
   std::string btn4;
-  if (currentPage == PAGE_STARTED_BOOKS || currentPage == PAGE_SESSIONS) {
+  if (currentPage == PAGE_OVERVIEW && selectedItemIndex == 1) {
+    // Push to Hardcover is focused: Confirm opens it, Up/Down leave it.
+    btn2 = tr(STR_SELECT);
+    btn3 = tr(STR_DIR_UP);
+    btn4 = tr(STR_DIR_DOWN);
+  } else if (currentPage == PAGE_STARTED_BOOKS || currentPage == PAGE_SESSIONS) {
     btn2 = (selectedItemIndex == 0) ? nextTabName : tr(STR_SELECT);
     btn3 = tr(STR_DIR_UP);
     btn4 = tr(STR_DIR_DOWN);
@@ -1576,7 +1676,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
     btn3 = tr(STR_DIR_UP);
     btn4 = tr(STR_DIR_DOWN);
   } else if (maxScroll > 0) {
-    // Overview/Weekly scroll when their content overflows; Up/Down (or
+    // Overview/Profile/Weekly scroll when their content overflows; Up/Down (or
     // Left/Right) move the view.
     btn2 = nextTabName;
     btn3 = tr(STR_DIR_UP);

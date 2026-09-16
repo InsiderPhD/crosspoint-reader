@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -7,6 +8,18 @@
 // Returns the user-configured daily reading goal in milliseconds.
 // Implemented in ReadingStatsStore.cpp; reads from CrossPointSettings.
 uint64_t getDailyReadingGoalMs();
+
+// Book progress at which the readers mark a book completed (short of 100% so
+// back matter nobody pages through doesn't keep a book "in progress"). Also what
+// Hardcover receives as Read.
+inline constexpr int READING_COMPLETED_PERCENT = 95;
+
+// Which part of the day a stretch of reading landed in. Boundaries match the
+// CrossInk dashboard the "reader type" badge was ported from: Morning 05-12,
+// Afternoon 12-17, Evening 17-21, Night otherwise.
+enum class ReadingTimeBucket : uint8_t { Morning = 0, Afternoon, Evening, Night };
+inline constexpr size_t READING_TIME_BUCKET_COUNT = 4;
+ReadingTimeBucket readingTimeBucketForHour(uint8_t hour);
 
 struct ReadingDayStats {
   uint32_t dayOrdinal = 0;
@@ -55,6 +68,12 @@ struct ReadingSessionLogEntry {
   // this; loadReadingStats fills it in with a best-effort match (the book with
   // the most reading on that day). Empty when even best-effort can't guess.
   std::string bookId;
+  // Book progress (0-100) when the session ended, so a day's progress can be
+  // replayed to Hardcover. PROGRESS_UNKNOWN for sessions logged before this
+  // was recorded. One byte: the entry pads to 36 bytes, ~1KB across the
+  // 256-entry log.
+  static constexpr uint8_t PROGRESS_UNKNOWN = 0xFF;
+  uint8_t endProgressPercent = PROGRESS_UNKNOWN;
 };
 
 class ReadingStatsStore;
@@ -99,12 +118,19 @@ class ReadingStatsStore {
     // it to a single day if the resolved date changes.
     uint32_t bucketedDay = 0;
     uint64_t bucketedMs = 0;
+    // Same idea for the time-of-day buckets, tracked separately: those are
+    // credited to whichever bucket the clock is in at each checkpoint and are
+    // never moved afterwards, so they cannot share bucketedMs.
+    uint64_t todBucketedMs = 0;
   };
 
   std::vector<ReadingBookStats> books;
   std::vector<ReadingDayStats> legacyReadingDays;
   std::vector<ReadingDayStats> readingDays;
   std::vector<ReadingSessionLogEntry> sessionLog;
+  // Lifetime reading time split by part of day. Fixed 4-entry array (32 bytes),
+  // so no heap and no growth over the device's life.
+  uint64_t timeOfDayMs[READING_TIME_BUCKET_COUNT] = {};
   SessionState activeSession;
   ReadingSessionSnapshot lastSessionSnapshot;
   uint32_t sessionSerialCounter = 0;
@@ -142,7 +168,8 @@ class ReadingStatsStore {
   void flushActiveSessionToBuckets();
   // bookId may be empty (legacy paths) and dayOrdinal may be 0 (no date yet).
   // The MAX_SESSION_LOG_ENTRIES cap is still applied.
-  void appendSessionLogEntry(uint32_t dayOrdinal, uint32_t sessionMs, const std::string& bookId);
+  void appendSessionLogEntry(uint32_t dayOrdinal, uint32_t sessionMs, const std::string& bookId,
+                             uint8_t endProgressPercent = ReadingSessionLogEntry::PROGRESS_UNKNOWN);
   bool convertLegacyReadingDaysToUnassigned();
   uint32_t resolveCurrentMonthReferenceDayOrdinal() const;
   bool pruneToCurrentMonth(uint32_t referenceDayOrdinal);
@@ -198,6 +225,11 @@ class ReadingStatsStore {
   const std::vector<ReadingBookStats>& getBooks() const { return books; }
   const std::vector<ReadingDayStats>& getReadingDays() const { return readingDays; }
   const std::vector<ReadingSessionLogEntry>& getSessionLog() const { return sessionLog; }
+  // Lifetime milliseconds read in each ReadingTimeBucket. Only accrues while
+  // the wall clock is valid, so it stays all-zero on a device that has never
+  // synced time.
+  const uint64_t* getTimeOfDayMs() const { return timeOfDayMs; }
+  bool hasTimeOfDayData() const;
   static bool shouldIgnorePath(const std::string& path);
 
   uint32_t getBooksStartedCount() const { return static_cast<uint32_t>(books.size()); }

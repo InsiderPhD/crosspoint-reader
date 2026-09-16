@@ -17,6 +17,11 @@
 > in the book's cache directory (HTML-stripped plain UTF-8, capped at
 > `Epub::MAX_DESCRIPTION_BYTES`) and read lazily by the Book Details view so it never loads
 > on the Library hot path.
+>
+> The first `<dc:identifier>` that is a valid ISBN is likewise kept out of `book.bin`: it is
+> written, normalised to ISBN-13 (13 ASCII digits, no newline), to an `isbn.txt` sidecar in the
+> same cache directory on the metadata-build pass. Absent when the book has no valid ISBN or its
+> cache predates the sidecar. Read only by the Hardcover sync when linking a book.
 
 ### Version 3
 
@@ -272,3 +277,16 @@ if (parsedSize != fileSize) {
     std::warning(std::format("Unparsed data detected: {} bytes remaining at offset 0x{:X}", fileSize - parsedSize, parsedSize));
 }
 ```
+
+## Hardcover sidecars
+
+- `/.crosspoint/hardcover.json` — the obfuscated API token (`token_obf`) plus the cached
+  account `user_id` and `privacy_setting_id`.
+- `/.crosspoint/hardcover_<md5 of epub path>.json` — per-book link: `book_id`, `edition_id`,
+  `pages`, `user_book_id`, `read_id`, `started_at`, `synced_pages`, `synced_percent`,
+  `synced_day` (last local day ordinal whose progress was replayed as a dated update),
+  `finished`, `miss_at` (epoch of the last failed match; retried after a week). Deleting it
+  only costs a re-link on the next push, and a replay of the days still in the session log.
+- `/.crosspoint/reading_stats.json` `sessionLog` entries carry an optional `endProgress`
+  (0-100, book progress when the session ended). Absent on sessions logged before it was
+  recorded; no format version bump, older firmware ignores the key.

@@ -20,6 +20,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "util/HardcoverSync.h"
 #include "util/TouchListNav.h"
 
 namespace {
@@ -256,6 +257,7 @@ void FontDownloadActivity::onEnter() {
   // triangulate who holds it.
   LOG_INF("FONT", "Heap at entry: free=%u largest=%u", ESP.getFreeHeap(),
           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  HardcoverSync::preempt();
   WiFi.mode(WIFI_STA);
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });

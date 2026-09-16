@@ -7,7 +7,7 @@
 
 struct Rect;
 
-enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, BOOKFUSION };
+enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, BOOKFUSION, OPDS };
 
 /**
  * NetworkModeSelectionActivity presents the user with a choice:
@@ -15,6 +15,7 @@ enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, BOOKFUSI
  * - "Connect to Calibre" - Use Calibre wireless device transfers
  * - "Create Hotspot" - Create an Access Point that others can connect to (AP mode)
  * - "BookFusion" - Browse a linked BookFusion library (only once an account is linked)
+ * - "OPDS Browser" - Browse an OPDS catalogue (only once a server URL is set)
  *
  * The onModeSelected callback is called with the user's choice.
  * The onCancel callback is called if the user presses back.

@@ -173,6 +173,16 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const 
         LOG_ERR("EBP", "Could not write description sidecar");
       }
     }
+
+    // ISBN sidecar for tracker lookups (Hardcover). A sidecar rather than a
+    // book.bin field: adding a field means a cache-version bump, which blanks
+    // the Tags/Authors folder views for every book until a recache.
+    const auto isbnPath = getIsbnPath();
+    if (opfParser.isbn.empty()) {
+      if (Storage.exists(isbnPath.c_str())) Storage.remove(isbnPath.c_str());
+    } else if (!Storage.writeFile(isbnPath.c_str(), String(opfParser.isbn.c_str()))) {
+      LOG_ERR("EBP", "Could not write ISBN sidecar");
+    }
   }
 
   if (!opfParser.tocNcxPath.empty()) {
@@ -693,6 +703,8 @@ const std::string& Epub::getBookshelf() const {
 }
 
 std::string Epub::getDescriptionPath() const { return cachePath + "/desc.bin"; }
+
+std::string Epub::getIsbnPath() const { return cachePath + "/isbn.txt"; }
 
 bool Epub::hasDescription() const { return Storage.exists(getDescriptionPath().c_str()); }
 

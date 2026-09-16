@@ -16,7 +16,6 @@ class HomeActivity final : public Activity {
   bool recentsLoading = false;
   bool recentsLoaded = false;
   bool firstRenderDone = false;
-  bool hasOpdsUrl = false;
   bool coverRendered = false;      // Track if cover has been rendered once
   bool coverBufferStored = false;  // Track if cover buffer is stored
   BookContextMenu contextMenu;
@@ -35,16 +34,15 @@ class HomeActivity final : public Activity {
   // and (via BookContextMenu's action enum) any future caller.
   void dispatchBookAction(BookContextMenu::Action action, const std::string& path, const std::string& title);
   void onSelectBook(const std::string& path);
+  void onLibraryOpen();
   void onFileBrowserOpen();
   void onSettingsOpen();
   void onFileTransferOpen();
-  void onOpdsBrowserOpen();
   void onStatsOpen();
 
   int getMenuItemCount() const;
-  // Number of cover-area slots on the home screen. Equals recentBooks.size()
-  // for themes without a library tile; for LyraLibraryTheme it's at least
-  // librarySlot+1 so the library tile is always reachable even with no recents.
+  // Number of cover-area slots on the home screen (one per recent book); the
+  // button-menu tiles follow them in selectorIndex space.
   int getCoverSlotsUsed() const;
   // Layout shared by render() and the Full Touch tap hit-testing in loop().
   Rect coverStripRect() const;

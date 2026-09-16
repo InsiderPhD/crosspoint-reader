@@ -171,8 +171,18 @@ class CrossPointSettings {
   // Hide battery percentage
   enum HIDE_BATTERY_PERCENTAGE { HIDE_NEVER = 0, HIDE_READER = 1, HIDE_ALWAYS = 2, HIDE_BATTERY_PERCENTAGE_COUNT };
 
-  // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, LYRA_LIBRARY = 3, LYRA_CAROUSEL = 4 };
+  // UI Theme. Values are persisted. LYRA_LIBRARY is retired (Library became a
+  // home menu row on every theme) and loads as LYRA_3_COVERS; its number stays
+  // reserved so the themes after it keep theirs across firmware versions.
+  enum UI_THEME {
+    CLASSIC = 0,
+    LYRA = 1,
+    LYRA_3_COVERS = 2,
+    LYRA_LIBRARY = 3,
+    LYRA_CAROUSEL = 4,
+    DASHBOARD = 5,
+    UI_THEME_COUNT
+  };
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };

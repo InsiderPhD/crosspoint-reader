@@ -66,7 +66,8 @@ void TxtReaderActivity::onExit() {
   }
 
   const int progressPercent = (totalPages > 1) ? static_cast<int>((currentPage * 100) / (totalPages - 1)) : 0;
-  READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)), progressPercent >= 90);
+  READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)),
+                               progressPercent >= READING_COMPLETED_PERCENT);
   READING_STATS.endSession();
 
   txt.reset();
@@ -103,13 +104,15 @@ void TxtReaderActivity::loop() {
   if (prevTriggered && currentPage > 0) {
     currentPage--;
     const int progressPercent = (totalPages > 1) ? static_cast<int>((currentPage * 100) / (totalPages - 1)) : 0;
-    READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)), progressPercent >= 90);
+    READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)),
+                                 progressPercent >= READING_COMPLETED_PERCENT);
     requestUpdate();
   } else if (nextTriggered) {
     if (currentPage < totalPages - 1) {
       currentPage++;
       const int progressPercent = (totalPages > 1) ? static_cast<int>((currentPage * 100) / (totalPages - 1)) : 0;
-      READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)), progressPercent >= 90);
+      READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)),
+                                   progressPercent >= READING_COMPLETED_PERCENT);
       requestUpdate();
     } else {
       onGoHome();

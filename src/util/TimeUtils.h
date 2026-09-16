@@ -14,6 +14,9 @@ uint32_t getAuthoritativeTimestamp();
 uint32_t getCurrentValidTimestamp();
 bool setCurrentDate(int year, unsigned month, unsigned day, uint32_t* epochSeconds = nullptr);
 uint32_t getLocalDayOrdinal(uint32_t epochSeconds);
+// Local wall-clock hour (0-23) for an epoch timestamp. False when the clock is
+// not trustworthy, in which case hourOut is untouched.
+bool getLocalHour(uint32_t epochSeconds, uint8_t& hourOut);
 uint32_t getDayOrdinalForDate(int year, unsigned month, unsigned day);
 bool getDateFromDayOrdinal(uint32_t dayOrdinal, int& year, unsigned& month, unsigned& day);
 bool wasTimeSyncedThisBoot();

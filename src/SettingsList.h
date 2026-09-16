@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "HardcoverTokenStore.h"
 #include "KOReaderCredentialStore.h"
 #include "activities/settings/SettingsActivity.h"
 
@@ -22,6 +23,26 @@
 // entire 8KB stack (boot crashed with a stack protection fault). Each helper's
 // temporaries are released when it returns, capping peak stack at one section.
 namespace SettingsListDetail {
+
+// The theme picker lists positions, not stored values: LYRA_LIBRARY is retired
+// but keeps its persisted number, so the list skips it rather than renumbering
+// the themes after it. Position i shows kUiThemeOptions[i].
+constexpr uint8_t kUiThemeOptions[] = {CrossPointSettings::CLASSIC, CrossPointSettings::LYRA,
+                                       CrossPointSettings::LYRA_3_COVERS, CrossPointSettings::LYRA_CAROUSEL,
+                                       CrossPointSettings::DASHBOARD};
+
+inline uint8_t getUiThemeIndex() {
+  const uint8_t theme =
+      SETTINGS.uiTheme == CrossPointSettings::LYRA_LIBRARY ? CrossPointSettings::LYRA_3_COVERS : SETTINGS.uiTheme;
+  for (uint8_t i = 0; i < sizeof(kUiThemeOptions); i++) {
+    if (kUiThemeOptions[i] == theme) return i;
+  }
+  return 1;  // LYRA, the struct default
+}
+
+inline void setUiThemeIndex(const uint8_t index) {
+  if (index < sizeof(kUiThemeOptions)) SETTINGS.uiTheme = kUiThemeOptions[index];
+}
 
 inline uint8_t getLongPressActionIndex() {
   switch (SETTINGS.longPressAction) {
@@ -118,36 +139,38 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
                                  "frontlightWarmth", StrId::STR_CAT_DISPLAY));
 #endif
 #endif
-  v.insert(v.end(),
-           {
-               SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
-                                 {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER,
-                                  StrId::STR_NONE_OPT, StrId::STR_COVER_CUSTOM},
-                                 "sleepScreen", StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
-                                 {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode", StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,
-                                 {StrId::STR_NONE_OPT, StrId::STR_FILTER_CONTRAST, StrId::STR_INVERTED},
-                                 "sleepScreenCoverFilter", StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_SEAMLESS_SLEEP, &CrossPointSettings::seamlessSleepScreen,
-                                 {StrId::STR_NEVER, StrId::STR_AFTER_TIMEOUT, StrId::STR_ALWAYS}, "seamlessSleepScreen",
-                                 StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
-                                 {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
-                                 StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
-                                 {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15,
-                                  StrId::STR_PAGES_30},
-                                 "refreshFrequency", StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
-                                 {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                                  StrId::STR_THEME_LYRA_LIBRARY, StrId::STR_THEME_LYRA_CAROUSEL},
-                                 "uiTheme", StrId::STR_CAT_DISPLAY),
-               SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
-                                   StrId::STR_CAT_DISPLAY),
-               SettingInfo::Toggle(StrId::STR_READER_DARK_MODE, &CrossPointSettings::darkMode, "darkMode",
-                                   StrId::STR_CAT_DISPLAY),
-           });
+  v.insert(
+      v.end(),
+      {
+          SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
+                            {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER,
+                             StrId::STR_NONE_OPT, StrId::STR_COVER_CUSTOM},
+                            "sleepScreen", StrId::STR_CAT_DISPLAY),
+          SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
+                            {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode", StrId::STR_CAT_DISPLAY),
+          SettingInfo::Enum(StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,
+                            {StrId::STR_NONE_OPT, StrId::STR_FILTER_CONTRAST, StrId::STR_INVERTED},
+                            "sleepScreenCoverFilter", StrId::STR_CAT_DISPLAY),
+          SettingInfo::Enum(StrId::STR_SEAMLESS_SLEEP, &CrossPointSettings::seamlessSleepScreen,
+                            {StrId::STR_NEVER, StrId::STR_AFTER_TIMEOUT, StrId::STR_ALWAYS}, "seamlessSleepScreen",
+                            StrId::STR_CAT_DISPLAY),
+          SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
+                            {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
+                            StrId::STR_CAT_DISPLAY),
+          SettingInfo::Enum(
+              StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
+              {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15, StrId::STR_PAGES_30},
+              "refreshFrequency", StrId::STR_CAT_DISPLAY),
+          // Persisted directly in JsonSettingsIO: a DynamicEnum has no valuePtr.
+          SettingInfo::DynamicEnum(StrId::STR_UI_THEME,
+                                   {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
+                                    StrId::STR_THEME_LYRA_CAROUSEL, StrId::STR_THEME_DASHBOARD},
+                                   getUiThemeIndex, setUiThemeIndex, "uiTheme", StrId::STR_CAT_DISPLAY),
+          SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
+                              StrId::STR_CAT_DISPLAY),
+          SettingInfo::Toggle(StrId::STR_READER_DARK_MODE, &CrossPointSettings::darkMode, "darkMode",
+                              StrId::STR_CAT_DISPLAY),
+      });
 }
 
 // --- Reader: fonts and layout ---
@@ -399,6 +422,23 @@ inline void appendKoReaderSettings(std::vector<SettingInfo>& v) {
                     });
 }
 
+// --- Hardcover (web-only, uses HardcoverTokenStore) ---
+// The token is a JWT of several hundred characters: pasted here, never typed on
+// the device. The getter never echoes it back. The web settings API serialises
+// each setting into a 512-byte buffer and silently drops larger ones, so the
+// real token would vanish from the page; a short placeholder stands in for it,
+// and saving the placeholder unchanged is ignored. Clearing the field unlinks.
+inline void appendHardcoverSettings(std::vector<SettingInfo>& v) {
+  v.push_back(SettingInfo::DynamicString(
+      StrId::STR_HARDCOVER_API_TOKEN,
+      [] { return HC_TOKEN_STORE.hasToken() ? std::string(tr(STR_HARDCOVER_TOKEN_SAVED)) : std::string(); },
+      [](const std::string& val) {
+        if (val == tr(STR_HARDCOVER_TOKEN_SAVED)) return;
+        HC_TOKEN_STORE.setToken(val);
+      },
+      "hardcoverToken", StrId::STR_HARDCOVER));
+}
+
 // --- OPDS Browser (web-only, uses CrossPointSettings char arrays) ---
 inline void appendOpdsSettings(std::vector<SettingInfo>& v) {
   v.insert(v.end(), {
@@ -484,7 +524,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 inline const std::vector<SettingInfo>& getSettingsList() {
   static const std::vector<SettingInfo> list = [] {
     std::vector<SettingInfo> v;
-    v.reserve(67);
+    v.reserve(68);
     SettingsListDetail::appendDisplaySettings(v);
     SettingsListDetail::appendReaderTypographySettings(v);
     SettingsListDetail::appendReaderBehaviourSettings(v);
@@ -492,6 +532,7 @@ inline const std::vector<SettingInfo>& getSettingsList() {
     SettingsListDetail::appendControlSettings(v);
     SettingsListDetail::appendSystemSettings(v);
     SettingsListDetail::appendKoReaderSettings(v);
+    SettingsListDetail::appendHardcoverSettings(v);
     SettingsListDetail::appendOpdsSettings(v);
     SettingsListDetail::appendStatusBarSettings(v);
     // Only show tilt page turn setting when the QMI8658 IMU is present (X3)

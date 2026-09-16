@@ -13,11 +13,10 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "util/BookIdentity.h"
+#include "util/HardcoverSync.h"
 #include "util/TimeUtils.h"
 
-uint64_t getDailyReadingGoalMs() {
-  return SETTINGS.getDailyGoalMs();
-}
+uint64_t getDailyReadingGoalMs() { return SETTINGS.getDailyGoalMs(); }
 
 namespace {
 constexpr char READING_STATS_FILE_JSON[] = "/.crosspoint/reading_stats.json";
@@ -152,7 +151,29 @@ void dedupeStrings(std::vector<std::string>& values) {
 }
 }  // namespace
 
+ReadingTimeBucket readingTimeBucketForHour(const uint8_t hour) {
+  if (hour >= 5 && hour < 12) {
+    return ReadingTimeBucket::Morning;
+  }
+  if (hour >= 12 && hour < 17) {
+    return ReadingTimeBucket::Afternoon;
+  }
+  if (hour >= 17 && hour < 21) {
+    return ReadingTimeBucket::Evening;
+  }
+  return ReadingTimeBucket::Night;
+}
+
 ReadingStatsStore ReadingStatsStore::instance;
+
+bool ReadingStatsStore::hasTimeOfDayData() const {
+  for (const uint64_t bucket : timeOfDayMs) {
+    if (bucket > 0) {
+      return true;
+    }
+  }
+  return false;
+}
 
 void ReadingStatsStore::refreshLegacyCounters() {
   totalReadingTimeSeconds = static_cast<uint32_t>(std::min<uint64_t>(getTotalReadingMs() / 1000ULL, UINT32_MAX));
@@ -501,7 +522,7 @@ bool ReadingStatsStore::isClockValid(const uint32_t epochSeconds) { return TimeU
 bool ReadingStatsStore::shouldIgnorePath(const std::string& path) { return isIgnoredStatsPath(path); }
 
 void ReadingStatsStore::appendSessionLogEntry(const uint32_t dayOrdinal, const uint32_t sessionMs,
-                                              const std::string& bookId) {
+                                              const std::string& bookId, const uint8_t endProgressPercent) {
   // dayOrdinal == 0 is a valid "no date yet" sentinel since v7 — the user can
   // assign a date from the Sessions UI later. Reject only zero-length entries.
   if (sessionMs == 0) {
@@ -512,6 +533,7 @@ void ReadingStatsStore::appendSessionLogEntry(const uint32_t dayOrdinal, const u
   entry.dayOrdinal = dayOrdinal;
   entry.sessionMs = sessionMs;
   entry.bookId = bookId;
+  entry.endProgressPercent = endProgressPercent;
   sessionLog.push_back(std::move(entry));
   if (sessionLog.size() > MAX_SESSION_LOG_ENTRIES) {
     sessionLog.erase(sessionLog.begin(),
@@ -590,9 +612,8 @@ bool ReadingStatsStore::pruneToCurrentMonth(const uint32_t referenceDayOrdinal) 
   // Only prune future-dated days when the clock is valid RIGHT NOW, and even then keep a
   // grace window for timezone changes; otherwise leave the future side alone (it gets
   // re-checked on the next prune after the clock syncs).
-  const uint32_t futureLimitOrdinal = isClockValid(TimeUtils::getCurrentValidTimestamp())
-                                          ? referenceDayOrdinal + STATS_FUTURE_GRACE_DAYS
-                                          : UINT32_MAX;
+  const uint32_t futureLimitOrdinal =
+      isClockValid(TimeUtils::getCurrentValidTimestamp()) ? referenceDayOrdinal + STATS_FUTURE_GRACE_DAYS : UINT32_MAX;
 
   auto keepDay = [retentionStartOrdinal, futureLimitOrdinal](const ReadingDayStats& stats) {
     return stats.dayOrdinal >= retentionStartOrdinal && stats.dayOrdinal <= futureLimitOrdinal;
@@ -602,10 +623,10 @@ bool ReadingStatsStore::pruneToCurrentMonth(const uint32_t referenceDayOrdinal) 
 
   auto pruneDaysVector = [&keepDay, &changed](std::vector<ReadingDayStats>& days) {
     const size_t before = days.size();
-    days.erase(std::remove_if(days.begin(), days.end(), [&keepDay](const ReadingDayStats& stats) {
-                 return !keepDay(stats) || stats.readingMs == 0;
-               }),
-               days.end());
+    days.erase(
+        std::remove_if(days.begin(), days.end(),
+                       [&keepDay](const ReadingDayStats& stats) { return !keepDay(stats) || stats.readingMs == 0; }),
+        days.end());
     if (days.size() != before) {
       changed = true;
     }
@@ -683,11 +704,12 @@ bool ReadingStatsStore::pruneToCurrentMonth(const uint32_t referenceDayOrdinal) 
                                   [retentionStartOrdinal, futureLimitOrdinal](const ReadingSessionLogEntry& entry) {
                                     // dayOrdinal == 0 is the "no date yet" sentinel: keep these regardless of the
                                     // retention window so the user can still assign them a date from the Sessions UI.
-                                    // (Total count is still bounded by MAX_SESSION_LOG_ENTRIES in appendSessionLogEntry.)
+                                    // (Total count is still bounded by MAX_SESSION_LOG_ENTRIES in
+                                    // appendSessionLogEntry.)
                                     return entry.dayOrdinal != 0 && (entry.dayOrdinal < retentionStartOrdinal ||
                                                                      entry.dayOrdinal > futureLimitOrdinal);
                                   }),
-                 sessionLog.end());
+                   sessionLog.end());
   if (sessionLogBefore != sessionLog.size()) {
     changed = true;
   }
@@ -910,7 +932,24 @@ void ReadingStatsStore::flushActiveSessionToBuckets() {
   // at endSession — we never guess a day from stale timestamps.
   const uint32_t sessionTimestamp = TimeUtils::getCurrentValidTimestamp();
   const uint32_t day = isClockValid(sessionTimestamp) ? TimeUtils::getLocalDayOrdinal(sessionTimestamp) : 0;
-  if (day == 0 || activeSession.accumulatedMs == activeSession.bucketedMs) {
+  if (day == 0) {
+    return;
+  }
+
+  // Time-of-day is credited to the bucket the clock is in right now, for
+  // whatever accrued since the last checkpoint. Heartbeats are a minute apart,
+  // so a session that spans a boundary splits across the two buckets within a
+  // minute of the real crossing. Done before the accumulated == bucketed early
+  // return below so it tracks its own watermark.
+  uint8_t localHour = 0;
+  if (activeSession.accumulatedMs > activeSession.todBucketedMs &&
+      TimeUtils::getLocalHour(sessionTimestamp, localHour)) {
+    const size_t bucket = static_cast<size_t>(readingTimeBucketForHour(localHour));
+    timeOfDayMs[bucket] += activeSession.accumulatedMs - activeSession.todBucketedMs;
+    activeSession.todBucketedMs = activeSession.accumulatedMs;
+  }
+
+  if (activeSession.accumulatedMs == activeSession.bucketedMs) {
     return;
   }
 
@@ -1040,9 +1079,9 @@ bool ReadingStatsStore::updateBookMetadata(const std::string& path, const std::s
   return changed;
 }
 
-bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::string& newPath,
-                                       const std::string& title, const std::string& author,
-                                       const std::string& coverBmpPath, const std::string& bookId) {
+bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::string& newPath, const std::string& title,
+                                       const std::string& author, const std::string& coverBmpPath,
+                                       const std::string& bookId) {
   const std::string normalizedNewPath = BookIdentity::normalizePath(newPath);
   if (normalizedNewPath.empty() || shouldIgnorePath(normalizedNewPath)) {
     return false;
@@ -1136,7 +1175,7 @@ void ReadingStatsStore::endSession() {
     // Always record the session — even with an invalid clock. dayOrdinal=0 is
     // the "no date yet" sentinel; bookId pins which book it was so the editor
     // can apply the credit to the right book's per-day bucket once dated.
-    appendSessionLogEntry(dayOrdinal, sessionMs, book.bookId);
+    appendSessionLogEntry(dayOrdinal, sessionMs, book.bookId, book.lastProgressPercent);
   }
 
   lastSessionSnapshot.valid = true;
@@ -1158,6 +1197,17 @@ void ReadingStatsStore::endSession() {
   rebuildAggregatedReadingDays();
   refreshLegacyCounters();
   saveToFile();
+
+#if CROSSPOINT_HARDCOVER_AUTO_SYNC
+  // The session is on SD; mirror the book's progress to Hardcover in the
+  // background. Skipped for a glance too short to count, unless it finished the
+  // book. Looked up by path because the prune above may have rewritten `books`.
+  if (lastSessionSnapshot.counted || lastSessionSnapshot.completedThisSession) {
+    if (const ReadingBookStats* synced = findBook(lastSessionSnapshot.path)) {
+      HardcoverSync::onSessionWritten(*synced);
+    }
+  }
+#endif
 }
 
 bool ReadingStatsStore::adjustBookReadingTime(const std::string& path, const uint32_t dayOrdinal,
@@ -1235,9 +1285,9 @@ bool ReadingStatsStore::editSessionDate(const size_t index, const uint32_t newDa
   // (clock invalid at endSession), the day-bucket was never populated, so
   // there is nothing to subtract — only the add-side runs.
   if (oldDay != 0) {
-    auto it = std::lower_bound(
-        book->readingDays.begin(), book->readingDays.end(), oldDay,
-        [](const ReadingDayStats& day, const uint32_t ordinal) { return day.dayOrdinal < ordinal; });
+    auto it =
+        std::lower_bound(book->readingDays.begin(), book->readingDays.end(), oldDay,
+                         [](const ReadingDayStats& day, const uint32_t ordinal) { return day.dayOrdinal < ordinal; });
     if (it != book->readingDays.end() && it->dayOrdinal == oldDay) {
       const uint64_t removeMs = std::min(sessionMs, it->readingMs);
       it->readingMs -= removeMs;
@@ -1400,6 +1450,9 @@ void ReadingStatsStore::reset() {
   legacyReadingDays.clear();
   readingDays.clear();
   sessionLog.clear();
+  for (uint64_t& bucket : timeOfDayMs) {
+    bucket = 0;
+  }
   activeSession = {};
   lastSessionSnapshot = {};
   totalReadingTimeSeconds = 0;
@@ -1563,14 +1616,8 @@ void ReadingStatsStore::addReadingTime(const uint32_t seconds) {
   refreshLegacyCounters();
 }
 
-void ReadingStatsStore::addPageTurns(const uint32_t count) {
-  totalPagesRead += count;
-}
+void ReadingStatsStore::addPageTurns(const uint32_t count) { totalPagesRead += count; }
 
-void ReadingStatsStore::addBookFinished() {
-  booksFinished = std::min<uint32_t>(UINT32_MAX, booksFinished + 1);
-}
+void ReadingStatsStore::addBookFinished() { booksFinished = std::min<uint32_t>(UINT32_MAX, booksFinished + 1); }
 
-void ReadingStatsStore::addSession() {
-  totalSessions = std::min<uint32_t>(UINT32_MAX, totalSessions + 1);
-}
+void ReadingStatsStore::addSession() { totalSessions = std::min<uint32_t>(UINT32_MAX, totalSessions + 1); }

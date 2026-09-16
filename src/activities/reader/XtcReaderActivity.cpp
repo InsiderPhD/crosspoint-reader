@@ -69,7 +69,8 @@ void XtcReaderActivity::onExit() {
   if (xtc && xtc->getPageCount() > 1) {
     const int clampedPage = static_cast<int>(std::min<uint32_t>(currentPage, xtc->getPageCount() - 1));
     const int progressPercent = static_cast<int>((clampedPage * 100) / (xtc->getPageCount() - 1));
-    READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)), progressPercent >= 90);
+    READING_STATS.updateProgress(static_cast<uint8_t>(std::clamp(progressPercent, 0, 100)),
+                                 progressPercent >= READING_COMPLETED_PERCENT);
   }
   READING_STATS.endSession();
 

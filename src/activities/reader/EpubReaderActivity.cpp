@@ -63,6 +63,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
+#include "util/HardcoverSync.h"
 #include "util/HeapReport.h"
 #include "util/ScreenshotUtil.h"
 #include "util/TimeUtils.h"
@@ -2178,7 +2179,8 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   // via loop() and onExit(); reading time accrues via noteActivity() on page turns.
   if (!activityManager.isOnRenderTask()) {
     READING_STATS.updateProgress(
-        static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)), progressPercent >= 90, "",
+        static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)),
+        progressPercent >= READING_COMPLETED_PERCENT, "",
         static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f), 0, 100)));
   }
 }
@@ -2318,7 +2320,8 @@ void EpubReaderActivity::recordStatsProgress() {
     chapterTitle = epub->getTocItem(tocIndex).title;
   }
   READING_STATS.updateProgress(
-      static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)), progressPercent >= 90, chapterTitle,
+      static_cast<uint8_t>(std::clamp(static_cast<int>(progressPercent), 0, 100)),
+      progressPercent >= READING_COMPLETED_PERCENT, chapterTitle,
       static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f), 0, 100)));
 }
 
@@ -3594,6 +3597,7 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
     fcm->clearCache();
   }
 
+  HardcoverSync::preempt();
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);

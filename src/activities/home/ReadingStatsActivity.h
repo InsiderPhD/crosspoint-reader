@@ -39,6 +39,8 @@ class ReadingStatsActivity final : public Activity {
   // (capped) visible row count.
   int currentPageItemCount() const;
   void openSelectedBook();
+  void openHardcoverPush();
+  Rect hardcoverButtonRect() const;
   void confirmRemoveSelectedBook();
   void openSelectedSessionEditor();
   void changePage(int delta);

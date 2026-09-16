@@ -10,9 +10,9 @@
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "components/themes/BaseTheme.h"
+#include "components/themes/dashboard/DashboardTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
-#include "components/themes/lyra/LyraLibraryTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
 #include "fontIds.h"
 
@@ -43,16 +43,17 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       currentTheme = std::make_unique<LyraTheme>();
       break;
     case CrossPointSettings::UI_THEME::LYRA_3_COVERS:
+    case CrossPointSettings::UI_THEME::LYRA_LIBRARY:  // retired: Library is a home menu row on every theme now
       LOG_DBG("UI", "Using Lyra 3 Covers theme");
       currentTheme = std::make_unique<Lyra3CoversTheme>();
-      break;
-    case CrossPointSettings::UI_THEME::LYRA_LIBRARY:
-      LOG_DBG("UI", "Using Lyra Library theme");
-      currentTheme = std::make_unique<LyraLibraryTheme>();
       break;
     case CrossPointSettings::UI_THEME::LYRA_CAROUSEL:
       LOG_DBG("UI", "Using Lyra Carousel theme");
       currentTheme = std::make_unique<LyraCarouselTheme>();
+      break;
+    case CrossPointSettings::UI_THEME::DASHBOARD:
+      LOG_DBG("UI", "Using Dashboard theme");
+      currentTheme = std::make_unique<DashboardTheme>();
       break;
     default:
       LOG_DBG("UI", "Unknown theme %d, falling back to Lyra", static_cast<int>(type));
@@ -101,6 +102,8 @@ namespace {
 // out of this list silently. A new theme with a new homeCoverHeight must be
 // added here — the static_assert fires if the count stops matching.
 constexpr int kCoverThumbHeights[] = {
+    // DashboardMetrics deliberately reuses BaseMetrics' height, so it adds no
+    // entry here.
     BaseMetrics::values.homeCoverHeight,
     LyraMetrics::values.homeCoverHeight,
     LyraCarouselMetrics::values.homeCoverHeight,

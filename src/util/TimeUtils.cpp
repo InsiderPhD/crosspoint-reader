@@ -175,6 +175,23 @@ uint32_t TimeUtils::getLocalDayOrdinal(const uint32_t epochSeconds) {
                                              static_cast<unsigned>(localTime.tm_mday)));
 }
 
+bool TimeUtils::getLocalHour(const uint32_t epochSeconds, uint8_t& hourOut) {
+  configureTimezone();
+
+  if (!isClockValid(epochSeconds)) {
+    return false;
+  }
+
+  time_t currentTime = static_cast<time_t>(epochSeconds);
+  tm localTime = {};
+  if (localtime_r(&currentTime, &localTime) == nullptr) {
+    return false;
+  }
+
+  hourOut = static_cast<uint8_t>(localTime.tm_hour);
+  return true;
+}
+
 uint32_t TimeUtils::getDayOrdinalForDate(const int year, const unsigned month, const unsigned day) {
   return static_cast<uint32_t>(daysFromCivil(year, month, day));
 }

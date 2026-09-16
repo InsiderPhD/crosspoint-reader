@@ -17,6 +17,7 @@
 #include "CrossPointSettings.h"
 #include "TimeUtils.h"
 #include "WifiCredentialStore.h"
+#include "util/HardcoverSync.h"
 
 // Implemented in EpubReaderActivity.cpp — shared so the timestamp format stays
 // byte-identical to the manual sync paths (BookFusion sorts updated_at as a
@@ -224,6 +225,7 @@ bool connectSilently() {
     return false;
   }
 
+  HardcoverSync::preempt();
   WiFi.mode(WIFI_STA);
   if (cred->password.empty()) {
     WiFi.begin(cred->ssid.c_str());

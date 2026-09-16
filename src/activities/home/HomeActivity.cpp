@@ -32,20 +32,10 @@
 static constexpr size_t FRAG_RESTART_THRESHOLD = 24 * 1024;
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 4;  // File Browser, File transfer, Stats, Settings
-  count += getCoverSlotsUsed();
-  if (hasOpdsUrl) {
-    count++;
-  }
-  return count;
+  return 5 + getCoverSlotsUsed();  // Library, File Browser, File transfer, Stats, Settings
 }
 
-int HomeActivity::getCoverSlotsUsed() const {
-  const int librarySlot = UITheme::getInstance().getTheme().getLibrarySlotIndex();
-  const int recents = static_cast<int>(recentBooks.size());
-  // Library tile is always reachable: at minimum we expose librarySlot+1 slots.
-  return librarySlot >= 0 ? std::max(recents, librarySlot + 1) : recents;
-}
+int HomeActivity::getCoverSlotsUsed() const { return static_cast<int>(recentBooks.size()); }
 
 void HomeActivity::loadRecentBooks(int maxBooks) {
   recentBooks.clear();
@@ -163,17 +153,9 @@ void HomeActivity::onEnter() {
     }
   }
 
-  // Check if OPDS browser URL is configured
-  hasOpdsUrl = strlen(SETTINGS.opdsServerUrl) > 0;
-
   selectorIndex = 0;
 
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  // When the active theme reserves a library tile, only load enough recents
-  // to fill the slots before it — slots at/after librarySlot are not books.
-  const int librarySlot = UITheme::getInstance().getTheme().getLibrarySlotIndex();
-  const int maxRecents = librarySlot >= 0 ? librarySlot : metrics.homeRecentBooksCount;
-  loadRecentBooks(maxRecents);
+  loadRecentBooks(UITheme::getInstance().getMetrics().homeRecentBooksCount);
 
   // Trigger first update
   requestUpdate();
@@ -236,11 +218,8 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
   // Reload the recent-books vector after any mutation, keeping selector + cover
   // cache state in sync. Captures `this` to access members.
   auto reloadRecents = [this] {
-    const auto& m = UITheme::getInstance().getMetrics();
-    const int librarySlot = UITheme::getInstance().getTheme().getLibrarySlotIndex();
-    const int maxRecents = librarySlot >= 0 ? librarySlot : m.homeRecentBooksCount;
     recentBooks.clear();
-    loadRecentBooks(maxRecents);
+    loadRecentBooks(UITheme::getInstance().getMetrics().homeRecentBooksCount);
     selectorIndex = 0;
     recentsLoaded = false;
     recentsLoading = false;
@@ -493,31 +472,23 @@ int HomeActivity::tileIndexAt(const int lx, const int ly) const {
 
 void HomeActivity::activateSelectedTile() {
   {
-    // Library slot is checked first so a theme-provided library tile beats
-    // both the recent-book lookup and the menu fallthrough.
-    const int librarySlotIdx = UITheme::getInstance().getTheme().getLibrarySlotIndex();
-    if (librarySlotIdx >= 0 && selectorIndex == librarySlotIdx) {
-      activityManager.goToLibrary();
-      return;
-    }
-
     const int coverSlotsUsed = getCoverSlotsUsed();
 
     // Calculate dynamic indices based on which options are available
     int idx = 0;
     int menuSelectedIndex = selectorIndex - coverSlotsUsed;
+    const int libraryIdx = idx++;
     const int fileBrowserIdx = idx++;
-    const int opdsLibraryIdx = hasOpdsUrl ? idx++ : -1;
     const int fileTransferIdx = idx++;
     const int statsIdx = idx++;
     const int settingsIdx = idx;
 
     if (selectorIndex < static_cast<int>(recentBooks.size())) {
       onSelectBook(recentBooks[selectorIndex].path);
+    } else if (menuSelectedIndex == libraryIdx) {
+      onLibraryOpen();
     } else if (menuSelectedIndex == fileBrowserIdx) {
       onFileBrowserOpen();
-    } else if (menuSelectedIndex == opdsLibraryIdx) {
-      onOpdsBrowserOpen();
     } else if (menuSelectedIndex == fileTransferIdx) {
       onFileTransferOpen();
     } else if (menuSelectedIndex == statsIdx) {
@@ -550,15 +521,9 @@ void HomeActivity::render(RenderLock&&) {
                           bufferRestored, std::bind(&HomeActivity::storeCoverBuffer, this));
 
   // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_FILE_TRANSFER), tr(STR_READING_STATS),
-                                        tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Folder, Transfer, Book, Settings};
-
-  if (hasOpdsUrl) {
-    // Insert OPDS Browser after File Browser
-    menuItems.insert(menuItems.begin() + 1, tr(STR_OPDS_BROWSER));
-    menuIcons.insert(menuIcons.begin() + 1, Library);
-  }
+  std::vector<const char*> menuItems = {tr(STR_LIBRARY), tr(STR_BROWSE_FILES), tr(STR_FILE_TRANSFER),
+                                        tr(STR_READING_STATS), tr(STR_SETTINGS_TITLE)};
+  std::vector<UIIcon> menuIcons = {Library, Folder, Transfer, Book, Settings};
 
   const int menuOffset = getCoverSlotsUsed();
   GUI.drawButtonMenu(
@@ -605,10 +570,10 @@ void HomeActivity::onFileBrowserOpen() {
   }
 }
 
+void HomeActivity::onLibraryOpen() { activityManager.goToLibrary(); }
+
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
 void HomeActivity::onStatsOpen() { activityManager.goToStats(); }
-
-void HomeActivity::onOpdsBrowserOpen() { activityManager.goToBrowser(); }

@@ -69,7 +69,7 @@ class LyraTheme : public BaseTheme {
  public:
   // Lyra draws lists/tabs/menus against its own metrics table; overriding this
   // keeps the shared geometry helpers (listGeometry, hitTest*) in lockstep
-  // with the Lyra draw code. Lyra3Covers/LyraLibrary inherit it — their metrics
+  // with the Lyra draw code. Lyra3Covers inherits it — their metrics
   // differ only in home-tile fields no list geometry reads.
   const ThemeMetrics& themeMetrics() const override;
 

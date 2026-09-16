@@ -6,7 +6,6 @@
 #include "SdCardFontGlobals.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
-#include "browser/OpdsBookBrowserActivity.h"
 #include "components/ActionBar.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
@@ -252,10 +251,6 @@ void ActivityManager::goToSeriesBrowser() {
 }
 
 void ActivityManager::goToLibrary() { replaceActivity(std::make_unique<LibraryActivity>(renderer, mappedInput)); }
-
-void ActivityManager::goToBrowser() {
-  replaceActivity(std::make_unique<OpdsBookBrowserActivity>(renderer, mappedInput));
-}
 
 void ActivityManager::goToReader(std::string path) {
   ensureSdFontLoaded();

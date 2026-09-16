@@ -163,6 +163,10 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["frontButtonRight"] = s.frontButtonRight;
   doc["readingSpeedSecondsPerPage"] = s.readingSpeedSecondsPerPage;
 
+  // Theme — a DynamicEnum in SettingsList (the picker skips a retired value),
+  // so the generic loop above skips it. Stored as the raw UI_THEME number.
+  doc["uiTheme"] = s.uiTheme;
+
   // Reader-menu row visibility bitmask — managed by ReaderMenuSettingsActivity,
   // not SettingsList (one entry per row would put 25 toggles back in Settings).
   doc["readerMenuVisible"] = s.readerMenuVisible;
@@ -322,6 +326,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.longPressAction =
       clamp(doc["longPressAction"] | (uint8_t)S::LONG_PRESS_REFRESH, S::LONG_PRESS_ACTION_COUNT, S::LONG_PRESS_REFRESH);
   s.shortPwrBtn = clamp(doc["shortPwrBtn"] | (uint8_t)S::PAGE_TURN, S::SHORT_PWRBTN_COUNT, S::PAGE_TURN);
+  s.uiTheme = clamp(doc["uiTheme"] | (uint8_t)S::LYRA, S::UI_THEME_COUNT, S::LYRA);
+  if (s.uiTheme == S::LYRA_LIBRARY) s.uiTheme = S::LYRA_3_COVERS;  // retired theme
 
   // Per-button reader actions — clamped to READER_ACTION_COUNT so stale/corrupt values don't escape.
   const auto clampAction = [&clamp](uint8_t v, uint8_t def) -> uint8_t {
@@ -554,7 +560,10 @@ bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, const char
   // v7 adds per-session bookId so the Sessions UI can show which book each
   // session was for, and allows dayOrdinal=0 entries for sessions recorded
   // without a valid clock (user can later set the date from the UI).
-  doc["formatVersion"] = 7;
+  // v8 adds timeOfDayMs, the lifetime morning/afternoon/evening/night split
+  // the dashboard theme's "reader type" badge reads. Older files load with all
+  // four buckets at zero, which reads as "New Reader" until time accrues.
+  doc["formatVersion"] = 8;
 
   JsonArray days = doc["readingDays"].to<JsonArray>();
   for (const auto& day : store.getReadingDays()) {
@@ -578,6 +587,15 @@ bool JsonSettingsIO::saveReadingStats(const ReadingStatsStore& store, const char
     if (!session.bookId.empty()) {
       sessionObj["bookId"] = session.bookId;
     }
+    // Optional: absent for sessions logged before progress was recorded.
+    if (session.endProgressPercent != ReadingSessionLogEntry::PROGRESS_UNKNOWN) {
+      sessionObj["endProgress"] = session.endProgressPercent;
+    }
+  }
+
+  JsonArray timeOfDay = doc["timeOfDayMs"].to<JsonArray>();
+  for (size_t i = 0; i < READING_TIME_BUCKET_COUNT; i++) {
+    timeOfDay.add(store.timeOfDayMs[i]);
   }
 
   JsonArray books = doc["books"].to<JsonArray>();
@@ -628,6 +646,9 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
   store.legacyReadingDays.clear();
   store.readingDays.clear();
   store.sessionLog.clear();
+  for (uint64_t& bucket : store.timeOfDayMs) {
+    bucket = 0;
+  }
   store.dirty = false;
 
   const uint32_t formatVersion = doc["formatVersion"] | static_cast<uint32_t>(1);
@@ -667,6 +688,11 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
       // v7 added bookId; pre-v7 falls back to empty and gets filled in by the
       // best-effort migration below once we've loaded all the books.
       session.bookId = sessionObj["bookId"] | std::string("");
+      // Optional key (no format bump: older firmware ignores it). Out-of-range
+      // values read as unknown rather than replaying a bogus percent.
+      const int endProgress = sessionObj["endProgress"] | -1;
+      session.endProgressPercent = (endProgress >= 0 && endProgress <= 100) ? static_cast<uint8_t>(endProgress)
+                                                                            : ReadingSessionLogEntry::PROGRESS_UNKNOWN;
       if (session.sessionMs == 0) {
         continue;  // 0-duration is meaningless either way
       }
@@ -680,6 +706,17 @@ bool JsonSettingsIO::loadReadingStats(ReadingStatsStore& store, const char* json
     }
   } else {
     store.dirty = true;
+  }
+
+  if (formatVersion >= 8) {
+    JsonArray timeOfDay = doc["timeOfDayMs"].as<JsonArray>();
+    size_t bucket = 0;
+    for (JsonVariant value : timeOfDay) {
+      if (bucket >= READING_TIME_BUCKET_COUNT) {
+        break;
+      }
+      store.timeOfDayMs[bucket++] = value | static_cast<uint64_t>(0);
+    }
   }
 
   JsonArray books = doc["books"].as<JsonArray>();

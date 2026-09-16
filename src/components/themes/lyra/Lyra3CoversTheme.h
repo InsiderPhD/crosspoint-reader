@@ -30,7 +30,6 @@ class Lyra3CoversTheme : public LyraTheme {
   // three cover tiles and a taller strip, and hitTestRecentBookCover reads
   // homeRecentBooksCount/homeCoverTileHeight from here. Without it every tap in
   // the strip resolved to a single column, i.e. always the first book.
-  // LyraLibraryTheme inherits this — it shares these metrics by design.
   const ThemeMetrics& themeMetrics() const override;
 
   void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,

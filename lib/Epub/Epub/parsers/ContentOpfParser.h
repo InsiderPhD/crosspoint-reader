@@ -22,6 +22,7 @@ class ContentOpfParser final : public Print {
     IN_BOOK_SUBJECT,
     IN_BOOK_DATE,
     IN_BOOK_PUBLISHER,
+    IN_BOOK_IDENTIFIER,
     IN_MANIFEST,
     IN_SPINE,
     IN_GUIDE,
@@ -38,6 +39,9 @@ class ContentOpfParser final : public Print {
   // Tracks whether the description char-data stream is currently inside an HTML
   // tag (Calibre stores comments as escaped HTML); used to strip tags across chunks.
   bool descInTag = false;
+  // Current <dc:identifier>: its text, and whether its scheme attribute said ISBN.
+  std::string identifierText;
+  bool identifierSchemeIsbn = false;
 
   // Index for fast idref→href lookup (used only for large EPUBs)
   struct ItemIndexEntry {
@@ -75,6 +79,7 @@ class ContentOpfParser final : public Print {
   std::string pubDate;      // dc:date (first occurrence)
   std::string rating;       // calibre:rating meta (0-10 scale, as written)
   std::string bookshelf;    // calibre:user_metadata:#bookshelf custom column (#value#)
+  std::string isbn;         // first dc:identifier that is a valid ISBN, normalised to ISBN-13
   std::string description;  // dc:description, HTML-stripped, capped at Epub::MAX_DESCRIPTION_BYTES
   std::string tocNcxPath;
   std::string tocNavPath;  // EPUB 3 nav document path

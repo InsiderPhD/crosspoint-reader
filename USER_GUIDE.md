@@ -95,7 +95,6 @@ The Home screen is the main hub. Its layout depends on the **UI Theme** (Setting
 | **Classic** | Original KatiePoint look; one recent-book tile plus the menu. |
 | **Lyra** | Rounded elements and menu icons; one recent-book tile. |
 | **Lyra Extended** | Like Lyra, but shows the **3** most recent books instead of 1. |
-| **Lyra Library** | Replaces the recent tile with a paginated **cover grid** of every book on the SD card (the Library view). |
 
 ### Recent-book tile
 
@@ -106,9 +105,9 @@ Shows your most recently opened book(s) with cover, title, author, and progress.
 
 <img src="docs/images/user-guide/home-book-options.png" alt="Home screen with the Book Options popup open on a recent-book tile" width="300">
 
-### Library cover grid (Lyra Library theme)
+### Library cover grid
 
-A 3-column paginated grid of every book on the card. Cover thumbnails are cached to the SD card. Selecting a book opens it; long-pressing **Confirm** opens the same Book Options popup as the recent tile.
+Opened from **Library** in the home menu, on every theme. A 3-column paginated grid of every book on the card. Cover thumbnails are cached to the SD card. Selecting a book opens it; long-pressing **Confirm** opens the same Book Options popup as the recent tile.
 
 <p>
 <img src="docs/images/user-guide/library-grid.png" alt="Library cover grid showing book covers with titles, authors, and progress" width="300">
@@ -119,8 +118,8 @@ A 3-column paginated grid of every book on the card. Cover thumbnails are cached
 
 The menu (shown at the bottom, or as icons in Lyra themes) contains:
 
+- **Library** — the cover grid of every book on the card (see **[Library cover grid](#library-cover-grid)**).
 - **Browse Files** — the file/folder browser (see **[Browsing Your Library](#6-browsing-your-library)**).
-- **OPDS Browser** — *only shown when an OPDS server URL is configured.* Browse and download from an OPDS catalogue.
 - **File Transfer** — get books onto the device (see **[Getting Books onto the Device](#5-getting-books-onto-the-device)**).
 - **Reading Stats** — your reading statistics (see **[Reading Stats](#9-reading-stats)**).
 - **Settings** — device configuration (see **[Settings Reference](#12-settings-reference)**).
@@ -230,7 +229,7 @@ Insert the SD card into a computer and copy files anywhere on it. KatiePoint sca
 
 ### File Transfer menu
 
-**Home → File Transfer** offers four wireless options:
+**Home → File Transfer** offers these wireless options:
 
 1. **Join Network** — connects to your WiFi and hosts a web upload server. Open the shown URL in a browser on the same network to drag-and-drop books (and manage files / fonts / settings). See the [webserver docs](./docs/webserver.md).
 
@@ -238,10 +237,11 @@ Insert the SD card into a computer and copy files anywhere on it. KatiePoint sca
 2. **Calibre Wireless** — receive books sent from Calibre's *Send to device*. Install the [crosspoint_reader Calibre plugin](https://github.com/crosspoint-reader/calibre-plugins/releases) (Preferences → Plugins → Load plugin from file), then on the device choose *Calibre Wireless* and join a network. Your computer must be on the same WiFi.
 3. **Create Hotspot** — the device becomes its own access point when no shared WiFi is available; join it from your computer, then use the web uploader.
 4. **BookFusion Library** — browse and download from your linked [BookFusion](https://www.bookfusion.com/) cloud library (see **[Sync](#10-sync-bookfusion--koreader)** for account linking).
+5. **OPDS Browser** — browse and download from your OPDS catalogue. *Only shown once an OPDS server URL is set* (see below).
 
 ### OPDS Browser
 
-If you run an OPDS catalogue (e.g. Calibre Content Server), set it up in **Settings → System → OPDS Browser** (for Calibre Content Server, append `/opds` to the URL). Only HTTP **Basic** auth is supported — if using Calibre with auth, switch it from Digest to Basic. Once configured, **OPDS Browser** appears on the Home menu.
+If you run an OPDS catalogue (e.g. Calibre Content Server), set it up in **Settings → System → OPDS Browser** (for Calibre Content Server, append `/opds` to the URL). Only HTTP **Basic** auth is supported — if using Calibre with auth, switch it from Digest to Basic. Once configured, **OPDS Browser** appears in **Home → File Transfer**.
 
 ### Download from URL
 
@@ -581,7 +581,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Seamless Sleep Screen** — Never / After Timeout / Always.
 - **Hide Battery %** — Never / In Reader / Always (icon still shown).
 - **Refresh Frequency** — full-refresh every 1 / 5 / 10 / 15 / 30 pages (reduces ghosting).
-- **UI Theme** — Classic / Lyra / Lyra Extended / Lyra Library (see **[Home Screen](#3-home-screen)**).
+- **UI Theme** — Classic / Lyra / Lyra Extended / Lyra Carousel / Dashboard (see **[Home Screen](#3-home-screen)**).
 - **Sunlight Fading Fix** — software fix for white X4 units fading in direct sunlight.
 - **Reader Dark Mode** — invert reading to light-on-dark. Also cycled in place from the reader menu, and bindable as a reader action.
 - **Folder View** — Folders / Tags / Authors / Series (see **[Folder views](#folder-views)**).

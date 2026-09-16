@@ -14,6 +14,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/HardcoverSync.h"
 #include "util/TouchListNav.h"
 #include "util/WifiTimeSync.h"
 
@@ -98,6 +99,7 @@ void WifiSelectionActivity::startWifiScan() {
   requestUpdate();
 
   // Set WiFi mode to station
+  HardcoverSync::preempt();
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);
@@ -216,6 +218,7 @@ void WifiSelectionActivity::attemptConnection() {
   requestUpdate();
 
   WiFi.persistent(false);  // Credentials are managed by WifiCredentialStore; suppress SDK NVS auto-connect
+  HardcoverSync::preempt();
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true, true);  // Abort any in-progress SDK auto-connect and clear NVS-saved SSID
   delay(100);

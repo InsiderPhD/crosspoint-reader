@@ -37,6 +37,7 @@ enum class SettingAction {
   ExportStats,
   ImportStats,
   ExportStoryGraph,
+  PushToHardcover,
   SetDate,
   TimeZone,
   FontFamily,

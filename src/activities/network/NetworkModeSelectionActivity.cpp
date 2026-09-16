@@ -23,6 +23,7 @@ constexpr MenuRow MENU_ROWS[] = {
     {NetworkMode::CONNECT_CALIBRE, StrId::STR_CALIBRE_WIRELESS, StrId::STR_CALIBRE_DESC, UIIcon::Library},
     {NetworkMode::CREATE_HOTSPOT, StrId::STR_CREATE_HOTSPOT, StrId::STR_HOTSPOT_DESC, UIIcon::Hotspot},
     {NetworkMode::BOOKFUSION, StrId::STR_BF_BROWSE_LIBRARY, StrId::STR_BF_LIBRARY_DESC, UIIcon::BookFusion},
+    {NetworkMode::OPDS, StrId::STR_OPDS_BROWSER, StrId::STR_OPDS_DESC, UIIcon::Library},
 };
 constexpr int MAX_MENU_ITEM_COUNT = static_cast<int>(sizeof(MENU_ROWS) / sizeof(MENU_ROWS[0]));
 
@@ -31,6 +32,8 @@ constexpr int MAX_MENU_ITEM_COUNT = static_cast<int>(sizeof(MENU_ROWS) / sizeof(
 // that would otherwise just fail with NO_TOKEN once the user tried to use it.
 bool rowVisible(const MenuRow& row) {
   if (row.mode == NetworkMode::BOOKFUSION) return BF_TOKEN_STORE.hasToken();
+  // Same for OPDS: until a server URL is set in Settings there is nothing to browse.
+  if (row.mode == NetworkMode::OPDS) return SETTINGS.opdsServerUrl[0] != '\0';
   return true;
 }
 

@@ -20,6 +20,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/HardcoverSync.h"
 #include "util/WifiTimeSync.h"
 
 namespace {
@@ -548,6 +549,7 @@ void KOReaderSyncActivity::connectWifiWithPopup() {
   // Attempt connection
   LOG_DBG("KOSync", "Attempting to connect to WiFi: %s", lastSsid.c_str());
 
+  HardcoverSync::preempt();
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   delay(100);

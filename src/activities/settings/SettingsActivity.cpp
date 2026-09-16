@@ -18,6 +18,7 @@
 #include "FontLayoutPreviewActivity.h"
 #include "FontSelectionActivity.h"
 #include "FrontlightBrightnessActivity.h"
+#include "HardcoverPushActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "LanguageSelectActivity.h"
 #include "ManualDateActivity.h"
@@ -134,11 +135,13 @@ void SettingsActivity::onEnter() {
   // SettingsList — these actions go below them.
   statsSettings.push_back(SettingInfo::Action(StrId::STR_SET_DATE, SettingAction::SetDate));
   statsSettings.push_back(SettingInfo::Action(StrId::STR_TIME_ZONE, SettingAction::TimeZone));
-  // Data management: lossless JSON export/import (round-trip backup) plus a
-  // one-way StoryGraph-compatible CSV of the book catalog.
+  // Data management: lossless JSON export/import (round-trip backup), a
+  // one-way StoryGraph-compatible CSV of the book catalog, and a push of every
+  // book's progress to Hardcover.
   statsSettings.push_back(SettingInfo::Action(StrId::STR_EXPORT_READING_STATS, SettingAction::ExportStats));
   statsSettings.push_back(SettingInfo::Action(StrId::STR_IMPORT_READING_STATS, SettingAction::ImportStats));
   statsSettings.push_back(SettingInfo::Action(StrId::STR_EXPORT_STORYGRAPH, SettingAction::ExportStoryGraph));
+  statsSettings.push_back(SettingInfo::Action(StrId::STR_PUSH_TO_HARDCOVER, SettingAction::PushToHardcover));
 
   // --- Dev tools ---
   // These are all testing aids / risky operations, collected under a dedicated
@@ -463,6 +466,9 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::ExportStoryGraph:
         startActivityForResult(
             std::make_unique<StatsDataActivity>(renderer, mappedInput, StatsDataMode::ExportStoryGraph), resultHandler);
+        break;
+      case SettingAction::PushToHardcover:
+        startActivityForResult(std::make_unique<HardcoverPushActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::SetDate:
         startActivityForResult(std::make_unique<ManualDateActivity>(renderer, mappedInput), resultHandler);

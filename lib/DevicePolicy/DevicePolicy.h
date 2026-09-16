@@ -85,3 +85,17 @@
 #define CROSSPOINT_DOWNLOAD_WRITE_BUFFER (32 * 1024)
 #endif
 #endif
+
+// --- Hardcover automatic sync ------------------------------------------------
+//
+// When a reading session is written to the stats store, push that book's
+// progress to Hardcover from a background task. Every device can push manually
+// from Settings > Stats.
+//
+// Off on the C3: a background task would need WiFi (~40KB) plus a TLS session
+// next to a loaded book, which is the shortfall ProgressAutoSync.h measured,
+// and a push there can only fit by borrowing the framebuffer — which a task
+// running behind the UI cannot do.
+#ifndef CROSSPOINT_HARDCOVER_AUTO_SYNC
+#define CROSSPOINT_HARDCOVER_AUTO_SYNC (!CROSSPOINT_TIGHT_HEAP)
+#endif

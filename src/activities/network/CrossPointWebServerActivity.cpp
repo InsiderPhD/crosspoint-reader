@@ -13,10 +13,12 @@
 #include "NetworkModeSelectionActivity.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
+#include "activities/browser/OpdsBookBrowserActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
 #include "activities/settings/BookFusionBrowserActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/HardcoverSync.h"
 #include "util/QrUtils.h"
 
 namespace {
@@ -127,15 +129,24 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "Create Hotspot";
   } else if (mode == NetworkMode::BOOKFUSION) {
     modeName = "BookFusion";
+  } else if (mode == NetworkMode::OPDS) {
+    modeName = "OPDS Browser";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
 
-  if (mode == NetworkMode::BOOKFUSION) {
+  if (mode == NetworkMode::BOOKFUSION || mode == NetworkMode::OPDS) {
     // Use startActivityForResult so pressing Back in the browser returns to mode
     // selection rather than going all the way to the home screen. replaceActivity
-    // would clear the stack and leave nowhere to pop back to.
+    // would clear the stack and leave nowhere to pop back to. Both browsers
+    // bring up WiFi themselves.
+    std::unique_ptr<Activity> browser;
+    if (mode == NetworkMode::BOOKFUSION) {
+      browser = std::make_unique<BookFusionBrowserActivity>(renderer, mappedInput);
+    } else {
+      browser = std::make_unique<OpdsBookBrowserActivity>(renderer, mappedInput);
+    }
     startActivityForResult(
-        std::make_unique<BookFusionBrowserActivity>(renderer, mappedInput), [this](const ActivityResult&) {
+        std::move(browser), [this](const ActivityResult&) {
           state = WebServerActivityState::MODE_SELECTION;
           startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
                                  [this](const ActivityResult& result) {
@@ -172,6 +183,7 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
   if (mode == NetworkMode::JOIN_NETWORK) {
     // STA mode - launch WiFi selection
     LOG_DBG("WEBACT", "Turning on WiFi (STA mode)...");
+    HardcoverSync::preempt();
     WiFi.mode(WIFI_STA);
 
     state = WebServerActivityState::WIFI_SELECTION;

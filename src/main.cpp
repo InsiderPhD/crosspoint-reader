@@ -29,6 +29,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "DeepSleep.h"
+#include "HardcoverTokenStore.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "ReadingStatsStore.h"
@@ -42,6 +43,7 @@
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
 #include "util/ButtonNavigator.h"
+#include "util/HardcoverSync.h"
 #include "util/HeapReport.h"
 #include "util/ReaderCombos.h"
 #include "util/ScreenshotUtil.h"
@@ -310,6 +312,11 @@ void enterDeepSleep(bool fromTimeout) {
   APP_STATE.saveToFile();
 
   activityManager.goToSleep(fromTimeout);
+
+  // Leaving the reader just ended its stats session, which may have queued a
+  // background Hardcover push. The sleep screen is up; let the push finish
+  // (bounded) rather than cutting power mid-request.
+  HardcoverSync::finishBeforeSleep();
 
   if (isSeamless) {
     saveSleepFrameBuffer();
@@ -654,6 +661,7 @@ void setup() {
 
   READING_STATS.loadFromFile();
   BF_TOKEN_STORE.loadFromFile();
+  HC_TOKEN_STORE.loadFromFile();
 
   // Silent NTP attempt against the last-connected WiFi network, on a background
   // task — non-blocking. Up to 3 SNTP retries, ~10s worst case, no UI shown.

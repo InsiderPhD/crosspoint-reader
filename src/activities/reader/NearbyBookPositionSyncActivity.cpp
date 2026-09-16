@@ -23,6 +23,7 @@
 #include "activities/ActivityManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/HardcoverSync.h"
 
 namespace {
 
@@ -357,6 +358,7 @@ void NearbyBookPositionSyncActivity::loop() {
 }
 
 bool NearbyBookPositionSyncActivity::beginEspNow() {
+  HardcoverSync::preempt();
   WiFi.mode(WIFI_STA);
   radioActivated_ = true;
   WiFi.disconnect(false);

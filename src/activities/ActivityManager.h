@@ -98,7 +98,6 @@ class ActivityManager {
   void goToAuthorBrowser();
   void goToSeriesBrowser();
   void goToLibrary();
-  void goToBrowser();
   void goToReader(std::string path);
   void goToSleep(bool fromTimeout = false);
   void goToBoot();

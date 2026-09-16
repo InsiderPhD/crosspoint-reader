@@ -70,6 +70,9 @@ class Epub {
   // Path to the lazily-stored description sidecar (read on demand into a bounded
   // buffer; deliberately NOT returned as a heap std::string).
   std::string getDescriptionPath() const;
+  // ISBN-13 sidecar written on the metadata-build pass; absent when the book has
+  // no valid ISBN or its cache predates the sidecar.
+  std::string getIsbnPath() const;
   bool hasDescription() const;
   std::string getCoverBmpPath(bool cropped = false) const;
   bool generateCoverBmp(bool cropped = false) const;

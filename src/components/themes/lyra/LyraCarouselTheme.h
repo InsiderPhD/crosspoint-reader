@@ -57,6 +57,11 @@ class LyraCarouselTheme : public LyraTheme {
 
   const ThemeMetrics& themeMetrics() const override;
 
+  // Top edge of the bottom menu block (its shared label line), so a theme that
+  // inherits this menu -- DashboardTheme does -- can lay its own content out
+  // above it without duplicating the constants drawButtonMenu anchors with.
+  static int menuBlockTopY(const GfxRenderer& renderer, const ThemeMetrics& metrics);
+
   void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,
                            std::function<bool()> storeCoverBuffer) const override;
