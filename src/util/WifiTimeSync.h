@@ -25,13 +25,22 @@ namespace WifiTimeSync {
 bool attemptIfStale(uint32_t timeoutMs = 8000);
 
 // Fire-and-forget silent boot-time NTP attempt. Spawns a background task that:
-//   1. Looks up the last-connected SSID from WIFI_STORE
-//   2. Reconnects silently (no UI), waits up to ~5s for association
-//   3. On success, retries NTP up to 3 times for a fresh wall clock
-//   4. Tears WiFi back down regardless of outcome
+//   1. Waits 1.5s so the first paint isn't fighting it for SD/SPI bandwidth
+//   2. Looks up the last-connected SSID from WIFI_STORE
+//   3. Reconnects silently (no UI), waiting up to 8s for association — but
+//      stopping ~2s after the driver reports the network is absent or rejected
+//      us, so a device booting away from its saved network doesn't hold the
+//      radio open for the full budget on every boot
+//   4. On association, up to 2 SNTP attempts at 5s each
+//   5. Tears WiFi back down regardless of outcome
 // No-op if the clock is already valid this boot, or if there is no saved
 // last-connected network. Safe to call from main.cpp's setup() — does not
 // block boot because the work runs on a FreeRTOS task.
+//
+// Worst case the radio is up for ~18s (8s association + 10s SNTP), starting
+// 1.5s after setup() returns. That overlaps the first activity's own work, and
+// the WiFi stack holds ~40KB throughout, so treat it as part of the boot
+// budget — the task logs its own duration for exactly this reason.
 void startSilentBootAttempt();
 
 // Cooperatively stop the silent boot NTP task and wait (bounded) until it has
@@ -39,7 +48,8 @@ void startSilentBootAttempt();
 // this before a heavy, allocation-hungry foreground job (e.g. the library
 // metadata recache) so the two don't contend for heap or the SD/SPI bus and
 // crash on a cold boot. No-op (returns immediately) if the task isn't running,
-// so after the ~10s boot window this costs nothing. Safe to call from any task.
+// so once the boot window above has elapsed this costs nothing. Safe to call
+// from any task.
 //
 // maxWaitMs caps the wait: teardown is usually <200ms (the task polls WiFi
 // association every 100ms), but a browse that lands mid-SNTP may wait up to one
