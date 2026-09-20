@@ -54,6 +54,30 @@
 // Chunked long-runners (HTTP downloads, firmware flashing) feed mid-pass.
 constexpr uint32_t LOOP_WDT_TIMEOUT_MS = 300000;  // 5 minutes
 
+// Boot-phase timing. Everything setup() does runs before the device answers a
+// button, so a slow phase in here reads to the user as a dead device — and until
+// now nothing said which phase. Each call prints the elapsed time for the phase
+// that just finished plus the time since power-on, so one boot log attributes a
+// slow boot instead of leaving it to guesswork.
+//
+// LOG_INF, not LOG_DBG, so it survives into gh_release_rc builds, and because
+// every log line also lands in the RTC ring buffer that the crash report dumps —
+// a boot that ends in a panic still shows where the time went.
+//
+// Costs one unsigned long of stack in setup() and compiles to nothing at all —
+// not even the millis() call — on builds without INF logging (slim, gh_release).
+// `phaseStartMs` names a local declared at the top of setup().
+#if defined(ENABLE_SERIAL_LOG) && LOG_LEVEL >= 1
+#define BOOT_PHASE(tag)                                                                   \
+  do {                                                                                    \
+    const unsigned long phaseNowMs = millis();                                            \
+    LOG_INF("BOOT", "%-20s %5lu ms (t=%lu)", tag, phaseNowMs - phaseStartMs, phaseNowMs); \
+    phaseStartMs = phaseNowMs;                                                            \
+  } while (0)
+#else
+#define BOOT_PHASE(tag) ((void)0)
+#endif
+
 MappedInputManager mappedInputManager(gpio);
 GfxRenderer renderer(display);
 ActivityManager activityManager(renderer, mappedInputManager);
@@ -331,6 +355,11 @@ void enterDeepSleep(bool fromTimeout) {
 }
 
 void setupDisplayAndFonts(bool seamless = false) {
+  // Own phase clock: this runs inside setup()'s sequence but is three distinct
+  // costs (panel bring-up, built-in font registration, SD font discovery+load),
+  // and "fonts" is the one that reaches the SD card for a user-supplied file.
+  [[maybe_unused]] unsigned long phaseStartMs = millis();
+
 #if !FREEINK_MCU_C3
   // Resolve the panel controller before display.begin() picks a driver. Xteink
   // ships two silicon variants behind one pinout — original units an SSD1677,
@@ -357,6 +386,7 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.begin();
   activityManager.begin();
   LOG_DBG("MAIN", "Display initialized");
+  BOOT_PHASE("display.begin");
 
   // Initialize font decompressor for compressed reader fonts
   if (!fontDecompressor.init()) {
@@ -389,15 +419,20 @@ void setupDisplayAndFonts(bool seamless = false) {
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);
+  BOOT_PHASE("builtin fonts");
 
   // Discover and load SD card fonts
   sdFontSystem.begin(renderer);
+  BOOT_PHASE("sd fonts");
 
   LOG_DBG("MAIN", "Fonts setup");
 }
 
 void setup() {
   t1 = millis();
+  // Phase clock for BOOT_PHASE(). Every line below runs before the device can
+  // answer a button, so this is the budget the user experiences as "boot time".
+  [[maybe_unused]] unsigned long phaseStartMs = t1;
 
 #if FREEINK_DEVICE_X4PRO
   // FIRST statement in setup(), before serial, before gpio.begin(), before any
@@ -451,6 +486,7 @@ void setup() {
     }
     enableLoopWDT();  // subscribes loopTask; the core feeds it every loop() pass
   }
+  BOOT_PHASE("serial + wdt");
 
   HalSystem::begin();
 
@@ -473,10 +509,12 @@ void setup() {
   if (gpio.deviceIsX3()) {
     BoardConfig::selectDevice(BoardConfig::Board::XteinkX3);
   }
+  BOOT_PHASE("gpio.begin");
 
   powerManager.begin();
   halTiltSensor.begin();
   halClock.begin();
+  BOOT_PHASE("power/tilt/clock");
 
 #ifdef ENABLE_SERIAL_LOG
   if (gpio.isUsbConnected()) {
@@ -486,6 +524,7 @@ void setup() {
       delay(10);
     }
   }
+  BOOT_PHASE("serial settle");
 #endif
 
   LOG_INF("MAIN", "Hardware detect: %s", gpio.deviceIsX3() ? "X3" : "X4");
@@ -499,14 +538,18 @@ void setup() {
     return;
   }
 
+  BOOT_PHASE("sd mount");
+
   HalSystem::checkPanic();
 
   SETTINGS.loadFromFile();
+  BOOT_PHASE("settings.json");
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
   I18N.loadSettings();
   KOREADER_STORE.loadFromFile();
   UITheme::getInstance().reload();
+  BOOT_PHASE("state/recents/i18n");
   // Frontlight (X4 Pro): restore the saved brightness/warmth now that settings
   // are loaded. No-op on boards without one.
   halFrontlight.begin();
@@ -628,11 +671,15 @@ void setup() {
       LOG_INF("MAIN", "Recovery firmware mode (UP + POWER held at boot)");
     }
   }
+  BOOT_PHASE("bt cfg + btn settle");
 
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
 
   setupDisplayAndFonts(/*seamless=*/!APP_STATE.showBootScreen);
+  // setupDisplayAndFonts() keeps its own phase clock; re-base ours so the boot
+  // screen below is measured from where it actually returned.
+  phaseStartMs = millis();
 
   if (!isSilentReboot) {
     if (APP_STATE.showBootScreen) {
@@ -658,8 +705,10 @@ void setup() {
     renderer.clearScreen();
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   }
+  BOOT_PHASE("boot screen");
 
   READING_STATS.loadFromFile();
+  BOOT_PHASE("reading stats");
   BF_TOKEN_STORE.loadFromFile();
   HC_TOKEN_STORE.loadFromFile();
 
@@ -697,9 +746,21 @@ void setup() {
     activityManager.goToReader(path);
   }
 
+  BOOT_PHASE("routing");
+
   // Ensure we're not still holding the power button before leaving setup
   waitForPowerRelease();
   allowSleepAt = millis() + 2000;
+  BOOT_PHASE("power release");
+
+  // This is boot up to the BOOT SCREEN, not to a usable screen. goToBoot() ran
+  // its onEnter() inline (replaceActivity() only defers when there is already a
+  // current activity), but the goHome()/goToReader() that follows it is queued
+  // and does not enter until the first loop() pass. Home's cover work, and a
+  // resumed book's metadata load and per-spine page scan, all land after this
+  // line — see the timings in ReaderActivity::loadEpub and
+  // EpubReaderActivity::buildBookPageCache.
+  LOG_INF("BOOT", "=== setup() complete in %lu ms (boot screen up; first activity still to enter) ===", millis() - t1);
 
   // Baseline for the heap attribution ladder: framebuffer, fonts, settings and
   // i18n are up, no book, no radios. Every later HeapReport::logBrief tag is

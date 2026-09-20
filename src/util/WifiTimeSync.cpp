@@ -65,6 +65,7 @@ void silentBootTask(void* /*arg*/) {
   }
 
   LOG_INF("WTS", "Silent boot NTP attempt via '%s'", lastSsid.c_str());
+  const unsigned long radioStartMs = millis();
   WiFi.mode(WIFI_STA);
   if (cred->password.empty()) {
     WiFi.begin(cred->ssid.c_str());
@@ -75,7 +76,40 @@ void silentBootTask(void* /*arg*/) {
   // Wait up to ~8s for the association (corporate WiFi often takes >5s).
   constexpr int kConnectPollMs = 100;
   constexpr int kConnectMaxIters = 80;
-  for (int i = 0; i < kConnectMaxIters && WiFi.status() != WL_CONNECTED && !sStopRequested; ++i) {
+  // ...but stop early once the driver has actually ruled the network out. The
+  // loop used to test only "not connected yet", so a saved network that is
+  // simply not here - the common case for a device booting away from home -
+  // burned the whole 8s before the task could even conclude there was nothing
+  // to sync against. That is dead radio time in the window where the user is
+  // trying to use the device, and it recurred on EVERY boot.
+  //
+  // WL_NO_SSID_AVAIL means a full scan for the SSID completed and found
+  // nothing; WL_CONNECT_FAILED means the AP answered and rejected us. The
+  // interactive flow already treats exactly this pair as terminal and fails the
+  // connect on the spot (WifiSelectionActivity::updateConnecting) - this is the
+  // same verdict, just reached silently.
+  //
+  // It is applied more conservatively here than there, though: the core
+  // auto-reconnects, so the status can blip through one of these while a
+  // slow-but-present AP is still coming up, and unlike the interactive flow
+  // there is no user watching who could retry. Give it kVerdictGraceMs after
+  // the FIRST such verdict - about one more retry cycle - and only then stop.
+  // An AP that is present but slow never reports these statuses at all, so the
+  // full 8s budget those iteration counts were tuned for is untouched.
+  constexpr unsigned long kVerdictGraceMs = 2000;
+  unsigned long firstVerdictMs = 0;
+  for (int i = 0; i < kConnectMaxIters && !sStopRequested; ++i) {
+    const wl_status_t status = WiFi.status();
+    if (status == WL_CONNECTED) break;
+    if (status == WL_NO_SSID_AVAIL || status == WL_CONNECT_FAILED) {
+      if (firstVerdictMs == 0) {
+        firstVerdictMs = millis();
+      } else if (millis() - firstVerdictMs > kVerdictGraceMs) {
+        LOG_INF("WTS", "Silent boot: '%s' not reachable (status=%d), giving up after %lu ms", lastSsid.c_str(),
+                static_cast<int>(status), millis() - radioStartMs);
+        break;
+      }
+    }
     vTaskDelay(kConnectPollMs / portTICK_PERIOD_MS);
   }
 
@@ -102,12 +136,18 @@ void silentBootTask(void* /*arg*/) {
   vTaskDelay(50 / portTICK_PERIOD_MS);
   WiFi.mode(WIFI_OFF);
 
+  // Report how long the radio was actually up. This task holds the WiFi stack's
+  // ~40KB for its whole life, on the boot timeline, alongside a book open that
+  // needs a 32KB contiguous block (see the InflateScratchLease in
+  // ReaderActivity::loadEpub) - so its duration belongs in the boot log next to
+  // the BOOT_PHASE lines, not inferred from the gaps between them.
+  const unsigned long radioMs = millis() - radioStartMs;
   if (sStopRequested) {
-    LOG_INF("WTS", "Silent boot NTP preempted, WiFi torn down");
+    LOG_INF("WTS", "Silent boot NTP preempted after %lu ms, WiFi torn down", radioMs);
   } else if (synced) {
-    LOG_INF("WTS", "Silent boot NTP succeeded");
+    LOG_INF("WTS", "Silent boot NTP succeeded in %lu ms", radioMs);
   } else {
-    LOG_INF("WTS", "Silent boot NTP gave up, continuing without fresh clock");
+    LOG_INF("WTS", "Silent boot NTP gave up after %lu ms, continuing without fresh clock", radioMs);
   }
   sBootActive = false;  // Last write: preempt() waits on this to know WiFi is down.
   vTaskDelete(nullptr);

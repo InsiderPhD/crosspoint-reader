@@ -719,12 +719,16 @@ class CrossPointSettings {
 
   // One-time migration: applies legacy per-action settings (longPressAction, shortPwrBtn,
   // longPressChapterSkip, sideButtonLayout) to the new per-button action fields.
-  static void migrateReaderActions(CrossPointSettings& settings);
+  // Returns true only when it actually changed something, so loadFromFile() can tell
+  // an already-migrated file (the overwhelmingly common case) from one that needs
+  // writing back. See the write-back guard in loadFromFile().
+  static bool migrateReaderActions(CrossPointSettings& settings);
 
   // One-time migration (X4 Pro only): turns Full Touch on for settings files
   // written while it defaulted off. Every registered setting is always saved,
   // so an existing file pins fullTouchUi = 0 and the new default alone is a no-op.
-  static void migrateFullTouchDefault(CrossPointSettings& settings);
+  // Returns true only when it actually changed something.
+  static bool migrateFullTouchDefault(CrossPointSettings& settings);
 
   // One-time migration: derives the per-element statusBar*Pos fields from the
   // legacy status-bar show/hide toggles and Book/Chapter enums. Called when a

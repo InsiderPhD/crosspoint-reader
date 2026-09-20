@@ -30,6 +30,7 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) const {
     return nullptr;
   }
 
+  const unsigned long loadStartMs = millis();
   auto epub = std::unique_ptr<Epub>(new Epub(path, "/.crosspoint"));
   bool borrowedFramebuffer = false;
   bool loaded = false;
@@ -52,6 +53,12 @@ std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) const {
   if (borrowedFramebuffer) {
     renderer.clearScreen();
   }
+
+  // Resuming a book on boot runs this between the boot screen and the first page,
+  // and on a cache-version bump it is a full inflate + metadata rebuild. Time it:
+  // "the device sat there for a minute" is otherwise indistinguishable from a
+  // slow panel or a slow SD mount. Pairs with the BOOT_PHASE lines in main.cpp.
+  LOG_INF("READER", "Epub metadata load: %lu ms", millis() - loadStartMs);
 
   if (loaded) {
     return epub;
