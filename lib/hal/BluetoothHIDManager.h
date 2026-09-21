@@ -31,6 +31,16 @@ enum class BtStatus : uint8_t {
   SubscribeFailed,
 };
 
+// Who is enabling the stack, which decides how much heap must be left once it
+// is up (see BLE_POST_ENABLE_FREE_FLOOR in the .cpp). The reader reloads its
+// Epub and chapter layout the moment enable() returns; the Bluetooth settings
+// screen has nothing resident to reload — it is only ever reached through
+// goToSettings(), which drops the activity stack.
+enum class BtEnableFor : uint8_t {
+  Reader,
+  SettingsScreen,
+};
+
 struct BluetoothDevice {
   std::string address;
   std::string name;
@@ -124,7 +134,7 @@ class BluetoothHIDManager {
   static BluetoothHIDManager& getInstance();
 
   // Lifecycle
-  bool enable();
+  bool enable(BtEnableFor purpose = BtEnableFor::Reader);
   bool disable();
   bool isEnabled() const { return _enabled; }
 
@@ -179,11 +189,11 @@ class BluetoothHIDManager {
   // A plain function pointer, not std::function: no capture is needed and this
   // avoids the per-signature heap closure (see CLAUDE.md).
   void setBondedAddressUpdatedCallback(void (*callback)(const char* address, uint8_t addrType));
-  void updateActivity();  // Call periodically to check inactivity timeout
   // Reconnect the bonded device when disconnected. Two triggers: a physical
   // button press on the device, or the remote itself advertising (it does so
-  // after one of its buttons is pressed) — detected by a passive low-duty
-  // background scan that runs whenever enabled+bonded+disconnected.
+  // after one of its buttons is pressed) — detected by a background scan that
+  // runs whenever enabled+bonded+disconnected (see startBackgroundScan for its
+  // duty cycle).
   void checkAutoReconnect(bool userInputDetected = false);
 
   // Memory pause: shut the stack down to hand its heap to a memory-critical
@@ -270,6 +280,10 @@ class BluetoothHIDManager {
   void reconcileBondedAddressWithStore();
   bool rememberedAddressIsRotating() const;
   void stopBackgroundScan();
+  // Once the press-to-wake window has passed, restart the running background
+  // scan with its low-duty parameters. NimBLE only latches scan parameters at
+  // start(), so backing off means stop-then-start rather than a live update.
+  void demoteBackgroundScanToLowDuty();
   ConnectedDevice* findConnectedDevice(const std::string& address);
   // Feeds one HID report to the device's press detector. Returns true when the
   // frame represents a fresh button press that should turn a page.
@@ -280,6 +294,10 @@ class BluetoothHIDManager {
   bool _enabled = false;
   bool _scanning = false;
   bool _backgroundScanActive = false;
+  // When the running background scan was started, and whether it has already
+  // been backed off to its low-duty parameters. See BACKGROUND_SCAN_* below.
+  unsigned long _backgroundScanStartedMs = 0;
+  bool _backgroundScanLowDuty = false;
   // Bounded diagnostic: how many filtered-out advertisers this scan has logged.
   // Capped so a busy RF environment can't flood the serial log (see onScanResult).
   uint8_t _skippedAdvLogs = 0;
@@ -332,8 +350,24 @@ class BluetoothHIDManager {
   uint8_t _bondedAddrType = 0;
   std::string _bondedDeviceName;
 
-  // Inactivity timeout (milliseconds)
-  static constexpr unsigned long INACTIVITY_TIMEOUT_MS = 300000;  // 5 minutes
+  // Background reconnect scan duty cycle. Units are BLE's 0.625ms ticks.
+  //
+  // There used to be no duty cycle: the scan ran at ~90% until something
+  // connected, which for a press-only remote (it never advertises unless a
+  // button is pressed) meant the whole reading session. That was the single
+  // largest current draw while reading — tens of mA, next to well under 1mA for
+  // simply staying connected.
+  //
+  // Listen hard for the first stretch after a disconnect, because that is when
+  // the user is most likely to pick the remote back up, then back off. A press
+  // that lands in the low-duty gap costs one extra button press; a press on the
+  // device's own buttons reconnects immediately via the fast path in
+  // checkAutoReconnect() regardless.
+  static constexpr unsigned long BACKGROUND_SCAN_HIGH_DUTY_MS = 45000;
+  static constexpr uint16_t BACKGROUND_SCAN_HIGH_INTERVAL = 160;  // 100ms...
+  static constexpr uint16_t BACKGROUND_SCAN_HIGH_WINDOW = 144;    // ...listening 90ms of it (~90%)
+  static constexpr uint16_t BACKGROUND_SCAN_LOW_INTERVAL = 1600;  // 1000ms...
+  static constexpr uint16_t BACKGROUND_SCAN_LOW_WINDOW = 160;     // ...listening 100ms of it (~10%)
   // Minimum quiet time after a WiFi teardown before the BT controller may be
   // re-initialised. The WiFi->BT controller handoff hard-freezes this chip when
   // it happens too soon; a 500ms settle was measured to still freeze, so keep a
@@ -345,7 +379,6 @@ class BluetoothHIDManager {
   // the chapter layout and re-renders, so a persistently-failing enable must not
   // retry every loop — keep this generous.
   static constexpr unsigned long BLE_RESTORE_RETRY_MS = 5000;
-  unsigned long lastMaintenanceCheck = 0;
 };
 
 // RAII scope for pauseForMemory()/endMemoryPause(). On destruction the BLE

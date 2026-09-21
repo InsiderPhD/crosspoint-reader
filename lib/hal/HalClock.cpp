@@ -1,5 +1,6 @@
 #include "HalClock.h"
 
+#include <BoardConfig.h>
 #include <Logging.h>
 #include <WiFi.h>
 #include <esp_sntp.h>
@@ -10,22 +11,21 @@
 HalClock halClock;  // Singleton instance
 
 void HalClock::begin() {
-  if (!gpio.deviceIsX3()) {
-    _available = false;
-    return;
-  }
-
+  // Any board whose profile declares an RTC: the X3's DS3231, the X4 Pro's
+  // PCF8563 on the shared touch bus. Boards without one (the C3 X4) have no
+  // rtcAddr, and Rtc::begin() refuses those anyway — this just avoids probing.
+  //
   // freeink::Rtc reads the RTC's address, bus and chip type from the active board
   // profile (BoardConfig::ACTIVE). main.cpp selects the X3 profile right after
   // hardware detection; if that hasn't happened begin() below simply reports no RTC.
-  if (!_rtc.begin()) {
-    LOG_INF("CLK", "DS3231 RTC not found");
+  if (!BoardConfig::hasRtc() || !_rtc.begin()) {
+    LOG_INF("CLK", "RTC not found");
     _available = false;
     return;
   }
 
   _available = true;
-  LOG_INF("CLK", "DS3231 RTC found");
+  LOG_INF("CLK", "RTC found");
 
   // Prime the HH:MM cache with an initial read.
   uint8_t h, m;
@@ -60,6 +60,45 @@ bool HalClock::getTime(uint8_t& hour, uint8_t& minute) const {
   hour = _cachedHour;
   minute = _cachedMinute;
   return true;
+}
+
+namespace {
+// days::from_civil (Howard Hinnant): calendar date -> days since 1970-01-01.
+int32_t daysFromCivil(int year, const unsigned month, const unsigned day) {
+  year -= month <= 2;
+  const int32_t era = (year >= 0 ? year : year - 399) / 400;
+  const auto yoe = static_cast<uint32_t>(year - era * 400);
+  const uint32_t doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+  const uint32_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + static_cast<int32_t>(doe) - 719468;
+}
+}  // namespace
+
+bool HalClock::getUtcEpoch(uint32_t& outEpoch) const {
+  if (!_available) return false;
+
+  freeink::Rtc::DateTime dt;
+  if (!_rtc.now(dt)) return false;  // I2C error, or oscillator stopped: unusable
+  if (dt.month < 1 || dt.month > 12 || dt.day < 1 || dt.day > 31 || dt.hour > 23 || dt.minute > 59 || dt.second > 59) {
+    LOG_ERR("CLK", "RTC returned an implausible date: %04u-%02u-%02u %02u:%02u", dt.year, dt.month, dt.day, dt.hour,
+            dt.minute);
+    return false;
+  }
+
+  const int32_t days = daysFromCivil(dt.year, dt.month, dt.day);
+  if (days < 0) return false;
+  outEpoch = static_cast<uint32_t>(days) * 86400u + dt.hour * 3600u + dt.minute * 60u + dt.second;
+  return true;
+}
+
+bool HalClock::setUtcEpoch(const uint32_t epoch) {
+  if (!_available) return false;
+  const time_t when = static_cast<time_t>(epoch);
+  struct tm utc;
+  if (gmtime_r(&when, &utc) == nullptr) return false;
+  return writeDateTime(utc.tm_year + 1900, static_cast<unsigned>(utc.tm_mon + 1), static_cast<unsigned>(utc.tm_mday),
+                       static_cast<uint8_t>(utc.tm_hour), static_cast<uint8_t>(utc.tm_min),
+                       static_cast<uint8_t>(utc.tm_sec));
 }
 
 bool HalClock::writeDateTime(int year, unsigned month, unsigned day, uint8_t hour, uint8_t minute, uint8_t second) {

@@ -182,7 +182,12 @@ Error runQuery(const JsonDocument& request, JsonDocument& response) {
   ResponseBuffer resp;
   bool overflow = false;
   const freeink::SecureHttpClient::DataCallback onData = [&](const uint8_t* data, const size_t len) {
-    esp_task_wdt_reset();
+    // Only the loop task is subscribed to the task watchdog. A push also runs on
+    // the boot-sync and background tasks, which are not, and feeding it from
+    // there logs "esp_task_wdt_reset(): task not found" for every chunk.
+    if (esp_task_wdt_status(nullptr) == ESP_OK) {
+      esp_task_wdt_reset();
+    }
     if (!resp.append(data, len)) {
       overflow = true;
       return false;
@@ -192,13 +197,27 @@ Error runQuery(const JsonDocument& request, JsonDocument& response) {
 
   LOG_DBG("HCS", "POST graphql (%u bytes, heap %u, max alloc %u)", static_cast<unsigned>(body.length()),
           static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+  // Round-trip timing, logged on every outcome. A failure that takes exactly
+  // the client timeout is the server not answering; a fast failure is local.
+  // Without this the two are indistinguishable in the log.
+  const unsigned long requestStartMs = millis();
   const int httpCode =
       g_client->sendRequest("POST", reinterpret_cast<const uint8_t*>(body.c_str()), body.length(), onData);
+  const unsigned long elapsedMs = millis() - requestStartMs;
   g_lastRequestMs = millis();
+  LOG_DBG("HCS", "graphql reply: code %d in %lu ms, %u body bytes", httpCode, elapsedMs,
+          static_cast<unsigned>(resp.len));
 
   if (httpCode < 0) {
-    LOG_ERR("HCS", "Request failed: %d (heap %u, max alloc %u)", httpCode, static_cast<unsigned>(ESP.getFreeHeap()),
-            static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    // Stage + partial bytes are what separate "the server never answered" from
+    // "it answered and we mis-framed it" -- indistinguishable in the old log,
+    // which only ever said "-1".
+    const auto& diag = g_client->lastFailure();
+    LOG_ERR("HCS", "Request failed: %d after %lu ms (heap %u, max alloc %u)", httpCode, elapsedMs,
+            static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    LOG_ERR("HCS", "  stage=%s elapsed=%lums partial=%u bytes '%s' available=%d connected=%d reused=%d", diag.stage,
+            diag.elapsedMs, static_cast<unsigned>(diag.partialBytes), diag.partial, diag.available,
+            static_cast<int>(diag.connected), static_cast<int>(diag.reusedConnection));
     g_client.reset();
     return Error::NETWORK_ERROR;
   }

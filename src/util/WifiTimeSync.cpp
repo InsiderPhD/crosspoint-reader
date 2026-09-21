@@ -6,6 +6,7 @@
 #include <freertos/task.h>
 
 #include "CrossPointState.h"
+#include "HardcoverSync.h"
 #include "TimeUtils.h"
 #include "WifiCredentialStore.h"
 
@@ -16,6 +17,22 @@ namespace {
 //   sStopRequested  — written by preempt(), read by the task at its yield points
 volatile bool sBootActive = false;
 volatile bool sStopRequested = false;
+
+// Wall-clock cap on the once-a-day Hardcover push that piggybacks on this
+// task's connection. Generous enough for a handful of books at ~1-2s each;
+// an unreachable API is cut short long before this by runFullSync's
+// consecutive-failure limit.
+constexpr uint32_t kHardcoverSyncBudgetMs = 45000;
+
+// 4KB is plenty for the NTP work alone, but the Hardcover push above runs a
+// wolfSSL handshake on this task and needs the same room the dedicated push
+// worker gets (kWorkerStackBytes). Only pay for it on boards that actually
+// compile the push in - the C3s keep their original 4KB.
+#if CROSSPOINT_HARDCOVER_AUTO_SYNC
+constexpr uint32_t kBootTaskStackBytes = 12 * 1024;
+#else
+constexpr uint32_t kBootTaskStackBytes = 4096;
+#endif
 
 // Silent boot worker. Connects to the last-known SSID, runs up to 3 NTP
 // attempts, tears WiFi down, then deletes itself. Intentionally short timeouts
@@ -130,6 +147,18 @@ void silentBootTask(void* /*arg*/) {
     LOG_INF("WTS", "Silent boot WiFi connect failed (status=%d)", WiFi.status());
   }
 
+  // The radio is already up and the clock is now trustworthy, which is exactly
+  // what a whole-library Hardcover push needs - so take the chance rather than
+  // spending a second WiFi bring-up (and another ~40KB of stack+stack lifetime)
+  // on it later. Gated to once a calendar day by APP_STATE.lastHardcoverSyncDay,
+  // and bounded so it cannot turn a boot into a minute of dead radio.
+  //
+  // Deliberately keyed on "the clock is valid", not "SNTP just succeeded": a
+  // board that seeded its clock from the RTC has a usable date without NTP.
+  if (!sStopRequested && WiFi.status() == WL_CONNECTED && TimeUtils::isClockValid() && HardcoverSync::isFullSyncDue()) {
+    HardcoverSync::runFullSync(kHardcoverSyncBudgetMs, &sStopRequested);
+  }
+
   // Always tear WiFi back down — this is a silent boot helper, the radio
   // shouldn't stay on without the user knowing.
   WiFi.disconnect(false);
@@ -200,7 +229,7 @@ void WifiTimeSync::startSilentBootAttempt() {
   sStopRequested = false;
   sBootActive = true;
   // 4 KB stack is enough for the WiFi/SNTP path. Priority 1 (background).
-  if (xTaskCreate(&silentBootTask, "WTSBoot", 4096, nullptr, 1, nullptr) != pdPASS) {
+  if (xTaskCreate(&silentBootTask, "WTSBoot", kBootTaskStackBytes, nullptr, 1, nullptr) != pdPASS) {
     sBootActive = false;
     LOG_ERR("WTS", "Failed to create silent boot NTP task");
   }

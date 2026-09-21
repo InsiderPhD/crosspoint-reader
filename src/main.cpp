@@ -47,6 +47,7 @@
 #include "util/HeapReport.h"
 #include "util/ReaderCombos.h"
 #include "util/ScreenshotUtil.h"
+#include "util/TimeUtils.h"
 #include "util/WifiTimeSync.h"
 
 // Loop-task watchdog budget. Must exceed the longest legitimate single pass of
@@ -346,6 +347,11 @@ void enterDeepSleep(bool fromTimeout) {
     saveSleepFrameBuffer();
   }
 
+  // X3/X4: the only automatic Hardcover push. Lends the framebuffer to TLS, so
+  // it must come after saveSleepFrameBuffer. No-op on auto-sync boards, whose
+  // push was already waited for above.
+  HardcoverSync::pushBeforeSleep(renderer);
+
   halFrontlight.off();
   halTiltSensor.deepSleep();
   display.deepSleep();
@@ -512,8 +518,20 @@ void setup() {
   BOOT_PHASE("gpio.begin");
 
   powerManager.begin();
+  // A rejected deep-sleep entry now restarts the device instead of dropping
+  // back into loop() at full clock (HalPowerManager::startDeepSleep). Say so
+  // once, here: without this line that failure is silent and looks exactly like
+  // a battery-drain bug from the outside.
+  if (const auto abortedSleep = HalPowerManager::takeAbortedSleepInfo(); abortedSleep.aborted) {
+    LOG_ERR("BOOT", "Previous deep-sleep entry was REJECTED (wake cause %d, wake pin level %d); rebooted instead",
+            abortedSleep.wakeupCause, abortedSleep.wakePinLevel);
+  }
   halTiltSensor.begin();
   halClock.begin();
+  // The RTC is the only date a device that never sees WiFi will ever have, so
+  // seed the system clock from it before anything timestamps a session. No-op
+  // on boards without one, or when the chip was never set.
+  TimeUtils::seedClockFromRtc();
   BOOT_PHASE("power/tilt/clock");
 
 #ifdef ENABLE_SERIAL_LOG
@@ -832,7 +850,6 @@ void loop() {
     LOG_INF("MAIN", "Disabling Bluetooth (outside reader/settings)");
     btMgr.disable();
   }
-  btMgr.updateActivity();
   btMgr.checkAutoReconnect(physicalInputDetected);
   const bool bleRecentActivity = btMgr.isEnabled() && btMgr.hasRecentActivity();
 

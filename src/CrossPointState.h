@@ -25,6 +25,10 @@ class CrossPointState {
   std::string readerTimeLeftBookPath;
   uint32_t readerTimeLeftSeconds = 0;
   uint32_t lastKnownValidTimestamp = 0;
+  // Local day ordinal of the last whole-library Hardcover push, so the boot
+  // sync runs at most once a day. 0 = never. Persisted in state.json because
+  // the whole point is to survive the reboot.
+  uint32_t lastHardcoverSyncDay = 0;
   bool showBootScreen = true;
 
   // Returns true if idx was shown within the last checkCount picks.

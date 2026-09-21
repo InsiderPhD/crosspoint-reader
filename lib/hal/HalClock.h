@@ -44,6 +44,15 @@ class HalClock {
   // Returns false if RTC is not available.
   bool formatTime(char* buf, size_t bufSize, uint8_t utcOffsetQuarterHoursBiased = 48, bool use12Hour = false) const;
 
+  // Read the RTC as a UTC epoch. False when there is no RTC, on an I2C error,
+  // or when the chip reports its oscillator stopped (never set / flat backup
+  // cell), so a garbage time can never reach the system clock.
+  bool getUtcEpoch(uint32_t& outEpoch) const;
+
+  // Store a UTC epoch in the RTC, so the date survives a power cycle. Called
+  // whenever the system clock becomes trustworthy (NTP, or a manual date).
+  bool setUtcEpoch(uint32_t epoch);
+
   // Sync the RTC from an NTP server. Requires WiFi to be connected.
   // Blocks for up to ~5s while waiting for SNTP response.
   // Returns true if the RTC was successfully updated.

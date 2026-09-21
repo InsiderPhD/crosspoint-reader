@@ -57,7 +57,21 @@ class HalPowerManager {
 
   // Setup wake up GPIO and enter deep sleep
   // Should be called inside main loop() to handle the currentLockMode
-  void startDeepSleep(HalGPIO& gpio) const;
+  // Does not return: if the SoC rejects sleep entry this restarts the device
+  // rather than falling back into loop() (see the implementation).
+  [[noreturn]] void startDeepSleep(HalGPIO& gpio) const;
+
+  // Whether the PREVIOUS boot ended in a rejected deep-sleep entry, and the
+  // wake state captured at that moment. Clears the record, so it is reported
+  // once. Ported from freeink-sdk d37a158, which fixes the same busy-loop in
+  // the SDK's own PowerManager::deepSleep() — we don't call that, so we carry
+  // our own copy of the guard.
+  struct AbortedSleepInfo {
+    bool aborted = false;
+    int wakeupCause = 0;
+    int wakePinLevel = 0;
+  };
+  static AbortedSleepInfo takeAbortedSleepInfo();
 
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;

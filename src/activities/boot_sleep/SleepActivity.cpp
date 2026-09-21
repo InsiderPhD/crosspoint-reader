@@ -227,11 +227,23 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
   }
 
   LOG_DBG("SLP", "drawing to %d x %d", x, y);
-  renderer.clearScreen();
 
   const bool hasGreyscale = bitmap.hasGreyscale() &&
                             SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
 
+  if (hasGreyscale) {
+    // The grayscale LUT only nudges particles, so the BW base under it must go
+    // up on a weak FAST waveform (same reason the reader double-FASTs image
+    // pages). A HALF base no longer works: HalDisplay arms a resync on every
+    // HALF, which on the X3 is a full-sync waveform that sets the pixels too
+    // firmly for the grey drive to move, and the cover came out in harsh,
+    // wrong tones. Scrub to white on a FULL first so the FAST base doesn't
+    // ghost the reader page underneath.
+    renderer.clearScreen();
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  }
+
+  renderer.clearScreen();
   renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
 
   if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
@@ -239,40 +251,37 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
   }
 
   // Draw the stat box into this (BW) paint. For a BW cover this is the final
-  // commit. For a greyscale cover this HALF paint becomes the base image that
-  // displayGrayBuffer() refines; the greyscale passes below then clear the box
-  // rectangle so displayGrayBuffer leaves the box region as this BW base while
-  // the rest of the cover renders in greyscale — one refresh, greyscale kept.
+  // commit. For a greyscale cover it is the base; the greyscale passes below
+  // clear the box rectangle so displayGrayBuffer leaves the box region as this
+  // BW base while the rest of the cover renders in greyscale.
   SleepStatsCard::draw(renderer);
 
-  // Power off after this paint only when it is the final one. The greyscale
-  // pass below repaints and powers down on its own (displayGrayBuffer always
-  // collapses the rails after its update). When this IS the final paint (BW
-  // cover, no greyscale), use FULL_REFRESH so the image is fully committed and
-  // survives the battery-disconnect power collapse (see renderDefaultSleepScreen
-  // for the full rationale). The intermediate greyscale paint stays on
-  // HALF_REFRESH since displayGrayBuffer supersedes it.
-  renderer.displayBuffer(hasGreyscale ? HalDisplay::HALF_REFRESH : HalDisplay::FULL_REFRESH,
-                         /*powerOffAfter=*/!hasGreyscale);
-
-  if (hasGreyscale) {
-    bitmap.rewindToData();
-    renderer.clearScreen(0x00);
-    renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
-    SleepStatsCard::draw(renderer, /*clearRegionOnly=*/true);  // clear box rect -> preserves BW base box
-    renderer.copyGrayscaleLsbBuffers();
-
-    bitmap.rewindToData();
-    renderer.clearScreen(0x00);
-    renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-    renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
-    SleepStatsCard::draw(renderer, /*clearRegionOnly=*/true);
-    renderer.copyGrayscaleMsbBuffers();
-
-    renderer.displayGrayBuffer();
-    renderer.setRenderMode(GfxRenderer::BW);
+  if (!hasGreyscale) {
+    // Final paint: FULL_REFRESH so the image is fully committed and survives
+    // the battery-disconnect power collapse (see renderDefaultSleepScreen).
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH, /*powerOffAfter=*/true);
+    return;
   }
+
+  // displayGrayBuffer below powers the rails off.
+  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+
+  bitmap.rewindToData();
+  renderer.clearScreen(0x00);
+  renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
+  renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+  SleepStatsCard::draw(renderer, /*clearRegionOnly=*/true);  // clear box rect -> preserves BW base box
+  renderer.copyGrayscaleLsbBuffers();
+
+  bitmap.rewindToData();
+  renderer.clearScreen(0x00);
+  renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
+  renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
+  SleepStatsCard::draw(renderer, /*clearRegionOnly=*/true);
+  renderer.copyGrayscaleMsbBuffers();
+
+  renderer.displayGrayBuffer();
+  renderer.setRenderMode(GfxRenderer::BW);
 }
 
 void SleepActivity::renderCoverSleepScreen() const {

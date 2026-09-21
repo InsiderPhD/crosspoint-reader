@@ -225,7 +225,7 @@ void BluetoothSettingsActivity::activateMainMenuItem() {
       // Arm auto-restore: the remote should return by itself after later
       // memory-critical operations (chapter builds, syncs) tear the stack down.
       btMgr->setBluetoothWanted(true);
-      if (btMgr->enable()) {
+      if (btMgr->enable(BtEnableFor::SettingsScreen)) {
         lastError = tr(STR_BT_ENABLED);
       } else {
         lastError = btStatusText(btMgr->lastStatus);
@@ -271,7 +271,7 @@ void BluetoothSettingsActivity::activateMainMenuItem() {
         // Arm auto-restore, same as the toggle row: the stack should return by
         // itself after memory-critical operations tear it down.
         btMgr->setBluetoothWanted(true);
-        if (!btMgr->enable()) {
+        if (!btMgr->enable(BtEnableFor::SettingsScreen)) {
           // Surface the specific reason (fragmented heap, no memory, ...) the
           // same way the toggle row does.
           lastError = btStatusText(btMgr->lastStatus);

@@ -10,6 +10,7 @@
 #endif
 #include <esp_bt.h>
 #include <esp_sleep.h>
+#include <esp_system.h>  // esp_restart()
 #include <soc/gpio_num.h>
 
 #include <cassert>
@@ -22,6 +23,22 @@
 // HIGH (default) = battery connected; LOW = battery disconnected.
 // Pulling it LOW before deep sleep cuts quiescent draw from ~3-4mA to near zero.
 static constexpr gpio_num_t GPIO_SPIWP = GPIO_NUM_13;
+
+// Records a rejected deep-sleep entry across the esp_restart() that follows it,
+// so the next boot can report it via takeAbortedSleepInfo(). RTC_NOINIT_ATTR
+// survives esp_restart() (a warm reset, same RTC-memory domain) but holds
+// garbage on a cold boot, hence the magic guard — same pattern as main.cpp's
+// silentRebootMagic.
+static constexpr uint32_t ABORTED_SLEEP_MAGIC = 0x41424f52;  // 'ABOR'
+
+struct AbortedSleepRecord {
+  bool aborted;
+  int wakeupCause;
+  int wakePinLevel;
+};
+
+static RTC_NOINIT_ATTR uint32_t abortedSleepMagic;
+static RTC_NOINIT_ATTR AbortedSleepRecord abortedSleepRecord;
 
 HalPowerManager powerManager;  // Singleton instance
 
@@ -186,8 +203,49 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
 #else
   esp_deep_sleep_enable_gpio_wakeup(1ULL << InputManager::POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
 #endif
-  // Enter Deep Sleep
-  esp_deep_sleep_start();
+  // Enter Deep Sleep.
+  //
+  // Called through a volatile function pointer, NOT directly: IDF declares
+  // esp_deep_sleep_start() __attribute__((noreturn)) (esp_sleep.h), so a direct
+  // call lets the compiler prove the recovery below is unreachable and delete
+  // it — the guard would compile away to nothing and we would never know. The
+  // indirect call hides the attribute from the optimiser. (freeink-sdk d37a158
+  // calls it directly and so may lose its copy of this guard to the same
+  // optimisation.)
+  static void (*volatile deepSleepStart)() = &esp_deep_sleep_start;
+  deepSleepStart();
+
+  // esp_deep_sleep_start() does not return in normal operation. Reaching this
+  // line means the SoC rejected sleep entry — the commonest cause being a wake
+  // source that is already asserted (the ext1 pin sitting LOW). Falling out of
+  // here used to return into loop(), which leaves the device running at full
+  // clock behind a sleep screen, deaf to everything but a fresh power press,
+  // and — because lastActivityTime is never reset — re-attempting the whole
+  // sleep sequence every iteration. From the outside that is indistinguishable
+  // from a battery-drain bug, which is exactly what made previous drain hunts
+  // unfalsifiable. Record the abort in RTC memory (RTC_NOINIT_ATTR survives the
+  // warm reset below) and restart properly, so the next boot can say so.
+  // Ported from freeink-sdk d37a158.
+  abortedSleepRecord.aborted = true;
+  abortedSleepRecord.wakeupCause = static_cast<int>(esp_sleep_get_wakeup_cause());
+  abortedSleepRecord.wakePinLevel = digitalRead(InputManager::POWER_BUTTON_PIN);
+  abortedSleepMagic = ABORTED_SLEEP_MAGIC;
+  esp_restart();  // [[noreturn]], which satisfies this function's own contract
+}
+
+HalPowerManager::AbortedSleepInfo HalPowerManager::takeAbortedSleepInfo() {
+  AbortedSleepInfo info;
+  if (abortedSleepMagic == ABORTED_SLEEP_MAGIC && abortedSleepRecord.aborted) {
+    info.aborted = true;
+    info.wakeupCause = abortedSleepRecord.wakeupCause;
+    info.wakePinLevel = abortedSleepRecord.wakePinLevel;
+  }
+  // Clear so a stale record isn't reported again on a later boot, and stamp the
+  // magic so an uninitialised cold-boot read reports false rather than trusting
+  // a garbage `aborted` bit.
+  abortedSleepRecord.aborted = false;
+  abortedSleepMagic = ABORTED_SLEEP_MAGIC;
+  return info;
 }
 
 uint16_t HalPowerManager::getBatteryPercentage() const {

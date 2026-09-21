@@ -20,6 +20,10 @@ bool getLocalHour(uint32_t epochSeconds, uint8_t& hourOut);
 uint32_t getDayOrdinalForDate(int year, unsigned month, unsigned day);
 bool getDateFromDayOrdinal(uint32_t dayOrdinal, int& year, unsigned& month, unsigned& day);
 bool wasTimeSyncedThisBoot();
+// Seed the system clock from the board's RTC at boot. This is the only source
+// of a date for a device that never sees WiFi. False when the board has no RTC,
+// the chip was never set, or it reports a pre-2024 (so untrustworthy) time.
+bool seedClockFromRtc();
 const char* getCurrentTimeZoneLabel();
 std::string formatDate(uint32_t epochSeconds, bool appendBang = false);
 std::string formatDateTime(uint32_t epochSeconds, bool appendBang = false);

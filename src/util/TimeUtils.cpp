@@ -1,6 +1,8 @@
 #include "TimeUtils.h"
 
 #include <Arduino.h>
+#include <HalClock.h>
+#include <Logging.h>
 #include <esp_sntp.h>
 #include <sys/time.h>
 
@@ -14,6 +16,10 @@
 namespace {
 constexpr uint32_t VALID_CLOCK_THRESHOLD = 1704067200UL;  // 2024-01-01 UTC
 bool syncedThisBoot = false;
+// The clock came from the RTC rather than NTP. Kept separate from
+// syncedThisBoot, which callers also read as "the network worked this boot"
+// (ProgressAutoSync) — an offline device must not start attempting pushes.
+bool seededFromRtcThisBoot = false;
 uint8_t configuredTimeZonePreset = UINT8_MAX;
 
 bool isLeapYear(const int year) { return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0); }
@@ -98,6 +104,9 @@ bool TimeUtils::syncTimeWithNtp(const uint32_t timeoutMs) {
 
     if ((syncCompleted || clockJumpedToValid) && currentClockValid) {
       syncedThisBoot = true;
+      // Park it in the RTC so the date survives the next power cycle even if
+      // this is the last network the device ever sees.
+      halClock.setUtcEpoch(static_cast<uint32_t>(currentTime));
       return true;
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -112,7 +121,7 @@ bool TimeUtils::isClockValid(const uint32_t epochSeconds) { return epochSeconds 
 
 uint32_t TimeUtils::getAuthoritativeTimestamp() {
   const uint32_t now = static_cast<uint32_t>(time(nullptr));
-  if (syncedThisBoot && isClockValid(now)) {
+  if ((syncedThisBoot || seededFromRtcThisBoot) && isClockValid(now)) {
     return now;
   }
   return 0;
@@ -152,6 +161,8 @@ bool TimeUtils::setCurrentDate(const int year, const unsigned month, const unsig
   }
 
   syncedThisBoot = true;
+  // A hand-entered date is the offline user's only input; keep it across boots.
+  halClock.setUtcEpoch(static_cast<uint32_t>(epoch));
   if (epochSeconds) {
     *epochSeconds = static_cast<uint32_t>(epoch);
   }
@@ -202,6 +213,23 @@ bool TimeUtils::getDateFromDayOrdinal(const uint32_t dayOrdinal, int& year, unsi
 }
 
 bool TimeUtils::wasTimeSyncedThisBoot() { return syncedThisBoot; }
+
+bool TimeUtils::seedClockFromRtc() {
+  uint32_t epoch = 0;
+  if (!halClock.getUtcEpoch(epoch) || !isClockValid(epoch)) {
+    return false;
+  }
+
+  timeval tv{};
+  tv.tv_sec = static_cast<time_t>(epoch);
+  if (settimeofday(&tv, nullptr) != 0) {
+    return false;
+  }
+  seededFromRtcThisBoot = true;
+  configureTimezone();
+  LOG_INF("TIME", "System clock seeded from RTC (%u)", static_cast<unsigned>(epoch));
+  return true;
+}
 
 const char* TimeUtils::getCurrentTimeZoneLabel() {
   return TimeZoneRegistry::getPresetLabel(TimeZoneRegistry::clampPresetIndex(SETTINGS.timeZonePreset));

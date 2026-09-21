@@ -91,6 +91,25 @@ constexpr uint32_t BLE_CONTROLLER_MIN_BLOCK = 20 * 1024;
 // line the answer is to make the post-enable reload survive a failed
 // allocation, not to raise the number until nothing can enable.
 constexpr uint32_t BLE_POST_ENABLE_FREE_FLOOR = 35 * 1024;
+// The same check for the Bluetooth settings screen, which is where a remote is
+// first paired and mapped. Everything above is about the reader's reload; the
+// settings screen has no Epub to reload, only the scan list and one GATT client.
+// Applying the reader's 35KB there refused every enable on the X3 (2026-09-21:
+// free 83,108 -> 30,964 after init), whose 52.3KB framebuffer leaves it ~4KB
+// short of the X4 — and pairing on the X3 worked for weeks before any floor
+// existed. This keeps a floor only against starting into a heap too empty to
+// build the connection itself.
+constexpr uint32_t BLE_POST_ENABLE_FREE_FLOOR_SETTINGS = 24 * 1024;
+
+uint32_t postEnableFreeFloor(BtEnableFor purpose) {
+  switch (purpose) {
+    case BtEnableFor::Reader:
+      return BLE_POST_ENABLE_FREE_FLOOR;
+    case BtEnableFor::SettingsScreen:
+      return BLE_POST_ENABLE_FREE_FLOOR_SETTINGS;
+  }
+  return BLE_POST_ENABLE_FREE_FLOOR;
+}
 // --- Press detector tuning ---
 // Nothing here decodes keycodes. The detector answers "did a button just go
 // down?" structurally; which button it was is a separate signature match.
@@ -183,7 +202,7 @@ void BluetoothHIDManager::cleanup() {
   }
 }
 
-bool BluetoothHIDManager::enable() {
+bool BluetoothHIDManager::enable(BtEnableFor purpose) {
   if (_enabled) {
     LOG_DBG("BT", "Already enabled");
     return true;
@@ -256,9 +275,10 @@ bool BluetoothHIDManager::enable() {
   // BLE_POST_ENABLE_FREE_FLOOR. _enabled is still false here, so the teardown is
   // the direct deinit rather than disable().
   const uint32_t postInitFree = ESP.getFreeHeap();
-  if (postInitFree < BLE_POST_ENABLE_FREE_FLOOR) {
+  const uint32_t postInitFloor = postEnableFreeFloor(purpose);
+  if (postInitFree < postInitFloor) {
     LOG_ERR("BT", "Started into %u free (floor %u, largest %u) - handing the stack back", postInitFree,
-            static_cast<unsigned>(BLE_POST_ENABLE_FREE_FLOOR), ESP.getMaxAllocHeap());
+            static_cast<unsigned>(postInitFloor), ESP.getMaxAllocHeap());
     NimBLEDevice::deinit(true);
     lastError = "Not enough free memory";
     lastStatus = BtStatus::NotEnoughMemory;
@@ -431,19 +451,48 @@ void BluetoothHIDManager::startBackgroundScan() {
   // one of its buttons is pressed, then goes quiet again. At ~5% radio duty
   // (50ms every 1000ms) those bursts almost always land in the 95% the radio
   // isn't listening, so a press-to-wake reconnect silently fails. Listen nearly
-  // continuously instead (90ms window every 100ms, ~90% duty) so a press is
-  // caught within one advertising interval. This only runs while the remote is
-  // disconnected, and BLE's own inactivity timeout still powers the stack down
-  // after a few minutes idle, so the higher drain is bounded to active use.
-  pScan->setInterval(160);  // 100ms interval...
-  pScan->setWindow(144);    // ...with a 90ms window: ~90% radio duty while reconnecting
+  // continuously to begin with so a press is caught within one advertising
+  // interval, then demoteBackgroundScanToLowDuty() backs off — this scan can
+  // otherwise outlive the whole reading session and is expensive.
+  pScan->setInterval(BACKGROUND_SCAN_HIGH_INTERVAL);
+  pScan->setWindow(BACKGROUND_SCAN_HIGH_WINDOW);
   // This scan runs for as long as the remote stays disconnected — possibly the
   // whole reading session — so retaining results would leak steadily. We only
   // compare addresses in the callback and keep nothing.
   pScan->setMaxResults(0);
   if (pScan->start(0, false)) {
     _backgroundScanActive = true;
-    LOG_DBG("BT", "Background reconnect scan started");
+    _backgroundScanLowDuty = false;
+    _backgroundScanStartedMs = millis();
+    LOG_DBG("BT", "Background reconnect scan started (high duty)");
+  }
+}
+
+void BluetoothHIDManager::demoteBackgroundScanToLowDuty() {
+  if (!_backgroundScanActive || _backgroundScanLowDuty) {
+    return;
+  }
+  if (millis() - _backgroundScanStartedMs < BACKGROUND_SCAN_HIGH_DUTY_MS) {
+    return;
+  }
+  NimBLEScan* pScan = NimBLEDevice::getScan();
+  if (!pScan) {
+    return;
+  }
+  pScan->stop();
+  pScan->setInterval(BACKGROUND_SCAN_LOW_INTERVAL);
+  pScan->setWindow(BACKGROUND_SCAN_LOW_WINDOW);
+  // Clear the active flag before restarting: if start() fails we must not be
+  // left believing a scan is running, or nothing would ever re-arm one. The
+  // next checkAutoReconnect() then calls startBackgroundScan() again, which
+  // comes back at high duty — a self-healing retry rather than a silent stall.
+  _backgroundScanActive = false;
+  if (pScan->start(0, false)) {
+    _backgroundScanActive = true;
+    _backgroundScanLowDuty = true;
+    LOG_DBG("BT", "Background reconnect scan backed off to low duty");
+  } else {
+    LOG_ERR("BT", "Failed to restart background scan at low duty");
   }
 }
 
@@ -1218,10 +1267,9 @@ bool BluetoothHIDManager::hasRecentActivity() const {
   // stays awake between the widely-spaced page turns of remote-driven reading.
   //
   // Deliberately keyed on lastRemoteInputMs (actual detected presses), NOT
-  // lastActivityTime: the latter is seeded at connect time, and a constantly-
-  // advertising remote re-connects right after every 5-minute inactivity
-  // disconnect — counting the connection itself as activity made that cycle
-  // reset the sleep timer forever, and the device never slept.
+  // lastActivityTime: the latter is seeded at connect time, so counting a
+  // connection as activity let a remote that reconnects on its own hold the
+  // sleep timer off forever and the device never slept.
   unsigned long now = millis();
   for (const auto& device : _connectedDevices) {
     if (device.lastRemoteInputMs > 0) {
@@ -1531,7 +1579,7 @@ void BluetoothHIDManager::onHIDNotify(NimBLERemoteCharacteristic* pChar, uint8_t
   if (!device) return;
 
   const unsigned long nowMs = millis();
-  device->lastActivityTime = nowMs;  // Keeps the connection (and sleep timer) alive
+  device->lastActivityTime = nowMs;  // Last HID report seen, for diagnostics
 
   if (g_instance->_debugCaptureEnabled) {
     char rawBuf[128] = {0};
@@ -1590,43 +1638,16 @@ void BluetoothHIDManager::onHIDNotify(NimBLERemoteCharacteristic* pChar, uint8_t
           static_cast<unsigned>(button));
 }
 
-void BluetoothHIDManager::updateActivity() {
-  if (_maintenanceSuspended) {
-    return;
-  }
-  MaintenanceBusyScope busy(_maintenanceBusy);
-  unsigned long now = millis();
-
-  // No stale-release sweep is needed: presses are injected as pulses, so a
-  // dropped release frame cannot leave a virtual button held down.
-
-  // Connection maintenance every 10 seconds.
-  if (now - lastMaintenanceCheck < 10000) {
-    return;
-  }
-  lastMaintenanceCheck = now;
-
-  // Check for one inactive connection and disconnect it in-place.
-  std::string inactiveAddress;
-  unsigned long inactiveTimeMs = 0;
-  for (const auto& device : _connectedDevices) {
-    if (device.lastActivityTime == 0) {
-      continue;
-    }
-
-    unsigned long inactiveTime = now - device.lastActivityTime;
-    if (inactiveTime > INACTIVITY_TIMEOUT_MS) {
-      inactiveAddress = device.address;
-      inactiveTimeMs = inactiveTime;
-      break;
-    }
-  }
-
-  if (!inactiveAddress.empty()) {
-    LOG_INF("BT", "Device %s inactive for %lu ms, disconnecting", inactiveAddress.c_str(), inactiveTimeMs);
-    disconnectFromDevice(inactiveAddress);
-  }
-}
+// An idle remote is deliberately NOT disconnected. There used to be a 5-minute
+// inactivity timeout here, on the assumption that dropping the link saved power.
+// It did the opposite: a disconnect immediately put the manager into
+// "bonded + disconnected", which is exactly the state checkAutoReconnect() arms
+// the background reconnect scan for — so reading for five minutes with the
+// device's own buttons traded a connection idling at slave latency 33 (well
+// under 1mA) for a ~90%-duty active scan (tens of mA) that ran until something
+// connected. For a press-only remote nothing ever did. Staying connected is both
+// cheaper and more responsive; a genuinely departed remote still drops out via
+// BLE's own supervision timeout, and checkAutoReconnect() prunes the stale entry.
 
 void BluetoothHIDManager::checkAutoReconnect(bool userInputDetected) {
   if (!_enabled || _maintenanceSuspended) {
@@ -1739,7 +1760,10 @@ void BluetoothHIDManager::checkAutoReconnect(bool userInputDetected) {
   }
 
   // Disconnected with a bonded remote: keep listening for it to wake up.
+  // startBackgroundScan() is a no-op once one is running; the demote then backs
+  // that scan off to its low-duty parameters after the press-to-wake window.
   startBackgroundScan();
+  demoteBackgroundScanToLowDuty();
 }
 
 void BluetoothHIDManager::saveState() {
