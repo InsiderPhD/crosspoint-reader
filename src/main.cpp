@@ -207,15 +207,6 @@ constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
 
-// The user's standing "I am using a remote" intent, kept across a sleep only.
-// RTC_DATA is re-initialised from flash on every reset except a deep-sleep wake,
-// so a power-on, a reflash, a panic reboot and a silentRestart() all start with
-// Bluetooth OFF, while sleeping and waking mid-book keeps a paired remote alive.
-// On X3/X4 running on battery there is no distinction to make: deep sleep drives
-// GPIO13 low and disconnects the battery (HalPowerManager::startDeepSleep), so
-// RTC memory dies with the rail and every wake is a fresh boot by definition.
-RTC_DATA_ATTR uint8_t bleWantedAcrossSleep = 0;
-
 void silentRestart() {
   silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
@@ -608,25 +599,11 @@ void setup() {
   });
   btMgr.setButtonMapping(SETTINGS.bleBackSigIndex, SETTINGS.bleBackSigValue, SETTINGS.bleFwdSigIndex,
                          SETTINGS.bleFwdSigValue);
-  // Hold the user's standing "I am using a remote" intent across a sleep. The
-  // stack itself is torn down constantly (leaving the reader, a section build, a
-  // sync, deep sleep) and what brings it back is this flag — keeping it only in
-  // the manager's RAM made a paired remote go dead in the book after every
-  // sleep. RTC memory, not settings.json: the intent must NOT outlive the power
-  // cycle (see bleWantedAcrossSleep above), and this costs no SPIFFS write.
-  btMgr.setBluetoothWantedChangedCallback([](bool wanted) { bleWantedAcrossSleep = wanted ? 1 : 0; });
-  // Re-arm that intent after a sleep, for a device that has a remote paired.
-  // Nothing is enabled here: the flag only tells the reader's
-  // maybeAutoRestoreBluetooth() it may bring the stack up once a book is open
-  // and its chapter layout is resident — the state that guarantees the
-  // controller's contiguous block exists. On a fresh boot bleWantedAcrossSleep
-  // reads 0, so Bluetooth stays off until the user asks for it.
-  if (bleWantedAcrossSleep && SETTINGS.bleBondedDeviceAddr[0] != '\0') {
-    LOG_INF("MAIN", "Remote %s was in use before sleep; arming auto-restore", SETTINGS.bleBondedDeviceAddr);
-    btMgr.setBluetoothWanted(true);
-  } else {
-    LOG_DBG("MAIN", "Fresh boot: Bluetooth starts off");
-  }
+  // Bluetooth starts off on every boot AND every wake from sleep. Re-arming the
+  // auto-restore after a sleep brought the stack up (layout free, epub reload,
+  // second page render, a ~2s blocking connect) on the X4 Pro's every power-on,
+  // since there turning the device on IS a deep-sleep wake. The user's remote
+  // intent lives only in the manager's RAM for the current session.
 
   const auto wakeupReason = gpio.getWakeupReason();
   switch (wakeupReason) {

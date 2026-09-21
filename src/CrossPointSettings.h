@@ -503,9 +503,8 @@ class CrossPointSettings {
   uint8_t bleFwdSigIndex = 0xFF;
   uint8_t bleFwdSigValue = 0;
   // NOTE: the user's standing "I am using a remote" intent is deliberately NOT a
-  // setting. Bluetooth is off on every fresh boot; the intent lives only in RTC
-  // memory (bleWantedAcrossSleep in main.cpp) so it survives a sleep and dies
-  // with the power cycle.
+  // setting. Bluetooth is off on every boot and every wake from sleep; the intent
+  // lives only in BluetoothHIDManager's RAM for the current session.
   // "Browse Files" view: FOLDERS = the SD directory tree (default), TAGS = whole-library
   // tag folders (each book tag presented as a folder).
   uint8_t folderView = FOLDER_VIEW_FOLDERS;
