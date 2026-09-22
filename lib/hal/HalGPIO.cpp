@@ -6,7 +6,7 @@
 #include <Wire.h>
 #include <esp_sleep.h>
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_MCU_S3
 // USB host detection via the USB Serial JTAG start-of-frame counter (no VBUS pin).
 #include <soc/soc.h>
 #include <soc/usb_serial_jtag_reg.h>
@@ -473,8 +473,8 @@ void HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPre
 }
 
 bool HalGPIO::isUsbConnected() const {
-#if FREEINK_DEVICE_X4PRO
-  // The X4 Pro has no VBUS sense line, and UART0_RXD/GPIO20 (the X4's detect pin)
+#if FREEINK_MCU_S3
+  // The S3 boards (X4 Pro, X4C) have no VBUS sense line, and UART0_RXD/GPIO20 (the X4's detect pin)
   // is the S3's native USB D+, so reading it as a GPIO is meaningless. Infer host
   // presence the way upstream does: a connected USB host emits a start-of-frame
   // packet every 1 ms, so a start-of-frame counter that advances means a live host.

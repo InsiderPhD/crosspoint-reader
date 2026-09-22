@@ -7,6 +7,7 @@ A heavily-customised personal fork of [CrossPoint Reader](https://github.com/cro
 | **Xteink X4** | ESP32-C3 | Primary target |
 | **Xteink X3** | ESP32-C3 | Supported — same binary, board profile picked at boot |
 | **Xteink X4 Pro** | ESP32-S3 | **Experimental**, in bring-up — separate binary (`pio run -e x4pro`), touch + frontlight |
+| **Xteink X4C** | ESP32-S3 | **Experimental** — separate binary (`pio run -e x4c`), X4 buttons, tilt page turn, Bluetooth alongside WiFi |
 
 ![](./docs/images/logo.png)
 
@@ -90,6 +91,9 @@ pio run --target upload
 
 # X4 Pro (ESP32-S3) — a separate binary, not an addition to the C3 image
 pio run -e x4pro --target upload
+
+# X4C (ESP32-S3, buttons only) — its own binary as well
+pio run -e x4c --target upload
 ```
 
 The default (`pio run`) build produces a version string like `Dev-KT-v1.2.0-dev+<branch>`, visible on the boot screen and in Settings.

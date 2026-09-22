@@ -75,10 +75,11 @@ class HalGPIO {
   inline bool deviceIsX4() const { return _deviceType == DeviceType::X4; }
 
   // True when the physical side keys sit one per screen edge (left + right),
-  // as on the X3 and the X4 Pro; the C3 X4 stacks both on the right edge.
+  // as on the X3, the X4 Pro and the X4C (which shares the Pro's side keys);
+  // the C3 X4 stacks both on the right edge.
   // Drives button-hint placement, not input mapping.
   inline bool sideKeysAreLeftRight() const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC
     return true;
 #else
     return deviceIsX3();

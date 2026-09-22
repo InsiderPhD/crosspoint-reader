@@ -299,6 +299,8 @@ void NearbyBookPositionSyncActivity::onEnter() {
   // so the Pro has to be named at build time or it reports itself as an X4.
 #if FREEINK_DEVICE_X4PRO
   const char* board = "X4 Pro";
+#elif FREEINK_DEVICE_X4CLASSIC
+  const char* board = "X4C";
 #else
   const char* board = gpio.deviceIsX3() ? "X3" : "X4";
 #endif

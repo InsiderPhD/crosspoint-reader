@@ -29,8 +29,8 @@ class HalPowerManager {
   SemaphoreHandle_t modeMutex = nullptr;  // Protect access to currentLockMode
 
  public:
-#if FREEINK_DEVICE_X4PRO
-  // X4 PRO (ESP32-S3): 80 MHz is the floor, not 10.
+#if FREEINK_MCU_S3
+  // ESP32-S3 (X4 Pro, X4C): 80 MHz is the floor, not 10.
   // Below 80 MHz the CPU leaves the PLL and APB follows the CPU clock, so the
   // USB-OTG CDC console and every APB-clocked peripheral are reclocked by a
   // factor of 8 on the way down and back up. The transition *up* — the one a

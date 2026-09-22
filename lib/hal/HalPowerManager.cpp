@@ -49,10 +49,10 @@ void HalPowerManager::begin() {
     Wire.begin(X3_I2C_SDA, X3_I2C_SCL, X3_I2C_FREQ);
     Wire.setTimeOut(4);
     _batteryUseI2C = true;
-#if !FREEINK_DEVICE_X4PRO
+#if FREEINK_MCU_C3
   } else {
     // X4: GPIO0 is the battery ADC input.
-    // NOT on the X4 Pro, where GPIO0 is the Left nav button AND the boot strap.
+    // NOT on the S3 boards (X4 Pro, X4C), where GPIO0 is the Left side key AND the boot strap.
     // InputManager has already configured it as INPUT_PULLUP; re-declaring it as a
     // plain INPUT here would drop the pull-up and leave the button floating — and
     // that button is the strap used to reach the ROM bootloader for recovery.
@@ -124,8 +124,8 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
     gpio.update();
   }
 
-#if FREEINK_DEVICE_X4PRO
-  // No battery-disconnect latch on this board (GPIO13 is the display CS line —
+#if FREEINK_MCU_S3
+  // No battery-disconnect latch on the S3 boards (GPIO13 is the display CS line —
   // see the X3/X4 branch below), so every gated peripheral must be cut
   // individually or it stays powered all through deep sleep: the GT911 touch
   // rail (GPIO2, active-LOW) and the SD card enable (GPIO5, active-LOW) alone

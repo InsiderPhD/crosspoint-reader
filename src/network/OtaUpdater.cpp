@@ -36,6 +36,9 @@ constexpr char kTmpPath[] = "/firmware_ota.bin";
 // release with no matching asset reports NO_UPDATE, which is the safe outcome.
 #if FREEINK_DEVICE_X4PRO
 constexpr char kFirmwareAssetName[] = "x4pro_firmware.bin";
+#elif FREEINK_DEVICE_X4CLASSIC
+// Same S3 chip as the X4 Pro, but a different board: its image is not the Pro's.
+constexpr char kFirmwareAssetName[] = "x4c_firmware.bin";
 #else
 constexpr char kFirmwareAssetName[] = "firmware.bin";
 #endif

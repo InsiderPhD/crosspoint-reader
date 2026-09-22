@@ -52,10 +52,19 @@ bool HalTiltSensor::readGyro(float& gx, float& gy, float& gz) const {
 }
 
 void HalTiltSensor::begin() {
+#if FREEINK_DEVICE_X4CLASSIC
+  // X4C: the same QMI8658, on the shared sensor bus (SDA39/SCL38) with the BM8563
+  // RTC and CW2017 gauge. freeink::Rtc starts that bus lazily, but halClock.begin()
+  // runs after this, so bring it up here from the profile. Rtc's later begin() on
+  // an already-started bus is a no-op.
+  const auto& sensors = BoardConfig::ACTIVE.sensors;
+  Wire.begin(sensors.i2cSda, sensors.i2cScl, sensors.i2cHz);
+#else
   if (!gpio.deviceIsX3()) {
     _available = false;
     return;
   }
+#endif
 
   // Try primary address, then alternate
   uint8_t whoami = 0;

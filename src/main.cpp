@@ -431,10 +431,10 @@ void setup() {
   // answer a button, so this is the budget the user experiences as "boot time".
   [[maybe_unused]] unsigned long phaseStartMs = t1;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_MCU_S3
   // FIRST statement in setup(), before serial, before gpio.begin(), before any
-  // delay: on the X4 Pro the master peripheral rail is a latch on GPIO1
-  // (XTEINK_X4_PRO's power.latch0), and until firmware drives it HIGH the board
+  // delay: on the S3 boards (X4 Pro, X4C) the master peripheral rail is a latch
+  // on GPIO1 (power.latch0 in both profiles), and until firmware drives it HIGH the board
   // stays up only while the power button is physically bridging the rail. On USB
   // that goes unnoticed because VBUS holds everything up; on battery the device
   // dies the moment the button is released, which reads as "won't boot".
@@ -991,7 +991,7 @@ void loop() {
     activityManager.requestUpdate();
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_MCU_S3
   // Collapse the panel's analog rails once no refresh has happened for a few
   // seconds. Between refreshes the UC8179 otherwise sits powered (PON with no
   // matching POF), holding VCOM/VGH/VGL applied for as long as a static screen
