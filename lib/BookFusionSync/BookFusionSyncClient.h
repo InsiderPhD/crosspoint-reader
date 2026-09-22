@@ -87,6 +87,24 @@ struct BookFusionBookshelfList {
 };
 
 /**
+ * One highlight to create on BookFusion (POST /api/user/highlights).
+ * Pointers are borrowed for the duration of the call.
+ */
+struct BookFusionHighlight {
+  uint32_t bookId = 0;
+  int chapterIndex = 0;             // spine index, 0-based (same as BookFusionPosition)
+  const char* quoteText = nullptr;  // required
+  const char* chapterTitle = nullptr;
+  float positionPercentage = 0.0f;  // 0–100
+  const char* color = "#f7ce46";    // BookFusion web reader's default yellow
+  // Anchor in the chapter: UTF-16 offsets into its <body> text content, end
+  // exclusive. BookFusion only places highlights in the book when these are set.
+  bool hasOffsets = false;
+  uint32_t startOffset = 0;
+  uint32_t endOffset = 0;
+};
+
+/**
  * HTTP client for the BookFusion API.
  *
  * Base URL: https://www.bookfusion.com
@@ -149,6 +167,13 @@ class BookFusionSyncClient {
   // durationSeconds must be >= 5 (BookFusion minimum; caller enforces this).
   // loggedAtUtcIso must be UTC ISO-8601: "2026-06-17T14:30:05Z" (trailing Z).
   static Error trackReadingTime(uint32_t bookId, uint32_t durationSeconds, const char* loggedAtUtcIso);
+
+  // --- Highlights ---
+  // Creates one highlight. On success *outId receives the server's highlight id
+  // (never 0), which callers persist so the same clip is never pushed twice.
+  static Error createHighlight(const BookFusionHighlight& highlight, uint32_t* outId);
+  // DELETE /api/user/highlights/{id}. A 404 counts as success (already gone).
+  static Error deleteHighlight(uint32_t highlightId);
 
   static const char* errorString(Error error);
 

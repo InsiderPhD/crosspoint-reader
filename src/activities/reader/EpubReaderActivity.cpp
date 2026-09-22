@@ -60,6 +60,7 @@
 #include "activities/settings/ReaderControlsActivity.h"  // for ReaderControlsActivity::actionName()
 #include "activities/settings/ReaderMenuSettingsActivity.h"
 #include "clippings/ClippingsManager.h"
+#include "clippings/HighlightOffsetFinder.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
@@ -257,6 +258,121 @@ bool formatLocalSyncTimestamp(char* out, size_t outLen) {
   snprintf(out, outLen, "%04d-%02d-%02dT%02d:%02d:%02d.000Z", tm_utc.tm_year + 1900, tm_utc.tm_mon + 1, tm_utc.tm_mday,
            tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
   return true;
+}
+
+// A clip goes (back) to BookFusion when it has never been pushed, or when it
+// was pushed without an anchor and one has since been found — BookFusion keeps
+// an anchorless highlight but can't show it in the book.
+bool clipNeedsBookFusionPush(const Clipping& clip) {
+  if (clip.text.empty()) return false;
+  if (clip.bookFusionId == 0) return true;
+  return (clip.bookFusionFlags & BF_OFFSETS_FOUND) && !(clip.bookFusionFlags & BF_PUSHED_WITH_OFFSETS);
+}
+
+// Resolve BookFusion offsets for clips that don't have a verdict yet. Reads the
+// chapter XHTML, so it must run BEFORE a sync opens its TLS session: the
+// inflate dictionary is leased from the framebuffer, which TlsFramebufferBorrow
+// also claims. Caller holds the render lock. Returns true when the framebuffer
+// was used as scratch — its contents are then garbage and the caller must
+// repaint the whole screen before any partial draw.
+bool resolveBookFusionHighlightOffsets(GfxRenderer& renderer, const std::shared_ptr<Epub>& epub) {
+  if (!epub || CLIPPINGS.getBookFilePath() != epub->getPath()) return false;
+  const auto& clips = CLIPPINGS.getClippings();
+  const bool anyPending = std::any_of(clips.begin(), clips.end(), [](const Clipping& clip) {
+    return !clip.text.empty() && !(clip.bookFusionFlags & BF_OFFSETS_RESOLVED);
+  });
+  if (!anyPending) return false;
+
+  InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
+  bool changed = false;
+  for (size_t i = 0; i < clips.size(); ++i) {
+    const Clipping& clip = clips[i];
+    if (clip.text.empty() || (clip.bookFusionFlags & BF_OFFSETS_RESOLVED)) continue;
+    const float fraction =
+        clip.pageCount > 0 ? (static_cast<float>(clip.startPage) + 0.5f) / static_cast<float>(clip.pageCount) : 0.0f;
+    uint32_t start = 0;
+    uint32_t end = 0;
+    const auto result = HighlightOffsetFinder::find(*epub, clip.spineIndex, clip.text, fraction, start, end);
+    if (result == HighlightOffsetFinder::Result::Error) continue;  // retried next sync
+    CLIPPINGS.setBookFusionOffsets(i, result == HighlightOffsetFinder::Result::Found, start, end);
+    changed = true;
+  }
+  if (changed && !CLIPPINGS.saveToFile()) {
+    LOG_ERR("BFS", "Failed to persist BookFusion highlight offsets");
+  }
+  return scratch.active();
+}
+
+// Push every clipping of the open book that BookFusion hasn't got (see
+// clipNeedsBookFusionPush), recording each returned id so a clip is only sent
+// once. A clip re-sent to add its anchor replaces its old anchorless copy,
+// which is then deleted. Runs on the caller's open connection (inside its TLS
+// window). Relies on the reader having CLIPPINGS loaded for this book. Stops at
+// the first auth or transport failure — the rest would fail the same way — and
+// leaves those clips pending for the next sync. Returns the number pushed.
+// onProgress (optional) runs before each request with (1-based index, total).
+int countBookFusionHighlightsToPush(const std::shared_ptr<Epub>& epub) {
+  if (!epub || CLIPPINGS.getBookFilePath() != epub->getPath()) return 0;
+  const auto& clips = CLIPPINGS.getClippings();
+  return static_cast<int>(std::count_if(clips.begin(), clips.end(), clipNeedsBookFusionPush));
+}
+
+int pushBookFusionHighlights(const std::shared_ptr<Epub>& epub, const uint32_t bookId,
+                             void (*onProgress)(void* ctx, int current, int total), void* progressCtx) {
+  if (!epub || bookId == 0 || CLIPPINGS.getBookFilePath() != epub->getPath()) return 0;
+
+  const auto& clips = CLIPPINGS.getClippings();
+  const int total = countBookFusionHighlightsToPush(epub);
+  int attempted = 0;
+  int pushed = 0;
+  bool changed = false;
+  for (size_t i = 0; i < clips.size(); ++i) {
+    const Clipping& clip = clips[i];
+    if (!clipNeedsBookFusionPush(clip)) continue;
+    if (onProgress) onProgress(progressCtx, ++attempted, total);
+
+    BookFusionHighlight highlight;
+    highlight.bookId = bookId;
+    highlight.chapterIndex = clip.spineIndex;
+    highlight.quoteText = clip.text.c_str();
+    highlight.chapterTitle = clip.chapterTitle;
+    const float intra = clip.pageCount > 0 ? static_cast<float>(clip.startPage) / clip.pageCount : 0.0f;
+    highlight.positionPercentage = epub->calculateProgress(clip.spineIndex, intra) * 100.0f;
+    highlight.hasOffsets = (clip.bookFusionFlags & BF_OFFSETS_FOUND) != 0;
+    highlight.startOffset = clip.bookFusionStart;
+    highlight.endOffset = clip.bookFusionEnd;
+
+    const uint32_t oldId = clip.bookFusionId;
+    uint32_t remoteId = 0;
+    auto result = BookFusionSyncClient::createHighlight(highlight, &remoteId);
+    if (result == BookFusionSyncClient::OK) {
+      CLIPPINGS.setBookFusionPushed(i, remoteId, highlight.hasOffsets);
+      changed = true;
+      ++pushed;
+      if (oldId != 0) {
+        // Best effort: a failure only leaves an anchorless duplicate behind.
+        result = BookFusionSyncClient::deleteHighlight(oldId);
+        if (result != BookFusionSyncClient::OK) {
+          LOG_ERR("BFS", "Failed to delete superseded highlight %lu: %s", static_cast<unsigned long>(oldId),
+                  BookFusionSyncClient::errorString(result));
+        }
+      }
+      if (result == BookFusionSyncClient::OK) continue;
+    } else {
+      LOG_ERR("BFS", "Highlight push failed for clip %u: %s", static_cast<unsigned>(i),
+              BookFusionSyncClient::errorString(result));
+    }
+    if (result == BookFusionSyncClient::AUTH_FAILED || result == BookFusionSyncClient::NETWORK_ERROR ||
+        result == BookFusionSyncClient::NO_TOKEN) {
+      break;
+    }
+  }
+  if (changed && !CLIPPINGS.saveToFile()) {
+    // The ids stay in RAM and are retried on unload(); if that also fails the
+    // next session re-pushes these clips as duplicates.
+    LOG_ERR("BFS", "Failed to persist %d BookFusion highlight ids", pushed);
+  }
+  return pushed;
 }
 
 bool syncBookFusionTimeWithNTP() {
@@ -3729,6 +3845,13 @@ void EpubReaderActivity::performBookFusionSync() {
   // requests have no handshake spike).
   {
     RenderLock lock(*this);
+    // Anchor any new clippings for the highlight push while the book is still
+    // loaded and before TLS starts. The popups below draw over whatever is in
+    // the framebuffer, so wipe the inflate scratch it held; the page is
+    // repainted in full when the sync ends.
+    if (resolveBookFusionHighlightOffsets(renderer, epub)) {
+      renderer.clearScreen();
+    }
     if (section) {
       nextPageNumber = section->currentPage;
       cachedChapterTotalPageCount = section->pageCount;
@@ -3924,21 +4047,51 @@ void EpubReaderActivity::performBookFusionSync() {
     }
   }
 
+  // Clippings not yet on BookFusion go up as highlights on the same
+  // connection. Skipped when the progress fetch couldn't reach the server —
+  // every highlight request would fail the same way.
+  int highlightsPushed = 0;
+  if (downloadResult == BookFusionSyncClient::OK || downloadResult == BookFusionSyncClient::NOT_FOUND) {
+    highlightsPushed = pushBookFusionHighlights(
+        epub, bookId,
+        [](void* ctx, const int current, const int total) {
+          auto* self = static_cast<EpubReaderActivity*>(ctx);
+          RenderLock lock(*self);
+          char msg[48];
+          snprintf(msg, sizeof(msg), "Syncing highlight %d/%d", current, total);
+          UITheme::drawSyncProgressPopup(self->renderer, "BookFusion Sync", msg);
+          if (SETTINGS.darkMode) self->renderer.invertScreen();
+          self->renderer.displayBuffer();
+        },
+        this);
+  }
+  char highlightsLine[40] = {};
+  if (highlightsPushed > 0) {
+    snprintf(highlightsLine, sizeof(highlightsLine), "\n%d highlight%s synced", highlightsPushed,
+             highlightsPushed == 1 ? "" : "s");
+  }
+
   // Show completion popup
   {
     RenderLock lock(*this);
     if (appliedRemoteProgress) {
-      char msg[80];
-      snprintf(msg, sizeof(msg), "Pulled from BookFusion\n%.1f%% applied to device", remoteBfPos.percentage);
+      char msg[120];
+      snprintf(msg, sizeof(msg), "Pulled from BookFusion\n%.1f%% applied to device%s", remoteBfPos.percentage,
+               highlightsLine);
       UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
     } else if (alreadyUpToDate) {
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Progress already up to date.");
+      char msg[80];
+      snprintf(msg, sizeof(msg), "Progress already up to date.%s", highlightsLine);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
     } else if (skippedUploadForReread) {
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Re-reading detected.\nProgress preserved locally.");
+      char msg[100];
+      snprintf(msg, sizeof(msg), "Re-reading detected.\nProgress preserved locally.%s", highlightsLine);
+      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
     } else if (uploadResult == BookFusionSyncClient::OK) {
       LOG_DBG("BFS", "Progress uploaded successfully");
-      char msg[80];
-      snprintf(msg, sizeof(msg), "Pushed to BookFusion\n%.1f%% uploaded from device", localBfPos.percentage);
+      char msg[120];
+      snprintf(msg, sizeof(msg), "Pushed to BookFusion\n%.1f%% uploaded from device%s", localBfPos.percentage,
+               highlightsLine);
       UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
     } else {
       LOG_DBG("BFS", "Upload failed: %s", BookFusionSyncClient::errorString(uploadResult));

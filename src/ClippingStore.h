@@ -8,6 +8,11 @@ inline constexpr size_t CLIPPING_CHAPTER_TITLE_MAX = 48;
 inline constexpr size_t CLIPPING_TEXT_MAX = 512;
 inline constexpr uint16_t CLIPPING_MAX_PER_BOOK = 64;
 
+// Clipping::bookFusionFlags
+inline constexpr uint8_t BF_OFFSETS_RESOLVED = 0x01;     // offset lookup ran to a verdict
+inline constexpr uint8_t BF_OFFSETS_FOUND = 0x02;        // ...and found the text
+inline constexpr uint8_t BF_PUSHED_WITH_OFFSETS = 0x04;  // bookFusionId was created with offsets
+
 struct Clipping {
   uint16_t spineIndex = 0;
   uint16_t startPage = 0;
@@ -18,6 +23,13 @@ struct Clipping {
   uint16_t wordCount = 0;
   uint16_t paragraphIndex = UINT16_MAX;
   uint32_t timestamp = 0;
+  // BookFusion highlight id once this clip has been pushed; 0 = not pushed yet.
+  uint32_t bookFusionId = 0;
+  // BookFusion anchor: UTF-16 offsets into the chapter's <body> text (end
+  // exclusive). Valid only when BF_OFFSETS_FOUND is set.
+  uint32_t bookFusionStart = 0;
+  uint32_t bookFusionEnd = 0;
+  uint8_t bookFusionFlags = 0;  // BF_* bits above
   char chapterTitle[CLIPPING_CHAPTER_TITLE_MAX] = {};
   std::string text;
 };
@@ -51,12 +63,17 @@ class ClippingStore {
                         uint16_t startWordIndex, uint16_t endWordIndex, uint16_t wordCount, const char* chapterTitle,
                         uint16_t paragraphIndex, const std::string& text);
   bool removeClippingAt(size_t index);
+  // BookFusion sync bookkeeping. Both mark the store dirty but don't write —
+  // callers update a batch of clips and then call saveToFile() once.
+  bool setBookFusionOffsets(size_t index, bool found, uint32_t start, uint32_t end);
+  bool setBookFusionPushed(size_t index, uint32_t id, bool withOffsets);
   bool saveToFile();
   void clearAll();
 
   bool hasClippings() const { return !clippings.empty(); }
   bool hasClippingForPage(uint16_t spineIndex, uint16_t page) const;
   const std::vector<Clipping>& getClippings() const { return clippings; }
+  const std::string& getBookFilePath() const { return bookFilePath; }
 
   static bool hasAnyClippings();
   static bool getAllClippedBooks(std::vector<ClippedBookEntry>& out);

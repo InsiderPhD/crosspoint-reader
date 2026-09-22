@@ -27,6 +27,10 @@ extern bool resolveBookFusionPosition(const std::shared_ptr<Epub>& epub, const B
                                       int& outSpineIndex, float& outIntraSpineProgress);
 extern BookFusionStoredPosition storedPositionFromBookFusion(const BookFusionPosition& pos);
 extern bool formatLocalSyncTimestamp(char* out, size_t outLen);
+extern int countBookFusionHighlightsToPush(const std::shared_ptr<Epub>& epub);
+extern int pushBookFusionHighlights(const std::shared_ptr<Epub>& epub, uint32_t bookId,
+                                    void (*onProgress)(void* ctx, int current, int total), void* progressCtx);
+extern bool resolveBookFusionHighlightOffsets(GfxRenderer& renderer, const std::shared_ptr<Epub>& epub);
 
 std::string BookFusionSyncActivity::chapterNameForSpine(int spineIndex) const {
   if (!epub) return std::string("Chapter ") + std::to_string(spineIndex + 1);
@@ -152,9 +156,26 @@ void BookFusionSyncActivity::performPush() {
   hasLocalDetails = true;
 
   {
+    // Anchor new clippings for the highlight push before TLS claims the
+    // framebuffer. Every render here repaints the whole screen, so the inflate
+    // scratch left in the framebuffer needs no cleanup.
     RenderLock lock(*this);
-    char msg[64];
-    snprintf(msg, sizeof(msg), "Step 2 of 2: Uploading %.1f%%…", localBfPos.percentage);
+    resolveBookFusionHighlightOffsets(renderer, epub);
+  }
+
+  {
+    RenderLock lock(*this);
+    // No per-highlight progress here: the TLS block below holds the render lock
+    // and lends wolfSSL the framebuffer, so nothing can paint until it ends.
+    char msg[80];
+    const int pendingHighlights = countBookFusionHighlightsToPush(epub);
+    if (pendingHighlights > 0) {
+      // Kept short: drawCenteredText doesn't wrap, and portrait is only 480px.
+      snprintf(msg, sizeof(msg), "Step 2 of 2: %.1f%% + %d highlight%s…", localBfPos.percentage, pendingHighlights,
+               pendingHighlights == 1 ? "" : "s");
+    } else {
+      snprintf(msg, sizeof(msg), "Step 2 of 2: Uploading %.1f%%…", localBfPos.percentage);
+    }
     statusMessage = msg;
     // setProgress() / trackReadingTime() below are blocking network calls —
     // power the panel down after this paint so the charge pump isn't held
@@ -165,6 +186,7 @@ void BookFusionSyncActivity::performPush() {
 
   BookFusionPosition uploadedBfPos = localBfPos;
   uint32_t readingTimeSentSeconds = 0;
+  int highlightsPushed = 0;
   auto result = BookFusionSyncClient::NETWORK_ERROR;
   {
     // Lend the framebuffer to wolfSSL for the whole network block (one reused
@@ -198,6 +220,8 @@ void BookFusionSyncActivity::performPush() {
           }
         }
       }
+      // Clippings not yet on BookFusion go up as highlights — also best-effort.
+      highlightsPushed = pushBookFusionHighlights(epub, bookId, nullptr, nullptr);
     }
   }
 
@@ -234,6 +258,12 @@ void BookFusionSyncActivity::performPush() {
       resultDetail = timeBuf;
     } else {
       resultDetail.clear();
+    }
+    if (highlightsPushed > 0) {
+      char hlBuf[48];
+      snprintf(hlBuf, sizeof(hlBuf), "Highlights synced: %d", highlightsPushed);
+      if (!resultDetail.empty()) resultDetail += '\n';
+      resultDetail += hlBuf;
     }
   } else {
     state = RESULT_FAILED;

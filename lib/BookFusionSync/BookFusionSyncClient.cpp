@@ -1027,6 +1027,78 @@ BookFusionSyncClient::Error BookFusionSyncClient::trackReadingTime(const uint32_
   return SERVER_ERROR;
 }
 
+BookFusionSyncClient::Error BookFusionSyncClient::createHighlight(const BookFusionHighlight& highlight,
+                                                                  uint32_t* outId) {
+  if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
+  if (highlight.quoteText == nullptr || highlight.quoteText[0] == '\0') return JSON_ERROR;
+
+  char url[128];
+  snprintf(url, sizeof(url), "%s/api/user/highlights", BASE_URL);
+
+  // Same JSON shape the KOReader plugin posts (bf_sync.lua annotationToHighlight)
+  // plus chapter_path / position_percentage from the web reader. The server
+  // accepts a highlight without offsets, but then can't place it in the book.
+  JsonDocument body;
+  body["book_id"] = highlight.bookId;
+  body["chapter_index"] = highlight.chapterIndex;
+  body["quote_text"] = highlight.quoteText;
+  body["position_percentage"] = highlight.positionPercentage;
+  body["color"] = highlight.color;
+  if (highlight.hasOffsets) {
+    body["start_offset"] = highlight.startOffset;
+    body["end_offset"] = highlight.endOffset;
+  }
+  if (highlight.chapterTitle != nullptr && highlight.chapterTitle[0] != '\0') {
+    body["chapter_title"] = highlight.chapterTitle;
+    body["chapter_path"].to<JsonArray>().add(highlight.chapterTitle);
+  }
+  String bodyStr;
+  serializeJson(body, bodyStr);
+
+  ResponseBuffer resp;
+  const int httpCode = performRequest(url, "POST", "application/json", &bodyStr, &resp, nullptr, nullptr, true);
+  LOG_DBG("BFS", "createHighlight book=%lu response: %d", (unsigned long)highlight.bookId, httpCode);
+
+  if (httpCode < 0) return NETWORK_ERROR;
+  if (httpCode == 401) return AUTH_FAILED;
+  if (httpCode != 200 && httpCode != 201) return SERVER_ERROR;
+
+  // The response echoes the whole highlight (quote text, html, urls); only the
+  // id matters, so filter everything else out of the parse.
+  JsonDocument filter;
+  filter["id"] = true;
+  JsonDocument doc;
+  if (!resp.data ||
+      deserializeJson(doc, resp.data, DeserializationOption::Filter(filter)) != DeserializationError::Ok) {
+    LOG_ERR("BFS", "createHighlight JSON parse error");
+    return JSON_ERROR;
+  }
+  const uint32_t id = doc["id"] | 0u;
+  if (id == 0) {
+    LOG_ERR("BFS", "createHighlight: missing id");
+    return JSON_ERROR;
+  }
+  LOG_INF("BFS", "createHighlight: created id=%lu (chapter %d, %.1f%%, offsets %s %lu-%lu)", (unsigned long)id,
+          highlight.chapterIndex, highlight.positionPercentage, highlight.hasOffsets ? "yes" : "no",
+          (unsigned long)highlight.startOffset, (unsigned long)highlight.endOffset);
+  if (outId) *outId = id;
+  return OK;
+}
+
+BookFusionSyncClient::Error BookFusionSyncClient::deleteHighlight(const uint32_t highlightId) {
+  if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
+
+  char url[128];
+  snprintf(url, sizeof(url), "%s/api/user/highlights/%lu", BASE_URL, (unsigned long)highlightId);
+  const int httpCode = performRequest(url, "DELETE", nullptr, nullptr, nullptr, nullptr, nullptr, true);
+  LOG_DBG("BFS", "deleteHighlight id=%lu response: %d", (unsigned long)highlightId, httpCode);
+
+  if (httpCode == 200 || httpCode == 204 || httpCode == 404) return OK;
+  if (httpCode == 401) return AUTH_FAILED;
+  if (httpCode < 0) return NETWORK_ERROR;
+  return SERVER_ERROR;
+}
+
 void BookFusionSyncClient::closeConnection() { dropConnection(); }
 
 const char* BookFusionSyncClient::errorString(Error error) {
