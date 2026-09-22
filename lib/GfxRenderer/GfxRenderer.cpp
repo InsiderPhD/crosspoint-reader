@@ -312,6 +312,8 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   }
 }
 
+static constexpr uint32_t MAX_LOGGED_OUT_OF_RANGE = 4;
+
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and
 // efficient as possible.
 void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
@@ -323,7 +325,9 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
 
   // Bounds checking against runtime panel dimensions
   if (phyX < 0 || phyX >= panelWidth || phyY < 0 || phyY >= panelHeight) {
-    LOG_ERR("GFX", "!! Outside range (%d, %d) -> (%d, %d)", x, y, phyX, phyY);
+    if (outOfRangePixels++ < MAX_LOGGED_OUT_OF_RANGE) {
+      LOG_ERR("GFX", "!! Outside range (%d, %d) -> (%d, %d)", x, y, phyX, phyY);
+    }
     return;
   }
 
@@ -1257,6 +1261,11 @@ void GfxRenderer::invertScreen() const {
 void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode, const bool powerOffAfter) const {
   auto elapsed = millis() - start_ms;
   LOG_DBG("GFX", "Time = %lu ms from clearScreen to displayBuffer", elapsed);
+  if (outOfRangePixels > MAX_LOGGED_OUT_OF_RANGE) {
+    LOG_ERR("GFX", "!! %lu more off-panel pixels this frame (not logged)",
+            static_cast<unsigned long>(outOfRangePixels - MAX_LOGGED_OUT_OF_RANGE));
+  }
+  outOfRangePixels = 0;
   display.displayBuffer(refreshMode, fadingFix || powerOffAfter);
 }
 

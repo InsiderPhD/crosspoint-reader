@@ -38,6 +38,10 @@ class GfxRenderer {
   // displayGrayBuffer() that commits it. Mutable because the whole render path
   // is const, like the strip-target state below.
   mutable bool absoluteGrayPlanes = false;
+  // Off-panel drawPixel calls since the last displayBuffer(). Only the first few
+  // are logged: one misplaced string is hundreds of pixels, and logging each
+  // one floods serial and stalls the render.
+  mutable uint32_t outOfRangePixels = 0;
   Orientation orientation;
   bool fadingFix;
   bool imagesSuppressed = false;
