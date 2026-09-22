@@ -319,6 +319,8 @@ bool ActivityManager::consumesTouchInput() const { return currentActivity && cur
 
 bool ActivityManager::handlesDirectTouch() const { return currentActivity && currentActivity->handlesDirectTouch(); }
 
+bool ActivityManager::ownsSwipes() const { return currentActivity && currentActivity->ownsSwipes(); }
+
 bool ActivityManager::keepsBluetoothActive() const {
   return currentActivity && currentActivity->keepsBluetoothActive();
 }

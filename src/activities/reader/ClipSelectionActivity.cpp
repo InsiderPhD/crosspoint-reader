@@ -112,11 +112,11 @@ void ClipSelectionActivity::loop() {
   buttonNavigator.onContinuous({Button::Up}, [this, &moveCursor] { moveCursor(lineBackward(cursorIdx)); });
 
 #if FREEINK_DEVICE_X4PRO
-  // Kindle-style touch selection. A hold picks the word under the finger and
-  // finishes there (so hold-at-start + hold-at-end makes a clipping in two
-  // gestures); a tap extends the selection to that word, and a second tap on
-  // the word already under the cursor finishes.
-  {
+  if (!singleWordMode) {
+    if (handleRangeTouch()) return;
+  } else {
+    // Dictionary word pick: a hold picks the word under the finger; a tap moves
+    // the cursor there, and a second tap on the word under the cursor picks it.
     int lx, ly;
     if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
       const int idx = clipword::findWordAt(wordList, wordList.words[cursorIdx].pageIdx, lx, ly);
@@ -156,6 +156,9 @@ void ClipSelectionActivity::loop() {
   if (mappedInput.wasReleased(Button::Back)) {
     if (startMarkIdx != -1) {
       startMarkIdx = -1;
+#if FREEINK_DEVICE_X4PRO
+      startTapped = false;
+#endif
       requestUpdate();
       return;
     }
@@ -166,6 +169,65 @@ void ClipSelectionActivity::loop() {
     finish();
   }
 }
+
+#if FREEINK_DEVICE_X4PRO
+bool ClipSelectionActivity::handleRangeTouch() {
+  const int page = wordList.words[cursorIdx].pageIdx;
+  int lx, ly;
+
+  // Drag: the word the finger came down on is the start, the word under it now
+  // is the end, and lifting saves. A contact only becomes a drag once the
+  // finger reaches a different word, so a tap (or a wobbly one) stays a tap.
+  const bool held = mappedInput.heldTouchPoint(lx, ly);
+  if (held) {
+    const int idx = clipword::findWordAt(wordList, page, lx, ly);
+    if (!touchWasHeld) {
+      contactStartWord = idx;
+      dragging = false;
+    } else if (!dragging && idx >= 0 && contactStartWord >= 0 && idx != contactStartWord) {
+      dragging = true;
+      startMarkIdx = contactStartWord;
+      startTapped = true;
+      cursorIdx = contactStartWord;
+    }
+    // Word gaps report -1: keep the last word until the finger reaches another.
+    if (dragging && idx >= 0 && idx != cursorIdx) {
+      cursorIdx = idx;
+      requestUpdate();
+    }
+  }
+  const bool lifted = touchWasHeld && !held;
+  touchWasHeld = held;
+  if (lifted && dragging) {
+    dragging = false;
+    finishSelection();
+    return true;
+  }
+  if (dragging) return true;  // nothing else may act on a contact mid-drag
+
+  // Tap-tap: the first tap marks the start, the next tap marks the end and
+  // saves (tapping the start word again saves just that word). A hold in the
+  // reader opens this screen with the held word already marked, so there a
+  // single tap on another word saves the range -- and tapping the held word
+  // itself just confirms it as the start rather than saving one word.
+  // A hold here acts like a tap: its lift reports as one.
+  if (mappedInput.wasTapPoint(lx, ly)) {
+    const int idx = clipword::findWordAt(wordList, page, lx, ly);
+    if (idx < 0) return false;
+    if (startMarkIdx == -1 || (!startTapped && idx == startMarkIdx)) {
+      startMarkIdx = idx;
+      cursorIdx = idx;
+      startTapped = true;
+      requestUpdate();
+    } else {
+      cursorIdx = idx;
+      finishSelection();
+    }
+    return true;
+  }
+  return false;
+}
+#endif
 
 void ClipSelectionActivity::render(RenderLock&&) {
   // Re-render the page the cursor is on (no framebuffer snapshot — see header), then overlay

@@ -162,6 +162,11 @@ void MappedInputManager::processTouchInput() const {
     return;
   }
 
+  // The activity reads the drag itself; this swipe was its finger lifting.
+  if (swipesIgnored) {
+    return;
+  }
+
   // Deltas in calibrated panel pixels. The GT911's calibrated frame (post
   // swapXY/flipY) has its x axis along the panel's 800px dimension and y along
   // the 480px dimension, but with y INVERTED relative to the renderer's
@@ -361,6 +366,17 @@ MappedInputManager::TapZone MappedInputManager::heldTouchZone() const {
   // Same thirds classification as a tap, so a chord's zone and the zone whose
   // action it replaces can never be two different thirds.
   return classifyZone(p);
+}
+
+bool MappedInputManager::heldTouchPoint(int& lx, int& ly) const {
+  float nx, ny;
+  if (!gpio.isTouchHeldAt(nx, ny)) return false;
+  const LogicalTouchPoint p = toLogicalPoint(nx, ny);
+  Button barButton;
+  if (ActionBar::hitTest(p.x, p.y, barButton)) return false;
+  lx = p.x;
+  ly = p.y;
+  return true;
 }
 
 MappedInputManager::TapZone MappedInputManager::wasTouchLongPressZone(int& lx, int& ly) const {

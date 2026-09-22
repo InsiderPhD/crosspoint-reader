@@ -58,6 +58,9 @@ class ClipSelectionActivity final : public Activity {
   // Keep the bar's Confirm: taps move the word selection, and Confirm is what
   // closes the range and saves the clip.
   bool tapActivatesConfirm() const override { return false; }
+  // Range selection follows a dragging finger; the drag's closing swipe must
+  // not be injected as Back/Confirm.
+  bool ownsSwipes() const override { return !singleWordMode; }
 
  private:
   WordList wordList;
@@ -79,6 +82,19 @@ class ClipSelectionActivity final : public Activity {
   mutable std::array<std::string, 4> prewarmTextByStyle;
 
   ButtonNavigator buttonNavigator;
+
+#if FREEINK_DEVICE_X4PRO
+  // Touch range selection state (handleRangeTouch).
+  bool touchWasHeld = false;
+  bool dragging = false;
+  int contactStartWord = -1;
+  // The start was set by a tap or drag here, not inherited from the reader's
+  // hold -- decides whether tapping the start word saves it or confirms it.
+  bool startTapped = false;
+
+  // Drag and tap-tap range selection. True when it consumed this frame.
+  bool handleRangeTouch();
+#endif
 
   // Anchor at the cursor if unset, then build and return the clipping for the
   // anchored range. Shared by the Confirm button and the touch finish paths.

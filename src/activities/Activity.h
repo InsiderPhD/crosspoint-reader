@@ -61,6 +61,12 @@ class Activity {
   // hit-testing is open, so tap-activates-the-highlighted-option comes back
   // for the modal.
   virtual bool handlesDirectTouch() const { return false; }
+  // X4 Pro only. True for activities that follow a moving finger themselves
+  // (MappedInputManager::heldTouchPoint), e.g. drag-to-select. The main loop
+  // then drops swipe synthesis entirely -- a drag ends as a swipe, and its
+  // injected Back/Confirm would land on this screen (or, once it has
+  // finished, on the one beneath it).
+  virtual bool ownsSwipes() const { return false; }
   // X4 Pro Full Touch only. True while a tap on the highlighted element does
   // exactly what the action bar's Confirm slot would do, which makes that slot
   // a second way to run the same handler. ActionBar then leaves it out and the

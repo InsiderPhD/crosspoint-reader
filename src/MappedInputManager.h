@@ -48,6 +48,10 @@ class MappedInputManager {
   // are recorded for wasSwipe() so screens can give them a meaning of their own.
   void setSwipesBackOnly(bool enabled) { swipesBackOnly = enabled; }
 
+  // When true, a swipe is neither injected nor recorded: the activity tracks
+  // the finger itself via heldTouchPoint() (see Activity::ownsSwipes()).
+  void setSwipesIgnored(bool enabled) { swipesIgnored = enabled; }
+
   // Swipe recorded this frame, and only while swipesBackOnly is on (i.e. Full
   // Touch mode outside the reading screens). Nothing was injected for it, so a
   // consumer is free to give it a meaning of its own: paginated lists turn
@@ -108,6 +112,12 @@ class MappedInputManager {
   // suppressed or a second finger is down — see InputManager::isTouchHeldAt.
   TapZone heldTouchZone() const;
 
+  // Where a finger is CURRENTLY resting, in the same logical coordinates as
+  // wasTapPoint(); false when nothing is down. Same level-state rules as
+  // heldTouchZone() (follows a moving finger, reports from first contact, and
+  // a finger on an action-bar button doesn't count) -- for drag gestures.
+  bool heldTouchPoint(int& lx, int& ly) const;
+
   // Home-key events, for the readers' configurable actions.
   bool wasHomeKeyTapped() const { return gpio.wasHomeKeyTapped(); }
   bool wasHomeKeyLongPressed() const { return gpio.wasHomeKeyLongPressed(); }
@@ -150,6 +160,7 @@ class MappedInputManager {
   bool homeKeyActsAsConfirm = true;
   bool tapActsAsConfirm = true;
   bool swipesBackOnly = false;
+  bool swipesIgnored = false;
   // Written by the const processTouchInput(); the injected presses live in gpio
   // so these are the only pieces of per-frame touch state the manager owns.
   mutable Swipe swipe = Swipe::None;

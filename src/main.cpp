@@ -793,6 +793,7 @@ void loop() {
   // right (TouchListNav::tabSwipeNext).
   const bool onReadingScreen = activityManager.isReaderActivity() && activityOwnsTouch;
   mappedInputManager.setSwipesBackOnly(SETTINGS.fullTouchUi && !onReadingScreen);
+  mappedInputManager.setSwipesIgnored(activityManager.ownsSwipes());
 #endif
   // Latches buttons (gpio.update()) and, on X4 Pro, classifies touch swipes
   // into synthesized button presses.
