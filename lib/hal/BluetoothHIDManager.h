@@ -312,6 +312,11 @@ class BluetoothHIDManager {
   // written from the host task and must not allocate there.
   volatile bool _pendingAddrAdopt = false;
   char _rediscoveredAddr[18] = "";
+  // The bond store's identity address for the remote when it differs from the
+  // remembered one (a clicker that re-rolls its static address per pairing
+  // leaves settings pointing at the previous one). Never connected to blindly —
+  // only recognised when it is actually advertising. Empty when they agree.
+  char _bondIdentityAddr[18] = "";
   std::vector<BluetoothDevice> _discoveredDevices;
   std::vector<ConnectedDevice> _connectedDevices;
   std::function<void(uint8_t, bool)> _buttonInjector;

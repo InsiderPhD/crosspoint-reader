@@ -904,6 +904,23 @@ void EpubReaderActivity::loop() {
   // torn-down Bluetooth stack back (frees the chapter layout, so keep it off the
   // input path).
   maybeAutoRestoreBluetooth();
+  maybeRefreshForRemoteConnect();
+}
+
+void EpubReaderActivity::maybeRefreshForRemoteConnect() {
+  const bool connected = BluetoothHIDManager::getInstance().hasConnectedDevice();
+  // Connect only. A disconnect also happens every time a section build or sync
+  // tears the stack down, and redrawing for those would stack a second render
+  // on top of the one the build already does; the next page turn catches it.
+  if (!connected || statusBarShowsRemote) {
+    return;
+  }
+  statusBarShowsRemote = true;  // one request per connect, even before the render lands
+  if (SETTINGS.statusBarHidden || SETTINGS.statusBarBluetoothPos == CrossPointSettings::SB_POS_HIDE || !section) {
+    return;
+  }
+  LOG_DBG("BT", "Remote connected, redrawing page for the status bar icon");
+  requestUpdate();
 }
 
 // Translate an absolute percent into a spine index plus a normalized position
@@ -2941,6 +2958,10 @@ void EpubReaderActivity::renderStatusBar() const {
   // overlay the edge (read sideways) and no space is reserved.
   const bool hintsActive = SETTINGS.showButtonHints != CPS::BUTTON_HINTS_OFF;
   const bool hintsReserved = hintsActive && SETTINGS.orientation == CPS::PORTRAIT;
+
+  // Record what the Bluetooth icon now shows, so the idle loop only redraws for a
+  // connect the page doesn't already reflect.
+  statusBarShowsRemote = BluetoothHIDManager::getInstance().hasConnectedDevice();
 
   // Master hide (reader shortcut): skip the whole bar — including the
   // auto-page-turn banner it hosts — but keep the footnote/button-hint tail

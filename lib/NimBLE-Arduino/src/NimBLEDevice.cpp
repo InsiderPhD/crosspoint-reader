@@ -1066,8 +1066,25 @@ bool NimBLEDevice::deinit(bool clearAll) {
 # endif
 
 # if CONFIG_BT_NIMBLE_ROLE_CENTRAL
-        for (auto clt : m_pClients) {
-            deleteClient(clt);
+        /* CrossPoint (vendored patch): the host is already stopped above, so a
+         * client still holding a connection handle cannot be disconnected —
+         * deleteClient() calls disconnect(), it fails, and the client survives
+         * with its stale handle and cached services. After the next init()
+         * isConnected() reports that dead link as live, the app "adopts" it,
+         * every GATT call on it fails, and the remote can never reconnect until
+         * a reboot. With the host down no callback can reach a client, so free
+         * them outright. If the stop failed the host is still running and the
+         * normal (callback-safe) path is kept. */
+        for (auto& clt : m_pClients) {
+            if (clt == nullptr) {
+                continue;
+            }
+            if (!m_initialized) {
+                delete clt;
+                clt = nullptr;
+            } else {
+                deleteClient(clt);
+            }
         }
 # endif
     }

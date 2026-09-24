@@ -523,28 +523,41 @@ void BluetoothHIDManager::onScanResult(NimBLEAdvertisedDevice* advertisedDevice)
     // name captured when it was paired.
     const bool matchedByName =
         !isBondedRemote && !_bondedDeviceName.empty() && advertisedDevice->getName() == _bondedDeviceName;
-    if (matchedByName) {
-      LOG_INF("BT", "Bonded remote '%s' is advertising as %s (was %s) - address rotated", _bondedDeviceName.c_str(),
-              address.c_str(), _bondedDeviceAddress.c_str());
+    // Second fallback: the bond store's identity address. A clicker that re-rolls
+    // its static address on every pairing leaves settings one pairing behind the
+    // bond (remembered ff:ff:12:.., bonded ff:ff:11:..). Connecting to that
+    // address blindly was tried and timed out like the stale one, but a peer we
+    // can SEE advertising under it is the bonded remote, keys and all.
+    const bool matchedByIdentity = !isBondedRemote && !matchedByName && _bondIdentityAddr[0] != '\0' &&
+                                   strcmp(address.c_str(), _bondIdentityAddr) == 0;
+    if (matchedByName || matchedByIdentity) {
+      if (matchedByName) {
+        LOG_INF("BT", "Bonded remote '%s' is advertising as %s (was %s) - address rotated", _bondedDeviceName.c_str(),
+                address.c_str(), _bondedDeviceAddress.c_str());
+      } else {
+        LOG_INF("BT", "Bonded remote is advertising under its bond identity address %s (settings had %s)",
+                address.c_str(), _bondedDeviceAddress.c_str());
+      }
       // Only stage it: this runs on the NimBLE host task, and persisting the new
       // address writes SPIFFS. The loop task adopts it in checkAutoReconnect().
       snprintf(_rediscoveredAddr, sizeof(_rediscoveredAddr), "%s", address.c_str());
       _pendingAddrAdopt = true;
       isBondedRemote = true;
     }
-    if (isBondedRemote) {
-      // The advertisement carries the authoritative address TYPE — refresh it so
-      // the reconnect targets the peer correctly even for bonds saved before the
-      // type was persisted (a random-address remote ignores PUBLIC-typed connects).
-      _bondedAddrType = advertisedDevice->getAddress().getType();
-      LOG_INF("BT", "Bonded remote is advertising (addr type %u), scheduling reconnect", _bondedAddrType);
-      NimBLEScan* pScan = NimBLEDevice::getScan();
-      if (pScan) {
-        pScan->stop();
-      }
-      _backgroundScanActive = false;
-      _pendingBondedConnect = true;
+    if (!isBondedRemote) {
+      return;
     }
+    // The advertisement carries the authoritative address TYPE — refresh it so
+    // the reconnect targets the peer correctly even for bonds saved before the
+    // type was persisted (a random-address remote ignores PUBLIC-typed connects).
+    _bondedAddrType = advertisedDevice->getAddress().getType();
+    LOG_INF("BT", "Bonded remote is advertising (addr type %u), scheduling reconnect", _bondedAddrType);
+    NimBLEScan* pScan = NimBLEDevice::getScan();
+    if (pScan) {
+      pScan->stop();
+    }
+    _backgroundScanActive = false;
+    _pendingBondedConnect = true;
     return;
   }
 
@@ -676,6 +689,14 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   // the client's previous failure makes the log look like EALREADY forever.
   const auto liveClientForPeer = [&bleAddress]() -> NimBLEClient* {
     for (NimBLEClient* connected : NimBLEDevice::getConnectedClients()) {
+      // isConnected() only checks the client's cached handle. Confirm the host
+      // really has that link: a client that outlived a stack restart still
+      // carries its old handle, and adopting it fails every GATT call
+      // ("No input report characteristic found") on every reconnect.
+      ble_gap_conn_desc desc;
+      if (ble_gap_conn_find(connected->getConnHandle(), &desc) != 0) {
+        continue;
+      }
       if (memcmp(connected->getPeerAddress().getBase()->val, bleAddress.getBase()->val, 6) == 0) {
         return connected;
       }
@@ -1207,6 +1228,7 @@ void BluetoothHIDManager::setBondedAddressUpdatedCallback(void (*callback)(const
 // ble_store_util_bonded_peers() returns exactly those identity addresses; the
 // controller resolves the rotating RPA back to it via the resolving list.
 void BluetoothHIDManager::reconcileBondedAddressWithStore() {
+  _bondIdentityAddr[0] = '\0';
   if (_bondedDeviceAddress.empty()) {
     return;
   }
@@ -1236,15 +1258,18 @@ void BluetoothHIDManager::reconcileBondedAddressWithStore() {
     return;
   }
 
-  // Report only. Adopting this was tried and REVERTED: on the user's eMote the
+  // Not adopted blindly. That was tried and REVERTED: on the user's eMote the
   // store handed back an address that timed out exactly like the stale RPA it
   // replaced, and overwriting the remembered address destroyed the one link we
   // do trust — the bonded NAME, which the rediscovery in onScanResult uses.
   // Connecting to an identity address also needs the controller to resolve RPAs
   // against the resolving list (peer type BLE_ADDR_*_ID), which is not wired up
-  // here; until that is proven on hardware this stays a diagnostic.
-  LOG_INF("BT", "Bond identity address is %s (type %u); remembered %s - NOT adopting", identityStr.c_str(),
-          identity.getType(), _bondedDeviceAddress.c_str());
+  // here. Instead it is kept as a second thing the background scan RECOGNISES:
+  // a peer seen advertising under it is connected to and its address adopted,
+  // which is safe because the peer is demonstrably there.
+  snprintf(_bondIdentityAddr, sizeof(_bondIdentityAddr), "%s", identityStr.c_str());
+  LOG_INF("BT", "Bond identity address is %s (type %u); remembered %s - will recognise either when advertising",
+          identityStr.c_str(), identity.getType(), _bondedDeviceAddress.c_str());
 }
 
 void BluetoothHIDManager::setButtonMapping(const uint8_t backIndex, const uint8_t backValue, const uint8_t fwdIndex,

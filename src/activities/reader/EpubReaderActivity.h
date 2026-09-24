@@ -27,6 +27,9 @@ class EpubReaderActivity final : public Activity {
   int cachedSpineIndex = 0;
   int cachedChapterTotalPageCount = 0;
   unsigned long lastPageTurnTime = 0UL;
+  // Whether the last drawn status bar showed the remote as connected. Written by
+  // the (const) renderStatusBar(), hence mutable.
+  mutable bool statusBarShowsRemote = false;
   unsigned long readingSpeedLastTurnMs = 0UL;
   unsigned long readingSessionStartMs = 0UL;
   uint32_t sessionPageTurns = 0;
@@ -147,6 +150,9 @@ class EpubReaderActivity final : public Activity {
   // contiguous block back with a book open on X3. Silent; the page reloads from
   // cache.
   void maybeAutoRestoreBluetooth();
+  // Idle loop: when the remote connects, redraw so the status bar's Bluetooth
+  // icon updates now instead of on the next page turn.
+  void maybeRefreshForRemoteConnect();
   // Reload the Epub released before a Bluetooth enable(). Failing here leaves
   // the reader with no book, so it bails to Home; returns false in that case
   // and the caller must return immediately.
