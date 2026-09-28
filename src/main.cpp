@@ -899,6 +899,35 @@ void loop() {
         HeapTrace::handleCommand(cmd.length() > 10 ? cmd.c_str() + 10 : nullptr);
       }
 #endif
+#ifdef ENABLE_SERIAL_LOG
+      // Dev-only: `CMD:BTN <BACK|CONFIRM|LEFT|RIGHT|UP|DOWN|POWER>` presses a
+      // logical button through the same virtual-button overlay the BLE remote
+      // uses, so a serial session can drive the UI for timing captures.
+      else if (cmd.startsWith("BTN ")) {
+        const String name = cmd.substring(4);
+        int idx = -1;
+        if (name == "BACK")
+          idx = mappedInputManager.getPhysicalButtonIndex(MappedInputManager::Button::Back);
+        else if (name == "CONFIRM")
+          idx = mappedInputManager.getPhysicalButtonIndex(MappedInputManager::Button::Confirm);
+        else if (name == "LEFT")
+          idx = mappedInputManager.getPhysicalButtonIndex(MappedInputManager::Button::Left);
+        else if (name == "RIGHT")
+          idx = mappedInputManager.getPhysicalButtonIndex(MappedInputManager::Button::Right);
+        else if (name == "UP")
+          idx = HalGPIO::BTN_UP;
+        else if (name == "DOWN")
+          idx = HalGPIO::BTN_DOWN;
+        else if (name == "POWER")
+          idx = HalGPIO::BTN_POWER;
+        if (idx >= 0) {
+          gpio.injectButtonPress(static_cast<uint8_t>(idx));
+          LOG_INF("CMD", "Injected button %s (%d)", name.c_str(), idx);
+        } else {
+          LOG_ERR("CMD", "Unknown button: %s", name.c_str());
+        }
+      }
+#endif
     }
   }
 

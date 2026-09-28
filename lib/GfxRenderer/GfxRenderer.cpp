@@ -1138,19 +1138,24 @@ void GfxRenderer::drawPerspectiveBitmap(const Bitmap& bitmap, const int x, const
   free(columns);
 }
 
-void GfxRenderer::drawBitmapResampled(const Bitmap& bitmap, const int x, const int y, const int w, const int h) const {
-  if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
-  if (renderMode != BW || w <= 0 || h <= 0) return;
+namespace {
+// 4x4 Bayer thresholds, pre-scaled to 0..255 (index * 16 + 8). A pixel is
+// black when its averaged intensity is below the threshold at its position,
+// so the four 2-bit levels come out at 16/16, 11/16, 5/16 and 0/16 black.
+constexpr uint8_t kResampleBayer[4][4] = {
+    {8, 136, 40, 168}, {200, 72, 232, 104}, {56, 184, 24, 152}, {248, 120, 216, 88}};
 
+// Box-average resample of bitmap to w x h, re-dithered to 1 bit. Calls
+// emitBlack(dx, dy) for every black output pixel, in output coordinates; the
+// dither pattern is keyed to those too, so a cached copy matches a direct draw.
+// A template so both callers (screen, 1-bit buffer) inline their sink rather
+// than paying for std::function. False if a buffer could not be allocated or
+// the source could not be read.
+template <typename EmitBlack>
+bool resampleBitmap(const Bitmap& bitmap, const int w, const int h, EmitBlack&& emitBlack) {
   const int srcW = bitmap.getWidth();
   const int srcH = bitmap.getHeight();
-  if (srcW <= 0 || srcH <= 0) return;
-
-  // 4x4 Bayer thresholds, pre-scaled to 0..255 (index * 16 + 8). A pixel is
-  // black when its averaged intensity is below the threshold at its position,
-  // so the four 2-bit levels come out at 16/16, 11/16, 5/16 and 0/16 black.
-  static constexpr uint8_t kBayer[4][4] = {
-      {8, 136, 40, 168}, {200, 72, 232, 104}, {56, 184, 24, 152}, {248, 120, 216, 88}};
+  if (srcW <= 0 || srcH <= 0 || w <= 0 || h <= 0) return false;
 
   // Heap temporaries, sized at runtime and freed on every path: the two row
   // buffers drawBitmap uses, plus per-destination-column source spans and
@@ -1174,7 +1179,7 @@ void GfxRenderer::drawBitmapResampled(const Bitmap& bitmap, const int x, const i
   if (!outputRow || !rowBytes || !srcX0 || !srcX1 || !sums || !counts) {
     LOG_ERR("GFX", "!! Failed to allocate resample buffers (%d px wide)", w);
     freeAll();
-    return;
+    return false;
   }
 
   // Each destination column averages the source columns [srcX0, srcX1); when
@@ -1186,21 +1191,16 @@ void GfxRenderer::drawBitmapResampled(const Bitmap& bitmap, const int x, const i
     srcX1[dx] = static_cast<int16_t>(x1);
   }
 
-  const int screenW = getScreenWidth();
-  const int screenH = getScreenHeight();
   int pendingStart = -1;  // destination rows [pendingStart, pendingEnd) being accumulated
   int pendingEnd = -1;
 
   const auto flush = [&] {
     if (pendingStart < 0) return;
-    for (int dy = pendingStart; dy < pendingEnd; dy++) {
-      const int screenY = y + dy;
-      if (screenY < 0 || screenY >= screenH) continue;
+    for (int dy = pendingStart; dy < pendingEnd && dy < h; dy++) {
       for (int dx = 0; dx < w; dx++) {
-        const int screenX = x + dx;
-        if (screenX < 0 || screenX >= screenW || counts[dx] == 0) continue;
+        if (counts[dx] == 0) continue;
         const uint32_t avg = sums[dx] / counts[dx];
-        if (avg < kBayer[screenY & 3][screenX & 3]) drawPixel(screenX, screenY);
+        if (avg < kResampleBayer[dy & 3][dx & 3]) emitBlack(dx, dy);
       }
     }
   };
@@ -1212,7 +1212,7 @@ void GfxRenderer::drawBitmapResampled(const Bitmap& bitmap, const int x, const i
     if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
       LOG_ERR("GFX", "Failed to read row %d from bitmap (resample)", srcY);
       freeAll();
-      return;
+      return false;
     }
     const int srcRow = bitmap.isTopDown() ? srcY : (srcH - 1 - srcY);
     const int dstStart = (srcRow * h) / srcH;
@@ -1239,6 +1239,30 @@ void GfxRenderer::drawBitmapResampled(const Bitmap& bitmap, const int x, const i
   }
   flush();
   freeAll();
+  return true;
+}
+}  // namespace
+
+void GfxRenderer::drawBitmapResampled(const Bitmap& bitmap, const int x, const int y, const int w, const int h) const {
+  if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
+  if (renderMode != BW) return;
+
+  const int screenW = getScreenWidth();
+  const int screenH = getScreenHeight();
+  resampleBitmap(bitmap, w, h, [&](const int dx, const int dy) {
+    const int sx = x + dx;
+    const int sy = y + dy;
+    if (sx >= 0 && sx < screenW && sy >= 0 && sy < screenH) drawPixel(sx, sy);
+  });
+}
+
+bool GfxRenderer::resampleBitmapTo1Bit(const Bitmap& bitmap, const int w, const int h, uint8_t* bits,
+                                       const int rowBytes) {
+  if (bits == nullptr || rowBytes * 8 < w) return false;
+  memset(bits, 0xFF, static_cast<size_t>(rowBytes) * h);  // all white; black clears a bit
+  return resampleBitmap(bitmap, w, h, [&](const int dx, const int dy) {
+    bits[dy * rowBytes + dx / 8] &= static_cast<uint8_t>(~(0x80u >> (dx % 8)));
+  });
 }
 
 void GfxRenderer::fillPolygon(const int* xPoints, const int* yPoints, int numPoints, bool state) const {

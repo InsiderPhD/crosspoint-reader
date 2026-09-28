@@ -243,6 +243,10 @@ class GfxRenderer {
   // cover comes out almost solid black. Only black is drawn (the target is
   // assumed cleared); a no-op in the grayscale passes.
   void drawBitmapResampled(const Bitmap& bitmap, int x, int y, int w, int h) const;
+  // Same resample into a packed 1-bit buffer (MSB first, 1 = white, rows of
+  // rowBytes), for caching a shrunk image as a 1-bit BMP that later draws 1:1.
+  // bits must hold rowBytes * h bytes. False on allocation or read failure.
+  static bool resampleBitmapTo1Bit(const Bitmap& bitmap, int w, int h, uint8_t* bits, int rowBytes);
   // Paints over the four corner squares of an already-drawn rect so artwork
   // blitted by drawBitmap picks up rounded corners.
   void maskRoundedRectOutsideCorners(int x, int y, int width, int height, int radius, Color color) const;

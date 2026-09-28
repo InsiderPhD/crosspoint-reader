@@ -1,6 +1,7 @@
 #include "BookshelfTheme.h"
 
 #include <Bitmap.h>
+#include <BitmapHelpers.h>
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -9,8 +10,10 @@
 #include <Logging.h>
 
 #include <algorithm>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -56,12 +59,11 @@ constexpr int kHeroLabelGap = 8;
 constexpr int kHeroTitleMaxLines = 4;
 constexpr int kHeroAuthorMaxLines = 2;
 constexpr int kHeroBlurbGap = 8;
-constexpr int kHeroBlurbMaxLines = 10;
 constexpr int kBlurbFontId = SMALL_FONT_ID;
-// How much of the description sidecar to read for the card. Ten lines of a
-// ~200 px column hold well under this, and it keeps the per-selection read
-// small next to Epub::MAX_DESCRIPTION_BYTES (4 KB).
-constexpr size_t kBlurbReadBytes = 640;
+// How much of the description sidecar to read for the card: more than the
+// column beside the cover plus the full-width lines under it can show in
+// portrait, and still well short of Epub::MAX_DESCRIPTION_BYTES (4 KB).
+constexpr size_t kBlurbReadBytes = 1536;
 constexpr int kProgressBarH = 6;
 constexpr int kProgressTextGap = 6;
 
@@ -191,6 +193,7 @@ struct Layout {
   Rect heroCover;  // box; the artwork letterboxes inside it
   int heroTextX;
   int heroTextW;
+  int heroBottom;  // the card's text may run down to here, under the cover too
   bool showHero;
   int sectionLabelY;
   int plankY;  // books stand on this line
@@ -243,6 +246,7 @@ Layout computeLayout(const GfxRenderer& renderer, const Rect& rect, const ThemeM
   l.heroCover = Rect{l.left, contentTop, heroW, std::max(0, heroH)};
   l.heroTextX = l.left + heroW + kHeroTextGap;
   l.heroTextW = std::max(1, l.right - l.heroTextX);
+  l.heroBottom = std::max(l.heroCover.y + l.heroCover.height, heroBottom);
   return l;
 }
 
@@ -267,40 +271,6 @@ void drawPlaceholder(const GfxRenderer& renderer, const Rect& r, const int radiu
                       kPlaceholderIconSize, kPlaceholderIconSize);
   }
   renderer.drawRoundedRect(r.x, r.y, r.width, r.height, 1, radius, true);
-}
-
-// Draws the book's thumbnail fitted into box: centred horizontally, and either
-// bottom-aligned (standing on the shelf) or top-aligned (the hero card).
-// Returns the artwork rect actually painted, or the placeholder's rect.
-Rect drawCover(const GfxRenderer& renderer, const RecentBook& book, const Rect& box, const bool bottomAlign,
-               const int radius, const int thumbHeight) {
-  if (!book.coverBmpPath.empty()) {
-    const std::string thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, thumbHeight);
-    FsFile file;
-    if (Storage.openFileForRead("HOME", thumbPath, file)) {
-      Bitmap bitmap(file);
-      if (bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
-        int w = 0;
-        int h = 0;
-        fitSize(bitmap, box.width, box.height, w, h);
-        const Rect drawn{box.x + (box.width - w) / 2, bottomAlign ? box.y + box.height - h : box.y, w, h};
-        // Not drawBitmap: it paints every non-white source pixel black, and a
-        // 400 px dithered thumb shrunk to a shelf slot came out solid black.
-        renderer.drawBitmapResampled(bitmap, drawn.x, drawn.y, drawn.width, drawn.height);
-        renderer.maskRoundedRectOutsideCorners(drawn.x, drawn.y, drawn.width, drawn.height, radius, Color::White);
-        renderer.drawRoundedRect(drawn.x, drawn.y, drawn.width, drawn.height, 1, radius, true);
-        file.close();
-        return drawn;
-      }
-      file.close();
-    }
-  }
-  // No artwork: a 2:3 placeholder, so a coverless book still reads as a book
-  // standing on the shelf rather than filling its whole slot.
-  const int w = std::min(box.width, (box.height * 2) / 3);
-  const Rect placeholder{box.x + (box.width - w) / 2, box.y, w, box.height};
-  drawPlaceholder(renderer, placeholder, radius);
-  return placeholder;
 }
 
 // BookFusion-linked books get the same corner badge as the Lyra themes. iconY
@@ -358,29 +328,198 @@ void drawSpine(const GfxRenderer& renderer, const RecentBook& book, const Rect& 
                                ink, EpdFontFamily::BOLD);
 }
 
-// Draws the cover standing on the plank with its left edge at x, sized to fit
-// maxW x maxH at the artwork's aspect. False (nothing drawn) when there is no
-// readable thumbnail, so the caller can stand the book spine-out instead.
-bool drawShelfCover(const GfxRenderer& renderer, const RecentBook& book, const int x, const int plankY, const int maxW,
-                    const int maxH, const int thumbHeight, Rect& drawnOut) {
-  if (book.coverBmpPath.empty()) return false;
-  const std::string thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, thumbHeight);
+// ---- shelf cover cache ----
+//
+// Shrinking a 400 px thumbnail to a ~56 px shelf slot reads ~27 KB and
+// averages every source pixel -- slow on the C3, which has no FPU, and paid
+// for every book whenever the shelf is repainted. The shrunk, dithered result
+// is only a few hundred bytes as a 1-bit BMP, so it is cached next to the
+// book's thumbnails and later drawn 1:1.
+
+// Sampled from two points in the source's pixel data for the stamp below.
+constexpr size_t kStampSampleBytes = 64;
+
+// Identifies the source thumbnail a cached shelf cover was made from, stored
+// in the cached BMP's two reserved header fields. File size alone is not
+// enough: a regenerated cover (Regenerate Cover, a BookFusion refresh) almost
+// always has the same dimensions and so the same size. Leaves src at 0.
+uint32_t sourceStamp(FsFile& src) {
+  const size_t size = static_cast<size_t>(src.size());
+  uint32_t h = 2166136261u;
+  for (int i = 0; i < 4; ++i) h = (h ^ ((size >> (8 * i)) & 0xFFu)) * 16777619u;
+  uint8_t sample[kStampSampleBytes];
+  for (const size_t at : {size / 3, (2 * size) / 3}) {
+    if (!src.seek(at)) continue;
+    const int got = src.read(sample, sizeof(sample));
+    for (int i = 0; i < got; ++i) h = (h ^ sample[i]) * 16777619u;
+  }
+  src.seek(0);
+  return h;
+}
+
+// Where and how a cover is drawn inside its box: the shelf stands covers on
+// the plank at a packed x; the hero card top-aligns and centres its cover.
+struct CoverPlacement {
+  Rect box;
+  bool bottomAlign;
+  bool centerX;
+  const char* cacheKey;  // "shelf" or "hero": one cached copy per use and box size
+  int radius;
+};
+
+Rect placeCover(const CoverPlacement& place, const int w, const int h) {
+  const int x = place.centerX ? place.box.x + (place.box.width - w) / 2 : place.box.x;
+  const int y = place.bottomAlign ? place.box.y + place.box.height - h : place.box.y;
+  return Rect{x, y, w, h};
+}
+
+// thumb_[HEIGHT].bmp -> thumb_<key>_<w>x<h>.bmp, keyed by use and box size so a
+// different layout (landscape, gesture mode) gets its own copy. False when the
+// cover path has no [HEIGHT] template, since the cache would then overwrite
+// the source itself.
+bool coverCachePath(const std::string& coverTemplate, const CoverPlacement& place, std::string& out) {
+  const size_t pos = coverTemplate.find("[HEIGHT]");
+  if (pos == std::string::npos) return false;
+  char key[32];
+  snprintf(key, sizeof(key), "%s_%dx%d", place.cacheKey, place.box.width, place.box.height);
+  out = coverTemplate;
+  out.replace(pos, 8, key);
+  return true;
+}
+
+// Draws the cached cover if one exists for this stamp and fits the box. False
+// on any mismatch, so the caller rebuilds it.
+bool drawCachedCover(const GfxRenderer& renderer, const std::string& cachePath, const uint32_t stamp,
+                     const CoverPlacement& place, Rect& drawnOut) {
+  if (!Storage.exists(cachePath.c_str())) return false;
   FsFile file;
-  if (!Storage.openFileForRead("HOME", thumbPath, file)) return false;
-  Bitmap bitmap(file);
-  bool ok = false;
-  if (bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
-    int w = 0;
-    int h = 0;
-    fitSize(bitmap, maxW, maxH, w, h);
-    drawnOut = Rect{x, plankY - h, w, h};
-    renderer.drawBitmapResampled(bitmap, drawnOut.x, drawnOut.y, w, h);
-    renderer.maskRoundedRectOutsideCorners(drawnOut.x, drawnOut.y, w, h, kShelfCornerRadius, Color::White);
-    renderer.drawRoundedRect(drawnOut.x, drawnOut.y, w, h, 1, kShelfCornerRadius, true);
-    ok = true;
+  if (!Storage.openFileForRead("HOME", cachePath, file)) return false;
+
+  // bfType at 0, bfReserved1/2 at 6/8. memcpy: RISC-V faults on unaligned loads.
+  uint8_t header[14];
+  bool ok =
+      file.read(header, sizeof(header)) == static_cast<int>(sizeof(header)) && header[0] == 'B' && header[1] == 'M';
+  if (ok) {
+    uint16_t lo = 0;
+    uint16_t hi = 0;
+    memcpy(&lo, header + 6, sizeof(lo));
+    memcpy(&hi, header + 8, sizeof(hi));
+    ok = ((static_cast<uint32_t>(hi) << 16) | lo) == stamp && file.seek(0);
+  }
+  if (ok) {
+    Bitmap bitmap(file);
+    ok = bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.is1Bit() && bitmap.getWidth() > 0 &&
+         bitmap.getHeight() > 0 && bitmap.getWidth() <= place.box.width && bitmap.getHeight() <= place.box.height;
+    if (ok) {
+      drawnOut = placeCover(place, bitmap.getWidth(), bitmap.getHeight());
+      renderer.drawBitmap(bitmap, drawnOut.x, drawnOut.y, drawnOut.width, drawnOut.height);  // 1:1, no scaling
+    }
   }
   file.close();
   return ok;
+}
+
+// Shrinks the source thumbnail into the box, draws it, and writes the result
+// to cachePath (skipped when cachePath is empty). The 1-bit buffer is a heap
+// temporary freed before returning -- ~0.9 KB for a shelf slot, ~11 KB for the
+// hero cover, past the 256 B stack budget either way. A failed allocation
+// falls back to drawing directly, uncached.
+bool drawAndCacheCover(const GfxRenderer& renderer, FsFile& src, const std::string& cachePath, const uint32_t stamp,
+                       const CoverPlacement& place, Rect& drawnOut) {
+  Bitmap bitmap(src);
+  if (bitmap.parseHeaders() != BmpReaderError::Ok || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) return false;
+  int w = 0;
+  int h = 0;
+  fitSize(bitmap, place.box.width, place.box.height, w, h);
+  drawnOut = placeCover(place, w, h);
+
+  const int rowBytes = ((w + 31) / 32) * 4;  // BMP rows pad to 4 bytes
+  const size_t bufSize = static_cast<size_t>(rowBytes) * h;
+  auto* bits = static_cast<uint8_t*>(malloc(bufSize));
+  if (bits == nullptr) {
+    LOG_ERR("HOME", "cover cache malloc failed: %d bytes", static_cast<int>(bufSize));
+    renderer.drawBitmapResampled(bitmap, drawnOut.x, drawnOut.y, w, h);
+    return true;
+  }
+  if (!GfxRenderer::resampleBitmapTo1Bit(bitmap, w, h, bits, rowBytes)) {
+    free(bits);
+    return false;
+  }
+
+  for (int dy = 0; dy < h; ++dy) {
+    const uint8_t* row = bits + dy * rowBytes;
+    for (int dx = 0; dx < w; ++dx) {
+      if ((row[dx / 8] & (0x80u >> (dx % 8))) == 0) renderer.drawPixel(drawnOut.x + dx, drawnOut.y + dy);
+    }
+  }
+
+  if (!cachePath.empty()) {
+    BmpHeader header;
+    createBmpHeader(&header, w, h, BmpRowOrder::TopDown);
+    header.fileHeader.bfReserved1 = static_cast<uint16_t>(stamp & 0xFFFFu);
+    header.fileHeader.bfReserved2 = static_cast<uint16_t>(stamp >> 16);
+    FsFile out;
+    if (Storage.openFileForWrite("HOME", cachePath, out)) {
+      const bool written = out.write(&header, sizeof(header)) == sizeof(header) && out.write(bits, bufSize) == bufSize;
+      out.close();
+      if (!written) {
+        LOG_ERR("HOME", "cover cache write failed: %s", cachePath.c_str());
+        Storage.remove(cachePath.c_str());  // a short file would fail parse forever
+      }
+    }
+  }
+  free(bits);
+  bits = nullptr;
+  return true;
+}
+
+// Draws the book's cover fitted into place.box at the artwork's aspect: from
+// the cache when it is current, otherwise shrunk from the thumbnail and
+// cached, then masked to rounded corners and outlined. False (nothing drawn)
+// when there is no readable thumbnail.
+bool drawCoverCached(const GfxRenderer& renderer, const RecentBook& book, const CoverPlacement& place,
+                     const int thumbHeight, Rect& drawnOut) {
+  if (book.coverBmpPath.empty()) return false;
+  const std::string thumbPath = UITheme::getCoverThumbPath(book.coverBmpPath, thumbHeight);
+  if (!Storage.exists(thumbPath.c_str())) return false;
+  FsFile src;
+  if (!Storage.openFileForRead("HOME", thumbPath, src)) return false;
+
+  std::string cachePath;
+  const bool cacheable = coverCachePath(book.coverBmpPath, place, cachePath);
+  const uint32_t stamp = cacheable ? sourceStamp(src) : 0;
+  bool ok = cacheable && drawCachedCover(renderer, cachePath, stamp, place, drawnOut);
+  if (!ok) {
+    ok = drawAndCacheCover(renderer, src, cacheable ? cachePath : std::string(), stamp, place, drawnOut);
+  }
+  src.close();
+  if (ok) {
+    renderer.maskRoundedRectOutsideCorners(drawnOut.x, drawnOut.y, drawnOut.width, drawnOut.height, place.radius,
+                                           Color::White);
+    renderer.drawRoundedRect(drawnOut.x, drawnOut.y, drawnOut.width, drawnOut.height, 1, place.radius, true);
+  }
+  return ok;
+}
+
+// A shelf cover standing on the plank with its left edge at x. False when
+// there is no readable thumbnail, so the caller stands the book spine-out.
+bool drawShelfCover(const GfxRenderer& renderer, const RecentBook& book, const int x, const int plankY, const int maxW,
+                    const int maxH, const int thumbHeight, Rect& drawnOut) {
+  const CoverPlacement place{Rect{x, plankY - maxH, maxW, maxH}, /*bottomAlign=*/true, /*centerX=*/false, "shelf",
+                             kShelfCornerRadius};
+  return drawCoverCached(renderer, book, place, thumbHeight, drawnOut);
+}
+
+// The hero card's cover, top-aligned and centred in box, or a 2:3 placeholder
+// when the book has no artwork. Returns the rect painted.
+Rect drawHeroCover(const GfxRenderer& renderer, const RecentBook& book, const Rect& box, const int thumbHeight) {
+  const CoverPlacement place{box, /*bottomAlign=*/false, /*centerX=*/true, "hero", kHeroCornerRadius};
+  Rect drawn;
+  if (drawCoverCached(renderer, book, place, thumbHeight, drawn)) return drawn;
+  const int w = std::min(box.width, (box.height * 2) / 3);
+  const Rect placeholder{box.x + (box.width - w) / 2, box.y, w, box.height};
+  drawPlaceholder(renderer, placeholder, kHeroCornerRadius);
+  return placeholder;
 }
 
 void drawPlank(const GfxRenderer& renderer, const Layout& l) {
@@ -537,7 +676,9 @@ void drawGridCell(const GfxRenderer& renderer, const Rect& r, const char* label,
 
 // ---- hero card ----
 
-void drawProgress(const GfxRenderer& renderer, const Layout& l, const int bottomY, const int progressPercent) {
+// Progress percentage (or Not started / Book Finished) with its bar above
+// it, sitting on bottomY and spanning x..x+w.
+void drawProgress(const GfxRenderer& renderer, const int x, const int w, const int bottomY, const int progressPercent) {
   char buf[40];
   if (progressPercent < 0 || progressPercent == 0) {
     snprintf(buf, sizeof(buf), "%s", tr(STR_BOOK_INFO_NOT_STARTED));
@@ -547,29 +688,121 @@ void drawProgress(const GfxRenderer& renderer, const Layout& l, const int bottom
     snprintf(buf, sizeof(buf), "%d%%", progressPercent);
   }
   const int textY = bottomY - renderer.getLineHeight(kLabelFontId);
-  renderer.drawText(kLabelFontId, l.heroTextX, textY, buf, true);
+  renderer.drawText(kLabelFontId, x, textY, buf, true);
 
   if (progressPercent <= 0) return;
   const int barY = textY - kProgressTextGap - kProgressBarH;
   const int pct = std::min(100, progressPercent);
-  renderer.drawRoundedRect(l.heroTextX, barY, l.heroTextW, kProgressBarH, 1, kProgressBarH / 2, true);
-  const int fillW = (l.heroTextW * pct) / 100;
+  renderer.drawRoundedRect(x, barY, w, kProgressBarH, 1, kProgressBarH / 2, true);
+  const int fillW = (w * pct) / 100;
   if (fillW >= kProgressBarH) {
-    renderer.fillRoundedRect(l.heroTextX, barY, fillW, kProgressBarH, kProgressBarH / 2, Color::Black);
+    renderer.fillRoundedRect(x, barY, fillW, kProgressBarH, kProgressBarH / 2, Color::Black);
   }
 }
 
-// As much of the book's description (the plain-text sidecar the metadata pass
-// writes) as fits in maxLines from y; wrappedText ellipsises the last line.
-// Only the first kBlurbReadBytes are read: the whole 4 KB would be wasted on a
-// card that shows a few hundred characters. Heap, not stack, because the
-// buffer is past the 256 B stack budget; it is freed before returning.
-void drawBlurb(const GfxRenderer& renderer, const Layout& l, const RecentBook& book, const int y, const int maxLines) {
-  if (maxLines <= 0 || !FsHelpers::hasEpubExtension(book.path)) return;
+// Where the card's text goes: a column beside the cover until the text clears
+// the cover's bottom edge, then the full card width underneath it.
+struct TextFlow {
+  int y;       // top of the next line
+  int splitY;  // a line starting at or below this may use the full width
+  int colX;
+  int colW;
+  int fullX;
+  int fullW;
+  int bottomY;  // no line may end below this
+  int x() const { return y < splitY ? colX : fullX; }
+  int w() const { return y < splitY ? colW : fullW; }
+};
+
+// Greedy word wrap of text into the flow, at most maxLines lines. When the
+// text outruns the room, the last line that fits is ellipsised. Breaks only at
+// spaces, so a multi-byte UTF-8 sequence is never split; a single word wider
+// than the line is truncated instead. Advances flow.y past what it drew; the
+// next call checks for room itself, so running out needs no signal.
+//
+// Linear in the text: each word is measured once and a line's width is the
+// running sum of its words plus the inter-word advances. Re-measuring the
+// growing line after every word was quadratic, and on a 1.5 KB blurb that was
+// most of the lag moving between books on the C3. The sum ignores kerning
+// across the spaces, hence the small slack.
+void flowText(const GfxRenderer& renderer, TextFlow& flow, const int fontId, const char* text, const int maxLines,
+              const EpdFontFamily::Style style = EpdFontFamily::REGULAR) {
+  constexpr int kKerningSlack = 2;
+  const int lineH = renderer.getLineHeight(fontId);
+  const int spaceW = renderer.getTextAdvanceX(fontId, " ", style);
+  std::string buf;  // one reused buffer for measuring and drawing
+  const char* p = text;
+  for (int lines = 0; lines < maxLines; ++lines) {
+    while (*p == ' ') ++p;
+    if (*p == '\0' || flow.y + lineH > flow.bottomY) return;
+
+    const int x = flow.x();
+    const int w = flow.w() - kKerningSlack;
+    const bool lastLine = lines + 1 >= maxLines || flow.y + 2 * lineH > flow.bottomY;
+
+    // Longest run of whole words from p that fits in w; overflowEnd is the end
+    // of the first word that did not, for the ellipsis case.
+    const char* end = nullptr;
+    const char* overflowEnd = nullptr;
+    int lineW = 0;
+    const char* scan = p;
+    while (true) {
+      const char* wordStart = scan;
+      while (*wordStart == ' ') ++wordStart;
+      if (*wordStart == '\0') break;
+      const char* wordEnd = wordStart;
+      while (*wordEnd != '\0' && *wordEnd != ' ') ++wordEnd;
+      buf.assign(wordStart, wordEnd - wordStart);
+      const int candidateW = (end != nullptr ? lineW + spaceW : 0) + renderer.getTextWidth(fontId, buf.c_str(), style);
+      if (candidateW > w) {
+        overflowEnd = wordEnd;
+        break;
+      }
+      lineW = candidateW;
+      end = wordEnd;
+      scan = wordEnd;
+    }
+
+    if (lastLine && overflowEnd != nullptr) {
+      // More text than room: this line plus the word that did not fit,
+      // truncated to an ellipsis. Only that much is handed to truncatedText,
+      // never the whole remaining blurb.
+      buf.assign(p, overflowEnd - p);
+      const std::string cut = renderer.truncatedText(fontId, buf.c_str(), w, style);
+      renderer.drawText(fontId, x, flow.y, cut.c_str(), true, style);
+      flow.y += lineH;
+      return;
+    }
+    if (end == nullptr) {
+      // A single word wider than the line.
+      const char* wordEnd = p;
+      while (*wordEnd != '\0' && *wordEnd != ' ') ++wordEnd;
+      buf.assign(p, wordEnd - p);
+      const std::string cut = renderer.truncatedText(fontId, buf.c_str(), w, style);
+      renderer.drawText(fontId, x, flow.y, cut.c_str(), true, style);
+      p = wordEnd;
+    } else {
+      buf.assign(p, end - p);
+      renderer.drawText(fontId, x, flow.y, buf.c_str(), true, style);
+      p = end;
+    }
+    flow.y += lineH;
+  }
+}
+
+// Flows as much of the book's description (the plain-text sidecar the metadata
+// pass writes) as fits. Only the first kBlurbReadBytes are read -- the card
+// never shows the whole 4 KB. Heap, not stack, because the buffer is past the
+// 256 B stack budget; it is freed before returning.
+void drawBlurb(const GfxRenderer& renderer, TextFlow& flow, const RecentBook& book) {
+  if (!FsHelpers::hasEpubExtension(book.path)) return;
+  if (flow.y + renderer.getLineHeight(kBlurbFontId) > flow.bottomY) return;
   // Constructing an Epub only derives its cache path; nothing is loaded.
   const Epub epub(book.path, "/.crosspoint");
+  const std::string descPath = epub.getDescriptionPath();
+  if (!Storage.exists(descPath.c_str())) return;
   FsFile file;
-  if (!Storage.openFileForRead("HOME", epub.getDescriptionPath(), file)) return;
+  if (!Storage.openFileForRead("HOME", descPath, file)) return;
 
   const size_t fileSize = static_cast<size_t>(file.size());
   const size_t toRead = std::min<size_t>(fileSize, kBlurbReadBytes);
@@ -584,7 +817,7 @@ void drawBlurb(const GfxRenderer& renderer, const Layout& l, const RecentBook& b
   file.close();
 
   // A partial read can end inside a word or a multi-byte character: cut back
-  // to the last space so wrappedText only ever sees whole UTF-8 sequences.
+  // to the last space so the wrap only ever sees whole UTF-8 sequences.
   if (len < fileSize) {
     while (len > 0 && buf[len - 1] != ' ' && buf[len - 1] != '\n') --len;
   }
@@ -593,14 +826,8 @@ void drawBlurb(const GfxRenderer& renderer, const Layout& l, const RecentBook& b
   for (size_t i = 0; i < len; ++i) {
     if (buf[i] == '\n' || buf[i] == '\r' || buf[i] == '\t') buf[i] = ' ';
   }
-
   if (len > 0) {
-    const int lineH = renderer.getLineHeight(kBlurbFontId);
-    int lineY = y;
-    for (const auto& line : renderer.wrappedText(kBlurbFontId, buf, l.heroTextW, maxLines)) {
-      renderer.drawText(kBlurbFontId, l.heroTextX, lineY, line.c_str(), true);
-      lineY += lineH;
-    }
+    flowText(renderer, flow, kBlurbFontId, buf, INT_MAX);
   }
   free(buf);
   buf = nullptr;
@@ -608,51 +835,47 @@ void drawBlurb(const GfxRenderer& renderer, const Layout& l, const RecentBook& b
 
 void drawHero(const GfxRenderer& renderer, const Layout& l, const RecentBook& book, const int thumbHeight) {
   // drawBitmap only sets black pixels; the snapshot holds a blank card, but a
-  // full redraw follows a previous frame's card, so clear it either way.
-  renderer.fillRect(l.left, l.heroCover.y, l.right - l.left, l.heroCover.height, false);
+  // full redraw follows a previous frame's card, so clear it either way --
+  // down to heroBottom, since the text can run under the cover.
+  renderer.fillRect(l.left, l.heroCover.y, l.right - l.left, l.heroBottom - l.heroCover.y, false);
 
-  const Rect art = drawCover(renderer, book, l.heroCover, /*bottomAlign=*/false, kHeroCornerRadius, thumbHeight);
+  const Rect art = drawHeroCover(renderer, book, l.heroCover, thumbHeight);
   if (BookFusionBookIdStore::hasBookId(book.path.c_str())) {
     drawBookFusionBadge(renderer, art);
   }
 
-  int y = l.heroCover.y;
   // A book with no progress yet (never opened, or reset) is one to start, not
   // continue; the same test drawProgress uses for "Not started".
   const char* heading = book.progressPercent > 0 ? tr(STR_CONTINUE_READING) : tr(STR_START_READING_TITLE);
-  renderer.drawText(kLabelFontId, l.heroTextX, y, heading, true, EpdFontFamily::BOLD);
-  y += renderer.getLineHeight(kLabelFontId) + kHeroLabelGap;
+  renderer.drawText(kLabelFontId, l.heroTextX, l.heroCover.y, heading, true, EpdFontFamily::BOLD);
 
-  // Reserve the progress block at the card's bottom, then give the title and
-  // author only the lines that fit above it (landscape shrinks the card).
+  // The progress row sits on the card's bottom edge: full width when there is
+  // room under the cover for it, otherwise in the column beside the cover.
+  const int artBottom = art.y + art.height;
   const int progressBlockH = renderer.getLineHeight(kLabelFontId) + kProgressTextGap + kProgressBarH;
-  const int textBottom = art.y + art.height - progressBlockH - kHeroLabelGap;
-  const int titleLineH = renderer.getLineHeight(kTitleFontId);
-  const int authorLineH = renderer.getLineHeight(kAuthorFontId);
+  const int progressTop = l.heroBottom - progressBlockH;
+  const bool progressFullWidth = progressTop >= artBottom + kHeroTextGap;
+  drawProgress(renderer, progressFullWidth ? l.left : l.heroTextX, progressFullWidth ? l.right - l.left : l.heroTextW,
+               l.heroBottom, book.progressPercent);
+
+  // Title, author and blurb share one flow: beside the cover, then full width
+  // once a line starts below it, stopping just above the progress row.
+  TextFlow flow{l.heroCover.y + renderer.getLineHeight(kLabelFontId) + kHeroLabelGap,
+                artBottom + kHeroTextGap,
+                l.heroTextX,
+                l.heroTextW,
+                l.left,
+                l.right - l.left,
+                progressTop - kHeroLabelGap};
 
   const char* title = book.title.empty() ? book.path.c_str() : book.title.c_str();
-  const int titleLines = std::clamp((textBottom - y) / titleLineH, 0, kHeroTitleMaxLines);
-  if (titleLines > 0) {
-    for (const auto& line : renderer.wrappedText(kTitleFontId, title, l.heroTextW, titleLines, EpdFontFamily::BOLD)) {
-      renderer.drawText(kTitleFontId, l.heroTextX, y, line.c_str(), true, EpdFontFamily::BOLD);
-      y += titleLineH;
-    }
+  flowText(renderer, flow, kTitleFontId, title, kHeroTitleMaxLines, EpdFontFamily::BOLD);
+  if (!book.author.empty()) {
+    flow.y += 4;
+    flowText(renderer, flow, kAuthorFontId, book.author.c_str(), kHeroAuthorMaxLines);
   }
-
-  const int authorLines = std::clamp((textBottom - y - 4) / authorLineH, 0, kHeroAuthorMaxLines);
-  if (!book.author.empty() && authorLines > 0) {
-    y += 4;
-    for (const auto& line : renderer.wrappedText(kAuthorFontId, book.author.c_str(), l.heroTextW, authorLines)) {
-      renderer.drawText(kAuthorFontId, l.heroTextX, y, line.c_str(), true);
-      y += authorLineH;
-    }
-  }
-
-  const int blurbLines =
-      std::min(kHeroBlurbMaxLines, (textBottom - y - kHeroBlurbGap) / renderer.getLineHeight(kBlurbFontId));
-  drawBlurb(renderer, l, book, y + kHeroBlurbGap, blurbLines);
-
-  drawProgress(renderer, l, art.y + art.height, book.progressPercent);
+  flow.y += kHeroBlurbGap;
+  drawBlurb(renderer, flow, book);
 }
 
 // The card while the Library stack is selected. The stack's own label is only
@@ -687,7 +910,8 @@ void drawLibraryHero(const GfxRenderer& renderer, const Layout& l) {
 // repaint the shelf -- their positions depend on each cover's aspect, which
 // the snapshot frames never re-read.
 void recordHeroGeometry(const Layout& l) {
-  drawnHero = l.showHero ? Rect{l.left, l.heroCover.y, l.right - l.left, l.heroCover.height} : Rect{0, 0, 0, 0};
+  drawnHero =
+      l.showHero ? Rect{l.left, l.heroCover.y, l.right - l.left, l.heroBottom - l.heroCover.y} : Rect{0, 0, 0, 0};
 }
 
 }  // namespace

@@ -90,7 +90,9 @@ void LibraryActivity::onEnter() {
   Activity::onEnter();
   selectorIndex = 0;
   lastRenderedPage = static_cast<size_t>(-1);
-  pageRendered = false;
+  frameHoldsPage = false;
+  frameOverlayed = false;
+  lastDrawnSelector = static_cast<size_t>(-1);
   pageBufferStored = false;
   // Pull last-chosen sort from settings (shared across all list activities).
   currentSort =
@@ -299,7 +301,7 @@ void LibraryActivity::freePageBuffer() {
     pageBuffer = nullptr;
   }
   pageBufferStored = false;
-  pageRendered = false;
+  frameHoldsPage = false;
 }
 
 void LibraryActivity::render(RenderLock&&) {
@@ -318,7 +320,12 @@ void LibraryActivity::render(RenderLock&&) {
     // stack heap is freed before the metadata recache's heavy allocations —
     // avoids a cold-boot OOM/contention crash. No-op after the ~10s boot window.
     WifiTimeSync::preempt();
-    enumerateBooks();
+    {
+      const uint32_t t0 = millis();
+      enumerateBooks();
+      LOG_INF("LIBTIME", "enumerate+sort %u books: %lu ms", static_cast<unsigned>(bookPaths.size()),
+              static_cast<unsigned long>(millis() - t0));
+    }
     initialLoadPending = false;
     // Fall through.
   }
@@ -332,7 +339,11 @@ void LibraryActivity::render(RenderLock&&) {
     renderer.displayBuffer();
     if (SETTINGS.darkMode) renderer.invertScreen();
 
-    rebuildSortedIndices();
+    {
+      const uint32_t t0 = millis();
+      rebuildSortedIndices();
+      LOG_INF("LIBTIME", "sort rebuild: %lu ms", static_cast<unsigned long>(millis() - t0));
+    }
     pendingSortRebuild = false;
     lastRenderedPage = static_cast<size_t>(-1);
     pageBufferStored = false;
@@ -353,14 +364,34 @@ void LibraryActivity::render(RenderLock&&) {
   }
 
   const size_t page = currentPage();
-  const bool pageChanged = (page != lastRenderedPage) || !pageBufferStored;
+  const bool pageChanged = (page != lastRenderedPage);
+  const bool menuOpen = contextMenu.isOpen() || sortMenu.isOpen();
 
-  if (pageChanged) {
+  const uint32_t tPage = millis();
+  const char* pathName;
+  if (pageChanged || (!pageBufferStored && (!frameHoldsPage || (frameOverlayed && !menuOpen)))) {
+    // New page, or the frame no longer holds a clean page and no snapshot can restore one.
     renderPageFromScratch();
     lastRenderedPage = page;
-  } else {
+    pathName = "scratch";
+  } else if (pageBufferStored) {
     renderSelectionOnly();
+    pathName = "snapshot";
+  } else if (menuOpen) {
+    // Both menus paint an opaque box at a fixed spot and redraw over
+    // themselves below; the page underneath is untouched.
+    pathName = "menu";
+  } else {
+    // No snapshot, but the frame still holds this page's covers: the band
+    // never overlaps a cover, so only the tile that had it and the one that
+    // gets it need their chrome cleared before the text layer is redrawn.
+    const size_t pageStart = page * pageSize();
+    if (lastDrawnSelector / pageSize() == page) clearTileChrome(static_cast<int>(lastDrawnSelector - pageStart));
+    clearTileChrome(static_cast<int>(selectorIndex - pageStart));
+    drawOverlay();
+    pathName = "chrome";
   }
+  const uint32_t tPageDone = millis();
 
   drawButtonHints();
   contextMenu.render(renderer);
@@ -376,9 +407,22 @@ void LibraryActivity::render(RenderLock&&) {
   if (missingSlot >= 0) GUI.drawPopup(renderer, tr(STR_LOADING));
 
   if (SETTINGS.darkMode) renderer.invertScreen();
+  const uint32_t tDisp = millis();
   renderer.displayBuffer();
+  const uint32_t tDispDone = millis();
+  // Undo the dark-mode inversion so the frame stays in logical form for the
+  // snapshot-less chrome repaint and the menu redraw above.
+  if (SETTINGS.darkMode) renderer.invertScreen();
+  frameOverlayed = menuOpen || missingSlot >= 0;
+  LOG_INF("LIBTIME", "render page=%u %s: draw %lu ms, hints+menus %lu ms, display %lu ms, missingSlot=%d",
+          static_cast<unsigned>(page), pathName, static_cast<unsigned long>(tPageDone - tPage),
+          static_cast<unsigned long>(tDisp - tPageDone), static_cast<unsigned long>(tDispDone - tDisp), missingSlot);
 
-  if (missingSlot >= 0) fillMissingCover(missingSlot);
+  if (missingSlot >= 0) {
+    const uint32_t t0 = millis();
+    fillMissingCover(missingSlot);
+    LOG_INF("LIBTIME", "fillMissingCover slot=%d: %lu ms", missingSlot, static_cast<unsigned long>(millis() - t0));
+  }
 }
 
 void LibraryActivity::fillMissingCover(const int slotIndexInPage) {
@@ -427,35 +471,29 @@ void LibraryActivity::refreshCurrentPageMeta() {
     m.progressPercent = -1;
     m.hasCover = false;
     m.hasBfBadge = false;
+    m.coverResolved = false;
     m.thumbPath.clear();
   }
 
   for (int i = 0; i < booksOnPage; ++i) {
+    const uint32_t t0 = millis();
     const std::string path = pathAtLogicalIndex(pageStart + i);
     auto& meta = currentPageMeta[i];
 
     if (FsHelpers::hasEpubExtension(path)) {
       Epub epub(path, "/.crosspoint");
+      // Every path probe here is a FAT long-name resolve through /.crosspoint
+      // (~20-25 ms each on the X3 with a populated library), so the cover is
+      // not probed at all: drawTileCover opens the thumb, falls back to the
+      // BookFusion API cover.bmp (see there) and records the outcome in
+      // hasCover/coverResolved.
       meta.thumbPath = epub.getThumbBmpPath(COVER_HEIGHT);
-      meta.hasCover = Storage.exists(meta.thumbPath.c_str());
-      // BookFusion EPUBs frequently ship with no embedded cover image — the cover
-      // lives only on BookFusion's servers and is fetched at download time, cached
-      // as both thumb_<H>.bmp and the full sleep-screen cover.bmp. If the tile
-      // thumbnail is missing, render that full cover instead of falling back to
-      // (futile) EPUB extraction, which has nothing to extract and only yields a
-      // placeholder. drawTileCover scales/crops any BMP to the tile, so the
-      // full-size cover renders correctly here.
-      if (!meta.hasCover) {
-        const std::string bfCover = epub.getCoverBmpPath(/*cropped=*/false);
-        if (Storage.exists(bfCover.c_str())) {
-          meta.thumbPath = bfCover;
-          meta.hasCover = true;
-        }
-      }
-      // load uses cached book.bin when present (fast); otherwise parses the EPUB.
-      // We don't *force* parsing here — refresh is meant to be cheap. The
-      // generateThumbForSlot() path will trigger a full parse when needed.
-      if (Storage.exists((epub.getCachePath() + "/book.bin").c_str()) && epub.load(true, true)) {
+      meta.hasCover = true;
+      meta.coverResolved = false;
+      // Same reason: no exists() probe before the load. With buildIfMissing
+      // false a missing book.bin fails on its single open instead of parsing
+      // the EPUB; generateThumbForSlot() is the path that builds it.
+      if (epub.load(/*buildIfMissing=*/false, /*skipLoadingCss=*/true)) {
         meta.title = epub.getTitle();
         meta.author = epub.getAuthor();
       }
@@ -472,6 +510,8 @@ void LibraryActivity::refreshCurrentPageMeta() {
     const auto& recents = RECENT_BOOKS.getBooks();
     auto it = std::find_if(recents.begin(), recents.end(), [&path](const RecentBook& b) { return b.path == path; });
     meta.progressPercent = (it != recents.end()) ? it->progressPercent : -1;
+    LOG_DBG("LIBTIME", "  meta %d: %lu ms (cover=%d)", i, static_cast<unsigned long>(millis() - t0),
+            meta.hasCover ? 1 : 0);
   }
 }
 
@@ -513,11 +553,13 @@ bool LibraryActivity::generateThumbForSlot(int slotIndexInPage) {
   LOG_DBG("MEMDIAG", "thumb slot=%d free=%u largest=%u", slotIndexInPage, static_cast<unsigned>(ESP.getFreeHeap()),
           static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
 
+  const uint32_t tLoad = millis();
   Epub epub(path, "/.crosspoint");
   if (!epub.load(true, true)) {
     meta.hasCover = true;  // Unparseable EPUB; stop polling.
     return true;           // We did slow work; let the chain redraw.
   }
+  LOG_INF("LIBTIME", "thumb slot=%d epub.load: %lu ms", slotIndexInPage, static_cast<unsigned long>(millis() - tLoad));
 
   // Pick up metadata that may have only just been written to book.bin.
   if (meta.title.empty() || meta.title == path.substr(path.find_last_of('/') + 1)) {
@@ -543,7 +585,10 @@ bool LibraryActivity::generateThumbForSlot(int slotIndexInPage) {
     return false;
   }
 
+  const uint32_t tGen = millis();
   epub.generateThumbBmp(COVER_HEIGHT);
+  LOG_INF("LIBTIME", "thumb slot=%d generateThumbBmp: %lu ms", slotIndexInPage,
+          static_cast<unsigned long>(millis() - tGen));
   // Unconditional true: a missing file after generate means the EPUB has no
   // cover (or the converter rejected it). Either way, don't retry this slot.
   meta.hasCover = true;
@@ -556,7 +601,9 @@ void LibraryActivity::renderPageFromScratch() {
 
   // Make sure currentPageMeta reflects on-disk state. Cheap — only reads
   // book.bin entries that already exist; never parses an EPUB from scratch.
+  const uint32_t tMeta = millis();
   refreshCurrentPageMeta();
+  const uint32_t tMetaDone = millis();
 
   const size_t page = currentPage();
   // A fresh page (navigation, sort, reload — all of which reset lastRenderedPage
@@ -574,7 +621,14 @@ void LibraryActivity::renderPageFromScratch() {
   renderer.clearScreen();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, screenW, metrics.headerHeight}, tr(STR_LIBRARY),
                  sortModeLabel(currentSort), contextMenu.isOpen() ? nullptr : tr(STR_SORT));
-  for (int i = 0; i < booksOnPage; ++i) drawTileCover(i);
+  const uint32_t tTiles = millis();
+  for (int i = 0; i < booksOnPage; ++i) {
+    const uint32_t t0 = millis();
+    drawTileCover(i);
+    LOG_DBG("LIBTIME", "  tile %d (%s): %lu ms", i, currentPageMeta[i].hasCover ? "bmp" : "placeholder",
+            static_cast<unsigned long>(millis() - t0));
+  }
+  const uint32_t tTilesDone = millis();
 
   // Snapshot covers+header BEFORE drawing the selection/text layer, so
   // renderSelectionOnly() can restore a clean page and draw a fresh
@@ -582,9 +636,13 @@ void LibraryActivity::renderPageFromScratch() {
   // in the selection band at slot 0 (initial selectorIndex), causing it
   // to persist behind every subsequent navigation.
   pageBufferStored = storePageBuffer();
-  pageRendered = pageBufferStored;
+  frameHoldsPage = true;
 
+  const uint32_t tOverlay = millis();
   drawOverlay();
+  LOG_INF("LIBTIME", "scratch: meta %lu ms, %d tiles %lu ms, snapshot %lu ms, overlay %lu ms",
+          static_cast<unsigned long>(tMetaDone - tMeta), booksOnPage, static_cast<unsigned long>(tTilesDone - tTiles),
+          static_cast<unsigned long>(tOverlay - tTilesDone), static_cast<unsigned long>(millis() - tOverlay));
 }
 
 // Draw cover bitmap + border + placeholder for one slot. Matches the cover
@@ -597,9 +655,27 @@ void LibraryActivity::drawTileCover(const int slot) {
   renderer.fillRect(coverX, coverY, r.width, r.height, false);
 
   bool drewBitmap = false;
-  if (currentPageMeta[slot].hasCover && !currentPageMeta[slot].thumbPath.empty()) {
-    HalFile bmpFile;
-    if (Storage.openFileForRead(MODULE, currentPageMeta[slot].thumbPath.c_str(), bmpFile)) {
+  auto& meta = currentPageMeta[slot];
+  if (meta.hasCover && !meta.thumbPath.empty()) {
+    // Storage.open rather than openFileForRead: a missing thumb is an expected
+    // miss here, not an error line per render.
+    HalFile bmpFile = Storage.open(meta.thumbPath.c_str());
+    if (!bmpFile && !meta.coverResolved) {
+      // BookFusion EPUBs frequently ship with no embedded cover image — the cover
+      // lives only on BookFusion's servers and is fetched at download time, cached
+      // as both thumb_<H>.bmp and the full sleep-screen cover.bmp. If the tile
+      // thumbnail is missing, render that full cover instead of falling back to
+      // (futile) EPUB extraction, which has nothing to extract and only yields a
+      // placeholder. The scale/crop below fits any BMP to the tile. Path mirrors
+      // Epub::getCoverBmpPath(false) without constructing an Epub.
+      const std::string bfCover = meta.thumbPath.substr(0, meta.thumbPath.find_last_of('/')) + "/cover.bmp";
+      bmpFile = Storage.open(bfCover.c_str());
+      if (bmpFile) meta.thumbPath = bfCover;
+    }
+    meta.coverResolved = true;
+    if (!bmpFile) {
+      meta.hasCover = false;  // Neither file exists: placeholder; findMissingThumbSlot may generate one.
+    } else {
       Bitmap bitmap(bmpFile);
       if (bitmap.parseHeaders() == BmpReaderError::Ok) {
         const float bmpW = static_cast<float>(bitmap.getWidth());
@@ -625,7 +701,7 @@ void LibraryActivity::drawTileCover(const int slot) {
   // mark, inset from the cover corner. iconY is snapped to a multiple of 8
   // because drawImageTransparent truncates the display-y via integer divide
   // by 8 — non-aligned values shift the icon relative to the white fill.
-  if (currentPageMeta[slot].hasBfBadge) {
+  if (meta.hasBfBadge) {
     constexpr int BF_ICON_SIZE = 24;
     constexpr int BF_PADDING = 4;  // White padding around the icon.
     constexpr int BF_MARGIN = 4;   // Distance from the cover edge.
@@ -650,7 +726,28 @@ void LibraryActivity::renderSelectionOnly() {
   drawOverlay();
 }
 
+void LibraryActivity::clearTileChrome(const int slot) {
+  if (slot < 0 || slot >= pageSize()) return;
+  const int screenW = renderer.getScreenWidth();
+  const int screenH = renderer.getScreenHeight();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
+                                     metrics.pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
+  int tileX, tileY;
+  tileOrigin(slot, L, tileX, tileY);
+  const int coverTop = tileY + hPaddingInSelection;
+  const int coverBottom = coverTop + L.coverDrawH;
+  // Top strip, both side strips, then the title box and text rows down to the
+  // end of the row (the row height is what drawOverlay's text is sized to).
+  renderer.fillRect(tileX, tileY, L.tileWidth, hPaddingInSelection, false);
+  renderer.fillRect(tileX, coverTop, hPaddingInSelection, L.coverDrawH, false);
+  renderer.fillRect(tileX + L.tileWidth - hPaddingInSelection, coverTop, hPaddingInSelection, L.coverDrawH, false);
+  renderer.fillRect(tileX, coverBottom, L.tileWidth, L.rowH - hPaddingInSelection - L.coverDrawH, false);
+}
+
 void LibraryActivity::drawOverlay() {
+  lastDrawnSelector = selectorIndex;
   const int screenW = renderer.getScreenWidth();
   const int screenH = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -752,7 +849,7 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
   auto reloadAfterMutation = [this] {
     rebuildSortedIndices();
     pageBufferStored = false;
-    pageRendered = false;
+    frameHoldsPage = false;
     lastRenderedPage = static_cast<size_t>(-1);
     if (selectorIndex >= sortedIndices.size() && !sortedIndices.empty()) {
       selectorIndex = sortedIndices.size() - 1;

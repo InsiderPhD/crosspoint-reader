@@ -3,6 +3,7 @@
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalGPIO.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <InflateReader.h>
@@ -232,13 +233,12 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
                             SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
 
   if (hasGreyscale) {
-    // The grayscale LUT only nudges particles, so the BW base under it must go
-    // up on a weak FAST waveform (same reason the reader double-FASTs image
-    // pages). A HALF base no longer works: HalDisplay arms a resync on every
-    // HALF, which on the X3 is a full-sync waveform that sets the pixels too
-    // firmly for the grey drive to move, and the cover came out in harsh,
-    // wrong tones. Scrub to white on a FULL first so the FAST base doesn't
-    // ghost the reader page underneath.
+    // The grayscale LUT only nudges particles, so the BW base under it must
+    // not be a strong waveform. A HALF base no longer works: HalDisplay arms a
+    // resync on every HALF, which on the X3 is a full-sync waveform that sets
+    // the pixels too firmly for the grey drive to move, and the cover came out
+    // in harsh, wrong tones. Scrub to white on a FULL first so the base paint
+    // below (a differential) doesn't ghost the reader page underneath.
     renderer.clearScreen();
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   }
@@ -264,7 +264,18 @@ void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
   }
 
   // displayGrayBuffer below powers the rails off.
-  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  //
+  // The X3's UC8253 has a dedicated grey-base waveform (the OEM "AA-pre-BW(mid)"
+  // bank): a differential update that gives the cover's changed pixels the
+  // calibrated strong drives the gc nudge bank was tuned against. A plain FAST
+  // base is the short "turbo" bank, whose blacks are too weak to start from,
+  // and the grey nudge then lightens them further: every cover came out washed
+  // out. The other panels have no such waveform and their base stays the FAST
+  // paint they have always had.
+  if (!gpio.deviceIsX3() ||
+      !renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Overlay, HalDisplay::FAST_REFRESH)) {
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  }
 
   bitmap.rewindToData();
   renderer.clearScreen(0x00);

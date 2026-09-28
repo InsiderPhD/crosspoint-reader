@@ -61,6 +61,10 @@ class LibraryActivity final : public Activity {
     int progressPercent = -1;  // -1 when the book has no RecentBooksStore entry.
     bool hasCover = false;
     bool hasBfBadge = false;
+    // drawTileCover has tried to open thumbPath (and the BookFusion cover.bmp
+    // fallback) and fixed up hasCover/thumbPath from the result. Cleared by
+    // refreshCurrentPageMeta, which no longer probes the SD for covers itself.
+    bool coverResolved = false;
     std::string thumbPath;
   };
   std::array<SlotMeta, MAX_PAGE_SIZE> currentPageMeta;
@@ -108,7 +112,18 @@ class LibraryActivity final : public Activity {
   // and bitmap decodes for the 6 covers.
   uint8_t* pageBuffer = nullptr;
   bool pageBufferStored = false;
-  bool pageRendered = false;
+  // On the C3 the snapshot malloc (52KB) fails whenever the library is
+  // populated (largest free block ~45KB after the path list is loaded), so the
+  // fast paths below cannot depend on it:
+  // - frameHoldsPage: the framebuffer still holds this page's covers. The
+  //   selection band never overlaps a cover, so a cursor move repaints only the
+  //   chrome of the two affected tiles (clearTileChrome + drawOverlay).
+  // - frameOverlayed: the last render painted a menu or popup over the page;
+  //   the next menu-less render must rebuild it unless a snapshot restores it.
+  // - lastDrawnSelector: logical index whose tile last received the band.
+  bool frameHoldsPage = false;
+  bool frameOverlayed = false;
+  size_t lastDrawnSelector = static_cast<size_t>(-1);
   size_t lastRenderedPage = static_cast<size_t>(-1);
 
   // Returns the path at the current logical position (after sort direction is applied).
@@ -136,6 +151,10 @@ class LibraryActivity final : public Activity {
   // exist on disk *right now*. Missing covers render as placeholders; they get
   // filled in one at a time by render() -> fillMissingCover(). Always fast.
   void renderPageFromScratch();
+
+  // Clear a tile's selection strips and title box (everything but the cover)
+  // so drawOverlay() can repaint the band and text without a snapshot.
+  void clearTileChrome(int slot);
 
   // Repopulates currentPageMeta from on-disk caches for the current page.
   // Called by both renderPageFromScratch and after a successful thumb-gen tick
