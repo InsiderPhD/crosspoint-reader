@@ -55,7 +55,7 @@ void EpubReaderFootnotesActivity::loop() {
   // Full Touch: first tap on a row moves the cursor there; a second tap on the
   // already-selected row follows the footnote. The list is a scroll window, so
   // the tapped item is scrollOffset (as of the last render) plus the row.
-  if (SETTINGS.fullTouchUi && !footnotes.empty()) {
+  if (CrossPointSettings::FULL_TOUCH_UI && !footnotes.empty()) {
     int lx, ly;
     if (mappedInput.wasTapPoint(lx, ly)) {
       const int top = listTopY();

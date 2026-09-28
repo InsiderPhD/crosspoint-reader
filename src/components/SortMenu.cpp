@@ -47,7 +47,7 @@ bool SortMenu::handleInput(ButtonNavigator& nav, const MappedInputManager& input
   // there (two-tap); a tap on the cursor's row stays with the injected Confirm
   // below (select/flip that field). The redirects act on the injected Confirm
   // release this tap generates — see the latches in the header.
-  if (SETTINGS.fullTouchUi && popupRectValid_) {
+  if (CrossPointSettings::FULL_TOUCH_UI && popupRectValid_) {
     int tapX, tapY;
     if (input.wasTapPoint(tapX, tapY)) {
       const bool insidePopup =

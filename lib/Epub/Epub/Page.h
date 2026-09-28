@@ -2,6 +2,7 @@
 #include <HalStorage.h>
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 #include <utility>
@@ -15,7 +16,16 @@ enum PageElementTag : uint8_t {
   TAG_PageLine = 1,
   TAG_PageImage = 2,
   TAG_PageHorizontalRule = 3,
+  TAG_PageTable = 4,  // persisted in section.bin: never renumber
 };
+
+// Table grid limits (ported from witchhunt-reader). Every fragment is also bounded by the
+// viewport height, so a fragment never holds more than one page of cell lines.
+static constexpr uint8_t MAX_TABLE_COLS = 8;
+static constexpr uint16_t MAX_TABLE_ROWS = 48;  // per FRAGMENT; the packer enforces it
+static constexpr uint8_t TABLE_CELL_PADDING = 5;
+static constexpr uint16_t MIN_COL_INNER_WIDTH = 24;
+static constexpr uint8_t MAX_CELL_LINES = 64;
 
 // represents something that has been added to a page
 class PageElement {
@@ -76,6 +86,50 @@ class PageHorizontalRule final : public PageElement {
   bool serialize(FsFile& file) override;
   PageElementTag getTag() const override { return TAG_PageHorizontalRule; }
   static std::unique_ptr<PageHorizontalRule> deserialize(FsFile& file);
+};
+
+struct TableCell {
+  std::vector<std::unique_ptr<TextBlock>> lines;
+  bool isHeader = false;
+  // Grid columns this cell covers. A row's spans always sum to the fragment's columnCount
+  // (layout pads short rows), so the renderer walks cells and accumulates.
+  uint8_t colSpan = 1;
+};
+
+struct TableRow {
+  std::vector<TableCell> cells;
+  uint16_t height = 0;       // content + 2*TABLE_CELL_PADDING
+  bool isHeaderRow = false;  // 2px separator below
+};
+
+// One page's slice of a table: a bordered grid of equal-width columns. A table taller than
+// the viewport is split into several fragments at row boundaries (see ChapterHtmlSlimParser).
+class PageTableFragment final : public PageElement {
+  uint8_t columnCount = 0;
+  // Vertical step between cell lines, fixed at layout time so it includes lineCompression
+  // (witchhunt re-derives plain getLineHeight() at render, which overflows cells on Tight spacing).
+  uint16_t lineStep = 0;
+  uint16_t totalWidth = 0;
+  uint16_t totalHeight = 0;
+  bool hasBorder = true;
+  std::vector<TableRow> rows;
+
+ public:
+  PageTableFragment(uint8_t colCount, uint16_t lineStep, uint16_t totalWidth, uint16_t totalHeight,
+                    std::vector<TableRow> rows, int16_t xPos, int16_t yPos, bool hasBorder)
+      : PageElement(xPos, yPos),
+        columnCount(colCount),
+        lineStep(lineStep),
+        totalWidth(totalWidth),
+        totalHeight(totalHeight),
+        hasBorder(hasBorder),
+        rows(std::move(rows)) {}
+  void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
+  bool serialize(FsFile& file) override;
+  PageElementTag getTag() const override { return TAG_PageTable; }
+  static std::unique_ptr<PageTableFragment> deserialize(FsFile& file);
+  uint16_t getTotalHeight() const { return totalHeight; }
+  const std::vector<TableRow>& getRows() const { return rows; }
 };
 
 class Page {

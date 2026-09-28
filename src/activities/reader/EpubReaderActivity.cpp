@@ -64,6 +64,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
+#include "util/FrontlightToggle.h"
 #include "util/HardcoverSync.h"
 #include "util/HeapReport.h"
 #include "util/ScreenshotUtil.h"
@@ -499,6 +500,13 @@ void EpubReaderActivity::onEnter() {
     if (dataSize == 6) {
       cachedChapterTotalPageCount = data[4] + (data[5] << 8);
     }
+    // Seed the debounce with what is already on disk so the first render of the
+    // resumed page doesn't rewrite the identical position.
+    pendingProgressSpine = currentSpineIndex;
+    pendingProgressPage = nextPageNumber;
+    pendingProgressCount = cachedChapterTotalPageCount;
+    lastSavedProgressSpine = currentSpineIndex;
+    lastProgressFlushMs = millis();
   }
   // We may want a better condition to detect if we are opening for the first time.
   // This will trigger if the book is re-opened at Chapter 0.
@@ -547,6 +555,10 @@ void EpubReaderActivity::onEnter() {
 
 void EpubReaderActivity::onExit() {
   Activity::onExit();
+
+  // Land any debounced position while epub is still alive. onExit() runs under
+  // the ActivityManager's RenderLock, so the render task can't race this.
+  flushProgress();
 
   // Reset orientation back to portrait for the rest of the UI
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
@@ -882,11 +894,19 @@ void EpubReaderActivity::loop() {
     case MappedInputManager::TapZone::None:
       break;
   }
-  if (mappedInput.wasHomeKeyLongPressed()) {
-    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.effectiveReaderLongPressHome())))
-      return;
-  } else if (mappedInput.wasHomeKeyTapped()) {
-    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressHome))) return;
+  switch (mappedInput.homeKeyGesture()) {
+    case MappedInputManager::HomeKeyGesture::Tap:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressHome))) return;
+      break;
+    case MappedInputManager::HomeKeyGesture::DoubleTap:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerDoubleTapHome))) return;
+      break;
+    case MappedInputManager::HomeKeyGesture::LongPress:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.effectiveReaderLongPressHome())))
+        return;
+      break;
+    case MappedInputManager::HomeKeyGesture::None:
+      break;
   }
 #endif
 
@@ -996,6 +1016,8 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
   btMgr.setBluetoothWanted(turningOn);
   {
     RenderLock lock(*this);
+    // BLE enable is the known freeze risk (loop WDT reboot skips onExit()).
+    flushProgress();
     if (SETTINGS.darkMode) renderer.invertScreen();
     GUI.drawPopup(renderer, turningOn ? tr(STR_BT_TURNING_ON) : tr(STR_BT_TURNING_OFF));
     if (SETTINGS.darkMode) renderer.invertScreen();
@@ -1291,7 +1313,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       // Land the current position before handing over: the sync screen reboots
       // back into the book on the way out, so anything still only in memory here
       // would be lost even when the user cancels.
-      saveProgress(currentSpineIndex, currentPage, totalPages);
+      {
+        RenderLock lock(*this);  // render() may be mid-noteProgress on the other task
+        saveProgress(currentSpineIndex, currentPage, totalPages);
+      }
 
       // ESP-NOW brings the WiFi stack up (~40KB) inside a reader that is already
       // holding a laid-out section. Drop the section first.
@@ -1424,6 +1449,12 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           }
         }
         const auto direction = isPush ? KOReaderSyncActivity::Direction::PUSH : KOReaderSyncActivity::Direction::PULL;
+        {
+          // KOReaderSyncActivity exits by silent-restarting into the book, which
+          // skips onExit(): land the debounced position first.
+          RenderLock lock(*this);
+          flushProgress();
+        }
         startActivityForResult(
             std::make_unique<KOReaderSyncActivity>(renderer, mappedInput, epub, epub->getPath(), currentSpineIndex,
                                                    currentPage, totalPages, paragraphIndex, direction),
@@ -2223,7 +2254,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     currentPageFootnotes = std::move(p->footnotes);
   }
   silentIndexNextChapterIfNeeded(viewportWidth, viewportHeight);
-  saveProgress(currentSpineIndex, section->currentPage, section->pageCount);
+  noteProgress(currentSpineIndex, section->currentPage, section->pageCount);
 
   if (pendingScreenshot) {
     pendingScreenshot = false;
@@ -2308,9 +2339,11 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
 }
 
 void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount) {
-  // progress.bin + Recent Books live in EpubReaderUtils so the nearby position
-  // sync screen can land a received position without coming back through here.
-  EpubReaderUtils::saveProgress(*epub, spineIndex, currentPage, pageCount);
+  pendingProgressSpine = spineIndex;
+  pendingProgressPage = currentPage;
+  pendingProgressCount = pageCount;
+  progressDirty = true;
+  flushProgress();
 
   const float chapterProgress =
       (pageCount > 0) ? static_cast<float>(currentPage) / static_cast<float>(pageCount) : 0.0f;
@@ -2325,6 +2358,33 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
         progressPercent >= READING_COMPLETED_PERCENT, "",
         static_cast<uint8_t>(std::clamp(static_cast<int>((chapterProgress * 100.0f) + 0.5f), 0, 100)));
   }
+}
+
+void EpubReaderActivity::noteProgress(int spineIndex, int currentPage, int pageCount) {
+  if (spineIndex == pendingProgressSpine && currentPage == pendingProgressPage && pageCount == pendingProgressCount) {
+    return;  // re-render of the same page (status bar tick, popup dismiss, ...)
+  }
+  pendingProgressSpine = spineIndex;
+  pendingProgressPage = currentPage;
+  pendingProgressCount = pageCount;
+  progressDirty = true;
+  if (positionsSinceProgressFlush < UINT8_MAX) ++positionsSinceProgressFlush;
+
+  if (spineIndex != lastSavedProgressSpine || positionsSinceProgressFlush >= PROGRESS_FLUSH_PAGES ||
+      millis() - lastProgressFlushMs >= PROGRESS_FLUSH_MS) {
+    flushProgress();
+  }
+}
+
+void EpubReaderActivity::flushProgress() {
+  if (!progressDirty || !epub || pendingProgressSpine < 0) return;
+  // progress.bin + Recent Books live in EpubReaderUtils so the nearby position
+  // sync screen can land a received position without coming back through here.
+  EpubReaderUtils::saveProgress(*epub, pendingProgressSpine, pendingProgressPage, pendingProgressCount);
+  progressDirty = false;
+  positionsSinceProgressFlush = 0;
+  lastSavedProgressSpine = pendingProgressSpine;
+  lastProgressFlushMs = millis();
 }
 
 EpubReaderActivity::BookmarkToggleResult EpubReaderActivity::addBookmark() {
@@ -3354,18 +3414,6 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
       return false;
     }
 
-    case A::READER_ACTION_HEAP_REPORT: {
-      // Draws straight to the framebuffer like the POWER chord it replaces, so
-      // it needs the same renderable gate: a session that released the buffer
-      // (web server) has nothing to draw into.
-      if (!renderer.isRenderable()) return false;
-      {
-        RenderLock lock(*this);
-        HeapReport::dump(renderer);
-      }
-      return true;
-    }
-
     case A::READER_ACTION_FOOTNOTES:
       if (!currentPageFootnotes.empty()) {
         startActivityForResult(
@@ -3426,6 +3474,10 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
       openDictionaryLookup();
       return false;
 
+    case A::READER_ACTION_TOGGLE_FRONTLIGHT:
+      // No repaint: the page is unchanged, only the light behind it.
+      return FrontlightToggle::toggle();
+
     case A::READER_ACTION_HIDE_STATUS_BAR:
       // No reflow: pagination keeps reserving the bar's strip and the page is
       // merely re-centred at draw time (see computeOrientedMargins), so the
@@ -3444,6 +3496,12 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
 }
 
 void EpubReaderActivity::performLongPressSync() {
+  {
+    // The WiFi + TLS bring-up below is where a wedge (loop WDT reboot) would
+    // skip onExit(); land the debounced position first.
+    RenderLock lock(*this);
+    flushProgress();
+  }
   const std::string epubPath = epub ? epub->getPath() : std::string();
   const uint32_t bookId = epubPath.empty() ? 0 : BookFusionBookIdStore::loadBookId(epubPath.c_str());
 

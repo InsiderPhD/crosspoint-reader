@@ -60,8 +60,8 @@ const char* actionDescription(const uint8_t action) {
       return tr(STR_RA_DESC_STATUS_BAR);
     case A::READER_ACTION_DICTIONARY:
       return tr(STR_RA_DESC_DICTIONARY);
-    case A::READER_ACTION_HEAP_REPORT:
-      return tr(STR_RA_DESC_HEAP);
+    case A::READER_ACTION_TOGGLE_FRONTLIGHT:
+      return tr(STR_RA_DESC_FRONTLIGHT);
     default:
       return tr(STR_RA_DESC_NONE);
   }
@@ -77,8 +77,9 @@ ReaderActionSelectActivity::ReaderActionSelectActivity(GfxRenderer& renderer, Ma
 void ReaderActionSelectActivity::onEnter() {
   Activity::onEnter();
 
-  // Retired values are never offered, and the developer actions (Screenshot,
-  // RAM report) only while Dev Mode is on. A slot already set to one still
+  // Retired values are never offered, the developer actions (Screenshot, RAM
+  // report) only while Dev Mode is on, and hardware actions only where the
+  // hardware exists. A slot already set to one still
   // shows up, so it can be seen and changed.
   const bool dev = SETTINGS.devMode != 0;
   actionCount = 0;
@@ -86,6 +87,7 @@ void ReaderActionSelectActivity::onEnter() {
   for (uint8_t action = 0; action < CrossPointSettings::READER_ACTION_COUNT; action++) {
     if (CrossPointSettings::isRetiredReaderAction(action)) continue;
     if (!dev && CrossPointSettings::isDeveloperReaderAction(action) && action != currentAction) continue;
+    if (CrossPointSettings::isUnavailableReaderAction(action) && action != currentAction) continue;
     if (action == currentAction) currentIndex = actionCount;
     actions[actionCount++] = action;
   }

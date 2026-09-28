@@ -26,6 +26,19 @@ class EpubReaderActivity final : public Activity {
   int pagesUntilFullRefresh = 0;
   int cachedSpineIndex = 0;
   int cachedChapterTotalPageCount = 0;
+  // progress.bin + Recent Books write debounce. render() notes the position on
+  // every page; it reaches the SD card on a chapter change, every
+  // PROGRESS_FLUSH_PAGES positions, after PROGRESS_FLUSH_MS, and in onExit().
+  // A crash or power loss can lose at most PROGRESS_FLUSH_PAGES - 1 pages.
+  static constexpr uint8_t PROGRESS_FLUSH_PAGES = 10;
+  static constexpr unsigned long PROGRESS_FLUSH_MS = 5UL * 60UL * 1000UL;
+  int pendingProgressSpine = -1;
+  int pendingProgressPage = 0;
+  int pendingProgressCount = 0;
+  int lastSavedProgressSpine = -1;
+  bool progressDirty = false;
+  uint8_t positionsSinceProgressFlush = 0;
+  unsigned long lastProgressFlushMs = 0UL;
   unsigned long lastPageTurnTime = 0UL;
   // Whether the last drawn status bar showed the remote as connected. Written by
   // the (const) renderStatusBar(), hence mutable.
@@ -121,7 +134,14 @@ class EpubReaderActivity final : public Activity {
   // each button's mapped reader action, when SETTINGS.showButtonHints is enabled.
   void renderButtonHints() const;
   void silentIndexNextChapterIfNeeded(uint16_t viewportWidth, uint16_t viewportHeight);
+  // Immediate write (also records stats progress when on the main task). Use on
+  // paths that hand the position to something outside this activity.
   void saveProgress(int spineIndex, int currentPage, int pageCount);
+  // Debounced write for render(); see PROGRESS_FLUSH_PAGES.
+  void noteProgress(int spineIndex, int currentPage, int pageCount);
+  // Writes the pending position, if any. Caller must be on the render task,
+  // hold the RenderLock, or be in onExit() (which runs under it).
+  void flushProgress();
   BookmarkToggleResult addBookmark();
   // Record reading-stats progress from the current section. MUST be called on the main task
   // only (never render()): see ActivityManager::isOnRenderTask. The SD write is debounced

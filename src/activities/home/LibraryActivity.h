@@ -134,7 +134,7 @@ class LibraryActivity final : public Activity {
 
   // Render the current page from scratch using whatever metadata + thumb caches
   // exist on disk *right now*. Missing covers render as placeholders; they get
-  // filled in incrementally by loop() generating one thumb per tick. Always fast.
+  // filled in one at a time by render() -> fillMissingCover(). Always fast.
   void renderPageFromScratch();
 
   // Repopulates currentPageMeta from on-disk caches for the current page.
@@ -151,6 +151,14 @@ class LibraryActivity final : public Activity {
   // missing a thumb, or -1 if everything is cached.
   int findMissingThumbSlot() const;
 
+  // Generates one missing cover, then paints just that tile into the page
+  // snapshot (the rest of the page is already there) and schedules a render.
+  // Called by render() only AFTER it has pushed the placeholder page + popup.
+  void fillMissingCover(int slotIndexInPage);
+
+  // Cover bitmap (or placeholder) + border + BookFusion badge for one slot.
+  void drawTileCover(int slotIndexInPage);
+
   // Restore the cached framebuffer, then redraw the per-frame overlay (titles,
   // selection bands, page indicator). Fast — no SD reads, no decodes.
   void renderSelectionOnly();
@@ -164,7 +172,8 @@ class LibraryActivity final : public Activity {
   // to (Back / Select / Up / Down) while the book context menu is open.
   void drawButtonHints();
 
-  // Framebuffer snapshot helpers — same pattern as HomeActivity.
+  // Framebuffer snapshot helpers — same pattern as HomeActivity. The 48KB
+  // buffer is allocated on the first store and reused until onExit.
   bool storePageBuffer();
   bool restorePageBuffer();
   void freePageBuffer();

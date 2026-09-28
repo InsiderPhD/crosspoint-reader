@@ -15,3 +15,14 @@ build
 .history/
 /.venv
 *.local*
+
+# pioarduino custom_sdkconfig (heaptrace envs) rebuilds the Arduino core from
+# source and drops its scaffold in the project root.
+/managed_components
+/.dummy
+/CMakeLists.txt
+/dependencies.lock
+/sdkconfig.*
+
+# Release firmware images copied out of .pio for upload (e.g. x4c_firmware.bin)
+*_firmware.bin

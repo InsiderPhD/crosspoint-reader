@@ -236,6 +236,13 @@ class GfxRenderer {
     int16_t top;
     int16_t srcX;
   };
+  // Draws bitmap resampled to exactly w x h (up or down) for the BW pass:
+  // box-averages every source pixel that lands in a destination pixel, then
+  // re-dithers the average with a 4x4 ordered matrix. drawBitmap instead
+  // paints any non-white source pixel black, so a heavily shrunk dithered
+  // cover comes out almost solid black. Only black is drawn (the target is
+  // assumed cleared); a no-op in the grayscale passes.
+  void drawBitmapResampled(const Bitmap& bitmap, int x, int y, int w, int h) const;
   // Paints over the four corner squares of an already-drawn rect so artwork
   // blitted by drawBitmap picks up rounded corners.
   void maskRoundedRectOutsideCorners(int x, int y, int width, int height, int radius, Color color) const;

@@ -114,7 +114,7 @@ void OpdsBookBrowserActivity::loop() {
     // Full Touch: first tap on a row moves the cursor there; a second tap on the
     // already-selected row opens (or downloads) it. Rows are page-relative, so
     // the tapped entry is the current page start plus the row.
-    if (SETTINGS.fullTouchUi && !entries.empty()) {
+    if (CrossPointSettings::FULL_TOUCH_UI && !entries.empty()) {
       int lx, ly;
       if (mappedInput.wasTapPoint(lx, ly)) {
         const int top = listTopY();

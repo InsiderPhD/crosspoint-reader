@@ -98,13 +98,13 @@ struct FootnoteBodyEntry {
   uint16_t textOffset = FOOTNOTE_POOL_NO_TEXT;
   mutable int16_t cachedLineCount = -1;  // -1 = not yet computed
 };
+#include "../Page.h"
 #include "../ParsedText.h"
 #include "../blocks/ImageBlock.h"
 #include "../blocks/TextBlock.h"
 #include "../css/CssParser.h"
 #include "../css/CssStyle.h"
 
-class Page;
 class GfxRenderer;
 class Epub;
 
@@ -150,7 +150,6 @@ class ChapterHtmlSlimParser {
   bool bionicReadingEnabled;
   std::string contentBase;
   std::string imageBasePath;
-  int imageCounter = 0;
 
   // Style tracking (replaces depth-based approach)
   struct StyleStackEntry {
@@ -173,9 +172,52 @@ class ChapterHtmlSlimParser {
   CssTextDirection effectiveDirection = CssTextDirection::Ltr;
   bool effectiveSup = false;
   bool effectiveSub = false;
-  int tableDepth = 0;
-  int tableRowIndex = 0;
-  int tableColIndex = 0;
+
+  // Streaming table grid (ported from witchhunt-reader). Only ONE row is buffered as ParsedText;
+  // at </tr> it is laid out into TableRows packed into a PageTableFragment that never exceeds a
+  // page. Anything the grid cannot represent degrades that row (or, for rowspan/nesting, the
+  // rest of the table) to ordinary paragraphs, so nothing is ever dropped.
+  struct BufferedTableCell {
+    std::unique_ptr<ParsedText> text;
+    bool isHeader = false;
+    uint8_t colSpan = 1;
+  };
+  struct BufferedTableRow {
+    std::vector<BufferedTableCell> cells;
+    bool isHeaderRow = false;   // true when every cell in this row is <th>
+    uint8_t effectiveCols = 0;  // sum of colSpan values: the row's real column footprint
+  };
+  struct LayoutRow {
+    std::vector<TableCell> cells;
+    uint16_t height = 0;  // content height + 2 x TABLE_CELL_PADDING
+    bool isHeaderRow = false;
+    uint8_t renderCols = 0;  // grid columns this row was laid out on
+  };
+  struct TableFragmentPacker {
+    std::vector<TableRow> rows;
+    uint16_t height = 0;
+    uint8_t cols = 0;
+    uint16_t totalWidth = 0;
+    int16_t xInset = 0;  // left edge of the table box; non-zero when the <table> carries a left inset
+    bool hasBorder = true;
+  };
+  struct BufferedTable {
+    BufferedTableRow pendingRow;
+    TableFragmentPacker packer;
+    uint8_t columnCount = 0;
+    uint16_t contentWidth = 0;
+    int depth = 0;          // nesting depth; > 1 means we're inside a nested table
+    bool hasBorder = true;  // false when border="0" on the <table> element
+    bool degraded = false;  // whole rest of the table flows as paragraphs
+    bool rowDegraded = false;
+    bool rowOverflowed = false;
+    size_t pendingRowBytes = 0;  // attributed bytes of the buffered row (see MAX_TABLE_ROW_BUFFER_BYTES)
+    std::unique_ptr<BufferedTableRow> repeatHeader;  // first row, if all <th>: repeated on continuation pages
+    uint16_t repeatHeaderHeight = 0;
+    bool repeatHeaderResolved = false;
+  };
+  std::unique_ptr<BufferedTable> currentTable;
+  BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
 
   // Anchor-to-page mapping: tracks which page each HTML id attribute lands on
   int completedPageCount = 0;
@@ -231,6 +273,23 @@ class ChapterHtmlSlimParser {
   void flushPartWordBuffer();
   void makePages();
   void emitHorizontalRule(const BlockStyle& blockStyle);
+  // Table grid
+  bool heapAllowsTableRowLayout() const;
+  bool ensurePage();
+  void breakPage();
+  void recordPendingAnchor();
+  void attachPendingFootnotesToPage();
+  int tableLineStep() const;
+  std::unique_ptr<ParsedText> newCellText() const;
+  void commitPendingRow();
+  bool layoutTableRow(BufferedTableRow& bufRow, uint8_t columnCount, LayoutRow& out);
+  void flushTableFragment(TableFragmentPacker& packer);
+  void emitCellAsParagraph(BufferedTableCell& cell);
+  void emitRowAsParagraphs(BufferedTableRow& row);
+  void degradeRow(const char* reason);
+  void degradeTable(const char* reason);
+  void degradeRowAtOpenCell(const char* reason);
+  void streamClosedCell(BufferedTableRow& row);
   // XML callbacks
   static void XMLCALL startElement(void* userData, const XML_Char* name, const XML_Char** atts);
   static void XMLCALL characterData(void* userData, const XML_Char* s, int len);

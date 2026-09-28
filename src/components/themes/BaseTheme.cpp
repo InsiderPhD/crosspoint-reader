@@ -174,7 +174,7 @@ const ThemeMetrics& BaseTheme::themeMetrics() const {
   // this returns, so a Full Touch toggle takes effect on UITheme::reload()
   // (SettingsActivity::onExit) -- which keeps the reserved strip and the paint
   // in lockstep meanwhile, since drawButtonHints reads the same table.
-  return SETTINGS.fullTouchUi ? BaseMetrics::values : BaseMetrics::noActionBarValues;
+  return CrossPointSettings::FULL_TOUCH_UI ? BaseMetrics::values : BaseMetrics::noActionBarValues;
 #else
   return BaseMetrics::values;
 #endif

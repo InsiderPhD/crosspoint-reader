@@ -257,8 +257,8 @@ int pngDrawCallback(PNGDRAW* pDraw) {
 
     pw.beginRow(outY);
 
-    // The cache streams to disk one row at a time. Flushing rows below this one
-    // (PNGdec delivers scanlines top to bottom) repositions the single-row band.
+    // The cache streams to disk in bands. Rows below this one are final (PNGdec
+    // delivers scanlines top to bottom); advanceTo flushes them once the band fills.
     // A flush failure stops caching for the rest of the decode so we never write
     // past the band buffer; finalize() then drops the partial file.
     bool caching = ctx->caching;

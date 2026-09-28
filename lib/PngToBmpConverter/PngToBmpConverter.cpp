@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "BitmapHelpers.h"
+#include "BufferedPrint.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Same as JpegToBmpConverter for consistency
@@ -395,7 +396,7 @@ static void convertScanlineToGray(const PngDecodeContext& ctx, uint8_t* grayRow)
   }
 }
 
-bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOut, int targetWidth, int targetHeight,
+bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink, int targetWidth, int targetHeight,
                                                    bool oneBit, bool crop) {
   LOG_DBG("PNG", "Converting PNG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : "2-bit", targetWidth, targetHeight);
 
@@ -596,6 +597,10 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
     LOG_DBG("PNG", "Scaling %ux%u -> %dx%d (target %dx%d)", width, height, outWidth, outHeight, targetWidth,
             targetHeight);
   }
+
+  // Coalesces the byte-at-a-time header and one-write-per-row output into 2 KB SD writes.
+  // Degrades to pass-through if the nothrow buffer allocation fails.
+  BufferedPrint bmpOut(sink);
 
   // Write BMP header
   int bytesPerRow;
@@ -801,6 +806,11 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& bmpOu
     uint8_t* temp = ctx.previousRow;
     ctx.previousRow = ctx.currentRow;
     ctx.currentRow = temp;
+  }
+
+  if (success && !bmpOut.flushBuffer()) {
+    LOG_ERR("PNG", "Failed to flush buffered BMP output");
+    success = false;
   }
 
   // Clean up

@@ -445,7 +445,7 @@ untouched activities need no changes.
 | Hook | Returns true when | Effect |
 |------|-------------------|--------|
 | `consumesTouchInput()` | The activity reads raw touch itself — reader tap/hold zones, home-key dispatch, keyboard hit-testing | Disables **both** the tap-anywhere-is-Confirm and home-key-is-Confirm injections, so a consumed touch can't also fire Confirm |
-| `handlesDirectTouch()` | The activity hit-tests taps against its own drawn UI under Full Touch mode | Disables **only** the tap-anywhere injection; the home-key injection stays on |
+| `handlesDirectTouch()` | The activity hit-tests taps against its own drawn UI (Full Touch, always on for the X4 Pro) | Disables the tap-anywhere injection |
 
 `handlesDirectTouch()` may be dynamic — return `false` while a modal that has no
 tap hit-testing is open, so tap-activates-the-highlighted-option comes back for

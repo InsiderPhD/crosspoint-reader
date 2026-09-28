@@ -31,6 +31,8 @@ class ParsedText {
   bool hyphenationEnabled;
   bool bionicReadingEnabled;
 
+  struct LineScratch;
+
   void applyParagraphIndent();
   std::vector<size_t> computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
                                         std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec);
@@ -41,7 +43,7 @@ class ParsedText {
   void extractLine(size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
                    const std::vector<bool>& continuesVec, const std::vector<size_t>& lineBreakIndices,
                    const std::function<void(std::unique_ptr<TextBlock>)>& processLine, const GfxRenderer& renderer,
-                   int fontId);
+                   int fontId, LineScratch& scratch);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
   // True if word i should render with bionic bolding (feature on and not already bold).
   bool isBionicWord(size_t i) const;
@@ -60,7 +62,12 @@ class ParsedText {
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }
+  // CONSUMES its source by default (laid-out words are moved out and erased). preserveSource
+  // snapshots the word vectors on entry and restores them on return: layout also rewrites words
+  // in place (em-space indent, fallback force-split), so skipping the erase alone is not enough.
+  // Only the table grid passes true: it finds out that a cell does not fit by laying it out,
+  // and must then emit the SAME text as paragraphs.
   void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
-                             bool includeLastLine = true);
+                             bool includeLastLine = true, bool preserveSource = false);
 };

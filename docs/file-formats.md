@@ -125,7 +125,7 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-> **Current version: 43** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> **Current version: 44** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
 > The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
 > v30 inline ("on page") footnotes; v31–v33 KOReader xpath/paragraph sync data and
 > nested block styles; v34 `<pre>` blocks carry a monospace font override; v35 hanging
@@ -136,7 +136,12 @@ if (parsedSize != fileSize) {
 > v41 a laid-out line's words stored in one flat arena; v42 percentage vertical
 > margins/padding resolve against the column's short axis instead of its width, so
 > paragraph spacing no longer inflates in landscape; v43 adjacent blocks collapse
-> their margins (max) instead of summing them, per CSS.
+> their margins (max) instead of summing them, per CSS; v44 tables are laid out as
+> grids in a new page element, `PageTableFragment` (tag 4): `xPos i16, yPos i16,
+> columnCount u8, lineStep u16, totalWidth u16, totalHeight u16, hasBorder bool,
+> rowCount u16`, then per row `height u16, isHeaderRow bool, cellCount u8`, then per
+> cell `isHeader bool, colSpan u8, lineCount u8` followed by `lineCount` TextBlocks.
+> Extracted images are now shared per book as `img_<fnv64 of archive path>.<ext>`.
 >
 > Any change to the on-disk structure **must** bump this constant — a stale cache read
 > against a new layout is how you get a hard fault, not a graceful failure.

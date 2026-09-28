@@ -114,6 +114,8 @@ class ActivityManager {
 
   bool preventAutoSleep() const;
   bool isReaderActivity() const;
+  // The Home screen itself, with nothing pushed over it and nothing pending.
+  bool isAtHome() const;
   bool consumesTouchInput() const;
   bool handlesDirectTouch() const;
   bool ownsSwipes() const;

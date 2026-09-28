@@ -24,15 +24,12 @@ class ReaderControlsActivity final : public Activity {
  private:
   Rect listRect() const;
 
-#if !FREEINK_DEVICE_X4PRO
-  static constexpr uint8_t kConfigurableRows = 13;  // 13 user-configurable + 1 fixed
-#endif
   // Rows 14-18 are the X4 Pro touch extras: the three tap zones, home key
   // short and long press. Rows 19-21 are the hold (long-press) variants of the
   // three tap zones, and row 22 picks the axis those zones are cut along.
   // Row 23 is Custom Combos on every board: not an action slot of its own, it
-  // opens the chord list.
-  static constexpr uint8_t kTotalRows = 24;
+  // opens the chord list. Row 24 is the X4 Pro home key's double tap.
+  static constexpr uint8_t kTotalRows = 25;
 
   uint8_t selectedRow = 0;
   bool isDirty = false;
@@ -42,18 +39,13 @@ class ReaderControlsActivity final : public Activity {
   const char* getRowTitle(uint8_t row) const;
   // Returns the action label for each row.
   const char* getRowActionName(uint8_t row) const;
-  // Confirm/tap on a row. X4 Pro opens the action picker; everywhere else the
-  // row cycles in place — see openActionPicker()'s note on button wear.
+  // Confirm/tap on a row: opens the action picker (the X4 Pro's tap-zone axis
+  // row toggles in place instead).
   void activateRow(uint8_t row);
   // Custom combo slots in use, for the Custom Combos row's value.
   static uint8_t definedComboCount();
-#if FREEINK_DEVICE_X4PRO
   // Opens the action picker for the given row and stores what comes back.
   void openActionPicker(uint8_t row);
-#else
-  // Advances the action for the given row by one (wraps around).
-  void cycleActionForRow(uint8_t row);
-#endif
   // Settings field backing a row, or nullptr for the rows whose action is fixed
   // (Power long press, Home hold). Single source for both reading a row's
   // current action and writing the picked one.

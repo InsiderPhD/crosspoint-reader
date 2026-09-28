@@ -21,6 +21,7 @@
 #include "CrossPointSettings.h"
 #include "LibraryScan.h"
 #include "MappedInputManager.h"
+#include "ReadingStatsDetailActivity.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -492,6 +493,10 @@ void GroupBrowserActivity::dispatchBookAction(BookContextMenu::Action action, co
       startActivityForResult(std::move(details), [this](const ActivityResult&) { requestUpdate(); });
       break;
     }
+    case BookContextMenu::Action::ViewStats:
+      startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, path),
+                             [this](const ActivityResult&) { requestUpdate(); });
+      break;
   }
 }
 
@@ -584,7 +589,7 @@ void GroupBrowserActivity::loop() {
     // contact — opens the menu for the touched row. A hold on a folder or dead
     // space opens nothing and is NOT suppressed, so the lift still counts as a
     // tap (two-tap row selection).
-    if (SETTINGS.fullTouchUi) {
+    if (CrossPointSettings::FULL_TOUCH_UI) {
       int lx, ly;
       if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
         const int rowCount = atGroupList() ? static_cast<int>(rootListSize()) : static_cast<int>(groupBookIdx.size());

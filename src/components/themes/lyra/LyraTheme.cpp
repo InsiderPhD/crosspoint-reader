@@ -34,6 +34,7 @@
 #include "components/icons/search24.h"
 #include "components/icons/settings2.h"
 #include "components/icons/star24.h"
+#include "components/icons/stats.h"
 #include "components/icons/text24.h"
 #include "components/icons/transfer.h"
 #include "components/icons/wifi.h"
@@ -128,6 +129,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return BookFusion32Icon;
       case UIIcon::Check:
         return Check32Icon;
+      case UIIcon::Stats:
+        return StatsIcon;
       default:
         return nullptr;
     }
@@ -392,7 +395,7 @@ const ThemeMetrics& LyraTheme::themeMetrics() const {
 #if FREEINK_DEVICE_X4PRO
   // See BaseTheme::themeMetrics() -- Full Touch keeps the action-bar strip,
   // gesture mode reclaims it.
-  return SETTINGS.fullTouchUi ? LyraMetrics::values : LyraMetrics::noActionBarValues;
+  return CrossPointSettings::FULL_TOUCH_UI ? LyraMetrics::values : LyraMetrics::noActionBarValues;
 #else
   return LyraMetrics::values;
 #endif

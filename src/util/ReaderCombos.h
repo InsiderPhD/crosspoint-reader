@@ -72,6 +72,26 @@ class ReaderCombos {
   // none of the touch bits. The settings FIELDS are identical on every build — only what can be
   // captured and matched differs, so a settings.json still round-trips between
   // boards.
+  // True when `mask` needs two keys from the same resistor ladder. On the
+  // X3/X4 the four front keys share one ADC pin and Up/Down share another; a
+  // ladder decodes to at most one key per reading, so two keys from one ladder
+  // can never be seen held together (see freeink-sdk InputManager::getState).
+  // A capture that claims such a pair is an artefact of the reading sweeping
+  // through bands while the fingers land. Front-button remaps only shuffle
+  // roles within the front four, so the logical groups ARE the physical ones.
+  static bool sharesLadder(const uint16_t mask) {
+#if FREEINK_DEVICE_X4PRO
+    (void)mask;
+    return false;
+#else
+    using S = CrossPointSettings;
+    constexpr uint16_t front = (1u << S::COMBO_BTN_BACK) | (1u << S::COMBO_BTN_CONFIRM) | (1u << S::COMBO_BTN_LEFT) |
+                               (1u << S::COMBO_BTN_RIGHT);
+    constexpr uint16_t side = (1u << S::COMBO_BTN_SIDE_UP) | (1u << S::COMBO_BTN_SIDE_DOWN);
+    return buttonCount(mask & front) > 1 || buttonCount(mask & side) > 1;
+#endif
+  }
+
   static constexpr uint16_t eligibleMask() {
     using S = CrossPointSettings;
 #if FREEINK_DEVICE_X4PRO

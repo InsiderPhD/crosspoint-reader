@@ -117,14 +117,11 @@ void MappedInputManager::processTouchInput() const {
   // Home key first: a bar contact also reports as an edge screen tap, so drop
   // the rest of the contact the moment a home-key event fires (the GT911 raises
   // it before the finger lifts) — otherwise the lift would double-dispatch as a
-  // screen tap. Outside the readers a tap means Confirm; the readers poll
-  // wasHomeKeyTapped()/wasHomeKeyLongPressed() themselves for their
-  // configurable actions.
+  // screen tap. What the key MEANS is left to the gesture's consumers (the
+  // readers' configurable actions, main.cpp's Home route).
+  homeGesture = resolveHomeKeyGesture();
   if (gpio.wasHomeKeyTapped() || gpio.wasHomeKeyLongPressed()) {
     gpio.suppressTouchContact();
-    if (homeKeyActsAsConfirm && gpio.wasHomeKeyTapped() && !gpio.isPressed(HalGPIO::BTN_CONFIRM)) {
-      gpio.injectButtonPress(HalGPIO::BTN_CONFIRM);
-    }
     return;
   }
 
@@ -235,6 +232,10 @@ void MappedInputManager::processTouchInput() const {
     LOG_DBG("INPUT", "Swipe logical=(%d,%d) -> Full Touch gesture %u", ldx, ldy, static_cast<unsigned>(swipe));
     return;
   }
+  if (confirmSwipeIgnored && idx == HalGPIO::BTN_CONFIRM) {
+    LOG_DBG("INPUT", "Swipe logical=(%d,%d) -> Confirm swipe disabled here", ldx, ldy);
+    return;
+  }
   LOG_DBG("INPUT", "Swipe cal=(%d,%d) logical=(%d,%d) -> btn %u", dcx, dcy, ldx, ldy, idx);
 
   // A held BLE remote button on the same index must not be disturbed: the
@@ -286,6 +287,42 @@ MappedInputManager::LogicalTouchPoint MappedInputManager::toLogicalPoint(const f
     }
   }
   return p;
+}
+
+MappedInputManager::HomeKeyGesture MappedInputManager::resolveHomeKeyGesture() const {
+  // A hold is its own gesture, never the second half of a double tap.
+  if (gpio.wasHomeKeyLongPressed()) {
+    homeTapPending = false;
+    return HomeKeyGesture::LongPress;
+  }
+  const unsigned long now = millis();
+  if (gpio.wasHomeKeyTapped()) {
+    if (!homeKeyDoubleTap) {
+      homeTapPending = false;
+      return HomeKeyGesture::Tap;
+    }
+    if (homeTapPending) {
+      homeTapPending = false;
+      return HomeKeyGesture::DoubleTap;
+    }
+    homeTapPending = true;
+    homeTapAt = now;
+    return HomeKeyGesture::None;
+  }
+  if (!homeTapPending) return HomeKeyGesture::None;
+  // The screen that opened the window is gone (or unbound its double tap): a
+  // late single tap would act on whatever replaced it, so drop it.
+  if (!homeKeyDoubleTap) {
+    homeTapPending = false;
+    return HomeKeyGesture::None;
+  }
+  // A finger back on the key when the window closes is the second tap still in
+  // progress: wait for its release (tap -> DoubleTap) or hold (-> LongPress).
+  if (now - homeTapAt > HOME_DOUBLE_TAP_MS && !gpio.isHomeKeyDown()) {
+    homeTapPending = false;
+    return HomeKeyGesture::Tap;
+  }
+  return HomeKeyGesture::None;
 }
 
 bool MappedInputManager::wasTapPoint(int& lx, int& ly) const {

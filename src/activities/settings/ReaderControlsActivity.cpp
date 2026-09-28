@@ -8,10 +8,8 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
-#include "ReaderComboListActivity.h"
-#if FREEINK_DEVICE_X4PRO
 #include "ReaderActionSelectActivity.h"
-#endif
+#include "ReaderComboListActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/TouchListNav.h"
@@ -36,14 +34,15 @@ namespace {
 constexpr uint8_t kFixedRow = 13;
 
 #if FREEINK_DEVICE_X4PRO
-// X4 Pro: rows 0/2/4/6 configure the four screen swipes (left/right/up/down
-// reuse the Back/Confirm/Left/Right short-press action slots). A swipe cannot
-// be long-pressed, so the corresponding long-press rows are hidden. Row 22
+// X4 Pro: row 0 is the rightward swipe and the action bar's Back button, row 2
+// the bar's Confirm button (its swipe is disabled on the reading screen, see
+// MappedInputManager::setConfirmSwipeIgnored), rows 4/6 the bar's Left/Right.
+// Those are taps and flicks, never holds, so the long-press rows are hidden. Row 22
 // picks the axis the tap zones are cut along and so leads them. Rows 14-16
 // are the screen tap zones with 19-21 their hold (long-press) variants shown
-// as tap/hold pairs, 17/18 the home key tap and long press; the side keys and
-// Power keep their short/long pairs.
-constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 22, 14, 19, 15, 20, 16, 21, 17, 18, 8, 9, 10, 11, 12, 13, 23};
+// as tap/hold pairs, 17/24/18 the home key tap, double tap and long press; the
+// side keys and Power keep their short/long pairs.
+constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 22, 14, 19, 15, 20, 16, 21, 17, 24, 18, 8, 9, 10, 11, 12, 13, 23};
 
 // Row 22 is a layout choice, not a bindable action: it has no entry in
 // fieldForRow() and toggles in place instead of opening the action picker.
@@ -177,6 +176,9 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
     case 18:
       snprintf(buf, sizeof(buf), "%s %s", tr(STR_HOME_BUTTON), tr(STR_LONG_PRESS));
       return buf;
+    case 24:
+      snprintf(buf, sizeof(buf), "%s %s", tr(STR_HOME_BUTTON), tr(STR_DOUBLE_TAP));
+      return buf;
     default:
       break;
   }
@@ -184,18 +186,19 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
   const char* btn;
   switch (row / 2) {
 #if FREEINK_DEVICE_X4PRO
-    // The front four. Back and Confirm are reached by the horizontal swipes,
-    // which read backwards from the slot names -- on hardware a RIGHTWARD flick
-    // lands on the Back slot and a leftward one on Confirm -- so those rows are
-    // labelled by the gesture the user actually makes, not by the slot behind
-    // it. Left/Right are the action bar's outer slots. The VERTICAL swipes are
-    // not here: they are the side keys' gesture twin and follow the side rows
-    // below. See MappedInputManager's X4 Pro mapping table.
+    // The front four. Back is reached by a horizontal swipe, which reads
+    // backwards from the slot name -- on hardware a RIGHTWARD flick lands on
+    // the Back slot -- so that row is labelled by the gesture the user actually
+    // makes. The leftward (Confirm) swipe is off on the reading screen, so that
+    // row is the action bar's Confirm button. Left/Right are the bar's outer
+    // slots. The VERTICAL swipes are not here: they are the side keys' gesture
+    // twin and follow the side rows below. See MappedInputManager's X4 Pro
+    // mapping table.
     case 0:
       btn = tr(STR_SWIPE_RIGHT);
       break;
     case 1:
-      btn = tr(STR_SWIPE_LEFT);
+      btn = tr(STR_CONFIRM);
       break;
     case 2:
       btn = tr(STR_DIR_LEFT);
@@ -239,7 +242,7 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
       break;
   }
 #if FREEINK_DEVICE_X4PRO
-  // Swipe rows are gestures — no press-type suffix.
+  // Front rows are flicks and action-bar taps — no press-type suffix.
   if (row < 8) {
     snprintf(buf, sizeof(buf), "%s", btn);
     return buf;
@@ -328,8 +331,8 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
       return tr(STR_READER_ACTION_STATUS_BAR);
     case CrossPointSettings::READER_ACTION_DICTIONARY:
       return tr(STR_LOOKUP);
-    case CrossPointSettings::READER_ACTION_HEAP_REPORT:
-      return tr(STR_READER_ACTION_HEAP);
+    case CrossPointSettings::READER_ACTION_TOGGLE_FRONTLIGHT:
+      return tr(STR_READER_ACTION_FRONTLIGHT);
     default:
       return tr(STR_NONE_OPT);
   }
@@ -386,6 +389,8 @@ uint8_t* ReaderControlsActivity::fieldForRow(const uint8_t row) const {
       return &SETTINGS.readerHoldMiddle;
     case 21:
       return &SETTINGS.readerHoldRight;
+    case 24:
+      return &SETTINGS.readerDoubleTapHome;
     default:
       return nullptr;
   }
@@ -421,21 +426,13 @@ void ReaderControlsActivity::activateRow(const uint8_t row) {
     requestUpdate();
     return;
   }
-  openActionPicker(row);
-#else
-  cycleActionForRow(row);
-  isDirty = true;
-  requestUpdate();
 #endif
+  openActionPicker(row);
 }
 
-#if FREEINK_DEVICE_X4PRO
-
-// X4 Pro only. Cycling costs one Confirm per step, which is the cheaper
-// interaction on a device with real front buttons -- a picker would turn every
-// change into open/scroll/select and wear those buttons three times as fast.
-// The X4 Pro has no front buttons: the same cycle is a blind tap-and-look, so
-// there it becomes a list.
+// Every board: a list with a one-line description per action reads better
+// than cycling through ~25 values in place, at the cost of an extra press to
+// open and one to pick.
 void ReaderControlsActivity::openActionPicker(const uint8_t row) {
   uint8_t* field = fieldForRow(row);
   if (!field) return;
@@ -449,20 +446,3 @@ void ReaderControlsActivity::openActionPicker(const uint8_t row) {
                            isDirty = true;
                          });
 }
-
-#else
-
-void ReaderControlsActivity::cycleActionForRow(const uint8_t row) {
-  uint8_t* field = fieldForRow(row);
-  if (!field) return;
-  // Retired values (Sleep, Mark Finished) are never offered, and the developer
-  // actions (Screenshot, RAM report) only while Dev Mode is on -- a button
-  // already set to one from a prior Dev session still works and cycles past.
-  const bool dev = SETTINGS.devMode != 0;
-  do {
-    *field = (*field + 1) % static_cast<uint8_t>(CrossPointSettings::READER_ACTION_COUNT);
-  } while (CrossPointSettings::isRetiredReaderAction(*field) ||
-           (!dev && CrossPointSettings::isDeveloperReaderAction(*field)));
-}
-
-#endif  // FREEINK_DEVICE_X4PRO

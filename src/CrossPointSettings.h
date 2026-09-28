@@ -181,6 +181,7 @@ class CrossPointSettings {
     LYRA_LIBRARY = 3,
     LYRA_CAROUSEL = 4,
     DASHBOARD = 5,
+    BOOKSHELF = 6,
     UI_THEME_COUNT
   };
 
@@ -307,28 +308,35 @@ class CrossPointSettings {
     READER_ACTION_TOGGLE_BLUETOOTH = 22,
     READER_ACTION_HIDE_STATUS_BAR = 23,
     READER_ACTION_DICTIONARY = 24,
-    // The two former POWER chords, now bindable like anything else. They stay
-    // wired into main.cpp as defaults so a reading can still be taken on any
-    // screen; binding a combo to one is what overrides it (in the readers).
-    READER_ACTION_HEAP_REPORT = 25,
+    // 25 was READER_ACTION_HEAP_REPORT (the on-screen heap report), retired
+    // 2026-09-24 in favour of the heaptrace build (docs/heap-trace.md). The
+    // POWER + Confirm chord in main.cpp still takes a reading on any screen.
+    // Light off, or back on at frontlightLastBrightness. Offered only on boards
+    // with a frontlight (isUnavailableReaderAction).
+    READER_ACTION_TOGGLE_FRONTLIGHT = 26,
     READER_ACTION_COUNT
   };
 
-  // Values 8 and 14 were dropped from the picker but stay reserved so a
+  // Values 8, 14 and 25 were dropped from the picker but stay reserved so a
   // settings.json written by an older firmware keeps its numbering for every
   // other action. Never reuse them; a stored slot holding one is rewritten to
   // READER_ACTION_NONE by sanitizeReaderActions() on load.
-  static constexpr bool isRetiredReaderAction(const uint8_t action) { return action == 8 || action == 14; }
+  static constexpr bool isRetiredReaderAction(const uint8_t action) {
+    return action == 8 || action == 14 || action == 25;
+  }
 
-  // Actions offered only while Dev Mode is on: both draw straight to the
-  // framebuffer for diagnostics and neither belongs in a reading session by
+  // Actions offered only while Dev Mode is on: they draw straight to the
+  // framebuffer for diagnostics and do not belong in a reading session by
   // accident. A slot already holding one still shows up in the picker, so a
   // binding made in a Dev session can be seen and changed without turning Dev
   // Mode back on. Single predicate because the picker and the X3/X4 row cycling
   // both filter on it and must not drift.
-  static constexpr bool isDeveloperReaderAction(const uint8_t action) {
-    return action == READER_ACTION_SCREENSHOT || action == READER_ACTION_HEAP_REPORT;
-  }
+  static constexpr bool isDeveloperReaderAction(const uint8_t action) { return action == READER_ACTION_SCREENSHOT; }
+
+  // Actions this board has no hardware for. Filtered like the developer
+  // actions: hidden from the picker unless a slot already holds one (a
+  // settings.json carried over from another device), and a no-op when run.
+  static bool isUnavailableReaderAction(uint8_t action);
 
   // Reader button-hint bar mode. Cycles Off -> Short -> Long -> Front-only Short -> Front-only Long.
   // The FRONT_* modes show only the front-button bar (no side/power hints).
@@ -353,6 +361,10 @@ class CrossPointSettings {
   // 100 = fully warm); ignored on single-channel boards.
   uint8_t frontlightBrightness = 0;
   uint8_t frontlightWarmth = 50;
+  // Last non-zero brightness, which READER_ACTION_TOGGLE_FRONTLIGHT turns the
+  // light back on at. Captured in saveToFile() because every brightness setter
+  // (reader menu, Settings, web UI) ends in a save; mutable so that stays const.
+  mutable uint8_t frontlightLastBrightness = 0;
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
   // Sleep screen cover mode settings
@@ -517,15 +529,16 @@ class CrossPointSettings {
   // beta/rc included. Only OtaUpdater reads this; the field exists on every
   // build so settings.json round-trips.
   uint8_t allowPreReleases = 0;
-  // Full Touch mode (X4 Pro): taps hit-test the drawn UI directly (tap a row to
-  // select and activate it) instead of injecting Confirm on the current
-  // selection. Gestures keep working either way. Field exists on every build so
-  // settings.json round-trips; only the X4 Pro main loop and activities read it.
-  // Default-on for the X4 Pro; see migrateFullTouchDefault() for existing files.
+  // Full Touch (X4 Pro): taps hit-test the drawn UI directly (tap a row to
+  // select and activate it) and every screen draws the tappable action bar. No
+  // longer a choice -- the X4 Pro has no front buttons, so it is always on
+  // there, and always off on the button boards (whose layouts must not reserve
+  // the bar). Compile-time so a settings.json carried between devices cannot
+  // switch it; the old "fullTouchUi" key is ignored on load.
 #if FREEINK_DEVICE_X4PRO
-  uint8_t fullTouchUi = 1;
+  static constexpr bool FULL_TOUCH_UI = true;
 #else
-  uint8_t fullTouchUi = 0;
+  static constexpr bool FULL_TOUCH_UI = false;
 #endif
   // Yolo Selection (Full Touch only): a single tap activates the row/tile/option
   // under the finger instead of the default two-tap model (first tap moves the
@@ -598,6 +611,10 @@ class CrossPointSettings {
   uint8_t readerTapZoneLayout = TAP_ZONES_SIDES;
   uint8_t readerShortPressHome = READER_ACTION_GO_HOME;
   uint8_t readerLongPressHome = READER_ACTION_OPEN_MENU;
+  // A second home-key tap within MappedInputManager::HOME_DOUBLE_TAP_MS. While
+  // this is anything but None the reader holds a single tap back for that
+  // window, so None also makes the single tap fire without the wait.
+  uint8_t readerDoubleTapHome = READER_ACTION_OPEN_MENU;
 
   // ── Custom combos (chords) ───────────────────────────────────────────────
   // Two or more inputs held together, bound to one reader action. Each slot is
@@ -643,15 +660,6 @@ class CrossPointSettings {
 
   // Migration flag: 0 = old settings not yet applied to new per-button fields.
   uint8_t readerActionsMigrated = 0;
-  // Migration flag for the Full Touch default flip. Defaults are inverted on
-  // purpose: a fresh X4 Pro file already carries fullTouchUi = 1, so it starts
-  // migrated (opting out sticks); a file first created on another board starts
-  // unmigrated, so it still gets the flip the first time it boots on an X4 Pro.
-#if FREEINK_DEVICE_X4PRO
-  uint8_t fullTouchDefaultMigrated = 1;
-#else
-  uint8_t fullTouchDefaultMigrated = 0;
-#endif
 
   // Home-key hold is hard-wired to the reader menu: with every other slot
   // remappable, the menu (and its Go Home row) must stay reachable from at
@@ -722,12 +730,6 @@ class CrossPointSettings {
   // an already-migrated file (the overwhelmingly common case) from one that needs
   // writing back. See the write-back guard in loadFromFile().
   static bool migrateReaderActions(CrossPointSettings& settings);
-
-  // One-time migration (X4 Pro only): turns Full Touch on for settings files
-  // written while it defaulted off. Every registered setting is always saved,
-  // so an existing file pins fullTouchUi = 0 and the new default alone is a no-op.
-  // Returns true only when it actually changed something.
-  static bool migrateFullTouchDefault(CrossPointSettings& settings);
 
   // One-time migration: derives the per-element statusBar*Pos fields from the
   // legacy status-bar show/hide toggles and Book/Chapter enums. Called when a

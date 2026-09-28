@@ -299,7 +299,7 @@ void EpubReaderClippingListActivity::loop() {
   // Full Touch: a long tap on a list row is the hold-Confirm delete for that
   // row. Suppress the contact only when the delete actually ran, so a no-op
   // hold still falls through to the tap handling below.
-  if (SETTINGS.fullTouchUi && !detailMode && !clippings.empty()) {
+  if (CrossPointSettings::FULL_TOUCH_UI && !detailMode && !clippings.empty()) {
     int lx, ly;
     if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
       const int pageItems = getPageItems();
@@ -320,7 +320,7 @@ void EpubReaderClippingListActivity::loop() {
 
   // Full Touch: first tap on a row moves the cursor there; a second tap on the
   // already-selected row opens its detail view.
-  if (SETTINGS.fullTouchUi && !detailMode && !clippings.empty()) {
+  if (CrossPointSettings::FULL_TOUCH_UI && !detailMode && !clippings.empty()) {
     int lx, ly;
     if (mappedInput.wasTapPoint(lx, ly)) {
       const int pageItems = getPageItems();

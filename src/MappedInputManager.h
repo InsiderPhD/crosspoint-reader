@@ -31,9 +31,13 @@ class MappedInputManager {
   // constructed before the renderer's orientation is meaningful.
   void setRenderer(const GfxRenderer* r) { renderer = r; }
 
-  // When true (everywhere except the readers), a home-key tap injects Confirm.
-  // The readers disable this and dispatch their own configurable actions.
-  void setHomeKeyActsAsConfirm(bool enabled) { homeKeyActsAsConfirm = enabled; }
+  // Home-key gesture resolved for this frame. A tap is held back for
+  // HOME_DOUBLE_TAP_MS only while the double-tap window is on (the reading
+  // screen with a double-tap action bound); everywhere else it is reported on
+  // the frame it lands, so Home never waits on a gesture nothing listens for.
+  enum class HomeKeyGesture : uint8_t { None, Tap, DoubleTap, LongPress };
+  static constexpr unsigned long HOME_DOUBLE_TAP_MS = 350;
+  void setHomeKeyDoubleTap(bool enabled) { homeKeyDoubleTap = enabled; }
 
   // When true, a completed screen tap anywhere injects Confirm. The main loop
   // disables this for activities that consume touch themselves (readers'
@@ -51,6 +55,10 @@ class MappedInputManager {
   // When true, a swipe is neither injected nor recorded: the activity tracks
   // the finger itself via heldTouchPoint() (see Activity::ownsSwipes()).
   void setSwipesIgnored(bool enabled) { swipesIgnored = enabled; }
+  // When true (the reading screen), the swipe that would inject Confirm injects
+  // nothing: bound to Open Menu by default, it opened the menu on a sloppy
+  // page-turn flick. The action bar's Confirm button still runs that slot.
+  void setConfirmSwipeIgnored(bool enabled) { confirmSwipeIgnored = enabled; }
 
   // Swipe recorded this frame, and only while swipesBackOnly is on (i.e. Full
   // Touch mode outside the reading screens). Nothing was injected for it, so a
@@ -118,9 +126,8 @@ class MappedInputManager {
   // a finger on an action-bar button doesn't count) -- for drag gestures.
   bool heldTouchPoint(int& lx, int& ly) const;
 
-  // Home-key events, for the readers' configurable actions.
-  bool wasHomeKeyTapped() const { return gpio.wasHomeKeyTapped(); }
-  bool wasHomeKeyLongPressed() const { return gpio.wasHomeKeyLongPressed(); }
+  // The readers' configurable home-key actions and main.cpp's Home route.
+  HomeKeyGesture homeKeyGesture() const { return homeGesture; }
   // Held state of the same key, for chords (ReaderCombos).
   bool isHomeKeyDown() const { return gpio.isHomeKeyDown(); }
 #endif
@@ -157,10 +164,16 @@ class MappedInputManager {
 
 #if FREEINK_DEVICE_X4PRO
   const GfxRenderer* renderer = nullptr;
-  bool homeKeyActsAsConfirm = true;
+  bool homeKeyDoubleTap = false;
+  // Written by processTouchInput() via resolveHomeKeyGesture().
+  mutable HomeKeyGesture homeGesture = HomeKeyGesture::None;
+  mutable bool homeTapPending = false;
+  mutable unsigned long homeTapAt = 0;
+  HomeKeyGesture resolveHomeKeyGesture() const;
   bool tapActsAsConfirm = true;
   bool swipesBackOnly = false;
   bool swipesIgnored = false;
+  bool confirmSwipeIgnored = false;
   // Written by the const processTouchInput(); the injected presses live in gpio
   // so these are the only pieces of per-frame touch state the manager owns.
   mutable Swipe swipe = Swipe::None;

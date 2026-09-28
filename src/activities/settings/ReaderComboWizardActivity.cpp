@@ -154,6 +154,12 @@ void ReaderComboWizardActivity::loop() {
   gripStarted = false;
 
   if (ReaderCombos::buttonCount(captureMask) >= 2) {
+    // Two keys on one X3/X4 ladder: the hardware can never report them held
+    // together, so this chord could be saved but would never fire.
+    if (ReaderCombos::sharesLadder(captureMask)) {
+      restartCapture(tr(STR_COMBO_SAME_CIRCUIT));
+      return;
+    }
     if (ReaderCombos::slotForMask(captureMask, static_cast<int8_t>(slot)) >= 0) {
       restartCapture(tr(STR_COMBO_IN_USE));
       return;

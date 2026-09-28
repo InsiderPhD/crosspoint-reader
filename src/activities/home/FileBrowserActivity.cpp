@@ -316,7 +316,7 @@ void FileBrowserActivity::loop() {
     // needed — closing returns to the list whose handler checks it — so the
     // outside tap reuses that flag; row-moves and dead-area taps reuse
     // awaitingBookOptionsRelease, which eats input until the release passes.
-    if (SETTINGS.fullTouchUi && bookOptionsLayoutValid) {
+    if (CrossPointSettings::FULL_TOUCH_UI && bookOptionsLayoutValid) {
       int lx, ly;
       if (mappedInput.wasTapPoint(lx, ly)) {
         const bool insidePopup = lx >= bookOptionsPopupX && lx < bookOptionsPopupX + bookOptionsPopupW &&
@@ -444,7 +444,7 @@ void FileBrowserActivity::loop() {
 #if FREEINK_DEVICE_X4PRO
   // Full Touch: only reached with no modal open (the sort menu and book
   // options blocks above return first).
-  if (SETTINGS.fullTouchUi && !files.empty()) {
+  if (CrossPointSettings::FULL_TOUCH_UI && !files.empty()) {
     int lx, ly;
     // Long-press on a book row opens its context menu. Fires while the finger
     // is still down, so the contact must be suppressed or the lift would also

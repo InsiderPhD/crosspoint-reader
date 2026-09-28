@@ -131,7 +131,7 @@ void EpubReaderBookmarksActivity::loop() {
   // Full Touch: a long tap on a bookmark row is the hold-Confirm delete for
   // that row. Suppress the contact only when the delete actually ran, so a
   // no-op hold still falls through to the tap.
-  if (SETTINGS.fullTouchUi && !bookmarks.empty()) {
+  if (CrossPointSettings::FULL_TOUCH_UI && !bookmarks.empty()) {
     int lx, ly;
     if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
       const int index =

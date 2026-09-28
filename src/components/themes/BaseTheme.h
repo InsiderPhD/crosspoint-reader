@@ -95,6 +95,7 @@ enum UIIcon {
   Check,
   Files,
   Search,
+  Stats,
   None,  // Render nothing — the row reserves icon space but draws blank.
 };
 
@@ -244,6 +245,14 @@ class BaseTheme {
   // than 1/homeRecentBooksCount of the strip, so equal columns resolve taps to
   // the wrong book there.
   virtual int hitTestRecentBookCover(const Rect& rect, int slotCount, int lx, int ly) const;
+
+  // Home-screen selector move for a directional press, over the combined index
+  // space HomeActivity uses (covers first, then the menu). Returns the new
+  // index, or -1 for the default linear step (Down/Right next, Up/Left
+  // previous). Virtual so a theme with a 2-D menu (Bookshelf's shelf above a
+  // button grid) can move by rows; the drawn geometry is the theme's to know.
+  enum class NavDirection : uint8_t { Up, Down, Left, Right };
+  virtual int homeNavigate(int selectorIndex, int coverCount, int totalCount, NavDirection dir) const { return -1; }
 
   // Component drawing methods
   virtual void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total) const;

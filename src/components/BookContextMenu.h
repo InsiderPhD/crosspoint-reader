@@ -28,8 +28,9 @@ class BookContextMenu {
     Reindex = 4,
     RegenerateCover = 5,
     BookInfo = 6,
+    ViewStats = 7,
   };
-  static constexpr int OPTIONS_COUNT = 7;
+  static constexpr int OPTIONS_COUNT = 8;
   static constexpr uint32_t DEFAULT_HOLD_MS = 700;
 
   bool isOpen() const { return showing_; }

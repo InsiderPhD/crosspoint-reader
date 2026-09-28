@@ -262,7 +262,7 @@ Session log:
 - [ ] Flashed current-tree build — **must include the dirty `freeink-sdk` submodule**
       (powerOffIdle reimplementation). Verify by checking serial for the UC8179
       POF path, or by the absence of the old page-turn noise.
-- [ ] Serial attached; note whether `SETTINGS.fullTouchUi` starts off (it's opt-in).
+- [ ] Serial attached. Full Touch is always on (compile-time `CrossPointSettings::FULL_TOUCH_UI`).
 
 ## Boot & smoke
 - [ ] Cold boot to Home, SD detected, heap > 50KB.
@@ -284,8 +284,8 @@ Session log:
       single taps 20× — every one registers as a tap/Confirm, never a long-press action.
 - [ ] Tap-anywhere-is-Confirm works in ordinary menus; reader touch zones page correctly.
 
-## Full Touch mode (opt-in; landed in `c139e9a3` / `e207694e`)
-- [ ] Enable Full Touch in settings; setting persists across reboot.
+## Full Touch (always on for X4 Pro; landed in `c139e9a3` / `e207694e`)
+- [ ] No Full Touch toggle in Settings → System; an old settings.json with `"fullTouchUi": 0` still boots into Full Touch.
 - [ ] In each **touch-enabled activity** (Home, File browser, Library, Group browser,
       reader menu, chapter select, bookmarks, clippings, footnotes, settings lists,
       WiFi/network selection, OPDS browser, BookFusion browser, sort/context menus):
@@ -354,8 +354,6 @@ Session log:
       hold on a word to look it up directly.
 - [ ] Definition screen: tap left third = previous page, elsewhere = next page;
       Back returns to word selection. A tap must not *also* fire Confirm.
-- [ ] Full Touch mode on **and** off — both must behave the same here, since the
-      selector and the viewer hit-test taps themselves.
 
 ## Clippings regression (the dictionary shares this selector)
 - [ ] Hold-to-clip still opens the range selector pre-anchored on the held word, and

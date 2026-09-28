@@ -1138,6 +1138,109 @@ void GfxRenderer::drawPerspectiveBitmap(const Bitmap& bitmap, const int x, const
   free(columns);
 }
 
+void GfxRenderer::drawBitmapResampled(const Bitmap& bitmap, const int x, const int y, const int w, const int h) const {
+  if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
+  if (renderMode != BW || w <= 0 || h <= 0) return;
+
+  const int srcW = bitmap.getWidth();
+  const int srcH = bitmap.getHeight();
+  if (srcW <= 0 || srcH <= 0) return;
+
+  // 4x4 Bayer thresholds, pre-scaled to 0..255 (index * 16 + 8). A pixel is
+  // black when its averaged intensity is below the threshold at its position,
+  // so the four 2-bit levels come out at 16/16, 11/16, 5/16 and 0/16 black.
+  static constexpr uint8_t kBayer[4][4] = {
+      {8, 136, 40, 168}, {200, 72, 232, 104}, {56, 184, 24, 152}, {248, 120, 216, 88}};
+
+  // Heap temporaries, sized at runtime and freed on every path: the two row
+  // buffers drawBitmap uses, plus per-destination-column source spans and
+  // intensity sums (~10 B per column, ~2.3 KB for a 230 px cover) -- far past
+  // the 256 B stack budget.
+  const int outputRowSize = (srcW + 3) / 4;
+  auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
+  auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
+  auto* srcX0 = static_cast<int16_t*>(malloc(w * sizeof(int16_t)));
+  auto* srcX1 = static_cast<int16_t*>(malloc(w * sizeof(int16_t)));
+  auto* sums = static_cast<uint32_t*>(malloc(w * sizeof(uint32_t)));
+  auto* counts = static_cast<uint16_t*>(malloc(w * sizeof(uint16_t)));
+  const auto freeAll = [&] {
+    free(outputRow);
+    free(rowBytes);
+    free(srcX0);
+    free(srcX1);
+    free(sums);
+    free(counts);
+  };
+  if (!outputRow || !rowBytes || !srcX0 || !srcX1 || !sums || !counts) {
+    LOG_ERR("GFX", "!! Failed to allocate resample buffers (%d px wide)", w);
+    freeAll();
+    return;
+  }
+
+  // Each destination column averages the source columns [srcX0, srcX1); when
+  // enlarging that span is a single nearest column.
+  for (int dx = 0; dx < w; dx++) {
+    const int x0 = std::min(srcW - 1, (dx * srcW) / w);
+    const int x1 = std::max(x0 + 1, std::min(srcW, ((dx + 1) * srcW) / w));
+    srcX0[dx] = static_cast<int16_t>(x0);
+    srcX1[dx] = static_cast<int16_t>(x1);
+  }
+
+  const int screenW = getScreenWidth();
+  const int screenH = getScreenHeight();
+  int pendingStart = -1;  // destination rows [pendingStart, pendingEnd) being accumulated
+  int pendingEnd = -1;
+
+  const auto flush = [&] {
+    if (pendingStart < 0) return;
+    for (int dy = pendingStart; dy < pendingEnd; dy++) {
+      const int screenY = y + dy;
+      if (screenY < 0 || screenY >= screenH) continue;
+      for (int dx = 0; dx < w; dx++) {
+        const int screenX = x + dx;
+        if (screenX < 0 || screenX >= screenW || counts[dx] == 0) continue;
+        const uint32_t avg = sums[dx] / counts[dx];
+        if (avg < kBayer[screenY & 3][screenX & 3]) drawPixel(screenX, screenY);
+      }
+    }
+  };
+
+  // readNextRow is forward-only, and a bottom-up BMP visits destination rows
+  // in reverse; the accumulator only cares that rows sharing a destination
+  // row arrive consecutively, which holds in either direction.
+  for (int srcY = 0; srcY < srcH; srcY++) {
+    if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
+      LOG_ERR("GFX", "Failed to read row %d from bitmap (resample)", srcY);
+      freeAll();
+      return;
+    }
+    const int srcRow = bitmap.isTopDown() ? srcY : (srcH - 1 - srcY);
+    const int dstStart = (srcRow * h) / srcH;
+    const int dstEnd = std::max(dstStart + 1, ((srcRow + 1) * h) / srcH);
+
+    if (dstStart != pendingStart) {
+      flush();
+      memset(sums, 0, w * sizeof(uint32_t));
+      memset(counts, 0, w * sizeof(uint16_t));
+      pendingStart = dstStart;
+      pendingEnd = dstEnd;
+    } else {
+      pendingEnd = std::max(pendingEnd, dstEnd);
+    }
+
+    for (int dx = 0; dx < w; dx++) {
+      uint32_t sum = 0;
+      for (int sx = srcX0[dx]; sx < srcX1[dx]; sx++) {
+        sum += ((outputRow[sx / 4] >> (6 - ((sx * 2) % 8))) & 0x3) * 85u;  // 0 black .. 255 white
+      }
+      sums[dx] += sum;
+      counts[dx] = static_cast<uint16_t>(counts[dx] + (srcX1[dx] - srcX0[dx]));
+    }
+  }
+  flush();
+  freeAll();
+}
+
 void GfxRenderer::fillPolygon(const int* xPoints, const int* yPoints, int numPoints, bool state) const {
   if (numPoints < 3) return;
 

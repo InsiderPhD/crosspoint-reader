@@ -14,17 +14,10 @@ struct Rect;
 /**
  * Picker for one reader action.
  *
- * Reader Controls opens it per row on the X4 Pro only, and deliberately so: on
- * the X3/X4 a row cycles its action on Confirm, which is one press per step but
- * wears no button out faster than any other menu. Turning that into
- * open-menu/scroll/select would triple the presses on hardware whose buttons
- * are the thing we are trying to spare. The X4 Pro has no front buttons — the
- * same interaction is taps — so it gets the list instead of a cycle that has to
- * be tapped through blind.
- *
- * The Custom Combo wizard uses it on every board: a wizard step has no row to
- * cycle in place, and picking blind from a chord you have just captured is the
- * one case where the list is the cheaper interaction on buttons too.
+ * Reader Controls opens it for every action row on every board, and the Custom
+ * Combo wizard uses it for a captured chord. The one-line description under
+ * each action is why it beats cycling a row in place, even on boards whose
+ * front buttons make the cycle one press per step.
  *
  * It owns no persistence: the caller passes the row's current action and gets
  * the chosen one back as a ReaderActionResult, so Reader Controls keeps its

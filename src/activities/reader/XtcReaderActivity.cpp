@@ -26,7 +26,7 @@
 #include "activities/home/ReadingStatsDetailActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "util/HeapReport.h"
+#include "util/FrontlightToggle.h"
 #include "util/ScreenshotUtil.h"
 
 namespace {
@@ -197,12 +197,8 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
       }
       return true;
 
-    case A::READER_ACTION_HEAP_REPORT:
-      if (renderer.isRenderable()) {
-        RenderLock lock(*this);
-        HeapReport::dump(renderer);
-      }
-      return true;
+    case A::READER_ACTION_TOGGLE_FRONTLIGHT:
+      return FrontlightToggle::toggle();
 
     default:
       return false;
@@ -396,11 +392,19 @@ void XtcReaderActivity::loop() {
     case MappedInputManager::TapZone::None:
       break;
   }
-  if (mappedInput.wasHomeKeyLongPressed()) {
-    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.effectiveReaderLongPressHome())))
-      return;
-  } else if (mappedInput.wasHomeKeyTapped()) {
-    if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressHome))) return;
+  switch (mappedInput.homeKeyGesture()) {
+    case MappedInputManager::HomeKeyGesture::Tap:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressHome))) return;
+      break;
+    case MappedInputManager::HomeKeyGesture::DoubleTap:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerDoubleTapHome))) return;
+      break;
+    case MappedInputManager::HomeKeyGesture::LongPress:
+      if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.effectiveReaderLongPressHome())))
+        return;
+      break;
+    case MappedInputManager::HomeKeyGesture::None:
+      break;
   }
 #endif
 

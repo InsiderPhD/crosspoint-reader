@@ -27,9 +27,9 @@ namespace SettingsListDetail {
 // The theme picker lists positions, not stored values: LYRA_LIBRARY is retired
 // but keeps its persisted number, so the list skips it rather than renumbering
 // the themes after it. Position i shows kUiThemeOptions[i].
-constexpr uint8_t kUiThemeOptions[] = {CrossPointSettings::CLASSIC, CrossPointSettings::LYRA,
+constexpr uint8_t kUiThemeOptions[] = {CrossPointSettings::CLASSIC,       CrossPointSettings::LYRA,
                                        CrossPointSettings::LYRA_3_COVERS, CrossPointSettings::LYRA_CAROUSEL,
-                                       CrossPointSettings::DASHBOARD};
+                                       CrossPointSettings::DASHBOARD,     CrossPointSettings::BOOKSHELF};
 
 inline uint8_t getUiThemeIndex() {
   const uint8_t theme =
@@ -139,38 +139,38 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
                                  "frontlightWarmth", StrId::STR_CAT_DISPLAY));
 #endif
 #endif
-  v.insert(
-      v.end(),
-      {
-          SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
-                            {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER,
-                             StrId::STR_NONE_OPT, StrId::STR_COVER_CUSTOM},
-                            "sleepScreen", StrId::STR_CAT_DISPLAY),
-          SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
-                            {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode", StrId::STR_CAT_DISPLAY),
-          SettingInfo::Enum(StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,
-                            {StrId::STR_NONE_OPT, StrId::STR_FILTER_CONTRAST, StrId::STR_INVERTED},
-                            "sleepScreenCoverFilter", StrId::STR_CAT_DISPLAY),
-          SettingInfo::Enum(StrId::STR_SEAMLESS_SLEEP, &CrossPointSettings::seamlessSleepScreen,
-                            {StrId::STR_NEVER, StrId::STR_AFTER_TIMEOUT, StrId::STR_ALWAYS}, "seamlessSleepScreen",
-                            StrId::STR_CAT_DISPLAY),
-          SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
-                            {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
-                            StrId::STR_CAT_DISPLAY),
-          SettingInfo::Enum(
-              StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
-              {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15, StrId::STR_PAGES_30},
-              "refreshFrequency", StrId::STR_CAT_DISPLAY),
-          // Persisted directly in JsonSettingsIO: a DynamicEnum has no valuePtr.
-          SettingInfo::DynamicEnum(StrId::STR_UI_THEME,
-                                   {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                                    StrId::STR_THEME_LYRA_CAROUSEL, StrId::STR_THEME_DASHBOARD},
-                                   getUiThemeIndex, setUiThemeIndex, "uiTheme", StrId::STR_CAT_DISPLAY),
-          SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
-                              StrId::STR_CAT_DISPLAY),
-          SettingInfo::Toggle(StrId::STR_READER_DARK_MODE, &CrossPointSettings::darkMode, "darkMode",
-                              StrId::STR_CAT_DISPLAY),
-      });
+  v.insert(v.end(),
+           {
+               SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
+                                 {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER,
+                                  StrId::STR_NONE_OPT, StrId::STR_COVER_CUSTOM},
+                                 "sleepScreen", StrId::STR_CAT_DISPLAY),
+               SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
+                                 {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode", StrId::STR_CAT_DISPLAY),
+               SettingInfo::Enum(StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,
+                                 {StrId::STR_NONE_OPT, StrId::STR_FILTER_CONTRAST, StrId::STR_INVERTED},
+                                 "sleepScreenCoverFilter", StrId::STR_CAT_DISPLAY),
+               SettingInfo::Enum(StrId::STR_SEAMLESS_SLEEP, &CrossPointSettings::seamlessSleepScreen,
+                                 {StrId::STR_NEVER, StrId::STR_AFTER_TIMEOUT, StrId::STR_ALWAYS}, "seamlessSleepScreen",
+                                 StrId::STR_CAT_DISPLAY),
+               SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
+                                 {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
+                                 StrId::STR_CAT_DISPLAY),
+               SettingInfo::Enum(StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
+                                 {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15,
+                                  StrId::STR_PAGES_30},
+                                 "refreshFrequency", StrId::STR_CAT_DISPLAY),
+               // Persisted directly in JsonSettingsIO: a DynamicEnum has no valuePtr.
+               SettingInfo::DynamicEnum(
+                   StrId::STR_UI_THEME,
+                   {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
+                    StrId::STR_THEME_LYRA_CAROUSEL, StrId::STR_THEME_DASHBOARD, StrId::STR_THEME_BOOKSHELF},
+                   getUiThemeIndex, setUiThemeIndex, "uiTheme", StrId::STR_CAT_DISPLAY),
+               SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
+                                   StrId::STR_CAT_DISPLAY),
+               SettingInfo::Toggle(StrId::STR_READER_DARK_MODE, &CrossPointSettings::darkMode, "darkMode",
+                                   StrId::STR_CAT_DISPLAY),
+           });
 }
 
 // --- Reader: fonts and layout ---
@@ -305,15 +305,6 @@ inline void appendControlSettings(std::vector<SettingInfo>& v) {
 #if !FREEINK_DEVICE_X4PRO
                                    // No front buttons on X4 Pro: keep the JSON key round-tripping
                                    // but hide the toggle (no category = hidden from UI).
-                                   ,
-                                   StrId::STR_CAT_SYSTEM
-#endif
-                                   ),
-               SettingInfo::Toggle(StrId::STR_FULL_TOUCH_UI, &CrossPointSettings::fullTouchUi,
-                                   "fullTouchUi"
-#if FREEINK_DEVICE_X4PRO
-                                   // Touch panel exists only on the X4 Pro: show the toggle there,
-                                   // round-trip the JSON key everywhere else (no category = hidden).
                                    ,
                                    StrId::STR_CAT_SYSTEM
 #endif

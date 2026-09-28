@@ -8,15 +8,20 @@
 #include <Serialization.h>
 #include <esp_heap_caps.h>
 
+#include <algorithm>
+
 #include "Epub/css/CssParser.h"
 #include "Page.h"
 #include "hyphenation/Hyphenator.h"
 #include "parsers/ChapterHtmlSlimParser.h"
+#include "parsers/VoidTagCloser.h"
 
 namespace {
 // 41: TextBlock word data stored as one flat arena (offset table + NUL-terminated
 //     text blob) instead of length-prefixed strings and per-field arrays.
-constexpr uint8_t SECTION_FILE_VERSION = 43;
+// 44: tables render as PageTableFragment grids (new page element TAG_PageTable = 4);
+//     also covers VoidTagCloser's layout change and hash-keyed shared img_ files.
+constexpr uint8_t SECTION_FILE_VERSION = 44;
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
                                  sizeof(uint8_t) + sizeof(uint8_t) + sizeof(bool) + sizeof(uint32_t) +
@@ -217,7 +222,10 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
       if (!Storage.openFileForWrite("SCT", tmpHtmlPath, tmpHtml)) {
         continue;
       }
-      success = epub->readItemContentsToStream(localPath, tmpHtml, 1024);
+      // Self-close HTML void elements on the way out: web-article exports ship
+      // "<img ...>", which strict XML parsing rejects for the whole chapter.
+      VoidTagCloser xhtmlOut(tmpHtml);
+      success = epub->readItemContentsToStream(localPath, xhtmlOut, 1024) && xhtmlOut.finish();
       fileSize = tmpHtml.size();
       // Explicitly close() file before calling Storage.remove()
       tmpHtml.close();
@@ -251,12 +259,20 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
   writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
                          viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, footnoteDisplay,
                          bionicReadingEnabled);
-  std::vector<PageLutEntry> lut = {};
+  // One up-front block instead of ~log2(pages) grow-copy-free cycles while the
+  // parser is fighting for contiguous heap. A page is ~2-3KB of XHTML, so
+  // 2KB/page slightly over-estimates; the cap bounds the block at 4KB (512 x 8B)
+  // and anything longer just grows past it as before.
+  constexpr uint32_t HTML_BYTES_PER_PAGE_ESTIMATE = 2048;
+  constexpr uint32_t MAX_LUT_RESERVE = 512;
+  std::vector<PageLutEntry> lut;
+  lut.reserve(std::min<uint32_t>(fileSize / HTML_BYTES_PER_PAGE_ESTIMATE + 1, MAX_LUT_RESERVE));
 
   // Derive the content base directory and image cache path prefix for the parser
   size_t lastSlash = localPath.find_last_of('/');
   std::string contentBase = (lastSlash != std::string::npos) ? localPath.substr(0, lastSlash + 1) : "";
-  std::string imageBasePath = epub->getCachePath() + "/img_" + std::to_string(spineIndex) + "_";
+  // Shared by every spine: images are keyed on their archive path, so one extraction serves all.
+  std::string imageBasePath = epub->getCachePath() + "/img_";
 
   CssParser* cssParser = nullptr;
   if (embeddedStyle) {

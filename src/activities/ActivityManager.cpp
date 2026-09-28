@@ -315,6 +315,11 @@ bool ActivityManager::preventAutoSleep() const { return currentActivity && curre
 
 bool ActivityManager::isReaderActivity() const { return currentActivity && currentActivity->isReaderActivity(); }
 
+bool ActivityManager::isAtHome() const {
+  return currentActivity && currentActivity->name == "Home" && stackActivities.empty() &&
+         pendingAction == PendingAction::None;
+}
+
 bool ActivityManager::consumesTouchInput() const { return currentActivity && currentActivity->consumesTouchInput(); }
 
 bool ActivityManager::handlesDirectTouch() const { return currentActivity && currentActivity->handlesDirectTouch(); }

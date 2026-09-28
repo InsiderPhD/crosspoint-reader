@@ -215,12 +215,13 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["readerTapZoneLayout"] = s.readerTapZoneLayout;
   doc["readerShortPressHome"] = s.readerShortPressHome;
   doc["readerLongPressHome"] = s.readerLongPressHome;
+  doc["readerDoubleTapHome"] = s.readerDoubleTapHome;
+  doc["frontlightLastBrightness"] = s.frontlightLastBrightness;
   for (uint8_t slot = 0; slot < CrossPointSettings::READER_COMBO_SLOTS; slot++) {
     doc[kComboButtonsKeys[slot]] = s.readerComboButtons[slot];
     doc[kComboActionKeys[slot]] = s.readerComboAction[slot];
   }
   doc["readerActionsMigrated"] = s.readerActionsMigrated;
-  doc["fullTouchDefaultMigrated"] = s.fullTouchDefaultMigrated;
 
   String json;
   serializeJson(doc, json);
@@ -379,6 +380,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
       clampAction(doc["readerShortPressHome"] | (uint8_t)S::READER_ACTION_GO_HOME, S::READER_ACTION_GO_HOME);
   s.readerLongPressHome =
       clampAction(doc["readerLongPressHome"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
+  s.readerDoubleTapHome =
+      clampAction(doc["readerDoubleTapHome"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
+  s.frontlightLastBrightness = clamp(doc["frontlightLastBrightness"] | (uint8_t)0, 101, 0);
   // Custom combos. Absent keys leave the slot empty; sanitizeReaderCombos()
   // then drops unknown bits, one-button masks and duplicates, so nothing below
   // has to re-check a stored mask.
@@ -388,9 +392,6 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   }
   CrossPointSettings::sanitizeReaderCombos(s);
   s.readerActionsMigrated = doc["readerActionsMigrated"] | (uint8_t)0;
-  // Explicit 0, not the struct default: a file predating this key is exactly
-  // the file that still needs migrateFullTouchDefault().
-  s.fullTouchDefaultMigrated = doc["fullTouchDefaultMigrated"] | (uint8_t)0;
 
   // Reader-menu visibility. Predating the per-row bitmask, a settings file
   // carries only the four coarse group toggles; fold those into the mask and

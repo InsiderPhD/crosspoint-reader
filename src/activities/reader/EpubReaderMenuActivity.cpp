@@ -224,7 +224,7 @@ void EpubReaderMenuActivity::loop() {
 
   // Full Touch: first tap on a row moves the cursor; a second tap on the
   // selected row runs its Confirm action (cycling rows cycle in place).
-  if (SETTINGS.fullTouchUi) {
+  if (CrossPointSettings::FULL_TOUCH_UI) {
     int lx, ly;
     if (mappedInput.wasTapPoint(lx, ly)) {
       const int top = menuTopY();

@@ -1,5 +1,6 @@
 #include "CrossPointSettings.h"
 
+#include <HalFrontlight.h>
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
 #include <Logging.h>
@@ -125,19 +126,6 @@ bool CrossPointSettings::migrateReaderActions(CrossPointSettings& settings) {
   return true;
 }
 
-bool CrossPointSettings::migrateFullTouchDefault(CrossPointSettings& settings) {
-#if FREEINK_DEVICE_X4PRO
-  if (settings.fullTouchDefaultMigrated) return false;
-  settings.fullTouchDefaultMigrated = 1;
-  settings.fullTouchUi = 1;
-  return true;
-#else
-  // Leave the flag unset so the card still migrates when it reaches an X4 Pro.
-  (void)settings;
-  return false;
-#endif
-}
-
 void CrossPointSettings::migrateStatusBarPositions(CrossPointSettings& settings) {
   // Battery: on -> left, off -> hidden (its classic cluster).
   settings.statusBarBatteryPos = settings.statusBarBattery ? SB_POS_LEFT : SB_POS_HIDE;
@@ -222,7 +210,7 @@ void CrossPointSettings::sanitizeReaderActions(CrossPointSettings& settings) {
       &CrossPointSettings::readerTapMiddle,          &CrossPointSettings::readerTapRight,
       &CrossPointSettings::readerHoldLeft,           &CrossPointSettings::readerHoldMiddle,
       &CrossPointSettings::readerHoldRight,          &CrossPointSettings::readerShortPressHome,
-      &CrossPointSettings::readerLongPressHome,
+      &CrossPointSettings::readerLongPressHome,      &CrossPointSettings::readerDoubleTapHome,
   };
   for (const auto slot : SLOTS) {
     uint8_t& action = settings.*slot;
@@ -232,7 +220,12 @@ void CrossPointSettings::sanitizeReaderActions(CrossPointSettings& settings) {
   }
 }
 
+bool CrossPointSettings::isUnavailableReaderAction(const uint8_t action) {
+  return action == READER_ACTION_TOGGLE_FRONTLIGHT && !halFrontlight.present();
+}
+
 bool CrossPointSettings::saveToFile() const {
+  if (frontlightBrightness > 0) frontlightLastBrightness = frontlightBrightness;
   Storage.mkdir("/.crosspoint");
   return JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON);
 }
@@ -252,11 +245,8 @@ bool CrossPointSettings::loadFromFile() {
         // write-throttling rule. Both migrations self-gate on a "migrated" flag
         // that a loaded file already carries, so on a normal boot neither does
         // any work and there is nothing to save.
-        // Note the ordering: both migrations must run, so they cannot be
-        // short-circuited by ||.
         const bool migratedActions = migrateReaderActions(*this);
-        const bool migratedFullTouch = migrateFullTouchDefault(*this);
-        resave = resave || migratedActions || migratedFullTouch;
+        resave = resave || migratedActions;
       }
       if (result && resave) {
         if (saveToFile()) {

@@ -21,6 +21,7 @@
 #include "BookFusionBookIdStore.h"
 #include "CrossPointSettings.h"
 #include "LibraryScan.h"
+#include "ReadingStatsDetailActivity.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "components/icons/bookfusion24.h"
@@ -270,12 +271,15 @@ LibraryActivity::SlotRect LibraryActivity::slotRect(int slotIndexInPage) const {
 bool LibraryActivity::storePageBuffer() {
   uint8_t* fb = renderer.getFrameBuffer();
   if (!fb) return false;
-  freePageBuffer();
   const size_t bufferSize = renderer.getBufferSize();
-  pageBuffer = static_cast<uint8_t*>(malloc(bufferSize));
+  // Reuse the snapshot across page flips and cover fills: re-mallocing 48KB
+  // per page draw churns the largest free block for nothing.
   if (!pageBuffer) {
-    LOG_ERR(MODULE, "Failed to malloc %zu byte page buffer", bufferSize);
-    return false;
+    pageBuffer = static_cast<uint8_t*>(malloc(bufferSize));
+    if (!pageBuffer) {
+      LOG_ERR(MODULE, "Failed to malloc %zu byte page buffer", bufferSize);
+      return false;
+    }
   }
   std::memcpy(pageBuffer, fb, bufferSize);
   return true;
@@ -361,8 +365,40 @@ void LibraryActivity::render(RenderLock&&) {
   drawButtonHints();
   contextMenu.render(renderer);
   sortMenu.render(renderer);
+
+  // Two-phase load: the page just drawn shows cached covers + placeholders.
+  // Push it (with a Loading popup while covers are still missing) FIRST, then
+  // generate one cover. The popup separates "generating" from "permanently
+  // broken" — once it's gone, any remaining placeholder is confirmed broken.
+  // Keeping the slow work on the render task (rather than racing loop())
+  // avoids the TaskPriorityDisinherit mutex panic we hit on launch.
+  const int missingSlot = (contextMenu.isOpen() || sortMenu.isOpen()) ? -1 : findMissingThumbSlot();
+  if (missingSlot >= 0) GUI.drawPopup(renderer, tr(STR_LOADING));
+
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
+
+  if (missingSlot >= 0) fillMissingCover(missingSlot);
+}
+
+void LibraryActivity::fillMissingCover(const int slotIndexInPage) {
+  const size_t page = currentPage();
+  // Slow path: ~1-5s on the first visit per book.
+  generateThumbForSlot(slotIndexInPage);
+  // Paint only the new tile over the snapshot instead of redrawing the page:
+  // the other covers are already in it, and a from-scratch render re-opens
+  // every thumb and book.bin on the page. The next render restores the
+  // snapshot, redraws the overlay (picking up the fresh title/author), and
+  // starts the following cover. Always reschedule, even when nothing slow ran
+  // (e.g. a BookFusion book with no cached cover): coverGenAttempted stops the
+  // chain, and the final render drops the popup.
+  if (pageBufferStored && page == currentPage() && page == lastRenderedPage && restorePageBuffer()) {
+    drawTileCover(slotIndexInPage);
+    pageBufferStored = storePageBuffer();
+  } else {
+    pageBufferStored = false;
+  }
+  requestUpdate();
 }
 
 void LibraryActivity::drawButtonHints() {
@@ -516,11 +552,7 @@ bool LibraryActivity::generateThumbForSlot(int slotIndexInPage) {
 
 void LibraryActivity::renderPageFromScratch() {
   const int screenW = renderer.getScreenWidth();
-  const int screenH = renderer.getScreenHeight();
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int gridTopY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const GridLayout L = computeLayout(screenW, screenH, metrics.contentSidePadding, gridTopY,
-                                     metrics.pageIndicatorHeight + metrics.buttonHintsHeight, gridRows());
 
   // Make sure currentPageMeta reflects on-disk state. Cheap — only reads
   // book.bin entries that already exist; never parses an EPUB from scratch.
@@ -529,67 +561,16 @@ void LibraryActivity::renderPageFromScratch() {
   const size_t page = currentPage();
   // A fresh page (navigation, sort, reload — all of which reset lastRenderedPage
   // or move it off this page) clears the cover-generation attempt log so every
-  // slot gets one try. A continuation render (the gen tick below invalidated
-  // pageBufferStored but left lastRenderedPage == page) keeps it, so a slot whose
-  // cover can't be generated is skipped instead of retried forever.
+  // slot gets one try. A repaint of the same page (a modal invalidated the
+  // snapshot mid cover-fill) keeps it, so a slot whose cover can't be generated
+  // is skipped instead of retried forever.
   if (page != lastRenderedPage) coverGenAttempted.fill(false);
 
   const size_t pageStart = page * pageSize();
   const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookPaths.size() - pageStart));
 
-  // Draw cover bitmap + border + placeholder for one slot. Matches the cover
-  // styling from Lyra3CoversTheme.cpp:46-77.
-  auto drawTileCover = [&](int slot) {
-    int tileX, tileY;
-    tileOrigin(slot, L, tileX, tileY);
-    const int coverX = tileX + hPaddingInSelection;
-    const int coverY = tileY + hPaddingInSelection;
-
-    bool drewBitmap = false;
-    if (currentPageMeta[slot].hasCover && !currentPageMeta[slot].thumbPath.empty()) {
-      HalFile bmpFile;
-      if (Storage.openFileForRead(MODULE, currentPageMeta[slot].thumbPath.c_str(), bmpFile)) {
-        Bitmap bitmap(bmpFile);
-        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-          const float bmpW = static_cast<float>(bitmap.getWidth());
-          const float bmpH = static_cast<float>(bitmap.getHeight());
-          const float ratio = bmpW / bmpH;
-          const float tileRatio = static_cast<float>(L.coverDrawW) / static_cast<float>(L.coverDrawH);
-          const float cropX = 1.0f - (tileRatio / ratio);
-          renderer.drawBitmap(bitmap, coverX, coverY, L.coverDrawW, L.coverDrawH, cropX);
-          drewBitmap = true;
-        }
-        bmpFile.close();
-      }
-    }
-
-    renderer.drawRect(coverX, coverY, L.coverDrawW, L.coverDrawH, true);
-    if (!drewBitmap) {
-      // Placeholder verbatim from Lyra3CoversTheme.cpp:69-76.
-      renderer.fillRect(coverX, coverY + L.coverDrawH / 3, L.coverDrawW, 2 * L.coverDrawH / 3, true);
-      renderer.drawIcon(CoverIcon, coverX + 24, coverY + 24, 32, 32);
-    }
-
-    // BookFusion-linked books: bottom-left badge with white padding around the
-    // mark, inset from the cover corner. iconY is snapped to a multiple of 8
-    // because drawImageTransparent truncates the display-y via integer divide
-    // by 8 — non-aligned values shift the icon relative to the white fill.
-    if (currentPageMeta[slot].hasBfBadge) {
-      constexpr int BF_ICON_SIZE = 24;
-      constexpr int BF_PADDING = 4;  // White padding around the icon.
-      constexpr int BF_MARGIN = 4;   // Distance from the cover edge.
-      constexpr int BF_BADGE_SIZE = BF_ICON_SIZE + 2 * BF_PADDING;
-      const int iconY = ((coverY + L.coverDrawH - BF_MARGIN - BF_PADDING - BF_ICON_SIZE) / 8) * 8;
-      const int badgeX = coverX + BF_MARGIN;
-      const int badgeY = iconY - BF_PADDING;
-      const int iconX = badgeX + BF_PADDING;
-      renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
-      renderer.drawIcon(BookFusion24Icon, iconX, iconY, BF_ICON_SIZE, BF_ICON_SIZE);
-    }
-  };
-
   // Fast render — never blocks on cover generation. Missing covers stay as
-  // placeholders until loop() fills them in one at a time.
+  // placeholders; render() fills them in one at a time after pushing this page.
   renderer.clearScreen();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, screenW, metrics.headerHeight}, tr(STR_LIBRARY),
                  sortModeLabel(currentSort), contextMenu.isOpen() ? nullptr : tr(STR_SORT));
@@ -604,39 +585,57 @@ void LibraryActivity::renderPageFromScratch() {
   pageRendered = pageBufferStored;
 
   drawOverlay();
+}
 
-  // === Two-phase load: show placeholders first, generate missing covers second. ===
-  // The page is fully drawn at this point with whatever's cached + placeholders
-  // for the rest. Push it to the e-ink display NOW so the user sees a populated
-  // page immediately, BEFORE we start the slow generation work.
-  //
-  // Then generate exactly one missing cover and trigger another render. Each
-  // subsequent render fills in one more cover until the page is fully cached.
-  // Keeping all the slow work on the render task (rather than racing it with
-  // loop()) avoids the TaskPriorityDisinherit mutex panic we hit on launch.
-  if (contextMenu.isOpen()) return;
+// Draw cover bitmap + border + placeholder for one slot. Matches the cover
+// styling from Lyra3CoversTheme.cpp:46-77.
+void LibraryActivity::drawTileCover(const int slot) {
+  const SlotRect r = slotRect(slot);
+  const int coverX = r.x;
+  const int coverY = r.y;
+  // fillMissingCover paints over a placeholder already in the snapshot.
+  renderer.fillRect(coverX, coverY, r.width, r.height, false);
 
-  const int missingSlot = findMissingThumbSlot();
-  if (missingSlot < 0) return;  // Everything's cached — nothing more to do this render.
+  bool drewBitmap = false;
+  if (currentPageMeta[slot].hasCover && !currentPageMeta[slot].thumbPath.empty()) {
+    HalFile bmpFile;
+    if (Storage.openFileForRead(MODULE, currentPageMeta[slot].thumbPath.c_str(), bmpFile)) {
+      Bitmap bitmap(bmpFile);
+      if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+        const float bmpW = static_cast<float>(bitmap.getWidth());
+        const float bmpH = static_cast<float>(bitmap.getHeight());
+        const float ratio = bmpW / bmpH;
+        const float tileRatio = static_cast<float>(r.width) / static_cast<float>(r.height);
+        const float cropX = 1.0f - (tileRatio / ratio);
+        renderer.drawBitmap(bitmap, coverX, coverY, r.width, r.height, cropX);
+        drewBitmap = true;
+      }
+      bmpFile.close();
+    }
+  }
 
-  // Draw the Loading popup ON TOP of the placeholder page (not in the snapshot,
-  // since we already snapshotted above). The popup is the visual cue that
-  // separates "this cover is generating" from "this cover is permanently
-  // broken" — once gen is done and the popup disappears, any remaining
-  // placeholders are confirmed broken.
-  GUI.drawPopup(renderer, tr(STR_LOADING));
+  renderer.drawRect(coverX, coverY, r.width, r.height, true);
+  if (!drewBitmap) {
+    // Placeholder verbatim from Lyra3CoversTheme.cpp:69-76.
+    renderer.fillRect(coverX, coverY + r.height / 3, r.width, 2 * r.height / 3, true);
+    renderer.drawIcon(CoverIcon, coverX + 24, coverY + 24, 32, 32);
+  }
 
-  // Push (placeholders + popup) to e-ink so the user sees both immediately.
-  if (SETTINGS.darkMode) renderer.invertScreen();
-  renderer.displayBuffer();
-  if (SETTINGS.darkMode) renderer.invertScreen();  // Restore uninverted state.
-
-  // Slow path: generate one missing thumb (~3-5s on first visit per book).
-  if (generateThumbForSlot(missingSlot)) {
-    // Schedule the next render to redraw with the new cover + start the
-    // following thumb. Continues until findMissingThumbSlot returns -1.
-    pageBufferStored = false;
-    requestUpdate();
+  // BookFusion-linked books: bottom-left badge with white padding around the
+  // mark, inset from the cover corner. iconY is snapped to a multiple of 8
+  // because drawImageTransparent truncates the display-y via integer divide
+  // by 8 — non-aligned values shift the icon relative to the white fill.
+  if (currentPageMeta[slot].hasBfBadge) {
+    constexpr int BF_ICON_SIZE = 24;
+    constexpr int BF_PADDING = 4;  // White padding around the icon.
+    constexpr int BF_MARGIN = 4;   // Distance from the cover edge.
+    constexpr int BF_BADGE_SIZE = BF_ICON_SIZE + 2 * BF_PADDING;
+    const int iconY = ((coverY + r.height - BF_MARGIN - BF_PADDING - BF_ICON_SIZE) / 8) * 8;
+    const int badgeX = coverX + BF_MARGIN;
+    const int badgeY = iconY - BF_PADDING;
+    const int iconX = badgeX + BF_PADDING;
+    renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
+    renderer.drawIcon(BookFusion24Icon, iconX, iconY, BF_ICON_SIZE, BF_ICON_SIZE);
   }
 }
 
@@ -864,6 +863,10 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
       startActivityForResult(std::move(details), [this](const ActivityResult&) { requestUpdate(); });
       break;
     }
+    case BookContextMenu::Action::ViewStats:
+      startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, path),
+                             [this](const ActivityResult&) { requestUpdate(); });
+      break;
   }
 }
 
@@ -933,7 +936,7 @@ void LibraryActivity::loop() {
   // Full Touch: a touch hold targets the cover under the finger — move the
   // selector there first so checkLongPress below (which reads the same touch
   // event and suppresses the contact) opens the menu for that cover.
-  if (SETTINGS.fullTouchUi) {
+  if (CrossPointSettings::FULL_TOUCH_UI) {
     int lx, ly;
     if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
       const int slot = slotIndexAt(lx, ly);
@@ -977,7 +980,7 @@ void LibraryActivity::loop() {
   // Full Touch: first tap on a cover moves the selector; a second tap on the
   // selected cover opens it. Selection moves stay within the current page, so
   // the framebuffer snapshot remains valid.
-  if (SETTINGS.fullTouchUi) {
+  if (CrossPointSettings::FULL_TOUCH_UI) {
     int lx, ly;
     if (mappedInput.wasTapPoint(lx, ly)) {
       const int slot = slotIndexAt(lx, ly);

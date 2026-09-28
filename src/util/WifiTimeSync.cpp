@@ -27,11 +27,13 @@ constexpr uint32_t kHardcoverSyncBudgetMs = 45000;
 // 4KB is plenty for the NTP work alone, but the Hardcover push above runs a
 // wolfSSL handshake on this task and needs the same room the dedicated push
 // worker gets (kWorkerStackBytes). Only pay for it on boards that actually
-// compile the push in - the C3s keep their original 4KB.
+// compile the push in. The C3s get 5KB: the original 4KB plus room for the
+// 512-byte SdFat send buffer (USE_SPI_ARRAY_TRANSFER=1) that APP_STATE.saveToFile()
+// puts on this stack after a successful sync. The task is transient (<=~10s).
 #if CROSSPOINT_HARDCOVER_AUTO_SYNC
 constexpr uint32_t kBootTaskStackBytes = 12 * 1024;
 #else
-constexpr uint32_t kBootTaskStackBytes = 4096;
+constexpr uint32_t kBootTaskStackBytes = 5 * 1024;
 #endif
 
 // Silent boot worker. Connects to the last-known SSID, runs up to 3 NTP

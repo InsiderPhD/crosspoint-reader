@@ -11,6 +11,7 @@
 #include <new>
 
 #include "BitmapHelpers.h"
+#include "BufferedPrint.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Toggle these to test different configurations
@@ -471,7 +472,7 @@ JpegScratchLease::~JpegScratchLease() {
 }
 
 // Internal implementation with configurable target size and bit depth
-bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bmpOut, int targetWidth, int targetHeight,
+bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& sink, int targetWidth, int targetHeight,
                                                      bool oneBit, bool crop) {
   LOG_DBG("JPG", "Converting JPEG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : "2-bit", targetWidth, targetHeight);
 
@@ -601,6 +602,11 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
             targetHeight);
   }
 
+  // Coalesces the one-write-per-row output into 2 KB SD writes. Taken after the decoder
+  // object so it cannot split the block that needs. Degrades to pass-through if the nothrow
+  // allocation fails, so a tight heap costs speed, never output.
+  BufferedPrint bmpOut(sink);
+
   // Write BMP header with output dimensions
   int bytesPerRow;
   if (USE_8BIT_OUTPUT && !oneBit) {
@@ -714,6 +720,11 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
 
   if (ctx.rowsWritten != ctx.outHeight) {
     LOG_ERR("JPG", "JPEG decode incomplete: wrote %d/%d BMP rows", ctx.rowsWritten, ctx.outHeight);
+    return false;
+  }
+
+  if (!bmpOut.flushBuffer()) {
+    LOG_ERR("JPG", "Failed to flush buffered BMP output");
     return false;
   }
 

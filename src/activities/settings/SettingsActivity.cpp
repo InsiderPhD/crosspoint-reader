@@ -220,7 +220,7 @@ void SettingsActivity::loop() {
   // Full Touch: a tap on a tab selects that category directly; a tap on a row
   // selects and toggles/activates it. Both hit-tests need the raw point, so
   // this reads wasTapPoint directly instead of the TouchListNav helper.
-  if (SETTINGS.fullTouchUi) {
+  if (CrossPointSettings::FULL_TOUCH_UI) {
     // Swipe right = next tab, wrapping like Confirm-on-the-ribbon does. The
     // leftward swipe is still Back and walks back out through the tabs — see
     // the Back handler below.
@@ -288,7 +288,7 @@ void SettingsActivity::loop() {
     // Row focus is not a step on the way out either: taps move the cursor, so
     // there is nothing to back out of. Gesture mode and the X3/X4 keep the
     // row -> ribbon -> close ladder below.
-    if (SETTINGS.fullTouchUi) {
+    if (CrossPointSettings::FULL_TOUCH_UI) {
       SETTINGS.saveToFile();
       onGoHome();
       return;

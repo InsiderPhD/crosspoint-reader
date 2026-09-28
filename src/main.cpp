@@ -45,6 +45,7 @@
 #include "util/ButtonNavigator.h"
 #include "util/HardcoverSync.h"
 #include "util/HeapReport.h"
+#include "util/HeapTrace.h"
 #include "util/ReaderCombos.h"
 #include "util/ScreenshotUtil.h"
 #include "util/TimeUtils.h"
@@ -462,6 +463,9 @@ void setup() {
   Serial.begin(115200);
   delay(200);  // let the host re-open the CDC endpoint before the first write
   LOG_INF("BOOT", "=== setup() entry: serial up before hardware init ===");
+  // Heap tracer (heaptrace env only; compiles to nothing elsewhere). Started
+  // this early so the hooks see every allocation from hardware init onwards.
+  HeapTrace::begin();
 #endif
 
   // Watch the loop task: a wedged main loop (observed with the BLE controller
@@ -769,17 +773,16 @@ void loop() {
   static unsigned long lastMemPrint = 0;
 
 #if FREEINK_DEVICE_X4PRO
-  // Activities that own touch input (the readers' tap zones and home-key
-  // actions, the keyboard's tap hit-testing) opt out of the global
-  // tap-anywhere-is-Confirm and home-key-is-Confirm conveniences; every other
-  // screen — including the reader's own menus — gets both.
+  // Activities that own touch input (the readers' tap zones, the keyboard's
+  // tap hit-testing) opt out of the global tap-anywhere-is-Confirm
+  // convenience; every other screen — including the reader's own menus — gets
+  // it.
   const bool activityOwnsTouch = activityManager.consumesTouchInput();
   // Full Touch mode: converted screens hit-test taps against their drawn UI,
-  // so only the tap injection is disabled for them — a home-key tap still
-  // means Confirm there. One-frame lag on modal open/close is safe: the
-  // contact that opens a modal is suppressed by the opener.
-  const bool directTouch = SETTINGS.fullTouchUi && activityManager.handlesDirectTouch();
-  mappedInputManager.setHomeKeyActsAsConfirm(!activityOwnsTouch);
+  // so the tap injection is disabled for them too. One-frame lag on modal
+  // open/close is safe: the contact that opens a modal is suppressed by the
+  // opener.
+  const bool directTouch = CrossPointSettings::FULL_TOUCH_UI && activityManager.handlesDirectTouch();
   mappedInputManager.setTapActsAsConfirm(!activityOwnsTouch && !directTouch);
   // Full Touch keeps only the Back swipe as an injected press everywhere except
   // the actual reading screens, whose swipe/tap actions the user configures
@@ -792,12 +795,28 @@ void loop() {
   // (TouchListNav::pageSwipe) and the tabbed screens take the next tab from
   // right (TouchListNav::tabSwipeNext).
   const bool onReadingScreen = activityManager.isReaderActivity() && activityOwnsTouch;
-  mappedInputManager.setSwipesBackOnly(SETTINGS.fullTouchUi && !onReadingScreen);
+  mappedInputManager.setSwipesBackOnly(CrossPointSettings::FULL_TOUCH_UI && !onReadingScreen);
   mappedInputManager.setSwipesIgnored(activityManager.ownsSwipes());
+  mappedInputManager.setConfirmSwipeIgnored(onReadingScreen);
+  // Only the reading screen has a double-tap action, so only it pays the
+  // double-tap wait on a single tap -- and not even there with None bound.
+  mappedInputManager.setHomeKeyDoubleTap(onReadingScreen &&
+                                         SETTINGS.readerDoubleTapHome != CrossPointSettings::READER_ACTION_NONE);
 #endif
   // Latches buttons (gpio.update()) and, on X4 Pro, classifies touch swipes
   // into synthesized button presses.
   mappedInputManager.update();
+
+#if FREEINK_DEVICE_X4PRO
+  // Home key off the reading screen is Home, on every screen including the
+  // reader's own menus. (The reading screen dispatches its configurable
+  // tap/double-tap/hold actions itself.) Already at Home it is a no-op rather
+  // than a rebuild and repaint of the same screen.
+  if (!onReadingScreen && mappedInputManager.homeKeyGesture() == MappedInputManager::HomeKeyGesture::Tap &&
+      !activityManager.isAtHome()) {
+    activityManager.goHome();
+  }
+#endif
 
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
 
@@ -868,12 +887,18 @@ void loop() {
       String cmd = line.substring(4);
       cmd.trim();
       if (cmd == "SCREENSHOT" && renderer.isRenderable()) {
+        HeapTrace::OutputLock traceLock;  // keep @HT lines out of the binary dump
         const uint32_t bufferSize = display.getBufferSize();
         logSerial.printf("SCREENSHOT_START:%d\n", bufferSize);
         uint8_t* buf = display.getFrameBuffer();
         logSerial.write(buf, bufferSize);
         logSerial.printf("SCREENSHOT_END\n");
       }
+#ifdef CROSSPOINT_HEAP_TRACE
+      else if (cmd.startsWith("HEAPTRACE")) {
+        HeapTrace::handleCommand(cmd.length() > 10 ? cmd.c_str() + 10 : nullptr);
+      }
+#endif
     }
   }
 

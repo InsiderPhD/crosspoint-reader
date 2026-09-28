@@ -844,7 +844,7 @@ void ReadingStatsActivity::loop() {
   // selected row opens it. Both hit-tests need the raw point, so this reads
   // wasTapPoint directly instead of the TouchListNav helper (mirrors
   // SettingsActivity).
-  if (SETTINGS.fullTouchUi) {
+  if (CrossPointSettings::FULL_TOUCH_UI) {
     // Swipe right = next tab, wrapping like Confirm-on-the-ribbon does. The
     // leftward swipe is Back and walks back out through the tabs (above).
     if (TouchListNav::tabSwipeNext(mappedInput)) {
@@ -953,7 +953,7 @@ void ReadingStatsActivity::loop() {
     // otherwise one Back would do two things: reset row focus here, then close
     // on the release. The row→ribbon step is not part of the way out in Full
     // Touch anyway (taps move the cursor; there is nothing to back out of).
-    if (SETTINGS.fullTouchUi) {
+    if (CrossPointSettings::FULL_TOUCH_UI) {
       return;
     }
 #endif

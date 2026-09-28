@@ -10,6 +10,7 @@
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "components/themes/BaseTheme.h"
+#include "components/themes/bookshelf/BookshelfTheme.h"
 #include "components/themes/dashboard/DashboardTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
@@ -54,6 +55,10 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
     case CrossPointSettings::UI_THEME::DASHBOARD:
       LOG_DBG("UI", "Using Dashboard theme");
       currentTheme = std::make_unique<DashboardTheme>();
+      break;
+    case CrossPointSettings::UI_THEME::BOOKSHELF:
+      LOG_DBG("UI", "Using Bookshelf theme");
+      currentTheme = std::make_unique<BookshelfTheme>();
       break;
     default:
       LOG_DBG("UI", "Unknown theme %d, falling back to Lyra", static_cast<int>(type));
@@ -102,8 +107,8 @@ namespace {
 // out of this list silently. A new theme with a new homeCoverHeight must be
 // added here — the static_assert fires if the count stops matching.
 constexpr int kCoverThumbHeights[] = {
-    // DashboardMetrics deliberately reuses BaseMetrics' height, so it adds no
-    // entry here.
+    // DashboardMetrics and BookshelfMetrics deliberately reuse BaseMetrics'
+    // height, so they add no entry here.
     BaseMetrics::values.homeCoverHeight,
     LyraMetrics::values.homeCoverHeight,
     LyraCarouselMetrics::values.homeCoverHeight,

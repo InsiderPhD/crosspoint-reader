@@ -18,7 +18,7 @@
 const ThemeMetrics& Lyra3CoversTheme::themeMetrics() const {
 #if FREEINK_DEVICE_X4PRO
   // See BaseTheme::themeMetrics().
-  return SETTINGS.fullTouchUi ? Lyra3CoversMetrics::values : Lyra3CoversMetrics::noActionBarValues;
+  return CrossPointSettings::FULL_TOUCH_UI ? Lyra3CoversMetrics::values : Lyra3CoversMetrics::noActionBarValues;
 #else
   return Lyra3CoversMetrics::values;
 #endif

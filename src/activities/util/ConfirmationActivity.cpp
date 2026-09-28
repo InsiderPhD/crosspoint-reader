@@ -121,7 +121,7 @@ void ConfirmationActivity::loop() {
         finishWith(/*cancelled=*/true);
         return;
       }
-      if (SETTINGS.fullTouchUi) {
+      if (CrossPointSettings::FULL_TOUCH_UI) {
         finishWith(/*cancelled=*/true);
         return;
       }

@@ -22,6 +22,17 @@ RecentBooksStore RecentBooksStore::instance;
 
 void RecentBooksStore::addBook(const std::string& path, const std::string& title, const std::string& author,
                                const std::string& coverBmpPath) {
+  // Re-opening the book that is already first with identical details (sleep-wake
+  // resume, Continue Reading) changes nothing: skip both the per-entry exists()
+  // probes below and the full JSON rewrite. Stale entries can wait for the next
+  // real add; HomeActivity already hides missing books when it lists them.
+  if (!recentBooks.empty()) {
+    const RecentBook& front = recentBooks.front();
+    if (front.path == path && front.title == title && front.author == author && front.coverBmpPath == coverBmpPath) {
+      return;
+    }
+  }
+
   // Drop stale entries first so a new add can't evict a valid book in their stead.
   pruneMissing();
 
@@ -51,6 +62,7 @@ void RecentBooksStore::updateBook(const std::string& path, const std::string& ti
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end()) {
     RecentBook& book = *it;
+    if (book.title == title && book.author == author && book.coverBmpPath == coverBmpPath) return;
     book.title = title;
     book.author = author;
     book.coverBmpPath = coverBmpPath;
@@ -70,7 +82,7 @@ void RecentBooksStore::removeBook(const std::string& path) {
 void RecentBooksStore::updateProgress(const std::string& path, int8_t progressPercent) {
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
-  if (it != recentBooks.end()) {
+  if (it != recentBooks.end() && it->progressPercent != progressPercent) {
     it->progressPercent = progressPercent;
     saveToFile();
   }

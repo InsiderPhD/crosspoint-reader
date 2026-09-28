@@ -20,6 +20,7 @@ int collectActions(Action* out) {
   const bool dev = SETTINGS.devMode != 0;
   int n = 0;
   out[n++] = Action::BookInfo;  // First: the most common, least destructive action
+  out[n++] = Action::ViewStats;
   out[n++] = Action::MarkRead;
   if (dev) out[n++] = Action::ResetProgress;
   out[n++] = Action::Shelve;
@@ -45,6 +46,8 @@ const char* labelForAction(Action action) {
       return tr(STR_REGENERATE_COVER);
     case Action::BookInfo:
       return tr(STR_BOOK_INFO);
+    case Action::ViewStats:
+      return tr(STR_VIEW_STATS);
   }
   return "";
 }
@@ -128,7 +131,7 @@ bool BookContextMenu::handleInput(ButtonNavigator& nav, const MappedInputManager
       triggered_ = false;
       return true;
     }
-    if (SETTINGS.fullTouchUi) {
+    if (CrossPointSettings::FULL_TOUCH_UI) {
       const int row = (tapY - optionsTopY_) / OPTION_ROW_H;
       const bool onRow = tapY >= optionsTopY_ && row >= 0 && row < actionCount;
       if (onRow && SETTINGS.yoloSelection) {

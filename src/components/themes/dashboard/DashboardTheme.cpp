@@ -28,7 +28,7 @@
 const ThemeMetrics& DashboardTheme::themeMetrics() const {
 #if FREEINK_DEVICE_X4PRO
   // See BaseTheme::themeMetrics().
-  return SETTINGS.fullTouchUi ? DashboardMetrics::values : DashboardMetrics::noActionBarValues;
+  return CrossPointSettings::FULL_TOUCH_UI ? DashboardMetrics::values : DashboardMetrics::noActionBarValues;
 #else
   return DashboardMetrics::values;
 #endif

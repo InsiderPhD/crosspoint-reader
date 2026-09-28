@@ -48,7 +48,7 @@ inline bool tapActivates(const int tappedIndex, const int selectedIndex) {
 // dropped — gestures still work there.
 inline TapResult tapRow(const MappedInputManager& mappedInput, const Rect& rect, int itemCount, int selectedIndex,
                         bool hasSubtitle, int& outIndex) {
-  if (!SETTINGS.fullTouchUi) {
+  if (!CrossPointSettings::FULL_TOUCH_UI) {
     return TapResult::None;
   }
   int lx, ly;

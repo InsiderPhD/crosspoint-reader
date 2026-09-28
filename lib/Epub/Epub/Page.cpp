@@ -2,6 +2,7 @@
 
 #include <GfxRenderer.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 
 #include <cstring>
@@ -106,6 +107,141 @@ std::unique_ptr<PageHorizontalRule> PageHorizontalRule::deserialize(FsFile& file
     return nullptr;
   }
   return std::unique_ptr<PageHorizontalRule>(rule);
+}
+
+void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
+  const int drawX = xPos + xOffset;
+  const int drawY = yPos + yOffset;
+  if (hasBorder) renderer.drawRect(drawX, drawY, totalWidth, totalHeight, true);
+
+  // Integer column edges from totalWidth*(c+1)/N: no rounding drift across columns.
+  std::array<int, MAX_TABLE_COLS + 1> colX = {};
+  colX[0] = drawX;
+  for (uint8_t c = 0; c < columnCount; c++) {
+    colX[c + 1] = drawX + static_cast<int>((static_cast<uint32_t>(totalWidth) * (c + 1)) / columnCount);
+  }
+
+  int rowY = drawY;
+  for (size_t r = 0; r < rows.size(); r++) {
+    const TableRow& row = rows[r];
+    // Column separators are drawn per row: a colspan cell has no internal boundary.
+    const int sepBottom = (r + 1 < rows.size()) ? rowY + row.height - 1 : drawY + totalHeight - 1;
+    uint8_t col = 0;
+    for (const TableCell& cell : row.cells) {
+      if (col >= columnCount) break;
+      const uint8_t span = std::min<uint8_t>(cell.colSpan ? cell.colSpan : 1, columnCount - col);
+      int lineY = rowY + TABLE_CELL_PADDING;
+      for (const auto& line : cell.lines) {
+        line->render(renderer, fontId, colX[col] + TABLE_CELL_PADDING, lineY);
+        lineY += lineStep;
+      }
+      col = static_cast<uint8_t>(col + span);
+      if (hasBorder && col < columnCount) renderer.drawLine(colX[col], rowY, colX[col], sepBottom, true);
+    }
+    rowY += row.height;
+    if (hasBorder && r + 1 < rows.size()) {
+      renderer.drawLine(drawX, rowY, drawX + totalWidth - 1, rowY, row.isHeaderRow ? 2 : 1, true);
+    }
+  }
+}
+
+bool PageTableFragment::serialize(FsFile& file) {
+  serialization::writePod(file, xPos);
+  serialization::writePod(file, yPos);
+  serialization::writePod(file, columnCount);
+  serialization::writePod(file, lineStep);
+  serialization::writePod(file, totalWidth);
+  serialization::writePod(file, totalHeight);
+  serialization::writePod(file, hasBorder);
+  const uint16_t rowCount = static_cast<uint16_t>(rows.size());
+  serialization::writePod(file, rowCount);
+  for (const auto& row : rows) {
+    serialization::writePod(file, row.height);
+    serialization::writePod(file, row.isHeaderRow);
+    const uint8_t cellCount = static_cast<uint8_t>(row.cells.size());
+    serialization::writePod(file, cellCount);
+    for (const auto& cell : row.cells) {
+      serialization::writePod(file, cell.isHeader);
+      serialization::writePod(file, cell.colSpan);
+      const uint8_t lineCount = static_cast<uint8_t>(cell.lines.size());
+      serialization::writePod(file, lineCount);
+      for (const auto& line : cell.lines) {
+        if (!line->serialize(file)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file) {
+  int16_t xPos = 0;
+  int16_t yPos = 0;
+  uint8_t columnCount = 0;
+  uint16_t lineStep = 0;
+  uint16_t totalWidth = 0;
+  uint16_t totalHeight = 0;
+  uint16_t rowCount = 0;
+  bool hasBorder = true;
+  serialization::readPod(file, xPos);
+  serialization::readPod(file, yPos);
+  serialization::readPod(file, columnCount);
+  serialization::readPod(file, lineStep);
+  serialization::readPod(file, totalWidth);
+  serialization::readPod(file, totalHeight);
+  serialization::readPod(file, hasBorder);
+  if (columnCount == 0 || columnCount > MAX_TABLE_COLS) {
+    LOG_ERR("PGE", "TableFragment: invalid columnCount %u", columnCount);
+    return nullptr;
+  }
+  serialization::readPod(file, rowCount);
+  if (rowCount > MAX_TABLE_ROWS) {
+    LOG_ERR("PGE", "TableFragment: invalid rowCount %u", rowCount);
+    return nullptr;
+  }
+  std::vector<TableRow> rows;
+  rows.reserve(rowCount);
+  for (uint16_t r = 0; r < rowCount; r++) {
+    TableRow row;
+    uint8_t cellCount = 0;
+    serialization::readPod(file, row.height);
+    serialization::readPod(file, row.isHeaderRow);
+    serialization::readPod(file, cellCount);
+    if (cellCount > MAX_TABLE_COLS) {
+      LOG_ERR("PGE", "TableFragment: invalid cellCount %u in row %u", cellCount, r);
+      return nullptr;
+    }
+    row.cells.reserve(cellCount);
+    for (uint8_t c = 0; c < cellCount; c++) {
+      TableCell cell;
+      uint8_t lineCount = 0;
+      serialization::readPod(file, cell.isHeader);
+      serialization::readPod(file, cell.colSpan);
+      if (cell.colSpan == 0 || cell.colSpan > columnCount) {
+        LOG_ERR("PGE", "TableFragment: invalid colSpan %u at row %u cell %u", cell.colSpan, r, c);
+        return nullptr;
+      }
+      serialization::readPod(file, lineCount);
+      if (lineCount > MAX_CELL_LINES) {
+        LOG_ERR("PGE", "TableFragment: invalid lineCount %u at row %u cell %u", lineCount, r, c);
+        return nullptr;
+      }
+      cell.lines.reserve(lineCount);
+      for (uint8_t l = 0; l < lineCount; l++) {
+        auto tb = TextBlock::deserialize(file);
+        if (!tb) {
+          LOG_ERR("PGE", "TableFragment: TextBlock deserialize failed r%u c%u l%u", r, c, l);
+          return nullptr;
+        }
+        cell.lines.push_back(std::move(tb));
+      }
+      row.cells.push_back(std::move(cell));
+    }
+    rows.push_back(std::move(row));
+  }
+  auto fragment = makeUniqueNoThrow<PageTableFragment>(columnCount, lineStep, totalWidth, totalHeight, std::move(rows),
+                                                       xPos, yPos, hasBorder);
+  if (!fragment) LOG_ERR("PGE", "Deserialization failed: could not allocate PageTableFragment");
+  return fragment;
 }
 
 void Page::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) const {
@@ -395,6 +531,12 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file) {
         return nullptr;
       }
       page->elements.push_back(std::move(rule));
+    } else if (tag == TAG_PageTable) {
+      auto table = PageTableFragment::deserialize(file);
+      if (!table) {
+        return nullptr;
+      }
+      page->elements.push_back(std::move(table));
     } else {
       LOG_ERR("PGE", "Deserialization failed: Unknown tag %u", tag);
       return nullptr;

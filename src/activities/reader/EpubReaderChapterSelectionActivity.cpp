@@ -75,7 +75,7 @@ void EpubReaderChapterSelectionActivity::loop() {
   // Full Touch: first tap on a row moves the cursor there; a second tap on the
   // already-selected row opens the chapter. Rows are page-relative, so the
   // tapped item is the current page start plus the row.
-  if (SETTINGS.fullTouchUi) {
+  if (CrossPointSettings::FULL_TOUCH_UI) {
     int lx, ly;
     if (mappedInput.wasTapPoint(lx, ly)) {
       const int top = listTopY();

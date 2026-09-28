@@ -21,6 +21,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "ReadingStatsDetailActivity.h"
 #include "RecentBooksStore.h"
 #include "SilentRestart.h"
 #include "components/UITheme.h"
@@ -55,6 +56,22 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
 
     recentBooks.push_back(book);
   }
+}
+
+// Mirrors loadRecentCovers' conditions: true only when that pass would actually generate a thumb.
+// BookFusion EPUBs are skipped there (API artwork only), so they must not force a second pass.
+bool HomeActivity::anyRecentThumbNeedsGenerating(const int coverHeight) const {
+  for (const RecentBook& book : recentBooks) {
+    if (book.coverBmpPath.empty()) continue;
+    const std::string coverPath = UITheme::getCoverThumbPath(book.coverBmpPath, coverHeight);
+    if (Storage.exists(coverPath.c_str())) continue;
+    if (FsHelpers::hasEpubExtension(book.path)) {
+      if (!BookFusionBookIdStore::hasBookId(book.path.c_str())) return true;
+    } else if (FsHelpers::hasXtcExtension(book.path)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void HomeActivity::loadRecentCovers(int coverHeight) {
@@ -322,6 +339,10 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
                                                                    contextMenu.author(), contextMenu.progressPercent()),
                              [this](const ActivityResult&) { requestUpdate(); });
       break;
+    case BookContextMenu::Action::ViewStats:
+      startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, path),
+                             [this](const ActivityResult&) { requestUpdate(); });
+      break;
   }
 }
 
@@ -349,7 +370,7 @@ void HomeActivity::loop() {
   // Full Touch: a touch hold targets the tile under the finger — move the
   // selector there first so checkLongPress below (which reads the same touch
   // event and suppresses the contact) opens the menu for that book.
-  if (SETTINGS.fullTouchUi) {
+  if (CrossPointSettings::FULL_TOUCH_UI) {
     int lx, ly;
     if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
       const int tile = tileIndexAt(lx, ly);
@@ -386,13 +407,13 @@ void HomeActivity::loop() {
   // Home is the exception: it is the root screen, so Back closes nothing here
   // and its hint label is already blank. The context-menu branch above returns
   // before this point, so the menu keeps its own Back.
-  if (SETTINGS.fullTouchUi) {
+  if (CrossPointSettings::FULL_TOUCH_UI) {
     if (mappedInput.wasSwipe() == MappedInputManager::Swipe::Right && rotateCoverSelection(1)) return;
     if (mappedInput.wasReleased(MappedInputManager::Button::Back) && rotateCoverSelection(-1)) return;
   }
 
   // Full Touch: first tap on a tile moves the selector, a second tap opens it.
-  if (SETTINGS.fullTouchUi) {
+  if (CrossPointSettings::FULL_TOUCH_UI) {
     int lx, ly;
     if (mappedInput.wasTapPoint(lx, ly)) {
       const int tile = tileIndexAt(lx, ly);
@@ -411,15 +432,30 @@ void HomeActivity::loop() {
   }
 #endif
 
-  buttonNavigator.onNext([this, menuCount] {
-    selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
+  // One handler per direction so a theme with a 2-D home (Bookshelf's grid)
+  // can move by rows; -1 from the theme keeps the linear next/previous step
+  // (Down/Right forward, Up/Left back) every other theme uses.
+  const auto navigate = [this, menuCount](const BaseTheme::NavDirection dir, const bool forward) {
+    const int target = GUI.homeNavigate(selectorIndex, getCoverSlotsUsed(), menuCount, dir);
+    if (target >= 0 && target < menuCount) {
+      if (target == selectorIndex) return;  // edge of the grid: nothing to redraw
+      selectorIndex = target;
+    } else {
+      selectorIndex = forward ? ButtonNavigator::nextIndex(selectorIndex, menuCount)
+                              : ButtonNavigator::previousIndex(selectorIndex, menuCount);
+    }
     requestUpdate();
-  });
-
-  buttonNavigator.onPrevious([this, menuCount] {
-    selectorIndex = ButtonNavigator::previousIndex(selectorIndex, menuCount);
-    requestUpdate();
-  });
+  };
+  // Static: built once, not a heap vector per direction on every loop pass.
+  using Button = MappedInputManager::Button;
+  static const std::vector<Button> kDown{Button::Down};
+  static const std::vector<Button> kRight{Button::Right};
+  static const std::vector<Button> kUp{Button::Up};
+  static const std::vector<Button> kLeft{Button::Left};
+  buttonNavigator.onPressAndContinuous(kDown, [&] { navigate(BaseTheme::NavDirection::Down, true); });
+  buttonNavigator.onPressAndContinuous(kRight, [&] { navigate(BaseTheme::NavDirection::Right, true); });
+  buttonNavigator.onPressAndContinuous(kUp, [&] { navigate(BaseTheme::NavDirection::Up, false); });
+  buttonNavigator.onPressAndContinuous(kLeft, [&] { navigate(BaseTheme::NavDirection::Left, false); });
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     // If this release was the menu's confirmation/dismissal, the helper has
@@ -523,7 +559,7 @@ void HomeActivity::render(RenderLock&&) {
   // Build menu items dynamically
   std::vector<const char*> menuItems = {tr(STR_LIBRARY), tr(STR_BROWSE_FILES), tr(STR_FILE_TRANSFER),
                                         tr(STR_READING_STATS), tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Library, Folder, Transfer, Book, Settings};
+  std::vector<UIIcon> menuIcons = {Library, Folder, Transfer, Stats, Settings};
 
   const int menuOffset = getCoverSlotsUsed();
   GUI.drawButtonMenu(
@@ -543,7 +579,13 @@ void HomeActivity::render(RenderLock&&) {
 
   if (!firstRenderDone) {
     firstRenderDone = true;
-    requestUpdate();
+    // Only a missing thumb needs the second pass (loadRecentCovers below). With every thumb
+    // already cached it would repaint identical pixels: one wasted FAST refresh per Home entry.
+    if (anyRecentThumbNeedsGenerating(metrics.homeCoverHeight)) {
+      requestUpdate();
+    } else {
+      recentsLoaded = true;
+    }
   } else if (!recentsLoaded && !recentsLoading) {
     recentsLoading = true;
     loadRecentCovers(metrics.homeCoverHeight);

@@ -31,11 +31,12 @@ struct PixelCache {
   int width;
   int height;
   int bytesPerRow;
-  int originX;      // config.x - to convert screen coords to cache coords
-  int originY;      // config.y
-  int bandRows;     // rows held in the band buffer
-  int bandStart;    // image-local row index of band buffer row 0
-  int flushedRows;  // image-local rows already written to file
+  int originX;       // config.x - to convert screen coords to cache coords
+  int originY;       // config.y
+  int bandRows;      // rows held in the band buffer
+  int bandStart;     // image-local row index of band buffer row 0
+  int flushedRows;   // image-local rows already written to file (always == bandStart)
+  int maxBlockRows;  // tallest single decode block, in output rows
   HalFile file;
   std::string cachePathStr;
   bool ok;
@@ -51,6 +52,7 @@ struct PixelCache {
         bandRows(0),
         bandStart(0),
         flushedRows(0),
+        maxBlockRows(1),
         ok(false) {}
   PixelCache(const PixelCache&) = delete;
   PixelCache& operator=(const PixelCache&) = delete;
@@ -86,6 +88,7 @@ struct PixelCache {
       return false;
     }
     bandRows = wantRows;
+    maxBlockRows = maxBlockDstRows > 0 ? maxBlockDstRows : 1;
 
     const size_t bufSize = (size_t)(bandRows + 1) * bytesPerRow;  // +1 spare zero row
     buffer = (uint8_t*)malloc(bufSize);
@@ -117,18 +120,20 @@ struct PixelCache {
     return true;
   }
 
-  // Flush every output row below newTopRow (they are final in raster order) and
-  // reposition the band to start at newTopRow. Returns false if a write failed,
-  // in which case the caller must stop caching for the rest of the decode.
-  bool advanceTo(int newTopRow) {
-    if (!ok) return false;
-    if (newTopRow <= bandStart) return true;
-    if (newTopRow > height) newTopRow = height;
-
-    for (int r = bandStart; r < newTopRow; ++r) {
-      const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
-      if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
+  // Write rows [flushedRows, newTopRow) in one write for the part held in the band (plus
+  // zero-fill for any gap beyond it), then reposition the band at newTopRow.
+  bool flushThrough(int newTopRow) {
+    const int pending = newTopRow - flushedRows;
+    if (pending <= 0) return true;
+    const int inBand = pending < bandRows ? pending : bandRows;
+    const size_t runBytes = (size_t)inBand * bytesPerRow;
+    if (inBand > 0 && file.write(buffer, runBytes) != runBytes) {
+      LOG_ERR("IMG", "Cache write error at row %d", flushedRows);
+      ok = false;
+      return false;
+    }
+    for (int r = flushedRows + inBand; r < newTopRow; ++r) {
+      if (file.write(zeroRow, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
         LOG_ERR("IMG", "Cache write error at row %d", r);
         ok = false;
         return false;
@@ -140,6 +145,19 @@ struct PixelCache {
     return true;
   }
 
+  // Make room for a decode block whose top row is newTopRow. Rows below newTopRow are final
+  // (raster order), but they stay in the band while another whole block still fits beneath
+  // them: a PNG's 16-row band then costs one SD write per 16 rows instead of one per row.
+  // Returns false if a write failed, in which case the caller must stop caching for the
+  // rest of the decode. Callers must re-read bandStart after this returns.
+  bool advanceTo(int newTopRow) {
+    if (!ok) return false;
+    if (newTopRow <= bandStart) return true;
+    if (newTopRow > height) newTopRow = height;
+    if (newTopRow - bandStart + maxBlockRows <= bandRows) return true;
+    return flushThrough(newTopRow);
+  }
+
   // Flush the final band and zero-fill any rows never covered (image clipped by
   // the screen), then close the file.
   bool finalize() {
@@ -147,14 +165,9 @@ struct PixelCache {
       abort();
       return false;
     }
-    for (int r = flushedRows; r < height; ++r) {
-      const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx >= 0 && idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
-      if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
-        LOG_ERR("IMG", "Cache write error at row %d", r);
-        abort();
-        return false;
-      }
+    if (!flushThrough(height)) {
+      abort();
+      return false;
     }
     file.close();
     LOG_DBG("IMG", "Cache written: %s (%dx%d, %d bytes)", cachePathStr.c_str(), width, height,

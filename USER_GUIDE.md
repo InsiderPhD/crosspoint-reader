@@ -3,7 +3,7 @@
 Welcome to **KatiePoint** — a heavily-customised fork of CrossPoint firmware for the **Xteink X4**, **X3**, and (experimentally) **X4 Pro** e-paper readers. This guide covers the hardware controls, navigation, and reading features of the device.
 
 > [!NOTE]
-> KatiePoint has diverged substantially from upstream CrossPoint. If you have used CrossPoint before, the sections on the **[Home Screen](#3-home-screen)**, **[Getting Books onto the Device](#5-getting-books-onto-the-device)**, **[Sync](#10-sync-bookfusion--koreader)**, **[Reading Stats](#9-reading-stats)**, and the **[Settings Reference](#12-settings-reference)** are the ones most worth reading. For the full technical changelog, see [CHANGES.md](./CHANGES.md).
+> KatiePoint has diverged substantially from upstream CrossPoint. If you have used CrossPoint before, the sections on the **[Home Screen](#3-home-screen)**, **[Getting Books onto the Device](#5-getting-books-onto-the-device)**, **[Sync](#10-sync-bookfusion--koreader)**, **[Statistics](#9-statistics)**, and the **[Settings Reference](#12-settings-reference)** are the ones most worth reading. For the full technical changelog, see [CHANGES.md](./CHANGES.md).
 
 ## Contents
 
@@ -15,7 +15,7 @@ Welcome to **KatiePoint** — a heavily-customised fork of CrossPoint firmware f
 - [6. Browsing Your Library](#6-browsing-your-library)
 - [7. The Reader Menu](#7-the-reader-menu)
 - [8. Bookmarks & Clippings](#8-bookmarks--clippings)
-- [9. Reading Stats](#9-reading-stats)
+- [9. Statistics](#9-statistics)
 - [10. Sync (BookFusion & KOReader)](#10-sync-bookfusion--koreader)
 - [11. Bluetooth Page Turner](#11-bluetooth-page-turner)
 - [12. Settings Reference](#12-settings-reference)
@@ -53,13 +53,14 @@ The X4 Pro has **no front buttons**. It has two side keys, a capacitive **home p
 | **Swipe down**  | **Down** (next item)                            |
 | **Left side key**  | **Left** in menus, **Page Back** while reading    |
 | **Right side key** | **Right** in menus, **Page Forward** while reading |
-| **Home pad tap**   | **Confirm** outside the readers; a configurable action while reading |
-| **Home pad hold**  | Opens the reader menu                            |
-| **Screen tap**     | **Confirm** outside the readers; a tap-zone action while reading |
+| **Home pad tap**   | **Home** outside the reading page (including the reader's own menus); a configurable action while reading |
+| **Home pad double tap** | A configurable action while reading (default: reader menu) |
+| **Home pad hold**  | Opens the reader menu while reading              |
+| **Screen tap**     | Selects / activates what you tap outside the readers; a tap-zone action while reading |
 
 Because every other slot is remappable, the **home-pad hold is hard-wired to the reader menu** — that guarantees the menu (and its **Go Home** row) is always reachable, so a stray remap can never strand you inside a book.
 
-**Remap Front Buttons** and **Front Button Follows Orientation** are hidden on this device (there are no front buttons to remap), and see **[Full Touch Mode](#full-touch-mode-x4-pro)** for tap-to-select navigation.
+**Remap Front Buttons** and **Front Button Follows Orientation** are hidden on this device (there are no front buttons to remap), and see **[Full Touch](#full-touch-x4-pro)** for tap-to-select navigation.
 
 The X4 Pro is a **separate firmware binary** (`pio run -e x4pro`) — it is an ESP32-S3, not the ESP32-C3 the X4/X3 image is built for. The port is still in bring-up; expect rough edges.
 
@@ -95,6 +96,7 @@ The Home screen is the main hub. Its layout depends on the **UI Theme** (Setting
 | **Classic** | Original KatiePoint look; one recent-book tile plus the menu. |
 | **Lyra** | Rounded elements and menu icons; one recent-book tile. |
 | **Lyra Extended** | Like Lyra, but shows the **3** most recent books instead of 1. |
+| **Bookshelf** | Inspired by KOReader's Bookshelf plugin and Apple Books: a **Continue Reading** card (large cover, title, author, the start of the book's description, progress) above a shelf of your **6** most recent books — some face-out, some spine-out (books without a cover always stand spine-out). **Library** sits at the end of the shelf as a stack of books lying flat; the rest of the menu is a grid of large buttons (2×2, or one row in landscape). Moving along the shelf changes which book the card shows; **Up/Down** move between the shelf and the button rows, **Left/Right** step through items in order. |
 
 ### Recent-book tile
 
@@ -121,7 +123,7 @@ The menu (shown at the bottom, or as icons in Lyra themes) contains:
 - **Library** — the cover grid of every book on the card (see **[Library cover grid](#library-cover-grid)**).
 - **Browse Files** — the file/folder browser (see **[Browsing Your Library](#6-browsing-your-library)**).
 - **File Transfer** — get books onto the device (see **[Getting Books onto the Device](#5-getting-books-onto-the-device)**).
-- **Reading Stats** — your reading statistics (see **[Reading Stats](#9-reading-stats)**).
+- **Statistics** — your reading statistics (see **[Statistics](#9-statistics)**).
 - **Settings** — device configuration (see **[Settings Reference](#12-settings-reference)**).
 
 **Navigate:** use **Left/Up** and **Right/Down** (or the side **Up/Down** buttons) to move the cursor; **Confirm** to select.
@@ -156,7 +158,7 @@ This behaviour is configurable. By default long-press skips chapters; you can ch
 
 ### Touch controls while reading *(X4 Pro)*
 
-The screen is split into **left / middle / right thirds**. Each third has a **tap** action and a **hold** action, and the capacitive home pad has a **short** and a **long** press — all bindable in **Settings → Reader → Reader Controls**, from the same action list the physical buttons use.
+The screen is split into **left / middle / right thirds**. Each third has a **tap** action and a **hold** action, and the capacitive home pad has a **tap** and a **double tap** — all bindable in **Settings → Reader → Reader Controls**, from the same action list the physical buttons use.
 
 Defaults:
 
@@ -166,8 +168,11 @@ Defaults:
 | **Tap middle** | Open reader menu |
 | **Tap right** | Next page |
 | **Hold** (any third) | Save Clipping — hold on the passage you want |
-| **Home pad, short** | Go Home |
-| **Home pad, long** | Open reader menu *(fixed — see [Hardware Overview](#controls-on-the-x4-pro-experimental))* |
+| **Home pad, tap** | Go Home |
+| **Home pad, double tap** | Open reader menu |
+| **Home pad, hold** | Open reader menu *(fixed — see [Hardware Overview](#controls-on-the-x4-pro-experimental))* |
+
+While a double-tap action is bound, a single tap waits about a third of a second to rule out a second tap; bind the double tap to **None** to make the single tap instant. A **leftward swipe does nothing** on the reading page — it used to open the menu and was too easy to trigger by accident; use the action bar's **Confirm** button (bindable as the Confirm row) or the middle tap zone instead.
 
 ### On-screen button hints
 
@@ -369,30 +374,30 @@ Neither action touches `My Clippings.txt`, so copy it off the SD card whenever y
 
 ---
 
-## 9. Reading Stats
+## 9. Statistics
 
-Open from **Home → Reading Stats**. Tracks sessions across `.epub`, `.txt`, and `.xtc`. Metrics include **Reading Time, Pages Read, Books Finished, Sessions, Average Session, Reading Speed,** and **In Progress**. Books at **≥90%** count as finished.
+Open from **Home → Statistics**. Tracks sessions across `.epub`, `.txt`, and `.xtc`. Metrics include **Reading Time, Pages Read, Books Finished, Sessions, Average Session, Reading Speed,** and **In Progress**. Books at **≥90%** count as finished.
 
-Stats are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), and **Sessions**:
+Statistics are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), and **Sessions**:
 
 <p>
-<img src="docs/images/user-guide/stats-overview.png" alt="Reading Stats Overview tab with streak, daily goal, totals, and reading profile scores" width="300">
-<img src="docs/images/user-guide/stats-month.png" alt="Reading Stats Month tab showing a calendar heat-map of daily reading time" width="300">
+<img src="docs/images/user-guide/stats-overview.png" alt="Statistics Overview tab with streak, daily goal, totals, and reading profile scores" width="300">
+<img src="docs/images/user-guide/stats-month.png" alt="Statistics Month tab showing a calendar heat-map of daily reading time" width="300">
 </p>
 
-### Configuring stats (Settings → Stats tab)
+### Configuring statistics (Settings → Statistics tab)
 
 - **Daily Reading Goal** — 5 / 10 / 15 / 30 / 60 min.
 - **Minimum Session Length** — the shortest activity (1 / 3 / 5 min) that counts as a session.
 - **Set Date** / **Time Zone** — keep timestamps and streaks accurate.
-- **Export Reading Stats / Import Reading Stats / Export to StoryGraph** — back up or move your stats.
+- **Export Statistics / Import Statistics / Export to StoryGraph** — back up or move your stats.
 - **"If Found" contact** — a contact string (e.g. a phone number) that can be shown on the sleep screen.
 
-<img src="docs/images/user-guide/settings-stats.png" alt="Settings Stats tab with daily goal, session length, sleep-screen stat slots, and export options" width="300">
+<img src="docs/images/user-guide/settings-stats.png" alt="Settings Statistics tab with daily goal, session length, sleep-screen stat slots, and export options" width="300">
 
 ### Sleep-screen stats
 
-You can surface up to **three** reading stats on the sleep screen. **Settings → Stats → Sleep Stat 1 / 2 / 3** each pick one of: Today, Daily Goal, This Week, Streak, This Month, Total, Books Finished, "If Found" contact, Book Progress, Daily Average, Days This Month, Week Streak, Goal Remaining, or Book Time Left (or **None**).
+You can surface up to **three** reading stats on the sleep screen. **Settings → Statistics → Sleep Screen Statistics 1 / 2 / 3** each pick one of: Today, Daily Goal, This Week, Streak, This Month, Total, Books Finished, "If Found" contact, Book Progress, Daily Average, Days This Month, Week Streak, Goal Remaining, or Book Time Left (or **None**).
 
 ---
 
@@ -571,7 +576,7 @@ Occasionally the toggle will refuse with a memory message. Bluetooth needs one l
 
 ## 12. Settings Reference
 
-Settings are organised into tabs, selected via the top ribbon: **Display**, **Reader**, **Stats**, **System**, and **Developer** (only when Developer Mode is on). Most of these are also editable from the web settings page (File Transfer → Join Network).
+Settings are organised into tabs, selected via the top ribbon: **Display**, **Reader**, **Statistics**, **System**, and **Developer** (only when Developer Mode is on). Most of these are also editable from the web settings page (File Transfer → Join Network).
 
 ### Display tab
 
@@ -581,7 +586,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Seamless Sleep Screen** — Never / After Timeout / Always.
 - **Hide Battery %** — Never / In Reader / Always (icon still shown).
 - **Refresh Frequency** — full-refresh every 1 / 5 / 10 / 15 / 30 pages (reduces ghosting).
-- **UI Theme** — Classic / Lyra / Lyra Extended / Lyra Carousel / Dashboard (see **[Home Screen](#3-home-screen)**).
+- **UI Theme** — Classic / Lyra / Lyra Extended / Lyra Carousel / Dashboard / Bookshelf (see **[Home Screen](#3-home-screen)**).
 - **Sunlight Fading Fix** — software fix for white X4 units fading in direct sunlight.
 - **Reader Dark Mode** — invert reading to light-on-dark. Also cycled in place from the reader menu, and bindable as a reader action.
 - **Folder View** — Folders / Tags / Authors / Series (see **[Folder views](#folder-views)**).
@@ -612,7 +617,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 - **Customise Status Bar** *(action)* — see below.
 - **Dictionary** *(action)* — pick the offline StarDict dictionary used for word lookups, or **None** to disable them. Only listed once at least one usable dictionary folder exists under `/dictionaries/`. See **[Dictionary Lookup](#dictionary-lookup)**.
-- **Reader Controls** *(action)* — bind a **short-press** and **long-press** action to every reader control. Choose from Next/Previous Page, Chapter Forward/Back, Menu, Home, Files, Sync, Bookmark, Force Refresh, Dark Mode, Screenshot, Footnotes, Auto Page Turn, Reading Stats, Bionic Reading, Button Hints, Rotate Screen, Create Clipping, Bluetooth Remote, Hide Status Bar, Look Up, or None. (Sleep isn't in the list — a long press of **Power** always sleeps.) Bindings attach to *logical* button roles, so they survive front-button remaps. On the X4 Pro the same screen also binds the **tap** and **hold** zones (left / middle / right) and the **home pad** (short and long). There's a live preview; **Confirm** cycles, **Back** saves.
+- **Reader Controls** *(action)* — bind a **short-press** and **long-press** action to every reader control. Choose from Next/Previous Page, Chapter Forward/Back, Menu, Home, Files, Sync, Bookmark, Force Refresh, Dark Mode, Screenshot, Footnotes, Auto Page Turn, Statistics, Bionic Reading, Button Hints, Rotate Screen, Create Clipping, Bluetooth Remote, Hide Status Bar, Look Up, Light *(boards with a frontlight: turns the light off, or back on at its last brightness)*, or None. (Sleep isn't in the list — a long press of **Power** always sleeps.) Bindings attach to *logical* button roles, so they survive front-button remaps. On the X4 Pro the same screen also binds the **tap** and **hold** zones (left / middle / right) and the **home pad** (tap, double tap and hold). **Confirm** on a row opens the list of actions, each with a one-line description; **Back** saves.
 
   <p>
   <img src="docs/images/user-guide/reader-controls.png" alt="Reader Controls screen listing short- and long-press bindings for every reader button" width="300">
@@ -648,15 +653,14 @@ All of these are also editable from the web settings page.
 > [!NOTE]
 > If you're upgrading, your old show/hide status-bar settings are migrated to the new per-element positions automatically on first boot.
 
-### Stats tab
+### Statistics tab
 
-See **[Reading Stats](#9-reading-stats)** — Daily Reading Goal, Minimum Session Length, Sleep Stat slots 1–3, "If Found" contact, Set Date, Time Zone, and Export/Import (incl. StoryGraph).
+See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Length, Sleep Stat slots 1–3, "If Found" contact, Set Date, Time Zone, and Export/Import (incl. StoryGraph).
 
 ### System tab
 
 - **Front Button Follows Orientation** *(not on X4 Pro)* — front-button roles rotate with the screen.
 - **Remap Front Buttons** *(action, not on X4 Pro)* — reassign the four front buttons to different physical positions.
-- **Full Touch Mode** *(X4 Pro only)* — see **[Full Touch Mode](#full-touch-mode-x4-pro)** below.
 - **Tilt Page Turn** *(X3 only, when the IMU is present)* — Off / Normal / Inverted.
 - **WiFi Networks** *(action)* — manage saved networks.
 - **Bluetooth Page Turner** *(action)* — pair a BLE remote (see **[Bluetooth Page Turner](#11-bluetooth-page-turner)**).
@@ -670,20 +674,18 @@ See **[Reading Stats](#9-reading-stats)** — Daily Reading Goal, Minimum Sessio
 - **Show Hidden Files** — show dotfiles in the browser.
 - **Developer Mode** — reveals the Developer tab.
 
-#### Full Touch Mode *(X4 Pro)*
+#### Full Touch *(X4 Pro)*
 
-Off by default. With Full Touch **off**, a tap anywhere is just a **Confirm** on whatever is currently selected, and you move the selection with swipes or the side keys.
-
-With Full Touch **on**, taps hit-test the drawn UI directly:
+The X4 Pro always runs Full Touch (it is not a setting). Every screen draws a tappable **Back / Confirm** action bar along the bottom, and taps hit-test the drawn UI directly:
 
 - **Tap an unselected row** — moves the cursor there.
 - **Tap the selected row** — activates it. (Two taps to act, so a mis-tap never fires something destructive.)
 - **Swipe up / down** on a list that actually paginates — jumps a whole page, wrapping like the held side key.
-- **Swipe right** on a tabbed screen (Settings, Reading Stats) — next tab.
+- **Swipe right** on a tabbed screen (Settings, Statistics) — next tab.
 - **Swipe left** — Back. On tabbed screens, Back steps to the *previous tab* first and only closes the screen once you're on the first tab, so "keep swiping left" still gets you out.
 - **Taps on dead space** (headers, gaps, below the last row) do nothing, and gestures still work there.
 
-Reading screens are unaffected: your configured tap zones, hold zones and swipe actions keep working either way (see **[Touch controls while reading](#touch-controls-while-reading-x4-pro)**).
+Reading screens use your configured tap zones, hold zones and swipe actions instead (see **[Touch controls while reading](#touch-controls-while-reading-x4-pro)**).
 
 ### Developer tab *(Developer Mode only)*
 
@@ -694,7 +696,7 @@ Reading screens are unaffected: your configured tap zones, hold zones and swipe 
 - **Recache Metadata** — rebuild book metadata.
 - **Refresh BookFusion Metadata** — re-pull metadata for linked books.
 - **Download from URL** — fetch a file to the SD card by URL.
-- **Reset Reading Stats** — clear all statistics.
+- **Reset Statistics** — clear all statistics.
 
 ---
 

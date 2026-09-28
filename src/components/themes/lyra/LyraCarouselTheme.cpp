@@ -20,13 +20,14 @@
 #include "components/icons/library.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
+#include "components/icons/stats.h"
 #include "components/icons/transfer.h"
 #include "fontIds.h"
 
 const ThemeMetrics& LyraCarouselTheme::themeMetrics() const {
 #if FREEINK_DEVICE_X4PRO
   // See BaseTheme::themeMetrics().
-  return SETTINGS.fullTouchUi ? LyraCarouselMetrics::values : LyraCarouselMetrics::noActionBarValues;
+  return CrossPointSettings::FULL_TOUCH_UI ? LyraCarouselMetrics::values : LyraCarouselMetrics::noActionBarValues;
 #else
   return LyraCarouselMetrics::values;
 #endif
@@ -150,6 +151,8 @@ const uint8_t* menuIcon(UIIcon icon) {
       return TransferIcon;
     case UIIcon::Library:
       return LibraryIcon;
+    case UIIcon::Stats:
+      return StatsIcon;
     default:
       return nullptr;
   }

@@ -80,7 +80,7 @@ void XtcReaderChapterSelectionActivity::loop() {
   // Full Touch: first tap on a row moves the cursor there; a second tap on the
   // already-selected row jumps to the chapter. Rows are page-relative, so the
   // tapped item is the current page start plus the row.
-  if (SETTINGS.fullTouchUi && totalItems > 0) {
+  if (CrossPointSettings::FULL_TOUCH_UI && totalItems > 0) {
     int lx, ly;
     if (mappedInput.wasTapPoint(lx, ly)) {
       const int top = listTopY();

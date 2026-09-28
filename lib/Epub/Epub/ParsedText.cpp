@@ -160,6 +160,47 @@ uint16_t measureBionicWordWidth(const GfxRenderer& renderer, const int fontId, c
 
 }  // namespace
 
+// Per-paragraph scratch for extractLine. clear() keeps each vector's capacity, so a paragraph
+// pays one allocation per vector instead of ~25-30 grow/free cycles on every line it emits --
+// less allocator churn and fragmentation during section builds. Peak is the same as the old
+// per-line peak; the buffers just live until layoutAndExtractLines returns.
+struct ParsedText::LineScratch {
+  std::vector<std::string> ew, outWords;
+  std::vector<EpdFontFamily::Style> es, outStyles;
+  std::vector<bool> ec, esuf;
+  std::vector<uint16_t> eww, outSuffixX;
+  std::vector<int16_t> lineXPos, outXPos;
+  std::vector<uint8_t> outBoundary;
+  std::vector<BionicFrag> frags;
+
+  void reserve(const size_t n) {
+    ew.reserve(n);
+    es.reserve(n);
+    ec.reserve(n);
+    esuf.reserve(n);
+    eww.reserve(n);
+    lineXPos.reserve(n);
+    outWords.reserve(n);
+    outXPos.reserve(n);
+    outStyles.reserve(n);
+    outBoundary.reserve(n);
+    outSuffixX.reserve(n);
+  }
+  void clear() {
+    ew.clear();
+    es.clear();
+    ec.clear();
+    esuf.clear();
+    eww.clear();
+    lineXPos.clear();
+    outWords.clear();
+    outXPos.clear();
+    outStyles.clear();
+    outBoundary.clear();
+    outSuffixX.clear();
+  }
+};
+
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
                          const bool attachToPrevious) {
   if (word.empty()) return;
@@ -186,9 +227,19 @@ bool ParsedText::isBionicWord(const size_t i) const {
 // Consumes data to minimize memory usage
 void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int baseFontId, const uint16_t viewportWidth,
                                        const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
-                                       const bool includeLastLine) {
+                                       const bool includeLastLine, const bool preserveSource) {
   if (words.empty()) {
     return;
+  }
+
+  // Bounded by the caller: only a table cell (<=12KB row budget) sets this; freed on return.
+  std::deque<std::string> savedWords;
+  std::vector<EpdFontFamily::Style> savedStyles;
+  std::vector<bool> savedContinues;
+  if (preserveSource) {
+    savedWords = words;
+    savedStyles = wordStyles;
+    savedContinues = wordContinues;
   }
 
   // A block may override the reader font (e.g. <pre> code blocks use monospace). Measure and
@@ -242,8 +293,21 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
   }
   const size_t lineCount = includeLastLine ? lineBreakIndices.size() : lineBreakIndices.size() - 1;
 
+  size_t maxLineWords = 0;
+  for (size_t i = 0, prev = 0; i < lineCount; prev = lineBreakIndices[i], ++i) {
+    maxLineWords = std::max(maxLineWords, lineBreakIndices[i] - prev);
+  }
+  LineScratch scratch;
+  scratch.reserve(bionicReadingEnabled ? maxLineWords * 2 : maxLineWords);  // bionic splits words in two
   for (size_t i = 0; i < lineCount; ++i) {
-    extractLine(i, pageWidth, wordWidths, wordContinues, lineBreakIndices, processLine, renderer, fontId);
+    extractLine(i, pageWidth, wordWidths, wordContinues, lineBreakIndices, processLine, renderer, fontId, scratch);
+  }
+
+  if (preserveSource) {
+    words = std::move(savedWords);
+    wordStyles = std::move(savedStyles);
+    wordContinues = std::move(savedContinues);
+    return;
   }
 
   // Remove consumed words so size() reflects only remaining words
@@ -569,7 +633,8 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const std::vector<uint16_t>& wordWidths,
                              const std::vector<bool>& continuesVec, const std::vector<size_t>& lineBreakIndices,
                              const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
-                             const GfxRenderer& renderer, const int fontId) {
+                             const GfxRenderer& renderer, const int fontId, LineScratch& scratch) {
+  scratch.clear();
   const size_t lineBreak = lineBreakIndices[breakIndex];
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
 
@@ -578,14 +643,15 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   // paragraph-wide vectors never hold the doubled fragment set. The local vectors below mirror
   // the per-fragment representation the layout/merge logic was originally written against, so
   // the rest of this function is unchanged aside from indexing them.
-  std::vector<std::string> ew;           // fragment text
-  std::vector<EpdFontFamily::Style> es;  // fragment style
-  std::vector<bool> ec;                  // continues (attaches to previous, no space before)
-  std::vector<bool> esuf;                // bionic regular suffix (merges into preceding bold word)
-  std::vector<uint16_t> eww;             // fragment width
+  auto& ew = scratch.ew;      // fragment text
+  auto& es = scratch.es;      // fragment style
+  auto& ec = scratch.ec;      // continues (attaches to previous, no space before)
+  auto& esuf = scratch.esuf;  // bionic regular suffix (merges into preceding bold word)
+  auto& eww = scratch.eww;    // fragment width
   for (size_t w = lastBreakAt; w < lineBreak; ++w) {
     if (isBionicWord(w)) {
-      std::vector<BionicFrag> frags;
+      auto& frags = scratch.frags;
+      frags.clear();
       appendBionicFrags(words[w], wordStyles[w], frags);
       if (!frags.empty()) {
         for (size_t k = 0; k < frags.size(); ++k) {
@@ -664,7 +730,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
 
   // Pre-calculate X positions for words
   // Continuation words attach to the previous word with no space before them
-  std::vector<int16_t> lineXPos;
+  auto& lineXPos = scratch.lineXPos;
   lineXPos.reserve(lineWordCount);
 
   for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
@@ -703,11 +769,11 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   // Merge each bionic suffix back into its preceding bold-prefix word.
   // The suffix x-offset was already pre-computed by the layout engine using bold font metrics —
   // store it so render time can split the combined string without extra font lookups.
-  std::vector<std::string> outWords;
-  std::vector<int16_t> outXPos;
-  std::vector<EpdFontFamily::Style> outStyles;
-  std::vector<uint8_t> outBoundary;
-  std::vector<uint16_t> outSuffixX;
+  auto& outWords = scratch.outWords;
+  auto& outXPos = scratch.outXPos;
+  auto& outStyles = scratch.outStyles;
+  auto& outBoundary = scratch.outBoundary;
+  auto& outSuffixX = scratch.outSuffixX;
   outWords.reserve(lineWordCount);
   outXPos.reserve(lineWordCount);
   outStyles.reserve(lineWordCount);
@@ -740,8 +806,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   static const std::vector<uint8_t> kNoBoundary;
   static const std::vector<uint16_t> kNoSuffixX;
   auto block = makeUniqueNoThrow<TextBlock>(outWords, outXPos, outStyles, blockStyle,
-                                            hasBionic ? outBoundary : kNoBoundary,
-                                            hasBionic ? outSuffixX : kNoSuffixX);
+                                            hasBionic ? outBoundary : kNoBoundary, hasBionic ? outSuffixX : kNoSuffixX);
   if (!block || !block->valid()) {
     LOG_ERR("PTX", "Dropping line: TextBlock allocation failed");
     return;
