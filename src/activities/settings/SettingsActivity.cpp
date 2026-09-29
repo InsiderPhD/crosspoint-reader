@@ -1,5 +1,6 @@
 #include "SettingsActivity.h"
 
+#include <DevicePolicy.h>
 #include <GfxRenderer.h>
 #include <HalFrontlight.h>
 #include <Logging.h>
@@ -38,6 +39,7 @@
 #include "TimeZoneSelectActivity.h"
 #include "activities/home/LibraryActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/plugins/PluginCatalogActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -123,6 +125,9 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BF_SYNC, SettingAction::BookFusionSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_BROWSER, SettingAction::OPDSBrowser));
+#if CROSSPOINT_SD_PLUGINS
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_PLUGINS, SettingAction::Plugins));
+#endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
@@ -451,6 +456,11 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::Language:
         startActivityForResult(std::make_unique<LanguageSelectActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::Plugins:
+#if CROSSPOINT_SD_PLUGINS
+        startActivityForResult(std::make_unique<PluginCatalogActivity>(renderer, mappedInput), resultHandler);
+#endif
         break;
       case SettingAction::ResetStats:
         startActivityForResult(std::make_unique<ResetStatsActivity>(renderer, mappedInput), resultHandler);

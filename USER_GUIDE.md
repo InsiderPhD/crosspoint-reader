@@ -243,6 +243,7 @@ Insert the SD card into a computer and copy files anywhere on it. KatiePoint sca
 3. **Create Hotspot** — the device becomes its own access point when no shared WiFi is available; join it from your computer, then use the web uploader.
 4. **BookFusion Library** — browse and download from your linked [BookFusion](https://www.bookfusion.com/) cloud library (see **[Sync](#10-sync-bookfusion--koreader)** for account linking).
 5. **OPDS Browser** — browse and download from your OPDS catalogue. *Only shown once an OPDS server URL is set* (see below).
+6. **Plugins** *(X4 Pro / X4C)* — catalogs from plugins on the SD card. *Only shown once a plugin with an on-device screen is installed* (see below).
 
 ### OPDS Browser
 
@@ -256,6 +257,15 @@ If you run an OPDS catalogue (e.g. Calibre Content Server), set it up in **Setti
 > Large, image-heavy EPUBs (10 MB+) can be slow to convert and use a lot of memory. When downloading such a book from BookFusion you'll get a size warning first. For faster covers/thumbnails, pre-optimise EPUBs with a converter such as [epub-to-xtc-converter](https://github.com/bigbag/epub-to-xtc-converter).
 
 ---
+
+### Plugins *(X4 Pro / X4C)*
+
+Plugins are folders on the SD card (`/plugins/<name>/` or `/.crosspoint/plugins/<name>/`) that add a service without a firmware change: a JSON or OPDS-style catalog with its own sign-in, a plugin store, or browser-side tools that run on the device's web pages. They need the extra memory of the X4 Pro and X4C, so the X3/X4 do not offer them; the built-in OPDS, BookFusion and dictionary features work the same on every device.
+
+- **On the reader:** **Settings → System → Plugins** lists every installed plugin and opens the ones with a device screen (browse, sign in, download to SD). Once one is installed, **Plugins** also appears in **Home → File Transfer**.
+- **In the browser:** join a network, then open the **Plugins** tab of the device's web pages. Browser plugins (and the plugin store) run there.
+- Plugins for services the firmware already has built in (BookFusion, dictionaries) are ignored, and the plugin store will not install them. Use the native features instead.
+- Plugins and the manifest format are documented in [docs/sd-plugins.md](docs/sd-plugins.md).
 
 ## 6. Browsing Your Library
 
@@ -667,6 +677,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **KOReader Sync** *(action)* — see **[KOReader Sync](#koreader-sync-quick-setup)**.
 - **BookFusion Sync** *(action)* — link/manage your BookFusion account.
 - **OPDS Browser** *(action)* — server URL, username, password.
+- **Plugins** *(action, X4 Pro / X4C)* — installed SD-card plugins and their on-device catalogs (see **[Plugins](#plugins-x4-pro--x4c)**).
 - **Check for Updates** *(action)* — OTA firmware update over WiFi.
 - **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.
 - **Language** *(action)* — set the UI language.

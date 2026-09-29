@@ -33,6 +33,7 @@ enum class SettingAction {
   SdFirmwareUpdate,
   DownloadFromUrl,
   Language,
+  Plugins,  // SD-card plugin catalogs (CROSSPOINT_SD_PLUGINS boards only)
   ResetStats,
   ExportStats,
   ImportStats,

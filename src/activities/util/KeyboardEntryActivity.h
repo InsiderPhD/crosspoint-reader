@@ -252,12 +252,24 @@ class KeyboardEntryActivity : public Activity {
   // read by the input task, so it cannot tear.
   int renderedKeyboardStartY = 0;
 
+  // Keys fire on touch-down (the panel's ~630 ms refresh is the floor, so the
+  // finger's dwell on the glass was pure added latency). The contact's lift
+  // still reports a tap, which must then be ignored: this marks that contact.
+  bool touchDownFired = false;
+  // The down press typed a character that a long press may swap for the key's
+  // alternative, as a held Confirm does.
+  bool touchDownTypedChar = false;
+
   // Logical-frame tap point -> key cell. False when the point misses the grid.
   bool hitTestKey(int lx, int ly, int& row, int& col) const;
 
   // Dispatches screen taps and long presses onto keys. Returns false when the
   // activity finished (Ok pressed) and loop() must not touch state again.
   bool handleTouchInput();
+
+  // Presses the key at (row, col) as a touch: selects it and runs it. Returns
+  // false when that finished the activity (Ok).
+  bool pressTouchedKey(int row, int col);
 #endif
 
   int getContentRowCount() const;

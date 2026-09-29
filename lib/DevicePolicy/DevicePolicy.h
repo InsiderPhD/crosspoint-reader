@@ -99,3 +99,18 @@
 #ifndef CROSSPOINT_HARDCOVER_AUTO_SYNC
 #define CROSSPOINT_HARDCOVER_AUTO_SYNC (!CROSSPOINT_TIGHT_HEAP)
 #endif
+
+// --- SD-card plugins ---------------------------------------------------------
+//
+// The plugin surfaces (src/activities/plugins, src/util/Plugin*, the web
+// server's /plugins host, relay, fetch and plugin-fs routes) are built from
+// exactly the allocations the C3 cannot make next to WiFi: a 32KB relay body,
+// 48KB API response caps, ArduinoJson pools and a kept-alive wolfSSL session.
+// The August 2026 attempt exhausted the X3/X4 heap at runtime. On a PSRAM
+// board every allocation of 4KB or more is served from PSRAM
+// (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096 in the S3 core), so none of that
+// touches internal DRAM there. The native features (OPDS, BookFusion,
+// dictionary downloads) stay on every board; plugins are an optional extra.
+#ifndef CROSSPOINT_SD_PLUGINS
+#define CROSSPOINT_SD_PLUGINS (!CROSSPOINT_TIGHT_HEAP)
+#endif

@@ -1,10 +1,12 @@
 #include "NetworkModeSelectionActivity.h"
 
+#include <DevicePolicy.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 
 #include "BookFusionTokenStore.h"
 #include "MappedInputManager.h"
+#include "activities/plugins/PluginCatalogActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/TouchListNav.h"
@@ -24,6 +26,7 @@ constexpr MenuRow MENU_ROWS[] = {
     {NetworkMode::CREATE_HOTSPOT, StrId::STR_CREATE_HOTSPOT, StrId::STR_HOTSPOT_DESC, UIIcon::Hotspot},
     {NetworkMode::BOOKFUSION, StrId::STR_BF_BROWSE_LIBRARY, StrId::STR_BF_LIBRARY_DESC, UIIcon::BookFusion},
     {NetworkMode::OPDS, StrId::STR_OPDS_BROWSER, StrId::STR_OPDS_DESC, UIIcon::Library},
+    {NetworkMode::PLUGINS, StrId::STR_PLUGINS, StrId::STR_PLUGINS_DESC, UIIcon::Library},
 };
 constexpr int MAX_MENU_ITEM_COUNT = static_cast<int>(sizeof(MENU_ROWS) / sizeof(MENU_ROWS[0]));
 
@@ -34,6 +37,15 @@ bool rowVisible(const MenuRow& row) {
   if (row.mode == NetworkMode::BOOKFUSION) return BF_TOKEN_STORE.hasToken();
   // Same for OPDS: until a server URL is set in Settings there is nothing to browse.
   if (row.mode == NetworkMode::OPDS) return SETTINGS.opdsServerUrl[0] != '\0';
+  // Plugins: only on boards that build them, and only once a plugin with an
+  // on-device catalog is on the card (rescanned each time this screen opens).
+  if (row.mode == NetworkMode::PLUGINS) {
+#if CROSSPOINT_SD_PLUGINS
+    return anyPluginInstalled();
+#else
+    return false;
+#endif
+  }
   return true;
 }
 

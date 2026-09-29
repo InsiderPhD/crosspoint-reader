@@ -102,9 +102,20 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent) {
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool allowConfiguredAuth,
-                                                             size_t expectedSize, const volatile bool* cancelFlag) {
+                                                             size_t expectedSize, const volatile bool* cancelFlag,
+                                                             const std::string& username, const std::string& password,
+                                                             const std::vector<Header>& headers) {
   freeink::SecureHttpClient http;
   configureRequest(http, url, allowConfiguredAuth);
+
+  // Per-request credentials/headers (SD plugins). Set after configureRequest so
+  // a plugin's own auth wins over anything the shared setup attached.
+  if (!username.empty()) {
+    http.setBasicAuth(username, password);
+  }
+  for (const auto& header : headers) {
+    http.addHeader(header.first, header.second);
+  }
 
   LOG_DBG("HTTP", "Downloading: %s", url.c_str());
   LOG_DBG("HTTP", "Destination: %s", destPath.c_str());

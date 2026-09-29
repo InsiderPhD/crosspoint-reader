@@ -261,6 +261,8 @@ bool HalGPIO::hasHomeKey() const { return BoardConfig::hasHomeKey(); }
 
 bool HalGPIO::wasTouchTap(float& nx, float& ny) const { return inputMgr.wasTouchTap(nx, ny); }
 
+bool HalGPIO::wasTouchPressedAt(float& nx, float& ny) const { return inputMgr.wasTouchPressedAt(nx, ny); }
+
 bool HalGPIO::wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const {
   return inputMgr.wasSwipe(nxStart, nyStart, nxEnd, nyEnd);
 }

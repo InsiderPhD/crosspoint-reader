@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CrossPoint Reader - Plugins</title>
+  <script src="/js/jszip.min.js"></script>
+  <style>
+    :root {
+      --font-color: #333;
+      --bg: #f5f5f5;
+      --title-color: #2c3e50;
+      --card-bg: #FFF;
+      --label-color: #7f8c8d;
+      --border-color: #eee;
+      --accent-color: rgb(110, 154, 130);
+      --accent-color-10: rgba(110, 154, 130, 0.1);
+      --accent-hover-color: #5a8c73;
+      --plugin-control-bg: #fbfcfb;
+      --plugin-control-border: #aebbb5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --font-color: #f5f5f5;
+        --bg: #333;
+        --title-color: #ecf0f1;
+        --card-bg: #444;
+        --label-color: #bdc3c7;
+        --border-color: #555;
+        --plugin-control-bg: #393f3c;
+        --plugin-control-border: #7b8781;
+        color-scheme: dark;
+      }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        Oxygen, Ubuntu, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: var(--bg);
+      color: var(--font-color);
+    }
+    h1 {
+      color: var(--title-color);
+      border-bottom: 2px solid var(--accent-color);
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: var(--title-color);
+      margin-top: 0;
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: 8px;
+      padding: 20px;
+      margin: 15px 0;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .nav-links {
+      margin: 20px 0;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .nav-links a {
+      padding: 10px 20px;
+      color: var(--font-color);
+      text-decoration: none;
+      border-radius: 4px;
+    }
+    .nav-links a.active {
+      background-color: var(--accent-color);
+      color: white;
+    }
+    .nav-links a:not(.active):hover {
+      background-color: var(--accent-hover-color);
+      color: white;
+    }
+    .empty-note {
+      color: var(--label-color);
+      text-align: center;
+      margin: 0;
+    }
+    .loader-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 20px 0;
+    }
+    .loader {
+      width: 48px;
+      height: 48px;
+      border: 5px solid #AAA;
+      border-bottom-color: transparent;
+      border-radius: 50%;
+      display: inline-block;
+      box-sizing: border-box;
+      animation: rotation 1s linear infinite;
+    }
+    @keyframes rotation {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    /* Plugin cards render the same markup conventions the Settings page uses
+       (.setting-row / .setting-name / .setting-control), so they are styled to
+       match it rather than carrying a look of their own: same row rhythm, same
+       control sizing, same primary button. A plugin written for upstream keeps
+       working untouched — only the presentation is ours. */
+    /* Same primary action as the Settings page's Save button. */
+    .save-btn {
+      background-color: #27ae60;
+      color: white;
+      padding: 12px 40px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1.1em;
+      font-weight: 600;
+      margin-top: 12px;
+    }
+    .save-btn:hover:not(:disabled) {
+      background-color: #229954;
+    }
+    .save-btn:disabled {
+      background-color: #95a5a6;
+      cursor: not-allowed;
+    }
+    .file-input {
+      display: block;
+      max-width: 100%;
+    }
+    .install-status {
+      margin: 12px 0 0;
+      color: var(--label-color);
+    }
+    #plugin-container {
+      display: grid;
+      gap: 15px;
+      margin: 15px 0;
+    }
+    #plugin-container .card {
+      margin: 0;
+    }
+    #plugin-container p {
+      line-height: 1.5;
+    }
+    #plugin-container .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+    #plugin-container .setting-row:last-child {
+      border-bottom: none;
+    }
+    #plugin-container .setting-name {
+      font-weight: 500;
+      color: var(--label-color);
+      flex: 1;
+      min-width: 0;
+      padding-right: 12px;
+    }
+    #plugin-container .setting-control {
+      flex-shrink: 0;
+    }
+    #plugin-container input[type="text"],
+    #plugin-container input[type="password"],
+    #plugin-container input[type="number"],
+    #plugin-container select,
+    #plugin-container textarea {
+      padding: 6px 10px;
+      border: 1px solid var(--plugin-control-border);
+      border-radius: 4px;
+      font: inherit;
+      font-size: 0.95em;
+      background: var(--card-bg);
+      color: var(--font-color);
+      box-sizing: border-box;
+    }
+    #plugin-container select {
+      min-width: 160px;
+    }
+    #plugin-container input[type="text"],
+    #plugin-container input[type="password"] {
+      width: 220px;
+    }
+    #plugin-container input[type="number"] {
+      width: 80px;
+    }
+    #plugin-container textarea {
+      width: 100%;
+      min-height: 96px;
+      resize: vertical;
+    }
+    #plugin-container input:focus-visible,
+    #plugin-container select:focus-visible,
+    #plugin-container textarea:focus-visible,
+    #plugin-container button:focus-visible {
+      outline: 2px solid var(--accent-color);
+      outline-offset: 1px;
+    }
+    /* .btn-add is a plugin's primary action, so it matches Save Settings;
+       .btn-small is everything else, styled as a quiet secondary button. */
+    #plugin-container .btn-small,
+    #plugin-container .btn-add {
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.95em;
+      font-weight: 600;
+    }
+    #plugin-container .btn-small {
+      border: 1px solid var(--plugin-control-border);
+      background: var(--card-bg);
+      color: var(--font-color);
+    }
+    #plugin-container .btn-small:hover:not(:disabled) {
+      border-color: var(--accent-color);
+      color: var(--accent-color);
+    }
+    #plugin-container .btn-add {
+      border: none;
+      background-color: #27ae60;
+      color: white;
+    }
+    #plugin-container .btn-add:hover:not(:disabled) {
+      background-color: #229954;
+    }
+    #plugin-container button:disabled,
+    #plugin-container input:disabled,
+    #plugin-container select:disabled,
+    #plugin-container textarea:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    #plugin-container hr {
+      margin: 18px 0;
+      border: 0;
+      border-top: 1px solid var(--border-color);
+    }
+    /* Narrow screens: stack each row and grow the controls to full width, so a
+       plugin form stays usable on a phone. */
+    @media (max-width: 600px) {
+      #plugin-container .setting-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 7px;
+      }
+      #plugin-container .setting-name {
+        padding-right: 0;
+      }
+      #plugin-container input[type="text"],
+      #plugin-container input[type="password"],
+      #plugin-container input[type="number"],
+      #plugin-container select {
+        width: 100%;
+        min-height: 44px;
+        font-size: 16px;
+      }
+      #plugin-container .btn-small,
+      #plugin-container .btn-add {
+        width: 100%;
+        min-height: 44px;
+      }
+    }
+    @media (prefers-color-scheme: dark) {
+      #plugin-container .card {
+        box-shadow: none;
+      }
+    }
+    @media (max-width: 600px) {
+      body {
+        padding: 10px;
+        font-size: 14px;
+      }
+      .card {
+        padding: 12px;
+        margin: 10px 0;
+      }
+      h1 {
+        font-size: 1.3em;
+      }
+      .nav-links a {
+        padding: 8px 12px;
+        font-size: 0.9em;
+      }
+      #plugin-container {
+        gap: 10px;
+        margin: 10px 0;
+      }
+      #plugin-container .card {
+        margin: 0;
+      }
+      #plugin-container .setting-row {
+        grid-template-columns: 1fr;
+        gap: 7px;
+        padding: 12px 0;
+      }
+      #plugin-container input[type="text"],
+      #plugin-container input[type="password"],
+      #plugin-container input[type="number"],
+      #plugin-container select,
+      #plugin-container textarea {
+        min-height: 44px;
+        font-size: 16px;
+      }
+      #plugin-container .btn-small {
+        min-height: 48px;
+        padding: 10px 12px;
+        font-size: 1em;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>🧩 Plugins</h1>
+
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="/files">File Manager</a>
+    <a href="/fonts">Fonts</a>
+    <a href="/settings">Settings</a>
+    <a href="/plugins" class="active">Plugins</a>
+  </div>
+
+  <div id="plugin-status" class="loader-container">
+    <span class="loader"></span>
+  </div>
+
+  <div id="plugin-container"></div>
+
+  <div class="card" id="plugin-install-card">
+    <h2>Install a plugin</h2>
+    <p>
+      Choose a plugin .zip. It is expanded in your browser and written to the SD card one file at a time, so a
+      large plugin takes a moment. Installing the Plugin Store this way is how you get the rest without pulling
+      the card.
+    </p>
+    <input type="file" id="pluginZip" accept=".zip,application/zip" class="file-input" />
+    <button id="pluginInstallBtn" class="save-btn" onclick="installPluginZip()">Install</button>
+    <p id="pluginInstallStatus" class="install-status"></p>
+  </div>
+
+  <div class="card">
+    <p style="text-align: center; color: #95a5a6; margin: 0;">
+      CrossPoint E-Reader • Open Source
+    </p>
+  </div>
+
+<script>
+<!--#include file="shared/PluginHost.js.inc" -->
+<!--#include file="shared/PluginInstall.js.inc" -->
+
+  // Plugins live on their own page rather than inside Settings and the File
+  // Manager. /api/plugins costs an SD directory scan plus a manifest read, and
+  // firing it alongside those pages' own fetches was enough, on a ~20KB heap,
+  // to push free memory to ~3KB — where a single TCP write costs tens of
+  // seconds. Here it is the only request the page makes.
+  //
+  // Mount-agnostic (loadPlugins(null)): a manifest's "mount" placed a plugin on
+  // Settings or Files, and every plugin now lands here regardless, so existing
+  // manifests keep working untouched.
+  (async () => {
+    await loadPlugins(null);
+    const status = document.getElementById('plugin-status');
+    const host = document.getElementById('plugin-container');
+    if (host.childElementCount === 0) {
+      status.className = 'card';
+      status.innerHTML = '<p class="empty-note">No plugins installed. ' +
+        'Add one under <code>/.crosspoint/plugins/&lt;name&gt;/</code> on the SD card.</p>';
+    } else {
+      status.remove();
+    }
+  })();
+</script>
+</body>
+</html>

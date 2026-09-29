@@ -3,6 +3,8 @@
 
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 /**
  * HTTP client utility for fetching content and downloading files.
@@ -11,6 +13,10 @@
 class HttpDownloader {
  public:
   using ProgressCallback = std::function<void(size_t downloaded, size_t total)>;
+  // One outgoing request header, as (name, value). SD plugins express their
+  // auth as manifest-declared headers, so the caller supplies them per request
+  // rather than the downloader knowing any scheme.
+  using Header = std::pair<std::string, std::string>;
 
   enum DownloadError {
     OK = 0,
@@ -43,9 +49,15 @@ class HttpDownloader {
    *        returned. The caller owns the flag; it is only read here. Written from the
    *        progress callback on the same task (nothing here runs on another task), so
    *        `volatile` is documentation of intent rather than a memory barrier.
+   * @param username Optional HTTP Basic user for this request only (SD plugins carry
+   *        their own credentials; the configured OPDS ones must not leak to them).
+   * @param password Password for `username`.
+   * @param headers Extra request headers, e.g. a plugin's Authorization line.
    * @return DownloadError indicating success or failure type
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, bool allowConfiguredAuth = true,
-                                      size_t expectedSize = 0, const volatile bool* cancelFlag = nullptr);
+                                      size_t expectedSize = 0, const volatile bool* cancelFlag = nullptr,
+                                      const std::string& username = "", const std::string& password = "",
+                                      const std::vector<Header>& headers = {});
 };

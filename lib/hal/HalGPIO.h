@@ -143,6 +143,10 @@ class HalGPIO {
   // A completed tap: finger down and back up inside the tap slop.
   bool wasTouchTap(float& nx, float& ny) const;
 
+  // Press edge: true on the frame a contact begins, with its touch-down point.
+  // The same contact still reports wasTouchTap() on lift if it stays in slop.
+  bool wasTouchPressedAt(float& nx, float& ny) const;
+
   // A completed swipe. Start and end are both reported so the caller can decide
   // direction and whether it began in an edge region.
   bool wasSwipe(float& nxStart, float& nyStart, float& nxEnd, float& nyEnd) const;

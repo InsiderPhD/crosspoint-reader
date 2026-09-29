@@ -66,6 +66,13 @@ class HalDisplay {
   // flattened to the B/W framebuffer.
   void requestResync(uint8_t settlePasses = 1) { einkDisplay.requestResync(settlePasses); }
 
+  // Defer the FAST-streak GC promotion (see applyRefreshPolicy) while a burst-
+  // input screen is up: on the keyboard it landed a >1 s flash mid-word every
+  // FAST_REFRESH_SCRUB_LIMIT keystrokes. The streak keeps counting, so the
+  // first FAST paint after resuming (the screen the keyboard returns to) takes
+  // the owed scrub instead.
+  void setFastScrubSuspended(bool suspended) { _fastScrubSuspended = suspended; }
+
   // Access to frame buffer
   uint8_t* getFrameBuffer() const;
 
@@ -131,6 +138,7 @@ class HalDisplay {
   EInkDisplay einkDisplay;
   unsigned long _lastRefreshMs = 0;
   uint16_t _fastRefreshStreak = 0;
+  bool _fastScrubSuspended = false;
 };
 
 extern HalDisplay display;

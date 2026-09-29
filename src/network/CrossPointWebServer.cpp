@@ -1,12 +1,14 @@
 #include "CrossPointWebServer.h"
 
 #include <ArduinoJson.h>
+#include <DevicePolicy.h>
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <WiFi.h>
 #include <esp_task_wdt.h>
 
@@ -22,10 +24,36 @@
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
+#if CROSSPOINT_SD_PLUGINS
+#include "html/PluginsPageHtml.generated.h"
+#endif
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
 
 namespace {
+// Arduino's WebServer retains parsed request arguments until the next request.
+// For JSON POSTs, that includes the complete "plain" body. Expose a narrowly
+// scoped release operation so large request bodies do not remain resident
+// between requests, and so outbound TLS can reuse that memory immediately.
+class CrossPointHttpServer final : public WebServer {
+ public:
+  explicit CrossPointHttpServer(uint16_t port) : WebServer(port) {}
+
+  void releaseRequestArguments() {
+    if (_currentArgs) {
+      delete[] _currentArgs;
+      _currentArgs = nullptr;
+    }
+    _currentArgCount = 0;
+
+    if (_postArgs) {
+      delete[] _postArgs;
+      _postArgs = nullptr;
+    }
+    _postArgsLen = 0;
+  }
+};
+
 // Folders/files to hide from the web interface file browser
 // Note: Items starting with "." are automatically hidden
 const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
@@ -140,7 +168,7 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "Network mode: %s", apMode ? "AP" : "STA");
 
   LOG_DBG("WEB", "Creating web server on port %d...", port);
-  server.reset(new WebServer(port));
+  server.reset(new CrossPointHttpServer(port));
 
   // Disable WiFi sleep to improve responsiveness and prevent 'unreachable' errors.
   // This is critical for reliable web server operation on ESP32.
@@ -196,6 +224,23 @@ void CrossPointWebServer::begin() {
   server->on("/api/fonts/upload", HTTP_POST, [this] { handleFontUpload(); }, [this] { handleFontUploadData(); });
   server->on("/api/fonts/delete", HTTP_POST, [this] { handleFontDelete(); });
 
+  // SD-card plugins (docs/sd-plugins.md). The page itself is served on every
+  // board so the nav tab never 404s; the boards that build no plugin support
+  // get a one-line explanation instead of the host page.
+  server->on("/plugins", HTTP_GET, [this] { handlePluginsPage(); });
+#if CROSSPOINT_SD_PLUGINS
+  server->on("/api/plugins", HTTP_GET, [this] { handlePluginList(); });
+  server->on("/plugin", HTTP_GET, [this] { handlePluginFile(); });
+  server->on("/api/relay", HTTP_POST, [this] { handleRelay(); });
+  server->on("/api/crypto", HTTP_POST, [this] { handleCrypto(); });
+  server->on("/api/fetch", HTTP_POST, [this] { handleFetch(); });
+  server->on("/api/plugin-fs", HTTP_POST, [this] { handlePluginFs(); });
+  server->on("/api/plugin-jobs", HTTP_POST, [this] { handlePluginJobSubmit(); });
+  server->on("/api/plugin-jobs/claim", HTTP_GET, [this] { handlePluginJobClaim(); });
+  server->on("/api/plugin-jobs/complete", HTTP_POST, [this] { handlePluginJobComplete(); });
+  server->on("/api/plugin-jobs/status", HTTP_GET, [this] { handlePluginJobStatus(); });
+#endif
+
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
 
@@ -227,6 +272,41 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "WebSocket at ws://%s:%d/", ipAddr.c_str(), wsPort);
   LOG_DBG("WEB", "[MEM] Free heap after server.begin(): %d bytes", ESP.getFreeHeap());
 }
+
+void CrossPointWebServer::releaseRequestArguments() const {
+  if (server) static_cast<CrossPointHttpServer*>(server.get())->releaseRequestArguments();
+}
+
+#if CROSSPOINT_SD_PLUGINS
+void CrossPointWebServer::suspendTransferServices() {
+  // Leave the WebSocket server alone mid-upload; killing it would abort the
+  // transfer. The fetch just stalls that upload until it completes.
+  if (wsServer && !wsUploadInProgress) {
+    wsServer->close();
+    wsServer.reset();
+  }
+  if (udpActive) udp.stop();
+  LOG_DBG("WEB", "Transfer services suspended, heap %u, max block %u", (unsigned)ESP.getFreeHeap(),
+          (unsigned)ESP.getMaxAllocHeap());
+}
+
+void CrossPointWebServer::resumeTransferServices() {
+  if (!running) return;
+  if (!wsServer) {
+    auto* ws = new (std::nothrow) WebSocketsServer(wsPort);
+    if (ws) {
+      wsServer.reset(ws);
+      wsServer->begin();
+      wsServer->onEvent(wsEventCallback);
+    } else {
+      LOG_ERR("WEB", "OOM: WebSocket server restart");
+    }
+  }
+  if (udpActive) udpActive = udp.begin(LOCAL_UDP_PORT);
+  LOG_DBG("WEB", "Transfer services resumed, heap %u, max block %u", (unsigned)ESP.getFreeHeap(),
+          (unsigned)ESP.getMaxAllocHeap());
+}
+#endif
 
 void CrossPointWebServer::abortWsUpload(const char* tag) {
   // Explicit close() required: file-scope global persists beyond function scope
@@ -314,6 +394,10 @@ void CrossPointWebServer::handleClient() {
   }
 
   server->handleClient();
+  // WebServer otherwise keeps the last request's argument strings allocated
+  // until another request arrives. They are no longer observable once its
+  // handler returns, so release them now instead of retaining a JSON body.
+  releaseRequestArguments();
 
   // Handle WebSocket events
   if (wsServer) {
@@ -513,6 +597,15 @@ void CrossPointWebServer::handleFileListData() const {
   constexpr uint32_t MAX_PAGE_SIZE = 200;
   uint32_t offset = 0;
   uint32_t limit = DEFAULT_PAGE_SIZE;
+  // Response shape. This fork's own File Manager pages through the listing and
+  // reads {"items":[...],"nextOffset":N}; upstream (and therefore every plugin
+  // written against upstream, e.g. the Plugin Store deciding which plugins are
+  // already installed) fetches /api/files?path=... with no paging args and
+  // expects the bare array that shape replaced. Keying the envelope on whether
+  // the caller asked for a page serves both without a second endpoint: no
+  // offset/limit means "give me the directory", which is exactly the legacy
+  // contract.
+  const bool paginated = server->hasArg("offset") || server->hasArg("limit");
   if (server->hasArg("offset")) {
     offset = strtoul(server->arg("offset").c_str(), nullptr, 10);
   }
@@ -524,7 +617,7 @@ void CrossPointWebServer::handleFileListData() const {
 
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
-  server->sendContent("{\"items\":[");
+  server->sendContent(paginated ? "{\"items\":[" : "[");
   char output[512];
   constexpr size_t outputSize = sizeof(output);
   bool seenFirst = false;
@@ -560,7 +653,12 @@ void CrossPointWebServer::handleFileListData() const {
                   static_cast<unsigned>(ESP.getFreeHeap()));
         }
       });
-  if (hasMore) {
+  if (!paginated) {
+    // Legacy shape: the whole (first-page) listing as a bare array. A directory
+    // larger than one page is still truncated to it — the caller that wants the
+    // rest asks for pages.
+    server->sendContent("]");
+  } else if (hasMore) {
     char tail[48];
     snprintf(tail, sizeof(tail), "],\"nextOffset\":%u}", static_cast<unsigned>(offset + limit));
     server->sendContent(tail);
@@ -631,28 +729,38 @@ void CrossPointWebServer::handleDownload() const {
   server->sendHeader("Content-Disposition", "attachment; filename=\"" + filename + "\"");
   server->send(200, contentType.c_str(), "");
 
-  NetworkClient client = server->client();
-  const size_t chunkSize = 4096;
-  uint8_t buffer[chunkSize];
+  streamFileToClient(file);
+  file.close();
+}
 
-  bool downloadOk = true;
-  while (downloadOk && file.available()) {
-    int result = file.read(buffer, chunkSize);
+void CrossPointWebServer::streamFileToClient(HalFile& file) const {
+  NetworkClient client = server->client();
+  static constexpr size_t CHUNK_SIZE = 4096;
+  // Off the stack: the loop task also runs TLS and SD from this stack, and a
+  // 4KB local was a quarter of it.
+  auto buffer = makeUniqueNoThrow<uint8_t[]>(CHUNK_SIZE);
+  if (!buffer) {
+    LOG_ERR("WEB", "OOM: %u byte stream buffer", (unsigned)CHUNK_SIZE);
+    return;
+  }
+
+  bool ok = true;
+  while (ok && file.available()) {
+    const int result = file.read(buffer.get(), CHUNK_SIZE);
     if (result <= 0) break;
-    size_t bytesRead = static_cast<size_t>(result);
+    const size_t bytesRead = static_cast<size_t>(result);
     size_t totalWritten = 0;
     while (totalWritten < bytesRead) {
       esp_task_wdt_reset();
-      size_t wrote = client.write(buffer + totalWritten, bytesRead - totalWritten);
+      const size_t wrote = client.write(buffer.get() + totalWritten, bytesRead - totalWritten);
       if (wrote == 0) {
-        downloadOk = false;
+        ok = false;
         break;
       }
       totalWritten += wrote;
     }
   }
   client.clear();
-  file.close();
 }
 
 // Diagnostic counters for upload performance analysis
@@ -1180,6 +1288,21 @@ void CrossPointWebServer::handleDelete() const {
   } else {
     server->send(500, "text/plain", "Failed to delete some items: " + failedItems);
   }
+}
+
+void CrossPointWebServer::handlePluginsPage() const {
+#if CROSSPOINT_SD_PLUGINS
+  sendHtmlContent(server.get(), PluginsPageHtml, sizeof(PluginsPageHtml));
+  LOG_DBG("WEB", "Served plugins page");
+#else
+  // Boards without PSRAM build no plugin support (lib/DevicePolicy); say so
+  // rather than 404 the nav tab every page carries.
+  server->send(200, "text/html",
+               "<!doctype html><meta name=viewport content=\"width=device-width\"><title>Plugins</title>"
+               "<p style=\"font-family:sans-serif;margin:2em\">SD-card plugins need the extra memory of the "
+               "X4 Pro or X4C. This device keeps its built-in OPDS, BookFusion and dictionary features.</p>"
+               "<p style=\"font-family:sans-serif;margin:2em\"><a href=\"/\">Back</a></p>");
+#endif
 }
 
 void CrossPointWebServer::handleSettingsPage() const {

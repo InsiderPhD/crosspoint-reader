@@ -1,6 +1,7 @@
 #include "CrossPointWebServerActivity.h"
 
 #include <DNSServer.h>
+#include <DevicePolicy.h>
 #include <ESPmDNS.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
@@ -15,6 +16,7 @@
 #include "WifiSelectionActivity.h"
 #include "activities/browser/OpdsBookBrowserActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
+#include "activities/plugins/PluginCatalogActivity.h"
 #include "activities/settings/BookFusionBrowserActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -131,10 +133,12 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "BookFusion";
   } else if (mode == NetworkMode::OPDS) {
     modeName = "OPDS Browser";
+  } else if (mode == NetworkMode::PLUGINS) {
+    modeName = "Plugins";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
 
-  if (mode == NetworkMode::BOOKFUSION || mode == NetworkMode::OPDS) {
+  if (mode == NetworkMode::BOOKFUSION || mode == NetworkMode::OPDS || mode == NetworkMode::PLUGINS) {
     // Use startActivityForResult so pressing Back in the browser returns to mode
     // selection rather than going all the way to the home screen. replaceActivity
     // would clear the stack and leave nowhere to pop back to. Both browsers
@@ -142,21 +146,24 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     std::unique_ptr<Activity> browser;
     if (mode == NetworkMode::BOOKFUSION) {
       browser = std::make_unique<BookFusionBrowserActivity>(renderer, mappedInput);
+#if CROSSPOINT_SD_PLUGINS
+    } else if (mode == NetworkMode::PLUGINS) {
+      browser = std::make_unique<PluginCatalogActivity>(renderer, mappedInput);
+#endif
     } else {
       browser = std::make_unique<OpdsBookBrowserActivity>(renderer, mappedInput);
     }
-    startActivityForResult(
-        std::move(browser), [this](const ActivityResult&) {
-          state = WebServerActivityState::MODE_SELECTION;
-          startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
-                                 [this](const ActivityResult& result) {
-                                   if (result.isCancelled) {
-                                     onGoHome();
-                                   } else {
-                                     onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
-                                   }
-                                 });
-        });
+    startActivityForResult(std::move(browser), [this](const ActivityResult&) {
+      state = WebServerActivityState::MODE_SELECTION;
+      startActivityForResult(std::make_unique<NetworkModeSelectionActivity>(renderer, mappedInput),
+                             [this](const ActivityResult& result) {
+                               if (result.isCancelled) {
+                                 onGoHome();
+                               } else {
+                                 onNetworkModeSelected(std::get<NetworkModeResult>(result.data).mode);
+                               }
+                             });
+    });
     return;
   }
 

@@ -94,6 +94,12 @@ class MappedInputManager {
   // once, which is also the honest layering — the contact is spent.
   bool wasTapPoint(int& lx, int& ly) const;
 
+  // Touch-down edge in the same coordinate space as wasTapPoint(), for screens
+  // that act the moment a finger lands (the keyboard). The same contact still
+  // reports wasTapPoint() on lift, so a consumer must ignore that tap itself.
+  // False for home-pad contacts, which also report as edge screen points.
+  bool wasTouchDownPoint(int& lx, int& ly) const;
+
   // Finger down and stationary past the SDK long-press threshold, in the same
   // coordinate space as wasTapPoint(). Fires once per contact, while the finger
   // is still down — the lift afterwards still reports as a tap, so a consumer
@@ -131,6 +137,84 @@ class MappedInputManager {
   // Held state of the same key, for chords (ReaderCombos).
   bool isHomeKeyDown() const { return gpio.isHomeKeyDown(); }
 #endif
+
+  // --- board-neutral touch surface -------------------------------------------
+  // Declared on every board so screens shared across the X3/X4/X4C and the
+  // X4 Pro (the FreeInkUI list screens behind CROSSPOINT_SD_PLUGINS) need no
+  // #if of their own: on a board without a digitizer these fold away to
+  // constants, so the touch branches cost nothing there.
+#if !FREEINK_DEVICE_X4PRO
+  // Mirrors the X4 Pro declaration above; always None without a digitizer.
+  enum class Swipe : uint8_t { None, Up, Down, Right };
+  Swipe wasSwipe() const { return Swipe::None; }
+#endif
+
+  // True when the board has a touch digitizer. Screens gate touch-only
+  // affordances on it and keep their button-hint chrome otherwise.
+  bool hasTouch() const {
+#if FREEINK_DEVICE_X4PRO
+    return gpio.hasTouch();
+#else
+    return false;
+#endif
+  }
+
+  // Completed screen tap this frame in logical screen coordinates. Thin
+  // board-neutral name for wasTapPoint(); false on a board without touch.
+  bool wasScreenTapped(int& x, int& y) const {
+#if FREEINK_DEVICE_X4PRO
+    return wasTapPoint(x, y);
+#else
+    (void)x;
+    (void)y;
+    return false;
+#endif
+  }
+
+  // "Go home" gesture: a short home-key tap on the X4 Pro (the bottom-edge
+  // swipe is deliberately unused); boards without the key have none.
+  bool wasHomeGesture() const {
+#if FREEINK_DEVICE_X4PRO
+    return homeGesture == HomeKeyGesture::Tap;
+#else
+    return false;
+#endif
+  }
+
+  // Stationary contact held past the SDK long-press threshold, at the same
+  // logical coordinates as wasScreenTapped(). Consuming it obliges the caller
+  // to suppressTouchContact() — see wasTouchLongPressPoint().
+  bool wasScreenLongPress(int& x, int& y) const {
+#if FREEINK_DEVICE_X4PRO
+    return wasTouchLongPressPoint(x, y);
+#else
+    (void)x;
+    (void)y;
+    return false;
+#endif
+  }
+
+  // Touch-down edge and live contact position. Our touch classifier reports
+  // completed gestures only (tap, long-press, swipe), so both are always false
+  // here: FreeInkUI elements then activate on the tap rather than flashing on
+  // contact, and no InputDrag element (slider) can be dragged by finger. The
+  // catalog screens use neither. Present so the FreeInkUI snapshot builder is
+  // board-neutral, and as the seam to fill in if the classifier grows a
+  // contact-level API.
+  bool wasScreenTouchDown(int& x, int& y) const {
+    (void)x;
+    (void)y;
+    return false;
+  }
+  bool isScreenTouchHeld(int& x, int& y) const {
+    (void)x;
+    (void)y;
+    return false;
+  }
+  // Raw release edge, including releases the tap classifier never reports
+  // (swipe end, drag-off). Only meaningful alongside wasScreenTouchDown(), so
+  // it is false for the same reason.
+  bool wasScreenTouchReleased() const { return false; }
 
   void update() const {
     gpio.update();

@@ -1,5 +1,6 @@
 #include "KeyboardEntryActivity.h"
 
+#include <HalDisplay.h>
 #include <HalGPIO.h>
 #include <I18n.h>
 
@@ -29,10 +30,15 @@ void KeyboardEntryActivity::onEnter() {
   rightLongHandled = false;
   savedCursorPos = 0;
   rightStartCursorPos = 0;
+  // Every keystroke is a FAST paint; see HalDisplay::setFastScrubSuspended.
+  display.setFastScrubSuspended(true);
   requestUpdate();
 }
 
-void KeyboardEntryActivity::onExit() { Activity::onExit(); }
+void KeyboardEntryActivity::onExit() {
+  display.setFastScrubSuspended(false);
+  Activity::onExit();
+}
 
 int KeyboardEntryActivity::getContentRowCount() const {
   if (urlMode) return 3;
@@ -275,11 +281,11 @@ bool KeyboardEntryActivity::handleTouchInput() {
   int row = 0;
   int col = 0;
 
-  // Long press first: it fires while the finger is still down. Mirrors the held
-  // Confirm shortcuts — alternative character on a content key, clear-all on
-  // Del. Only a long press that actually did something suppresses the rest of
-  // the contact; otherwise the lift falls through to a normal tap, exactly as a
-  // held Confirm on a key with no alternative still types on release.
+  // Long press first: it fires while the finger is still down, after the down
+  // edge below has already pressed the key. Mirrors the held Confirm shortcuts:
+  // alternative character on a content key (replacing the primary the touch-
+  // down typed), clear-all on Del. The lift is ignored either way (the key
+  // already fired on the down edge), so no suppressTouchContact() is needed.
   if (mappedInput.wasTouchLongPressPoint(lx, ly) && hitTestKey(lx, ly, row, col)) {
     if (!isBottomRow(row)) {
       const int prevRow = selectedRow;
@@ -288,10 +294,14 @@ bool KeyboardEntryActivity::handleTouchInput() {
       selectedCol = col;
       const char alt = getAlternativeChar();
       if (alt != '\0') {
+        if (touchDownTypedChar && cursorPos > 0) {
+          text.erase(cursorPos - 1, 1);
+          cursorPos--;
+        }
+        touchDownTypedChar = false;
         insertChar(alt);
         delPressCount = 0;
         hintVisible = false;
-        mappedInput.suppressTouchContact();
         requestUpdate();
         return true;
       }
@@ -302,17 +312,41 @@ bool KeyboardEntryActivity::handleTouchInput() {
       cursorPos = 0;
       delPressCount = 0;
       hintVisible = false;
-      mappedInput.suppressTouchContact();
       requestUpdate();
       return true;
     }
   }
 
-  if (!mappedInput.wasTapPoint(lx, ly) || !hitTestKey(lx, ly, row, col)) {
+  // Touch-down: press the key now rather than on lift. Ok is the exception: it
+  // finishes the activity, and a contact still down when the next screen takes
+  // over would lift there as a tap on whatever sits under the finger. It stays
+  // on the lift path below, which is also where every other key used to fire.
+  if (mappedInput.wasTouchDownPoint(lx, ly)) {
+    touchDownFired = false;
+    touchDownTypedChar = false;
+    if (hitTestKey(lx, ly, row, col) && !(isBottomRow(row) && static_cast<SpecialKeyType>(col) == SpecialKeyType::Ok)) {
+      touchDownFired = true;
+      return pressTouchedKey(row, col);
+    }
     return true;
   }
 
-  // A tap is a direct pointer action, so it leaves the button-driven cursor
+  if (!mappedInput.wasTapPoint(lx, ly)) {
+    return true;
+  }
+  if (touchDownFired) {
+    // This contact's lift; its key already fired on the down edge.
+    touchDownFired = false;
+    return true;
+  }
+  if (!hitTestKey(lx, ly, row, col)) {
+    return true;
+  }
+  return pressTouchedKey(row, col);
+}
+
+bool KeyboardEntryActivity::pressTouchedKey(const int row, const int col) {
+  // A touch is a direct pointer action, so it leaves the button-driven cursor
   // mode rather than being interpreted inside it.
   if (cursorMode) {
     cursorMode = false;
@@ -323,7 +357,10 @@ bool KeyboardEntryActivity::handleTouchInput() {
 
   selectedRow = row;
   selectedCol = col;
-  if (handleKeyPress()) {
+  const size_t lengthBefore = text.length();
+  const bool stillActive = handleKeyPress();
+  touchDownTypedChar = !isBottomRow(row) && !urlMode && text.length() == lengthBefore + 1;
+  if (stillActive) {
     requestUpdate();
     return true;
   }

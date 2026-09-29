@@ -70,7 +70,8 @@ void HalDisplay::applyRefreshPolicy(HalDisplay::RefreshMode mode) {
   // up as speckle/noise. Promote every Nth consecutive fast paint to a full
   // GC flash of the frame being displayed. Reader page turns reset the streak
   // via their HALF scrub above, so this only fires on fast-only streaks.
-  if (++_fastRefreshStreak >= FAST_REFRESH_SCRUB_LIMIT) {
+  if (_fastRefreshStreak < UINT16_MAX) ++_fastRefreshStreak;
+  if (_fastRefreshStreak >= FAST_REFRESH_SCRUB_LIMIT && !_fastScrubSuspended) {
     einkDisplay.requestResync(1);
     _fastRefreshStreak = 0;
   }

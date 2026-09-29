@@ -345,6 +345,20 @@ bool MappedInputManager::wasTapPoint(int& lx, int& ly) const {
   return true;
 }
 
+bool MappedInputManager::wasTouchDownPoint(int& lx, int& ly) const {
+  if (gpio.isHomeKeyDown() || gpio.wasHomeKeyTapped() || gpio.wasHomeKeyLongPressed()) {
+    return false;
+  }
+  float nx, ny;
+  if (!gpio.wasTouchPressedAt(nx, ny)) {
+    return false;
+  }
+  const LogicalTouchPoint p = toLogicalPoint(nx, ny);
+  lx = p.x;
+  ly = p.y;
+  return true;
+}
+
 bool MappedInputManager::wasTouchLongPressPoint(int& lx, int& ly) const {
   if (gpio.wasHomeKeyTapped() || gpio.wasHomeKeyLongPressed()) {
     return false;
