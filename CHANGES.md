@@ -4,7 +4,7 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ---
 
-## Unreleased
+## 1.12.0 — October 2026
 
 ### Plugins: native lists, README info screen, headless runner, 4096-bit TLS *(X4 Pro / X4C)*
 
