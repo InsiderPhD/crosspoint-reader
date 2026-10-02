@@ -115,7 +115,7 @@ class BookFusionBrowserActivity final : public Activity {
   int downloadStatusY = 0;             // Y of the status line, shared by full + partial repaint
   void drawDownloadDynamic(int statusY);
 
-  char errorMsg[128] = {};
+  char errorMsg[224] = {};  // "Download failed: <reason> <resume hint> <log hint>" runs to ~190 chars
 
   // List body shared by both list states (category menu and BROWSING book
   // list) and by render() + the loop()'s tap hit-testing, so no two of them

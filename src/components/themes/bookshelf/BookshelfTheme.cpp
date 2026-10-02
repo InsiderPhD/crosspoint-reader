@@ -328,6 +328,23 @@ void drawSpine(const GfxRenderer& renderer, const RecentBook& book, const Rect& 
                                ink, EpdFontFamily::BOLD);
 }
 
+// A ribbon marker hanging over the head of a pinned book, drawn in both inks
+// so it reads on a dark spine and a light cover alike.
+void drawPinRibbon(const GfxRenderer& renderer, const Rect& book) {
+  constexpr int kRibbonW = 7;
+  constexpr int kRibbonH = 14;
+  const int x = book.x + book.width - kRibbonW - 3;
+  const int y = book.y;
+  if (x <= book.x) return;
+  renderer.fillRect(x - 1, y, kRibbonW + 2, kRibbonH + 1, false);
+  renderer.fillRect(x, y, kRibbonW, kRibbonH, true);
+  // Notch: a white wedge cut up into the ribbon's tail.
+  const int cx = x + kRibbonW / 2;
+  for (int row = 0; row < kRibbonW / 2 + 1; ++row) {
+    renderer.drawLine(cx - row, y + kRibbonH - row, cx + row, y + kRibbonH - row, false);
+  }
+}
+
 // ---- shelf cover cache ----
 //
 // Shrinking a 400 px thumbnail to a ~56 px shelf slot reads ~27 KB and
@@ -557,6 +574,7 @@ void drawShelf(const GfxRenderer& renderer, const Layout& l, const std::vector<R
       drawn = Rect{x, l.plankY - l.shelfCoverMaxH, kSpineW, l.shelfCoverMaxH};
       drawSpine(renderer, books[i], drawn, hash);
     }
+    if (books[i].pinned) drawPinRibbon(renderer, drawn);
     drawnArtwork[i] = drawn;
     // Hit area: the book's own column, full shelf height down to the plank,
     // widened by half a gap each side so taps between books still land.

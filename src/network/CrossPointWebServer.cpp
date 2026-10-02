@@ -26,6 +26,7 @@
 #include "html/HomePageHtml.generated.h"
 #if CROSSPOINT_SD_PLUGINS
 #include "html/PluginsPageHtml.generated.h"
+#include "html/RunnerPageHtml.generated.h"
 #endif
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
@@ -231,6 +232,7 @@ void CrossPointWebServer::begin() {
 #if CROSSPOINT_SD_PLUGINS
   server->on("/api/plugins", HTTP_GET, [this] { handlePluginList(); });
   server->on("/plugin", HTTP_GET, [this] { handlePluginFile(); });
+  server->on("/plugins-run", HTTP_GET, [this] { handlePluginRunnerPage(); });
   server->on("/api/relay", HTTP_POST, [this] { handleRelay(); });
   server->on("/api/crypto", HTTP_POST, [this] { handleCrypto(); });
   server->on("/api/fetch", HTTP_POST, [this] { handleFetch(); });
@@ -1289,6 +1291,13 @@ void CrossPointWebServer::handleDelete() const {
     server->send(500, "text/plain", "Failed to delete some items: " + failedItems);
   }
 }
+
+#if CROSSPOINT_SD_PLUGINS
+void CrossPointWebServer::handlePluginRunnerPage() const {
+  sendHtmlContent(server.get(), RunnerPageHtml, sizeof(RunnerPageHtml));
+  LOG_DBG("WEB", "Served plugin runner page");
+}
+#endif
 
 void CrossPointWebServer::handlePluginsPage() const {
 #if CROSSPOINT_SD_PLUGINS

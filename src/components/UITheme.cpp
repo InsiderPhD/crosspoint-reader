@@ -162,8 +162,10 @@ int UITheme::getStatusBarHeight() {
 }
 
 namespace {
-const char* bookOptionLabel(int optionId) {
+const char* bookOptionLabel(int optionId, const bool pinned) {
   switch (optionId) {
+    case UITheme::BOOK_OPT_PIN:
+      return pinned ? tr(STR_UNPIN_FROM_SHELF) : tr(STR_PIN_TO_SHELF);
     case UITheme::BOOK_OPT_MARK_READ:
       return tr(STR_MARK_AS_READ);
     case UITheme::BOOK_OPT_RESET_PROGRESS:
@@ -192,6 +194,7 @@ int UITheme::getVisibleBookOptions(int* ids, int maxIds, const bool includeDelet
   add(BOOK_OPT_BOOK_INFO);  // First: the most common, least destructive action
   add(BOOK_OPT_MARK_READ);
   add(BOOK_OPT_RESET_PROGRESS);
+  if (getInstance().getMetrics().homePinnedBooks) add(BOOK_OPT_PIN);
   add(BOOK_OPT_SHELVE);
   add(BOOK_OPT_DELETE);
   if (includeDeleteClippings) add(BOOK_OPT_DELETE_CLIPPINGS);
@@ -202,7 +205,7 @@ int UITheme::getVisibleBookOptions(int* ids, int maxIds, const bool includeDelet
 UITheme::BookOptionsPopupLayout UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title,
                                                               const char* author, const char* folderPath,
                                                               int progressPercent, int selectedOptionIndex,
-                                                              const bool includeDeleteClippings) {
+                                                              const bool includeDeleteClippings, const bool pinned) {
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   constexpr int POPUP_W = 420;
@@ -253,7 +256,7 @@ UITheme::BookOptionsPopupLayout UITheme::drawBookOptionsPopup(GfxRenderer& rende
     if (i == selectedOptionIndex) {
       renderer.fillRect(px + BORDER, optY, POPUP_W - BORDER * 2, OPTION_H, true);
     }
-    renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - lineH) / 2, bookOptionLabel(ids[i]),
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - lineH) / 2, bookOptionLabel(ids[i], pinned),
                       i != selectedOptionIndex);
   }
 

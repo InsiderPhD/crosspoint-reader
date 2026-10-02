@@ -52,6 +52,14 @@ struct ThemeMetrics {
   int homeCoverHeight;
   int homeCoverTileHeight;
   int homeRecentBooksCount;
+  // When fewer recent books exist than homeRecentBooksCount, fill the rest of
+  // the slots with library books (see HomeActivity::backfillFromLibrary).
+  // Only sensible on a home that shows several books, not a Continue Reading
+  // tile.
+  bool homeBackfillFromLibrary;
+  // Pinned books (RecentBooksStore::getPinnedPaths) take the first slots and
+  // the book menus offer Pin / Unpin. Again only for a home with a shelf.
+  bool homePinnedBooks;
 
   int buttonHintsHeight;
   int sideButtonHintsWidth;
@@ -125,6 +133,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeCoverHeight = 400,
                                  .homeCoverTileHeight = 400,
                                  .homeRecentBooksCount = 1,
+                                 .homeBackfillFromLibrary = false,
+                                 .homePinnedBooks = false,
 #if FREEINK_DEVICE_X4PRO
                                  // X4 Pro has no front buttons, so this strip holds the tappable
                                  // action bar instead of four button labels (see ActionBar.h).

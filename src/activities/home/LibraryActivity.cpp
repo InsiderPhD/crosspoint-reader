@@ -881,11 +881,15 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
       RECENT_BOOKS.saveToFile();
       reloadAfterMutation();
       break;
+    case BookContextMenu::Action::Pin:
+      RECENT_BOOKS.togglePin(path);
+      reloadAfterMutation();
+      break;
     case BookContextMenu::Action::Shelve:
       // "Remove from recents" — the file stays on disk and remains in the library
-      // listing, only the RecentBooksStore entry is cleared.
-      RECENT_BOOKS.removeBook(path);
-      RECENT_BOOKS.saveToFile();
+      // listing, only the RecentBooksStore entry is cleared (and the Bookshelf
+      // home stops offering it as a filler).
+      RECENT_BOOKS.shelveBook(path);
       reloadAfterMutation();
       break;
     case BookContextMenu::Action::Reindex:

@@ -220,6 +220,20 @@ void CrossPointSettings::sanitizeReaderActions(CrossPointSettings& settings) {
   }
 }
 
+void CrossPointSettings::sanitizeFrontlightSchedules(CrossPointSettings& settings) {
+  constexpr uint16_t MINUTES_PER_DAY = 24 * 60;
+  for (auto& slot : settings.frontlightSchedules) {
+    slot.enabled = slot.enabled ? 1 : 0;
+    if (slot.startMinutes >= MINUTES_PER_DAY) slot.startMinutes = 0;
+    if (slot.endMinutes >= MINUTES_PER_DAY) slot.endMinutes = 0;
+    if (slot.brightness > 100) slot.brightness = 100;
+    if (slot.warmth > 100) slot.warmth = 100;
+  }
+  if (settings.frontlightScheduleActive > FRONTLIGHT_SCHEDULE_SLOTS) settings.frontlightScheduleActive = 0;
+  if (settings.frontlightScheduleRestoreBrightness > 100) settings.frontlightScheduleRestoreBrightness = 100;
+  if (settings.frontlightScheduleRestoreWarmth > 100) settings.frontlightScheduleRestoreWarmth = 100;
+}
+
 bool CrossPointSettings::isUnavailableReaderAction(const uint8_t action) {
   return action == READER_ACTION_TOGGLE_FRONTLIGHT && !halFrontlight.present();
 }

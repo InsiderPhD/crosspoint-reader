@@ -29,6 +29,10 @@ class HomeActivity final : public Activity {
   int coverRectW = 0;
   int coverRectH = 0;
   std::vector<RecentBook> recentBooks;
+  // Slot the selector starts on after a (re)load: the newest book that is a
+  // real recent, so pinned books and library fillers never steal the hero
+  // card from the current read. 0 when there is no such book.
+  int homeSelectorIndex = 0;
 
   // Apply a chosen book-options action to `path`. Used by both this activity
   // and (via BookContextMenu's action enum) any future caller.
@@ -63,6 +67,12 @@ class HomeActivity final : public Activity {
   bool restoreCoverBuffer();  // Restore frame buffer from stored cover
   void freeCoverBuffer();     // Free the stored cover buffer
   void loadRecentBooks(int maxBooks);
+  // Puts the store's pinned books (ThemeMetrics::homePinnedBooks) into the
+  // first slots, in pin order; metadata from the recents entry or the cache.
+  void loadPinnedBooks(int maxBooks);
+  // Tops recentBooks up to maxBooks with library books when the theme asks for
+  // it (ThemeMetrics::homeBackfillFromLibrary). Fillers carry progress -1.
+  void backfillFromLibrary(int maxBooks);
   void loadRecentCovers(int coverHeight);
   bool anyRecentThumbNeedsGenerating(int coverHeight) const;
 

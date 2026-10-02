@@ -27,6 +27,19 @@ constexpr const char* kComboButtonsKeys[CrossPointSettings::READER_COMBO_SLOTS] 
     "readerCombo0Buttons", "readerCombo1Buttons", "readerCombo2Buttons", "readerCombo3Buttons"};
 constexpr const char* kComboActionKeys[CrossPointSettings::READER_COMBO_SLOTS] = {
     "readerCombo0Action", "readerCombo1Action", "readerCombo2Action", "readerCombo3Action"};
+// Frontlight schedule slots, one key per field per slot, same reasoning.
+constexpr uint8_t kFlSchedSlots = CrossPointSettings::FRONTLIGHT_SCHEDULE_SLOTS;
+constexpr const char* kFlSchedEnabledKeys[kFlSchedSlots] = {"frontlightSched0Enabled", "frontlightSched1Enabled",
+                                                            "frontlightSched2Enabled", "frontlightSched3Enabled"};
+constexpr const char* kFlSchedStartKeys[kFlSchedSlots] = {"frontlightSched0Start", "frontlightSched1Start",
+                                                          "frontlightSched2Start", "frontlightSched3Start"};
+constexpr const char* kFlSchedEndKeys[kFlSchedSlots] = {"frontlightSched0End", "frontlightSched1End",
+                                                        "frontlightSched2End", "frontlightSched3End"};
+constexpr const char* kFlSchedBrightnessKeys[kFlSchedSlots] = {
+    "frontlightSched0Brightness", "frontlightSched1Brightness", "frontlightSched2Brightness",
+    "frontlightSched3Brightness"};
+constexpr const char* kFlSchedWarmthKeys[kFlSchedSlots] = {"frontlightSched0Warmth", "frontlightSched1Warmth",
+                                                           "frontlightSched2Warmth", "frontlightSched3Warmth"};
 }  // namespace
 
 // Convert legacy settings.
@@ -222,6 +235,17 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
     doc[kComboActionKeys[slot]] = s.readerComboAction[slot];
   }
   doc["readerActionsMigrated"] = s.readerActionsMigrated;
+  for (uint8_t slot = 0; slot < kFlSchedSlots; slot++) {
+    const auto& sched = s.frontlightSchedules[slot];
+    doc[kFlSchedEnabledKeys[slot]] = sched.enabled;
+    doc[kFlSchedStartKeys[slot]] = sched.startMinutes;
+    doc[kFlSchedEndKeys[slot]] = sched.endMinutes;
+    doc[kFlSchedBrightnessKeys[slot]] = sched.brightness;
+    doc[kFlSchedWarmthKeys[slot]] = sched.warmth;
+  }
+  doc["frontlightScheduleActive"] = s.frontlightScheduleActive;
+  doc["frontlightScheduleRestoreBrightness"] = s.frontlightScheduleRestoreBrightness;
+  doc["frontlightScheduleRestoreWarmth"] = s.frontlightScheduleRestoreWarmth;
 
   String json;
   serializeJson(doc, json);
@@ -392,6 +416,21 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   }
   CrossPointSettings::sanitizeReaderCombos(s);
   s.readerActionsMigrated = doc["readerActionsMigrated"] | (uint8_t)0;
+  // Frontlight schedules. Absent keys keep the struct defaults (a disabled
+  // 21:00-07:00 slot), so a file from before this feature adds no windows.
+  for (uint8_t slot = 0; slot < kFlSchedSlots; slot++) {
+    auto& sched = s.frontlightSchedules[slot];
+    const CrossPointSettings::FrontlightSchedule defaults{};
+    sched.enabled = doc[kFlSchedEnabledKeys[slot]] | defaults.enabled;
+    sched.startMinutes = doc[kFlSchedStartKeys[slot]] | defaults.startMinutes;
+    sched.endMinutes = doc[kFlSchedEndKeys[slot]] | defaults.endMinutes;
+    sched.brightness = doc[kFlSchedBrightnessKeys[slot]] | defaults.brightness;
+    sched.warmth = doc[kFlSchedWarmthKeys[slot]] | defaults.warmth;
+  }
+  s.frontlightScheduleActive = doc["frontlightScheduleActive"] | (uint8_t)0;
+  s.frontlightScheduleRestoreBrightness = doc["frontlightScheduleRestoreBrightness"] | (uint8_t)0;
+  s.frontlightScheduleRestoreWarmth = doc["frontlightScheduleRestoreWarmth"] | (uint8_t)50;
+  CrossPointSettings::sanitizeFrontlightSchedules(s);
 
   // Reader-menu visibility. Predating the per-row bitmask, a settings file
   // carries only the four coarse group toggles; fold those into the mask and
@@ -525,6 +564,10 @@ bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* 
     obj["coverBmpPath"] = book.coverBmpPath;
     obj["progressPercent"] = book.progressPercent;
   }
+  JsonArray shelved = doc["shelved"].to<JsonArray>();
+  for (const auto& path : store.getShelvedPaths()) shelved.add(path);
+  JsonArray pinned = doc["pinned"].to<JsonArray>();
+  for (const auto& path : store.getPinnedPaths()) pinned.add(path);
 
   String json;
   serializeJson(doc, json);
@@ -550,6 +593,23 @@ bool JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const char* json) 
     book.coverBmpPath = obj["coverBmpPath"] | std::string("");
     book.progressPercent = obj["progressPercent"] | int8_t(-1);
     store.recentBooks.push_back(book);
+  }
+
+  store.shelvedPaths.clear();
+  JsonArray shelved = doc["shelved"].as<JsonArray>();
+  store.shelvedPaths.reserve(shelved.size());
+  for (JsonVariant v : shelved) {
+    if (store.shelvedPaths.size() >= RecentBooksStore::MAX_SHELVED_BOOKS) break;
+    const char* path = v.as<const char*>();
+    if (path != nullptr && path[0] != '\0') store.shelvedPaths.emplace_back(path);
+  }
+  store.pinnedPaths.clear();
+  JsonArray pinned = doc["pinned"].as<JsonArray>();
+  store.pinnedPaths.reserve(pinned.size());
+  for (JsonVariant v : pinned) {
+    if (store.pinnedPaths.size() >= RecentBooksStore::MAX_PINNED_BOOKS) break;
+    const char* path = v.as<const char*>();
+    if (path != nullptr && path[0] != '\0') store.pinnedPaths.emplace_back(path);
   }
 
   LOG_DBG("RBS", "Recent books loaded from file (%d entries)", store.getCount());

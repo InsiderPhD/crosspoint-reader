@@ -186,6 +186,21 @@ uint32_t TimeUtils::getLocalDayOrdinal(const uint32_t epochSeconds) {
                                              static_cast<unsigned>(localTime.tm_mday)));
 }
 
+bool TimeUtils::getLocalMinuteOfDay(uint16_t& minuteOut) {
+  const uint32_t now = static_cast<uint32_t>(time(nullptr));
+  if (!isClockValid(now)) {
+    return false;
+  }
+  configureTimezone();
+  time_t currentTime = static_cast<time_t>(now);
+  tm localTime = {};
+  if (localtime_r(&currentTime, &localTime) == nullptr) {
+    return false;
+  }
+  minuteOut = static_cast<uint16_t>(localTime.tm_hour * 60 + localTime.tm_min);
+  return true;
+}
+
 bool TimeUtils::getLocalHour(const uint32_t epochSeconds, uint8_t& hourOut) {
   configureTimezone();
 

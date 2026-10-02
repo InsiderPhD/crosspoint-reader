@@ -400,9 +400,12 @@ void GroupBrowserActivity::dispatchBookAction(BookContextMenu::Action action, co
       RECENT_BOOKS.saveToFile();
       requestUpdate(true);
       break;
+    case BookContextMenu::Action::Pin:
+      RECENT_BOOKS.togglePin(path);
+      requestUpdate(true);
+      break;
     case BookContextMenu::Action::Shelve:
-      RECENT_BOOKS.removeBook(path);
-      RECENT_BOOKS.saveToFile();
+      RECENT_BOOKS.shelveBook(path);
       requestUpdate(true);
       break;
     case BookContextMenu::Action::Reindex:

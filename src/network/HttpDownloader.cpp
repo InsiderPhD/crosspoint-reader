@@ -12,6 +12,7 @@
 #include <cstring>
 
 #include "CrossPointSettings.h"
+#include "DownloadFailureLog.h"
 
 // wolfSSL's Arduino port leaves its logging hook to the application
 // (wolfcrypt/src/logging.c calls it whenever logging is enabled; the reference
@@ -55,14 +56,16 @@ void configureRequest(freeink::SecureHttpClient& http, const std::string& url, b
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent) {
   freeink::SecureHttpClient http;
-  configureRequest(http, url, true);
 
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
 
+  // begin() resets the per-request header list, so it must run BEFORE
+  // configureRequest adds the BookFusion Accept/Referer headers.
   if (!http.begin(url)) {
     LOG_ERR("HTTP", "Fetch failed: bad URL");
     return false;
   }
+  configureRequest(http, url, true);
 
   // getStatus() is valid inside the sink (headers parse before the body);
   // error bodies are drained without reaching the caller's stream.
@@ -100,12 +103,31 @@ bool HttpDownloader::fetchUrl(const std::string& url, std::string& outContent) {
   return true;
 }
 
+namespace {
+// Status of the last downloadToFile() response; see HttpDownloader::lastHttpStatus().
+int gLastHttpStatus = 0;
+}  // namespace
+
+int HttpDownloader::lastHttpStatus() { return gLastHttpStatus; }
+
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
                                                              ProgressCallback progress, bool allowConfiguredAuth,
                                                              size_t expectedSize, const volatile bool* cancelFlag,
                                                              const std::string& username, const std::string& password,
-                                                             const std::vector<Header>& headers) {
+                                                             const std::vector<Header>& headers, bool resumePartial) {
+  gLastHttpStatus = 0;
   freeink::SecureHttpClient http;
+
+  LOG_DBG("HTTP", "Downloading: %s", url.c_str());
+  LOG_DBG("HTTP", "Destination: %s", destPath.c_str());
+
+  // begin() resets the per-request header list, so it must run BEFORE anything
+  // below adds headers (previously the BookFusion Accept/Referer pair and a
+  // plugin's own headers were added first and silently discarded here).
+  if (!http.begin(url)) {
+    LOG_ERR("HTTP", "Download failed: bad URL");
+    return HTTP_ERROR;
+  }
   configureRequest(http, url, allowConfiguredAuth);
 
   // Per-request credentials/headers (SD plugins). Set after configureRequest so
@@ -117,27 +139,54 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     http.addHeader(header.first, header.second);
   }
 
-  LOG_DBG("HTTP", "Downloading: %s", url.c_str());
-  LOG_DBG("HTTP", "Destination: %s", destPath.c_str());
-
-  if (!http.begin(url)) {
-    LOG_ERR("HTTP", "Download failed: bad URL");
-    return HTTP_ERROR;
+  // Resume: bytes already on disk from an earlier interrupted transfer. A
+  // partial that is already as large as the expected file cannot be a valid
+  // prefix (the server would answer 416 anyway), so it is discarded instead.
+  // `resumeBase` is what the progress/size maths add to this session's bytes;
+  // it drops to 0 inside the sink if the server ignores the Range and sends a
+  // full 200 body, which restarts the file from scratch.
+  size_t resumeBase = 0;
+  if (resumePartial && Storage.exists(destPath.c_str())) {
+    {
+      FsFile partial = Storage.open(destPath.c_str(), O_RDONLY);
+      if (partial) {
+        resumeBase = partial.fileSize();
+        partial.close();
+      }
+    }
+    if (expectedSize > 0 && resumeBase >= expectedSize) {
+      LOG_ERR("HTTP", "Partial file (%u bytes) is not smaller than the expected %u; starting over",
+              (unsigned)resumeBase, (unsigned)expectedSize);
+      resumeBase = 0;
+    }
+    if (resumeBase > 0) {
+      char range[40];
+      snprintf(range, sizeof(range), "bytes=%u-", (unsigned)resumeBase);
+      http.addHeader("Range", range);
+      LOG_INF("HTTP", "Resuming transfer from byte %u", (unsigned)resumeBase);
+    } else {
+      Storage.remove(destPath.c_str());
+    }
   }
+  // For the failure log: what was asked for, separately from what the server
+  // did about it (resumeBase itself drops to 0 when a 200 restarts the file).
+  const size_t rangeRequested = resumeBase;
 
   if (progress) {
     // SecureHttpClient reports (downloaded, total-from-Content-Length-or-0)
-    // after each delivered chunk — the same shape our callers expect.
-    http.setProgressCallback([&progress](size_t downloaded, size_t total) {
-      progress(downloaded, total);
+    // after each delivered chunk — the same shape our callers expect, offset
+    // by the resumed prefix so the bar never jumps backwards.
+    http.setProgressCallback([&progress, &resumeBase](size_t downloaded, size_t total) {
+      progress(resumeBase + downloaded, total > 0 ? resumeBase + total : 0);
       return true;
     });
   }
 
   // Heap snapshot before the transfer: the historical failure mode here was a
   // *largest-free-block* shortage, not a total-free shortage, so log both.
-  LOG_DBG("HTTP", "Heap before transfer: free=%u largest=%u", ESP.getFreeHeap(),
-          heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  const uint32_t heapFreeBefore = ESP.getFreeHeap();
+  const uint32_t heapLargestBefore = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  LOG_DBG("HTTP", "Heap before transfer: free=%u largest=%u", (unsigned)heapFreeBefore, (unsigned)heapLargestBefore);
 
   // The file is created lazily on the first 200-status body chunk, so an HTTP
   // error (or a redirect chain that never resolves) leaves any existing file
@@ -147,6 +196,13 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   bool fileError = false;
   size_t downloaded = 0;
   bool cancelled = false;
+  // Transfer-shape counters for the failure log: a stall shows up as a large
+  // gap between chunks; a slow link as a low chunk rate.
+  const unsigned long requestMs = millis();
+  unsigned long firstChunkMs = 0;
+  unsigned long lastChunkMs = 0;
+  unsigned long maxChunkGapMs = 0;
+  uint32_t chunkCount = 0;
 
 #if CROSSPOINT_DOWNLOAD_WRITE_BUFFER > 0
   // Write coalescing (roomy boards only — see CROSSPOINT_DOWNLOAD_WRITE_BUFFER).
@@ -179,8 +235,19 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
 #endif
 
   const int httpCode = http.GET([&](const uint8_t* data, size_t len) {
-    esp_task_wdt_reset();                      // download length is network-bound; feed the loop WDT per chunk
-    if (http.getStatus() != 200) return true;  // drain error body
+    esp_task_wdt_reset();  // download length is network-bound; feed the loop WDT per chunk
+    const int status = http.getStatus();
+    if (status != 200 && status != 206) return true;  // drain error body
+    {
+      const unsigned long now = millis();
+      if (chunkCount == 0) {
+        firstChunkMs = now;
+      } else if (now - lastChunkMs > maxChunkGapMs) {
+        maxChunkGapMs = now - lastChunkMs;
+      }
+      lastChunkMs = now;
+      chunkCount++;
+    }
     // Polled here rather than in the progress callback: the callback only fires
     // once a chunk has been delivered, and returning false from the sink is the
     // one path the transport already treats as "stop reading the body".
@@ -189,13 +256,27 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
       return false;
     }
     if (!fileOpen) {
-      if (Storage.exists(destPath.c_str())) {
-        Storage.remove(destPath.c_str());
-      }
-      if (!Storage.openFileForWrite("HTTP", destPath.c_str(), file)) {
-        LOG_ERR("HTTP", "Failed to open file for writing");
-        fileError = true;
-        return false;
+      if (status == 206 && resumeBase > 0) {
+        // Server honoured the Range: continue the existing file.
+        file = Storage.open(destPath.c_str(), O_WRONLY | O_APPEND);
+        if (!file) {
+          LOG_ERR("HTTP", "Failed to reopen partial file for append");
+          fileError = true;
+          return false;
+        }
+      } else {
+        if (resumeBase > 0) {
+          LOG_INF("HTTP", "Server ignored the Range request (status %d); restarting from byte 0", status);
+          resumeBase = 0;
+        }
+        if (Storage.exists(destPath.c_str())) {
+          Storage.remove(destPath.c_str());
+        }
+        if (!Storage.openFileForWrite("HTTP", destPath.c_str(), file)) {
+          LOG_ERR("HTTP", "Failed to open file for writing");
+          fileError = true;
+          return false;
+        }
       }
       fileOpen = true;
     }
@@ -252,76 +333,171 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   }
 #endif
 
-  if (cancelled) {
-    LOG_INF("HTTP", "Download cancelled after %zu bytes", downloaded);
-    if (fileOpen) {
+  gLastHttpStatus = httpCode > 0 ? httpCode : 0;
+
+  // What is on disk after a resumable failure. With resumePartial the bytes
+  // written so far are a valid prefix of the file (appended after a 206, or a
+  // fresh start), so they are kept for the next attempt; otherwise the usual
+  // delete-on-failure applies.
+  const auto discardUnlessResumable = [&]() {
+    if (resumePartial) {
+      LOG_INF("HTTP", "Keeping %u-byte partial file for resume", (unsigned)(resumeBase + downloaded));
+      return;
+    }
+    if (fileOpen || Storage.exists(destPath.c_str())) {
       Storage.remove(destPath.c_str());
     }
-    return ABORTED;
-  }
-
-  if (fileError) {
-    LOG_ERR("HTTP", "Write failed during download");
-    if (fileOpen) {
-      Storage.remove(destPath.c_str());
-    }
-    return FILE_ERROR;
-  }
-
-  if (httpCode != 200) {
-    LOG_ERR("HTTP", "Download failed: %d", httpCode);
-    return HTTP_ERROR;
-  }
+  };
 
   const size_t contentLength = http.hasContentLength() ? http.getContentLength() : 0;
-  if (contentLength > 0) {
-    LOG_DBG("HTTP", "Content-Length: %zu", contentLength);
-  } else {
-    LOG_DBG("HTTP", "Content-Length: unknown");
-  }
-  LOG_DBG("HTTP", "Downloaded %zu bytes", downloaded);
+  const size_t totalOnDisk = resumeBase + downloaded;
+  // How the body's end was signalled. `framed` means the transport can tell a
+  // complete body from a truncated one on its own (responseComplete() above).
+  const bool chunked = http.getHeader("transfer-encoding").find("chunked") != std::string::npos;
+  const bool framed = chunked || http.hasContentLength();
 
-  if (contentLength == 0 && downloaded == 0) {
+  // Single exit: every failure below lands in `result`, and the failure report
+  // at the bottom sees the same state the decision was made on.
+  DownloadError result = OK;
+  if (cancelled) {
+    LOG_INF("HTTP", "Download cancelled after %zu bytes", downloaded);
+    discardUnlessResumable();
+    result = ABORTED;
+  } else if (fileError) {
+    // A write failure is usually a full or removed card: a partial is of no
+    // use, and deleting it is the one thing that might free space.
+    LOG_ERR("HTTP", "Write failed during download");
+    if (fileOpen || Storage.exists(destPath.c_str())) {
+      Storage.remove(destPath.c_str());
+    }
+    result = FILE_ERROR;
+  } else if (httpCode < 0) {
+    // -1 = transport (DNS / TCP / TLS / no status line). Nothing was written
+    // this call, so any resumable partial is untouched. Log where THIS device
+    // sits on the network — a saved-credentials auto-join onto the wrong SSID
+    // is otherwise invisible.
+    const auto& diag = http.lastFailure();
+    LOG_ERR("HTTP", "Download failed: no response (stage=%s, %lums, ip=%s, rssi=%d)", diag.stage, diag.elapsedMs,
+            WiFi.localIP().toString().c_str(), WiFi.RSSI());
+    result = CONNECT_ERROR;
+  } else if (httpCode == 416 && resumeBase > 0) {
+    // Range not satisfiable: the partial does not match what the server has
+    // now (re-uploaded book, or it was already complete). Start clean next time.
+    LOG_ERR("HTTP", "Server rejected the resume range (416); discarding partial file");
+    Storage.remove(destPath.c_str());
+    result = HTTP_STATUS_ERROR;
+  } else if (httpCode != 200 && httpCode != 206) {
+    LOG_ERR("HTTP", "Download failed: HTTP %d", httpCode);
+    result = HTTP_STATUS_ERROR;
+  } else if (contentLength == 0 && downloaded == 0) {
     LOG_ERR("HTTP", "Download failed: no data received");
-    if (fileOpen) {
-      Storage.remove(destPath.c_str());
-    }
-    return HTTP_ERROR;
-  }
-
-  // A body that stopped short of its framing (chunked terminator or
-  // Content-Length) is a truncation. Reject it loudly rather than handing a
-  // partial file downstream (the corrupt-cover bug).
-  if (!http.responseComplete()) {
+    discardUnlessResumable();
+    result = NO_DATA_ERROR;
+  } else if (!http.responseComplete()) {
+    // A body that stopped short of its framing (chunked terminator or
+    // Content-Length) is a truncation. Reject it loudly rather than handing a
+    // partial file downstream (the corrupt-cover bug).
     LOG_ERR("HTTP", "Transfer truncated: got %zu bytes without a clean end-of-body", downloaded);
-    Storage.remove(destPath.c_str());
-    return HTTP_ERROR;
-  }
-
-  // Verify download size if known
-  if (contentLength > 0 && downloaded != contentLength) {
+    discardUnlessResumable();
+    result = TRUNCATED_ERROR;
+  } else if (contentLength > 0 && downloaded != contentLength) {
     LOG_ERR("HTTP", "Size mismatch: got %zu, expected %zu", downloaded, contentLength);
-    Storage.remove(destPath.c_str());
-    return HTTP_ERROR;
+    discardUnlessResumable();
+    result = TRUNCATED_ERROR;
+  } else if (expectedSize > 0 && !framed && totalOnDisk < expectedSize - expectedSize / 8) {
+    // Cross-check against the size the caller knows independently (e.g. BookFusion's
+    // API download_size) — but ONLY for a body with no framing at all (neither
+    // Content-Length nor chunked), which ends on connection close and so cannot
+    // tell a drop from the end of the file. A chunked body that reached its
+    // terminator is complete whatever the API claimed: BookFusion's reader
+    // endpoint serves a chunked EPUB that is ~55% of the book's advertised
+    // download_size, and this check used to reject that complete file three
+    // times in a row. The 87.5% band absorbs small advertised-vs-served drift.
+    LOG_ERR("HTTP", "Incomplete download: got %zu bytes, expected ~%zu", totalOnDisk, expectedSize);
+    discardUnlessResumable();
+    result = TRUNCATED_ERROR;
   }
 
-  // Cross-check against the size the caller knows independently (e.g. BookFusion's
-  // API download_size). The Content-Length check above only fires when the server
-  // sends that header; BookFusion's pre-signed URLs sometimes stream without one,
-  // so a connection dropped mid-transfer yields a silently truncated EPUB that
-  // every check above accepts. The expected size is an independent record of the
-  // full file, so reject a download that came up well short of it. A tolerance
-  // band (87.5%) absorbs the small, legitimate differences between the advertised
-  // size and the bytes actually served while still catching the gross shortfall
-  // of a truncated transfer.
-  if (expectedSize > 0) {
-    const size_t minAcceptable = expectedSize - expectedSize / 8;
-    if (downloaded < minAcceptable) {
-      LOG_ERR("HTTP", "Incomplete download: got %zu bytes, expected ~%zu", downloaded, expectedSize);
-      Storage.remove(destPath.c_str());
-      return HTTP_ERROR;
+  if (result == OK) {
+    LOG_DBG("HTTP", "Downloaded %zu bytes this session, %zu on disk (Content-Length %zu)", downloaded, totalOnDisk,
+            contentLength);
+    // 3. A framed body that disagrees with the caller's expected size is worth a
+    // note in the log (it is what the above used to fail on), not a failure.
+    if (expectedSize > 0 &&
+        (totalOnDisk < expectedSize - expectedSize / 8 || totalOnDisk > expectedSize + expectedSize / 8)) {
+      LOG_INF("HTTP", "Size differs from expected: got %zu, caller expected ~%zu (accepted: body was %s)", totalOnDisk,
+              expectedSize, chunked ? "chunked and terminated" : "Content-Length complete");
+      DownloadFailureLog::line("warning: served %u bytes but caller expected ~%u (%s); accepted", (unsigned)totalOnDisk,
+                               (unsigned)expectedSize, chunked ? "chunked, terminated" : "content-length matched");
     }
+    return OK;
   }
 
-  return OK;
+  // Failure report for the SD log (DownloadFailureLog::kPath). The TLS session
+  // is closed first so its record buffers are back in the heap before the
+  // report's own small allocations (the response-header dump builds a vector
+  // of std::string pairs) and so the "after" heap line shows the activity's
+  // footprint, not the transport's. Diagnostics and headers are plain members
+  // of `http` and survive end().
+  http.end();
+  {
+    static const char* const kNames[] = {"OK",      "HTTP_ERROR",        "FILE_ERROR",    "ABORTED",
+                                         "CONNECT", "HTTP_STATUS_ERROR", "NO_DATA_ERROR", "TRUNCATED_ERROR"};
+    const unsigned long now = millis();
+    const auto& diag = http.lastFailure();
+    DownloadFailureLog::section("HTTP transfer failed");
+    DownloadFailureLog::url("url", url.c_str());
+    DownloadFailureLog::line("dest=%s expectedSize=%u resumePartial=%d", destPath.c_str(), (unsigned)expectedSize,
+                             resumePartial ? 1 : 0);
+    if (rangeRequested > 0) {
+      DownloadFailureLog::line("resume: requested Range from byte %u -> %s", (unsigned)rangeRequested,
+                               httpCode == 206   ? "honoured (206)"
+                               : httpCode == 200 ? "IGNORED (200, restarted from 0)"
+                                                 : "no body");
+    } else {
+      DownloadFailureLog::line("resume: no partial to resume from");
+    }
+    DownloadFailureLog::line("framing: chunked=%d contentLength=%d -> %s", chunked ? 1 : 0,
+                             http.hasContentLength() ? 1 : 0, framed ? "framed" : "UNFRAMED (ends on close)");
+    DownloadFailureLog::line("result=%s(%d) httpCode=%d responseComplete=%d contentLength=%u(hasHeader=%d)",
+                             kNames[result < 8 ? result : 1], (int)result, httpCode, http.responseComplete() ? 1 : 0,
+                             (unsigned)contentLength, http.hasContentLength() ? 1 : 0);
+    DownloadFailureLog::line("bytes: thisSession=%u onDisk=%u chunks=%lu fileOpen=%d fileError=%d cancelled=%d",
+                             (unsigned)downloaded, (unsigned)totalOnDisk, (unsigned long)chunkCount, fileOpen ? 1 : 0,
+                             fileError ? 1 : 0, cancelled ? 1 : 0);
+    DownloadFailureLog::line("timing: request->now=%lums firstChunk=+%lums lastChunk=+%lums maxGap=%lums rate=%luKB/s",
+                             now - requestMs, firstChunkMs ? firstChunkMs - requestMs : 0,
+                             lastChunkMs ? lastChunkMs - requestMs : 0, maxChunkGapMs,
+                             (lastChunkMs > firstChunkMs && downloaded > 0)
+                                 ? (unsigned long)((downloaded >> 10) * 1000UL / (lastChunkMs - firstChunkMs))
+                                 : 0UL);
+    if (httpCode < 0) {
+      DownloadFailureLog::line("transport: stage=%s elapsed=%lums partialBytes=%u available=%d connected=%d reused=%d",
+                               diag.stage, diag.elapsedMs, (unsigned)diag.partialBytes, diag.available,
+                               diag.connected ? 1 : 0, diag.reusedConnection ? 1 : 0);
+      if (diag.partialBytes > 0) {
+        DownloadFailureLog::line("transport: partial=\"%s\"", diag.partial);
+      }
+    } else {
+      for (const auto& h : http.getHeaders()) {
+        DownloadFailureLog::line("hdr: %s: %s", h.first.c_str(), h.second.c_str());
+      }
+    }
+    {
+      size_t onDiskNow = 0;
+      const bool exists = Storage.exists(destPath.c_str());
+      if (exists) {
+        FsFile f = Storage.open(destPath.c_str(), O_RDONLY);
+        if (f) {
+          onDiskNow = f.fileSize();
+          f.close();
+        }
+      }
+      DownloadFailureLog::line("sd: dest exists=%d size=%u (kept for resume=%d)", exists ? 1 : 0, (unsigned)onDiskNow,
+                               (exists && resumePartial) ? 1 : 0);
+    }
+    DownloadFailureLog::line("before: heap free=%u largest=%u", (unsigned)heapFreeBefore, (unsigned)heapLargestBefore);
+    DownloadFailureLog::environment("after");
+  }
+  return result;
 }

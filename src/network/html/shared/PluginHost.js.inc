@@ -172,6 +172,11 @@
         if (typeof CrossPoint._pending === 'function') {
           CrossPoint._pending(container, {
             name: p.name,
+            // The plugin's own folder on the SD card, for files it keeps beside
+            // itself (the store's config.json). Reported by /api/plugins since
+            // a plugin may live under any plugin root; older firmware without
+            // the field is covered by the historical root.
+            dir: p.dir || ('/.crosspoint/plugins/' + p.name),
             relay: (m, u, h, b) => CrossPoint.relay(p.name, m, u, h, b),
             cookiesFrom: (resp, existing) => CrossPoint.cookiesFrom(resp, existing),
             crypto: (op, f) => CrossPoint.crypto(op, f),

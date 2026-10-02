@@ -43,6 +43,7 @@
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
 #include "util/ButtonNavigator.h"
+#include "util/FrontlightScheduler.h"
 #include "util/HardcoverSync.h"
 #include "util/HeapReport.h"
 #include "util/HeapTrace.h"
@@ -566,6 +567,10 @@ void setup() {
   // Frontlight (X4 Pro): restore the saved brightness/warmth now that settings
   // are loaded. No-op on boards without one.
   halFrontlight.begin();
+  // Schedules first: a wake that lands past the end of a night window must
+  // restore the daytime level before the light comes up, not flash the night
+  // level and correct it a loop later. No-op until the clock is trustworthy.
+  FrontlightScheduler::evaluate();
   halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 #if FREEINK_DEVICE_X4PRO
@@ -819,6 +824,10 @@ void loop() {
 #endif
 
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
+
+  // Frontlight schedules: once a minute, switch the light at a window edge.
+  // Cheap no-op on boards without a light.
+  FrontlightScheduler::tick();
 
   // Bluetooth HID maintenance: inactivity timeout and bonded-remote reconnect.
   // Cheap no-ops while Bluetooth is disabled.

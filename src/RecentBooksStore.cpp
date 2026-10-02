@@ -36,6 +36,9 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
   // Drop stale entries first so a new add can't evict a valid book in their stead.
   pruneMissing();
 
+  // Reading a shelved book puts it back in circulation.
+  shelvedPaths.erase(std::remove(shelvedPaths.begin(), shelvedPaths.end(), path), shelvedPaths.end());
+
   // Preserve existing progress percentage if the book was already in the list
   int8_t existingProgress = -1;
   auto it =
@@ -73,10 +76,53 @@ void RecentBooksStore::updateBook(const std::string& path, const std::string& ti
 void RecentBooksStore::removeBook(const std::string& path) {
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
-  if (it != recentBooks.end()) {
-    recentBooks.erase(it);
-    saveToFile();
+  const bool wasPinned = isPinned(path);
+  if (wasPinned) pinnedPaths.erase(std::remove(pinnedPaths.begin(), pinnedPaths.end(), path), pinnedPaths.end());
+  if (it != recentBooks.end()) recentBooks.erase(it);
+  if (it != recentBooks.end() || wasPinned) saveToFile();
+}
+
+void RecentBooksStore::shelveBook(const std::string& path) {
+  auto it =
+      std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
+  if (it != recentBooks.end()) recentBooks.erase(it);
+  pinnedPaths.erase(std::remove(pinnedPaths.begin(), pinnedPaths.end(), path), pinnedPaths.end());
+  if (!isShelved(path)) {
+    if (shelvedPaths.size() >= RecentBooksStore::MAX_SHELVED_BOOKS) shelvedPaths.erase(shelvedPaths.begin());
+    shelvedPaths.push_back(path);
   }
+  saveToFile();
+}
+
+bool RecentBooksStore::isShelved(const std::string& path) const {
+  return std::find(shelvedPaths.begin(), shelvedPaths.end(), path) != shelvedPaths.end();
+}
+
+void RecentBooksStore::pinBook(const std::string& path) {
+  if (isPinned(path)) return;
+  if (pinnedPaths.size() >= MAX_PINNED_BOOKS) pinnedPaths.erase(pinnedPaths.begin());
+  pinnedPaths.push_back(path);
+  shelvedPaths.erase(std::remove(shelvedPaths.begin(), shelvedPaths.end(), path), shelvedPaths.end());
+  saveToFile();
+}
+
+void RecentBooksStore::unpinBook(const std::string& path) {
+  const size_t before = pinnedPaths.size();
+  pinnedPaths.erase(std::remove(pinnedPaths.begin(), pinnedPaths.end(), path), pinnedPaths.end());
+  if (pinnedPaths.size() != before) saveToFile();
+}
+
+bool RecentBooksStore::togglePin(const std::string& path) {
+  if (isPinned(path)) {
+    unpinBook(path);
+    return false;
+  }
+  pinBook(path);
+  return true;
+}
+
+bool RecentBooksStore::isPinned(const std::string& path) const {
+  return std::find(pinnedPaths.begin(), pinnedPaths.end(), path) != pinnedPaths.end();
 }
 
 void RecentBooksStore::updateProgress(const std::string& path, int8_t progressPercent) {

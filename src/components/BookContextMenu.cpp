@@ -7,6 +7,8 @@
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "RecentBooksStore.h"
+#include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
 
@@ -23,6 +25,7 @@ int collectActions(Action* out) {
   out[n++] = Action::ViewStats;
   out[n++] = Action::MarkRead;
   if (dev) out[n++] = Action::ResetProgress;
+  if (UITheme::getInstance().getMetrics().homePinnedBooks) out[n++] = Action::Pin;
   out[n++] = Action::Shelve;
   out[n++] = Action::Delete;
   if (dev) out[n++] = Action::Reindex;
@@ -30,8 +33,10 @@ int collectActions(Action* out) {
   return n;
 }
 
-const char* labelForAction(Action action) {
+const char* labelForAction(Action action, const std::string& path) {
   switch (action) {
+    case Action::Pin:
+      return RECENT_BOOKS.isPinned(path) ? tr(STR_UNPIN_FROM_SHELF) : tr(STR_PIN_TO_SHELF);
     case Action::MarkRead:
       return tr(STR_MARK_AS_READ);
     case Action::ResetProgress:
@@ -255,7 +260,7 @@ void BookContextMenu::render(GfxRenderer& renderer) const {
     if (i == selectedIndex_) {
       renderer.fillRect(px + BORDER, optY, POPUP_W - BORDER * 2, OPTION_H, true);
     }
-    renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - lineH) / 2, labelForAction(actions[i]),
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD * 2, optY + (OPTION_H - lineH) / 2, labelForAction(actions[i], path_),
                       i != selectedIndex_);
   }
 }

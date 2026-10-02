@@ -365,6 +365,28 @@ class CrossPointSettings {
   // light back on at. Captured in saveToFile() because every brightness setter
   // (reader menu, Settings, web UI) ends in a save; mutable so that stays const.
   mutable uint8_t frontlightLastBrightness = 0;
+  // Frontlight schedules ("night shift"): while the local clock is inside a
+  // slot's window the light is switched to that slot's brightness/warmth, and
+  // when the window ends it returns to whatever it was before. A window whose
+  // end is at or before its start crosses midnight (21:00 -> 07:00). Fields
+  // exist on every build so settings.json round-trips between devices; the UI
+  // is only offered on frontlight boards. See util/FrontlightScheduler.h.
+  static constexpr uint8_t FRONTLIGHT_SCHEDULE_SLOTS = 4;
+  struct FrontlightSchedule {
+    uint8_t enabled = 0;
+    uint16_t startMinutes = 21 * 60;  // minutes since local midnight, 0-1439
+    uint16_t endMinutes = 7 * 60;
+    uint8_t brightness = 10;  // 0-100, same scale as frontlightBrightness
+    uint8_t warmth = 80;      // 0-100, same scale as frontlightWarmth
+  };
+  FrontlightSchedule frontlightSchedules[FRONTLIGHT_SCHEDULE_SLOTS];
+  // Scheduler state. Persisted because deep sleep is a reboot on this hardware:
+  // waking inside a window must not re-capture the schedule's own level as the
+  // "previous" one, and waking after the window must still restore the
+  // daytime level. 0 = no window active, otherwise slot index + 1.
+  uint8_t frontlightScheduleActive = 0;
+  uint8_t frontlightScheduleRestoreBrightness = 0;
+  uint8_t frontlightScheduleRestoreWarmth = 50;
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
   // Sleep screen cover mode settings
@@ -723,6 +745,10 @@ class CrossPointSettings {
   // longer names at least two buttons or whose action is gone, and clears a
   // duplicate mask so one chord can never mean two things.
   static void sanitizeReaderCombos(CrossPointSettings& settings);
+
+  // Frontlight schedules: clamps every slot's minutes-of-day and percentages
+  // into range and drops an active-slot marker that names a missing slot.
+  static void sanitizeFrontlightSchedules(CrossPointSettings& settings);
 
   // One-time migration: applies legacy per-action settings (longPressAction, shortPwrBtn,
   // longPressChapterSkip, sideButtonLayout) to the new per-button action fields.

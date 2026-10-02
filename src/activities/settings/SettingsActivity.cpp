@@ -19,6 +19,7 @@
 #include "FontLayoutPreviewActivity.h"
 #include "FontSelectionActivity.h"
 #include "FrontlightBrightnessActivity.h"
+#include "FrontlightScheduleListActivity.h"
 #include "HardcoverPushActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "LanguageSelectActivity.h"
@@ -112,6 +113,22 @@ void SettingsActivity::onEnter() {
     }
     // Web-only categories (KOReader Sync, OPDS Browser) are skipped for device UI
   }
+
+#if FREEINK_CAP_FRONTLIGHT
+  // Schedules sit right under the brightness/warmth rows they time, not at
+  // the end of the tab with the unrelated rows.
+  if (halFrontlight.present()) {
+    auto after = displaySettings.begin();
+    for (auto it = displaySettings.begin(); it != displaySettings.end(); ++it) {
+      if (it->valuePtr == &CrossPointSettings::frontlightBrightness ||
+          it->valuePtr == &CrossPointSettings::frontlightWarmth) {
+        after = it + 1;
+      }
+    }
+    displaySettings.insert(after,
+                           SettingInfo::Action(StrId::STR_FRONTLIGHT_SCHEDULE, SettingAction::FrontlightSchedule));
+  }
+#endif
 
   // Append device-only ACTION items — button remap goes first in System
 #if !FREEINK_DEVICE_X4PRO
@@ -508,6 +525,13 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::SleepStats:
         startActivityForResult(std::make_unique<SleepStatsSettingsActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::FrontlightSchedule:
+#if FREEINK_CAP_FRONTLIGHT
+        // The list saves its own slots and re-evaluates the schedules on exit.
+        startActivityForResult(std::make_unique<FrontlightScheduleListActivity>(renderer, mappedInput),
+                               [](const ActivityResult&) {});
+#endif
         break;
       case SettingAction::None:
         // Do nothing

@@ -36,7 +36,7 @@ class UITheme {
 
   // Book context menu — shared across HomeActivity, FileBrowserActivity,
   // and RecentBooksActivity.
-  static constexpr int BOOK_OPTIONS_COUNT = 7;
+  static constexpr int BOOK_OPTIONS_COUNT = 8;
   static constexpr int BOOK_OPT_MARK_READ = 0;
   static constexpr int BOOK_OPT_RESET_PROGRESS = 1;
   static constexpr int BOOK_OPT_SHELVE = 2;
@@ -44,6 +44,7 @@ class UITheme {
   static constexpr int BOOK_OPT_REINDEX = 4;
   static constexpr int BOOK_OPT_BOOK_INFO = 5;
   static constexpr int BOOK_OPT_DELETE_CLIPPINGS = 6;
+  static constexpr int BOOK_OPT_PIN = 7;  // Pin / Unpin from Shelf; only on a theme with homePinnedBooks
 
   // Fills ids[] with the BOOK_OPT_* values currently visible (honoring Dev Mode —
   // Delete Book Cache is hidden when Dev Mode is off; Delete Clippings appears only when
@@ -60,7 +61,8 @@ class UITheme {
   };
   static BookOptionsPopupLayout drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author,
                                                      const char* folderPath, int progressPercent,
-                                                     int selectedOptionIndex, bool includeDeleteClippings);
+                                                     int selectedOptionIndex, bool includeDeleteClippings,
+                                                     bool pinned = false);
 
   static void drawSyncProgressPopup(GfxRenderer& renderer, const char* title, const char* statusMessage);
 

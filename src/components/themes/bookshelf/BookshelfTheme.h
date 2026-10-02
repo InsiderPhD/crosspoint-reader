@@ -19,7 +19,9 @@ constexpr ThemeMetrics values = [] {
   // Snapshot strip. Tall enough to hold the shelf even in X4 Pro gesture mode,
   // where the grid (and so the shelf above it) sits 44 px lower.
   v.homeCoverTileHeight = 600;
-  v.homeRecentBooksCount = 6;  // books on the shelf: at most 5 face-out, the rest spine-out
+  v.homeRecentBooksCount = 6;        // books on the shelf: at most 5 face-out, the rest spine-out
+  v.homeBackfillFromLibrary = true;  // a shelf with gaps looks wrong; see HomeActivity::backfillFromLibrary
+  v.homePinnedBooks = true;          // pinned books hold the left end of the shelf
   return v;
 }();
 

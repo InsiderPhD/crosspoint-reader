@@ -29,6 +29,11 @@ std::string levelLabel(const int index) {
 void FrontlightBrightnessActivity::onEnter() {
   Activity::onEnter();
   selectedIndex = FrontlightLevels::nearestIndex(startBrightness);
+  // Light the level the cursor opens on. The reader menu and Settings open the
+  // picker at the level already lit, so this is a no-op there; the schedule
+  // editor opens it at a schedule's level, which must be showing from the
+  // first frame or the list and the panel disagree until the cursor moves.
+  halFrontlight.apply(FrontlightLevels::LEVELS[selectedIndex], warmth);
   requestUpdate();
 }
 

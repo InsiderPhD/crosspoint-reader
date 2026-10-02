@@ -41,12 +41,14 @@ and the firmware carries no vendor names, URLs, or file-format knowledge.
 **Discovery and the on-device list.** Every plugin folder (anything holding a
 `manifest.json`, `plugin.js`, or `device.json`) appears under **Settings →
 System → Plugins** on the reader, showing its `title` and one-line
-`description`. Selecting a plugin opens an info screen with the description and
-the plugin's `README.md` as scrollable usage instructions — so even a
-browser-only plugin (no `device.json`) is listed and can explain how to use it
-from the web UI. A plugin that ships a `device.json` also gets an **Open**
-action there to launch its on-device catalog. `title`/`description` are read
-from `manifest.json`, with `device.json` overriding when present.
+`description`. Selecting a plugin that ships a `device.json` opens its
+on-device catalog directly. Selecting a browser-only plugin (no `device.json`)
+opens an info screen instead: the description and the plugin's `README.md` as
+scrollable usage instructions (`PluginInfoActivity`), so a web-only plugin is
+still listed and can explain how to use it from the web UI. A README over
+24 KB is skipped; a plugin with neither README nor description shows a hint
+pointing at the web Plugins tab. `title`/`description` are read from
+`manifest.json`, with `device.json` overriding when present.
 
 `<root>` is any of `/.crosspoint/plugins`, `/plugins`, or `/.plugins` — the
 first two-dot-free options exist so plugins are easy to copy onto the card
@@ -78,10 +80,9 @@ sd-plugins repository for the JS contract.
 External systems (a companion app, a script) can trigger plugin actions
 without a human clicking the web UI. The firmware stores small opaque
 `{plugin, action, args}` JSON blobs in a fixed 6-slot pool; it never interprets
-them. Any open **Plugins** page hosting the plugin claims jobs, executes the
-plugin's registered handler in the browser context, and posts the result
-back. (Upstream's headless `GET /plugins-run` runner is not ported: a job
-still needs a page hosting the plugin, which the Plugins tab is.)
+them. Any open page hosting the plugin — the **Plugins** tab, or the headless
+runner at `GET /plugins-run` — claims jobs, executes the plugin's registered
+handler in the browser context, and posts the result back.
 
 | Endpoint | Purpose |
 |---|---|
@@ -127,14 +128,14 @@ catalog: sign in, browse, download, sidecar" — enough for most book services �
 without any code running on the device. Anything beyond this vocabulary
 belongs in `plugin.js`.
 
-The firmware piece (service-agnostic, in `src/activities/plugins/`):
+The firmware pieces (service-agnostic, in `src/activities/plugins/`):
 `PluginCatalogActivity`, one activity that opens as a picker over the
-installed `device.json` plugins (title + description rows) and morphs into
-the manifest-driven browse / download / sign-in flow for the picked plugin.
-`discoverPlugins()` rescans the plugin folders each time the picker opens;
-nothing stays resident. Browser-only plugins (`plugin.js` without a
-`device.json`) are listed as inert "Web-only plugin" rows — an install is
-visibly installed — while their UI lives in the web interface.
+installed plugins (title + description rows) and morphs into the
+manifest-driven browse / download / sign-in flow for the picked `device.json`
+plugin; and `PluginInfoActivity`, the description + README screen the picker
+pushes for a browser-only plugin (`plugin.js` without a `device.json`), whose
+UI lives in the web interface. `discoverPlugins()` rescans the plugin folders
+each time the picker opens; nothing stays resident.
 
 ### Schema
 
@@ -266,6 +267,14 @@ Two browse formats:
   plugin.
 - **Stale tokens**: a 401/403 from browse returns to the sign-in screen rather
   than an error.
+- **Missing config**: when the manifest names a `config.file` that does not
+  exist (or does not parse), the device shows "Plugin not set up" and points at
+  the web Plugins tab. A key the file leaves out substitutes as an empty value
+  (`?w=&h=` rather than a literal `{cfg.width}`), matching the "omitted keys use
+  the server's default" convention the plugin READMEs document.
+- **Server certificates**: the X4 Pro / X4C accept RSA keys up to 4096 bits
+  (`CROSSPOINT_WOLFSSL_SP_4096`); a host with a larger key fails the TLS
+  handshake with `MP_INIT_E` in the serial log.
 - **Pagination** (json): the browse request should return up to `{limit}`
   items; the firmware displays `page_size` and uses the extra row to know
   another page exists. Navigation matches the OPDS browser: a "Previous
@@ -395,6 +404,7 @@ browser-side.
 | Outbound HTTP(S), any method (CORS-free) | `api.relay(method, url, headers, body)` |
 | Download a URL straight to SD | `api.fetchToSd(url, dest, headers)` |
 | Write a small file to SD | `api.writeFile(path, base64)` |
+| The plugin's own folder (keep files beside yourself) | `api.dir` (`<root>/<name>`, from `/api/plugins`) |
 | Crypto (hash, HMAC, AES, RSA, PKCS#12) | `api.crypto(op, fields)` |
 | Create / delete / move SD files | same-origin `/mkdir`, `/delete`, `/move` |
 | On-device catalog/browse/download | `device.json` (this document) |

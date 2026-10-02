@@ -65,6 +65,7 @@ void CrossPointWebServer::handlePluginList() const {
     if (!e.hasPluginJs) continue;
     JsonObject obj = arr.add<JsonObject>();
     obj["name"] = e.name;
+    obj["dir"] = e.dir;         // "<root>/<name>": the api.dir plugins write beside themselves
     obj["title"] = e.name;      // overridden by manifest below
     obj["mount"] = "settings";  // default mount point
     std::string manifest;

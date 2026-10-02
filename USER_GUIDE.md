@@ -96,7 +96,7 @@ The Home screen is the main hub. Its layout depends on the **UI Theme** (Setting
 | **Classic** | Original KatiePoint look; one recent-book tile plus the menu. |
 | **Lyra** | Rounded elements and menu icons; one recent-book tile. |
 | **Lyra Extended** | Like Lyra, but shows the **3** most recent books instead of 1. |
-| **Bookshelf** | Inspired by KOReader's Bookshelf plugin and Apple Books: a **Continue Reading** card (large cover, title, author, the start of the book's description, progress) above a shelf of your **6** most recent books — some face-out, some spine-out (books without a cover always stand spine-out). **Library** sits at the end of the shelf as a stack of books lying flat; the rest of the menu is a grid of large buttons (2×2, or one row in landscape). Moving along the shelf changes which book the card shows; **Up/Down** move between the shelf and the button rows, **Left/Right** step through items in order. |
+| **Bookshelf** | Inspired by KOReader's Bookshelf plugin and Apple Books: a **Continue Reading** card (large cover, title, author, the start of the book's description, progress) above a shelf of **6** books: your most recent ones first, and when fewer than six remain (a fresh card, or after **Shelve Book**) the rest of the shelf is filled with books from your library — the same ones each visit, never one you have shelved, and each opening a book replaces it with a real recent. **Pin to Shelf** (in any book menu) keeps a book at the left end of the shelf whatever you read next, marked with a small ribbon; **Unpin from Shelf** lets it go, and shelving or deleting a pinned book unpins it. Some stand face-out, some spine-out (books without a cover, including library books never opened on the device, always stand spine-out). **Library** sits at the end of the shelf as a stack of books lying flat; the rest of the menu is a grid of large buttons (2×2, or one row in landscape). Moving along the shelf changes which book the card shows; **Up/Down** move between the shelf and the button rows, **Left/Right** step through items in order. |
 
 ### Recent-book tile
 
@@ -256,14 +256,16 @@ If you run an OPDS catalogue (e.g. Calibre Content Server), set it up in **Setti
 > [!TIP]
 > Large, image-heavy EPUBs (10 MB+) can be slow to convert and use a lot of memory. When downloading such a book from BookFusion you'll get a size warning first. For faster covers/thumbnails, pre-optimise EPUBs with a converter such as [epub-to-xtc-converter](https://github.com/bigbag/epub-to-xtc-converter).
 
+> If a BookFusion download fails, the screen says why (no connection, a rejected or expired link, a dropped transfer, a full SD card, …). A transfer that was cut off keeps what it got in a `.part` file next to where the book will go; selecting the same book again continues from there when the server allows it (BookFusion's own download endpoint does not, so those restart from the beginning). Every failure also appends a detailed report to `/.crosspoint/download_failure.log` on the SD card — attach that file when reporting a problem.
+
 ---
 
 ### Plugins *(X4 Pro / X4C)*
 
 Plugins are folders on the SD card (`/plugins/<name>/` or `/.crosspoint/plugins/<name>/`) that add a service without a firmware change: a JSON or OPDS-style catalog with its own sign-in, a plugin store, or browser-side tools that run on the device's web pages. They need the extra memory of the X4 Pro and X4C, so the X3/X4 do not offer them; the built-in OPDS, BookFusion and dictionary features work the same on every device.
 
-- **On the reader:** **Settings → System → Plugins** lists every installed plugin and opens the ones with a device screen (browse, sign in, download to SD). Once one is installed, **Plugins** also appears in **Home → File Transfer**.
-- **In the browser:** join a network, then open the **Plugins** tab of the device's web pages. Browser plugins (and the plugin store) run there.
+- **On the reader:** **Settings → System → Plugins** lists every installed plugin and opens the ones with a device screen (browse, sign in, download to SD). Opening a browser-only plugin shows its description and its `README.md` as scrollable usage instructions instead (Up/Down or swipe to scroll). Once one is installed, **Plugins** also appears in **Home → File Transfer**.
+- **In the browser:** join a network, then open the **Plugins** tab of the device's web pages. Browser plugins (and the plugin store) run there. `http://<device>/plugins-run` is a headless version of that tab: it loads every plugin with its UI hidden so that jobs queued by an external app or script keep running while the page stays open.
 - Plugins for services the firmware already has built in (BookFusion, dictionaries) are ignored, and the plugin store will not install them. Use the native features instead.
 - Plugins and the manifest format are documented in [docs/sd-plugins.md](docs/sd-plugins.md).
 
@@ -602,6 +604,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Folder View** — Folders / Tags / Authors / Series (see **[Folder views](#folder-views)**).
 - **Frontlight Brightness** *(frontlight devices only — X4 Pro)* — 0–100% in 10% steps; 0 is off.
 - **Frontlight Warmth** *(warm/cool devices only — X4 Pro)* — 0 = fully cool, 100 = fully warm. Splits the total light between the two LED strings; overall brightness stays constant across the mix.
+- **Frontlight Schedule** *(frontlight devices only — X4 Pro)* — up to four daily windows, each with its own brightness and warmth ("night shift"). **Confirm** on a schedule opens its editor: **Enabled** toggles in place; **Start time** and **End time** each open a list of the 24 hours (an end at or before the start runs past midnight, e.g. 21:00 → 07:00); **Frontlight Brightness** opens the same level picker as the reader menu and **Frontlight Warmth** a list of 10% steps, both previewed live on the panel. **Back** saves the schedule. When a window begins the light switches to that schedule's level; when it ends the light returns to whatever it was before the window started. Changing the light by hand inside a window sticks until the window ends. Schedules need a set clock — the device shows a note on this screen until the time has synced over WiFi.
 
 ### Reader tab
 

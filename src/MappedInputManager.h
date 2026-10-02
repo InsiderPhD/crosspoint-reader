@@ -140,9 +140,9 @@ class MappedInputManager {
 
   // --- board-neutral touch surface -------------------------------------------
   // Declared on every board so screens shared across the X3/X4/X4C and the
-  // X4 Pro (the FreeInkUI list screens behind CROSSPOINT_SD_PLUGINS) need no
-  // #if of their own: on a board without a digitizer these fold away to
-  // constants, so the touch branches cost nothing there.
+  // X4 Pro (the plugin screens behind CROSSPOINT_SD_PLUGINS, TouchListNav)
+  // need no #if of their own: on a board without a digitizer these fold away
+  // to constants, so the touch branches cost nothing there.
 #if !FREEINK_DEVICE_X4PRO
   // Mirrors the X4 Pro declaration above; always None without a digitizer.
   enum class Swipe : uint8_t { None, Up, Down, Right };
@@ -196,11 +196,8 @@ class MappedInputManager {
 
   // Touch-down edge and live contact position. Our touch classifier reports
   // completed gestures only (tap, long-press, swipe), so both are always false
-  // here: FreeInkUI elements then activate on the tap rather than flashing on
-  // contact, and no InputDrag element (slider) can be dragged by finger. The
-  // catalog screens use neither. Present so the FreeInkUI snapshot builder is
-  // board-neutral, and as the seam to fill in if the classifier grows a
-  // contact-level API.
+  // here, and nothing can be dragged by finger. Kept as the board-neutral
+  // seam to fill in if the classifier grows a contact-level API.
   bool wasScreenTouchDown(int& x, int& y) const {
     (void)x;
     (void)y;

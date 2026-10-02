@@ -10,7 +10,9 @@
 #include <utility>
 #include <vector>
 
-#include "activities/UiListActivity.h"
+#include "activities/Activity.h"
+#include "components/themes/BaseTheme.h"
+#include "util/ButtonNavigator.h"
 #include "util/PluginHttp.h"
 
 class HalFile;
@@ -19,13 +21,15 @@ class SecureHttpClient;
 }
 
 // One installed SD plugin, as surfaced in the plugin picker. Web-only plugins
-// (plugin.js without a device.json) are listed but inert — an install is
-// visibly installed, while their UI lives in the web interface.
+// (plugin.js without a device.json) are listed too: opening one shows its
+// description and README (PluginInfoActivity), since their UI lives in the
+// web interface.
 struct PluginRef {
   std::string name;          // folder name
   std::string title;         // from device.json or manifest.json (falls back to name)
   std::string description;   // one-line summary, if provided
   std::string manifestPath;  // device.json path, "" for a web-only plugin
+  std::string readmePath;    // README.md path, "" when absent
 };
 
 // Scans every plugin folder across the SD plugin roots. Called on demand
@@ -43,8 +47,13 @@ bool anyPluginInstalled();
  * templates plus JSON field paths), so a new service is an SD card file, not
  * firmware. Anything the vocabulary cannot express stays in the plugin's
  * browser-side plugin.js.
+ *
+ * Drawn with the firmware's own UITheme lists (GUI.drawList / drawHeader /
+ * drawButtonHints), the same surface Settings and the BookFusion browser use,
+ * so the plugin screens follow the active theme and the Full Touch tap model
+ * (TouchListNav) like every other list in the firmware.
  */
-class PluginCatalogActivity final : public UiListActivity {
+class PluginCatalogActivity final : public Activity {
  public:
   enum class State {
     PLUGIN_PICKER,
@@ -68,7 +77,13 @@ class PluginCatalogActivity final : public UiListActivity {
 
   void onEnter() override;
   void onExit() override;
+  void loop() override;
   void render(RenderLock&&) override;
+  bool preventAutoSleep() override { return true; }
+  // Full Touch tap dispatch covers the three list states, which hit-test taps
+  // against listRect(). The status screens (error / sign-in / done) are single
+  // prompts, so they keep the global tap-is-Confirm injection.
+  bool handlesDirectTouch() const override { return isListState() && !infoOpen; }
 
  private:
   struct Manifest {
@@ -105,7 +120,7 @@ class PluginCatalogActivity final : public UiListActivity {
     };
     std::vector<BrowseList> browseLists;
     // Optional server-side search. When a search url or body is set, the
-    // browsing header gains a search action; the entered text substitutes
+    // browsing screen gains a search action; the entered text substitutes
     // {query} (URL-encoded, for a GET url) or {query_raw} (verbatim, for a JSON
     // body) into these templates. Either may be empty to reuse the browse
     // url/body (e.g. an endpoint that searches via a body field only). Results
@@ -166,14 +181,17 @@ class PluginCatalogActivity final : public UiListActivity {
   std::string catalogTitle;
   Manifest manifest;
   State state = State::PLUGIN_PICKER;
+  ButtonNavigator buttonNavigator;
   // Picker state: the installed device.json plugins.
   std::vector<PluginRef> installedPlugins;
   int pickerReturnRow = 0;  // picker row to reselect after leaving a catalog
+  // A web-only plugin's info screen (PluginInfoActivity) is pushed on top of
+  // the picker; the picker's input is parked until it returns.
+  bool infoOpen = false;
   std::vector<Item> items;
-  // Row buffer over items/browseLists plus the synthetic pager rows; rebuilt
-  // lazily on the render task whenever rowsDirty (items or state changed).
-  std::vector<freeink::ui::ListItem> rowItems;
-  bool rowsDirty = true;
+  // Highlighted row of whichever list state is showing (picker rows, browse
+  // lists, or pager rows + items while browsing).
+  int selectedIndex = 0;
   std::string token;
   std::vector<std::pair<std::string, std::string>> config;  // {cfg.KEY} values
   int page = 1;
@@ -193,6 +211,7 @@ class PluginCatalogActivity final : public UiListActivity {
   std::string errorMessage;
   std::string statusMessage;
   size_t downloadProgress = 0;
+  size_t downloadTotal = 0;  // 0 while the server sends no Content-Length
   bool cancelDownload = false;
   // Repaint throttle state for onDownloadProgress (reset before each download).
   int dlLastRenderedPercent = -1;
@@ -205,9 +224,6 @@ class PluginCatalogActivity final : public UiListActivity {
   unsigned long authIntervalMs = 5000;
   unsigned long authNextPollMs = 0;
   unsigned long authDeadlineMs = 0;
-  // QR placement measured by buildScreen (AUTH state); drawn as a raw-renderer
-  // overlay in render() after the app has painted.
-  freeink::ui::Rect authQrRect{};
 
   // Picker <-> catalog transitions. The picker discovers the installed
   // plugins; opening one sets manifestPath/catalogTitle and enters the
@@ -218,6 +234,10 @@ class PluginCatalogActivity final : public UiListActivity {
   bool loadManifest();
   bool loadToken();
   void loadConfig();
+  // False (after entering State::ERROR) when the manifest names a config file
+  // that is missing or leaves a {cfg.KEY} in the browse URL: the plugin needs
+  // its web-page setup first, which beats a cryptic transport failure.
+  bool configReady();
   bool saveToken(const std::string& value);
   // Enters State::ERROR with a translated message and requests a redraw.
   void fail(StrId msg);
@@ -231,8 +251,6 @@ class PluginCatalogActivity final : public UiListActivity {
   void startBrowse();
   // Server-side search (manifest.hasSearch()): prompt for a query on the
   // keyboard, then run it via the search templates.
-  static void onSearchEvent(const freeink::ui::ActionEvent& event, void* user);
-  static void onCancelEvent(const freeink::ui::ActionEvent& event, void* user);
   void launchSearch();
   void performSearch(const std::string& query);
   void pumpDownloadInput();
@@ -244,23 +262,32 @@ class PluginCatalogActivity final : public UiListActivity {
   // of the items past page 1, "Next page" after them while more pages exist.
   bool prevRowVisible() const;
   bool nextRowVisible() const;
-  // Rows on the current screen: pager rows + items (BROWSING), or the browse
-  // lists (LIST_PICKER); zero in every other state, which disables the base
-  // list protocol (routing, navigation) there.
+  bool isListState() const {
+    return state == State::PLUGIN_PICKER || state == State::LIST_PICKER || state == State::BROWSING;
+  }
+  // Rows on the current screen: pager rows + items (BROWSING), the browse
+  // lists (LIST_PICKER) or the installed plugins (PLUGIN_PICKER).
   int rowCount() const;
-  int listCount() const override { return rowCount(); }
+  // Whether the current list state's rows carry a subtitle line. Shared by
+  // render() and the loop()'s tap hit-test so the two agree on row height.
+  bool rowsHaveSubtitle() const;
+  // List body between the header and the button hints; shared by render()
+  // and the loop()'s tap hit-testing so they can never disagree.
+  Rect listRect() const;
+  // Input for the three list states: taps, Confirm, Back, and the
+  // ButtonNavigator step/page bindings.
+  void handleListInput();
+  void onBackButton();
   // Row dispatch: pager rows page, picker rows pick, item rows open/download.
-  void activateIndex(int index) override;
-  void buildScreen(UiScreen& screen) override;
-  bool handleCustomInput() override;
-  void onBackButton() override;
-  void drawFooter() override;
-  void rebuildRowItems();
-  // Items (and the interaction table indexing them) are about to be replaced:
-  // stop routing and mark the row buffer for rebuild.
-  void releaseRows();
-  void buildAuthScreen(UiScreen& screen);
-  void buildBrowsingScreen(UiScreen& screen);
+  void activateIndex(int index);
+  void activateItem(int itemIndex);  // XML list: navigate into a folder, else download
+  // Screen painters, one per state family; each leaves the button hints to
+  // render(), which finishes the frame.
+  void drawListScreen();
+  void drawAuthScreen();
+  void drawDownloadScreen();
+  void drawCenteredLines(const char* heading, const char* body, const char* hint);
+  void drawFooter();
   // Browse url/body with the selected browse list's overrides applied.
   const std::string& activeBrowseUrl() const;
   const std::string& activeBrowseBody() const;
@@ -273,7 +300,6 @@ class PluginCatalogActivity final : public UiListActivity {
   // manifest tracksInstalls().
   void computeInstallStatus();
   void fetchXmlList();
-  void activateItem(int itemIndex);  // XML list: navigate into a folder, else download
   void downloadItem(const Item& item);
   void beginAuth();
   void pollAuth();
@@ -291,7 +317,6 @@ class PluginCatalogActivity final : public UiListActivity {
   int apiRequestToFile(const std::string& url, const std::string& method, const std::string& body,
                        const std::vector<std::pair<std::string, std::string>>& headers, const char* destPath);
   std::string substituted(std::string tpl, const Item* item) const;
-  bool preventAutoSleep() override { return true; }
 };
 
 #endif  // CROSSPOINT_SD_PLUGINS

@@ -126,10 +126,15 @@ struct WordPickResult {
   std::string word;
 };
 
-using ResultVariant =
-    std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, FrontlightResult, ReaderActionResult,
-                 ReaderComboResult, ChapterResult, PercentResult, PageResult, SyncResult, NetworkModeResult,
-                 FootnoteResult, BookContextResult, FilePathResult, ClippingResult, ClippingJumpResult, WordPickResult>;
+// Returned by ListPickerActivity: the index of the row the user chose.
+struct ListPickResult {
+  int index = 0;
+};
+
+using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, FrontlightResult,
+                                   ReaderActionResult, ReaderComboResult, ChapterResult, PercentResult, PageResult,
+                                   SyncResult, NetworkModeResult, FootnoteResult, BookContextResult, FilePathResult,
+                                   ClippingResult, ClippingJumpResult, WordPickResult, ListPickResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

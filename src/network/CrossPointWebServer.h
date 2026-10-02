@@ -151,10 +151,13 @@ class CrossPointWebServer {
   bool readJsonBody(JsonDocument& out) const;
   void handlePluginList() const;  // GET  /api/plugins   -> discovered plugins
   void handlePluginFile() const;  // GET  /plugin?name&file -> serve SD file
-  void handleRelay();             // POST /api/relay     -> device makes an HTTP(S) call
-  void handleCrypto();            // POST /api/crypto    -> generic wolfCrypt primitive (CrossPointWebServerCrypto.cpp)
-  void handleFetch();             // POST /api/fetch     -> device downloads a URL to SD
-  void handlePluginFs();          // POST /api/plugin-fs -> plugin writes a small file to SD
+  // GET /plugins-run: the headless job runner — every plugin loaded with its
+  // UI hidden, so registered actions execute jobs while the page stays open.
+  void handlePluginRunnerPage() const;
+  void handleRelay();     // POST /api/relay     -> device makes an HTTP(S) call
+  void handleCrypto();    // POST /api/crypto    -> generic wolfCrypt primitive (CrossPointWebServerCrypto.cpp)
+  void handleFetch();     // POST /api/fetch     -> device downloads a URL to SD
+  void handlePluginFs();  // POST /api/plugin-fs -> plugin writes a small file to SD
 
   // Plugin job queue: an external caller (or one plugin, via the device) hands
   // a plugin work to do; any open /plugins page hosting that plugin claims and

@@ -29,9 +29,11 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/BookFusionCoverCache.h"
+#include "network/DownloadFailureLog.h"
 #include "network/HttpDownloader.h"
 #include "util/StringUtils.h"
 #include "util/TouchListNav.h"
+#include "util/ZipFileCheck.h"
 
 namespace {
 struct Category {
@@ -88,6 +90,62 @@ bool bookFusionFormatIsEpub(const BookFusionBook& book) {
 constexpr uint32_t LARGE_BOOK_WARN_BYTES = 10u * 1024 * 1024;  // 10 MB
 
 bool bookFusionBookIsLarge(const BookFusionBook& book) { return book.downloadSize >= LARGE_BOOK_WARN_BYTES; }
+
+// Turn a download failure into the sentence the ERROR screen shows. The
+// downloader already knows the cause; this only picks the wording, so the
+// user can tell a dead Wi-Fi link from a full SD card from a rejected
+// pre-signed URL. `partialKept` adds the resume hint when a .part file
+// survived the failure.
+void describeDownloadFailure(HttpDownloader::DownloadError err, int httpStatus, bool partialKept, char* out,
+                             size_t outLen) {
+  char reason[128];
+  switch (err) {
+    case HttpDownloader::CONNECT_ERROR:
+      strlcpy(reason, tr(STR_DL_REASON_CONNECT), sizeof(reason));
+      break;
+    case HttpDownloader::HTTP_STATUS_ERROR:
+      if (httpStatus == 401 || httpStatus == 403 || httpStatus == 416) {
+        snprintf(reason, sizeof(reason), tr(STR_DL_REASON_REJECTED_FORMAT), httpStatus);
+      } else if (httpStatus == 404) {
+        strlcpy(reason, tr(STR_DL_REASON_NOT_FOUND), sizeof(reason));
+      } else if (httpStatus >= 500) {
+        snprintf(reason, sizeof(reason), tr(STR_DL_REASON_SERVER_FORMAT), httpStatus);
+      } else {
+        snprintf(reason, sizeof(reason), tr(STR_DL_REASON_HTTP_FORMAT), httpStatus);
+      }
+      break;
+    case HttpDownloader::NO_DATA_ERROR:
+      strlcpy(reason, tr(STR_DL_REASON_NO_DATA), sizeof(reason));
+      break;
+    case HttpDownloader::TRUNCATED_ERROR:
+      strlcpy(reason, tr(STR_DL_REASON_TRUNCATED), sizeof(reason));
+      break;
+    case HttpDownloader::FILE_ERROR:
+      strlcpy(reason, tr(STR_DL_REASON_SD), sizeof(reason));
+      break;
+    case HttpDownloader::ABORTED:
+    case HttpDownloader::HTTP_ERROR:
+    case HttpDownloader::OK:
+    default:
+      reason[0] = '\0';
+      break;
+  }
+  if (reason[0] == '\0') {
+    strlcpy(out, tr(STR_DOWNLOAD_FAILED), outLen);
+  } else {
+    snprintf(out, outLen, "%s: %s", tr(STR_DOWNLOAD_FAILED), reason);
+  }
+  if (partialKept) {
+    const size_t used = strlen(out);
+    if (used + 1 < outLen) {
+      snprintf(out + used, outLen - used, " %s", tr(STR_DL_RESUME_HINT));
+    }
+  }
+  const size_t used = strlen(out);
+  if (used + 1 < outLen) {
+    snprintf(out + used, outLen - used, " %s", tr(STR_DL_LOG_HINT));
+  }
+}
 
 std::string bookFusionExpectedFilename(const BookFusionBook& book) {
   std::string baseName = book.title;
@@ -364,7 +422,23 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   }
 
   const std::string filename = "/" + StringUtils::sanitizeFilename(baseName) + "." + ext;
-  LOG_DBG("BFB", "Downloading book_id=%lu -> %s", static_cast<unsigned long>(book.id), filename.c_str());
+  // The transfer lands in a .part scratch file and is renamed on success. The
+  // library browsers filter by extension, so a half-downloaded book never
+  // shows up as an openable (and broken) EPUB, and a later attempt — this
+  // session's retry or the user selecting the book again days later — resumes
+  // it with an HTTP Range request instead of starting over.
+  const std::string partPath = filename + ".part";
+  const bool resumingPartial = Storage.exists(partPath.c_str());
+  LOG_DBG("BFB", "Downloading book_id=%lu -> %s%s", static_cast<unsigned long>(book.id), filename.c_str(),
+          resumingPartial ? " (resuming partial)" : "");
+  // Every download opens a section in the SD failure log; a success leaves
+  // only these few lines behind, a failure gets the transport report from
+  // HttpDownloader appended under it.
+  DownloadFailureLog::section("BookFusion download start");
+  DownloadFailureLog::line("book_id=%lu title=\"%s\" format=\"%s\" download_size=%lu file=%s resuming=%d",
+                           static_cast<unsigned long>(book.id), book.title, book.format,
+                           static_cast<unsigned long>(book.downloadSize), filename.c_str(), resumingPartial ? 1 : 0);
+  DownloadFailureLog::environment("start");
 
   // Pre-fetch the cover before the pre-signed-URL round trip. `book.coverUrl`
   // is already in memory from the search response. The cover is tiny (~30 KB)
@@ -414,6 +488,7 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   if (apiCoverOk) {
     LOG_DBG("BFB", "Pre-fetched BookFusion API cover before EPUB download");
   }
+  DownloadFailureLog::line("cover: ok=%d url_present=%d", apiCoverOk ? 1 : 0, book.coverUrl[0] != '\0' ? 1 : 0);
 
   // Retry the fetch a couple of times: BookFusion's pre-signed URLs sometimes
   // drop mid-transfer and hand back a truncated EPUB (caught by the
@@ -431,7 +506,10 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
       TlsFramebufferBorrow borrow(renderer);
       urlErr = BookFusionSyncClient::getDownloadUrl(book.id, downloadUrl, sizeof(downloadUrl));
     }
+    DownloadFailureLog::line("attempt %d/%d: getDownloadUrl -> %s(%d)", attempt, kMaxDownloadAttempts,
+                             BookFusionSyncClient::errorString(urlErr), static_cast<int>(urlErr));
     if (urlErr != BookFusionSyncClient::OK) {
+      DownloadFailureLog::environment("after getDownloadUrl failure");
       {
         RenderLock lock(*this);
         state = ERROR;
@@ -450,7 +528,8 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
       // The getDownloadUrl borrow above left TLS garbage in the framebuffer:
       // the next paint must be a full one, not the dynamic-band shortcut.
       downloadScreenPainted = false;
-      strlcpy(downloadStatus, tr(STR_DOWNLOAD_WAIT), sizeof(downloadStatus));
+      strlcpy(downloadStatus, Storage.exists(partPath.c_str()) ? tr(STR_DOWNLOAD_RESUMING) : tr(STR_DOWNLOAD_WAIT),
+              sizeof(downloadStatus));
     }
     // Paint the static info card (title / author / filesize+estimate) NOW and
     // wait for it: the e-ink holds it with no RAM, and the screen stays frozen
@@ -468,7 +547,7 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
       // arena memory freed — inside downloadToFile, before the borrow ends.)
       size_t lastLoggedMB = 0;
       dlResult = HttpDownloader::downloadToFile(
-          downloadUrl, filename,
+          downloadUrl, partPath,
           [&lastLoggedMB](const size_t downloaded, const size_t total) {
             const size_t mb = downloaded >> 20;
             if (mb > lastLoggedMB) {
@@ -480,7 +559,8 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
               }
             }
           },
-          true, static_cast<size_t>(book.downloadSize));
+          true, static_cast<size_t>(book.downloadSize), /*cancelFlag=*/nullptr, /*username=*/"", /*password=*/"",
+          /*headers=*/{}, /*resumePartial=*/true);
     }
 
     {
@@ -490,16 +570,24 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
       downloadScreenPainted = false;
     }
 
+    DownloadFailureLog::line("attempt %d/%d: downloadToFile -> %d (http %d)", attempt, kMaxDownloadAttempts,
+                             static_cast<int>(dlResult), HttpDownloader::lastHttpStatus());
     if (dlResult == HttpDownloader::OK) {
       break;
     }
 
-    LOG_ERR("BFB", "Download attempt %d/%d failed for book_id=%lu", attempt, kMaxDownloadAttempts,
-            static_cast<unsigned long>(book.id));
+    LOG_ERR("BFB", "Download attempt %d/%d failed for book_id=%lu (err=%d, http=%d)", attempt, kMaxDownloadAttempts,
+            static_cast<unsigned long>(book.id), static_cast<int>(dlResult), HttpDownloader::lastHttpStatus());
+
+    // An SD write failure (card full or pulled) will not fix itself in the
+    // next ten seconds; retrying would just burn the same bandwidth twice more.
+    if (dlResult == HttpDownloader::FILE_ERROR) {
+      break;
+    }
 
     // More attempts left — surface a brief "retrying" notice on the download
-    // screen and loop. The truncated/partial file is already removed by
-    // downloadToFile on failure, so the next attempt starts clean.
+    // screen and loop. A dropped transfer leaves its bytes in the .part file,
+    // so the next attempt (with a fresh pre-signed URL) continues from there.
     if (attempt < kMaxDownloadAttempts) {
       RenderLock lock(*this);
       strlcpy(downloadStatus, tr(STR_DOWNLOAD_RETRYING), sizeof(downloadStatus));
@@ -507,15 +595,38 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
     }
   }
 
+  // The transport says the body is complete; make sure the FILE is. An EPUB is
+  // a ZIP, and a ZIP without its end-of-central-directory record is truncated
+  // whatever the server claimed. A failed check deletes the .part: BookFusion's
+  // endpoint ignores Range requests, so there is nothing to resume into.
+  if (dlResult == HttpDownloader::OK && !ZipFileCheck::looksComplete(partPath.c_str())) {
+    LOG_ERR("BFB", "%s is not a complete ZIP; discarding", partPath.c_str());
+    DownloadFailureLog::line("zip check: %s has no end-of-central-directory record; discarded", partPath.c_str());
+    Storage.remove(partPath.c_str());
+    dlResult = HttpDownloader::TRUNCATED_ERROR;
+  }
+
+  if (dlResult == HttpDownloader::OK && !Storage.rename(partPath.c_str(), filename.c_str())) {
+    LOG_ERR("BFB", "Rename %s -> %s failed", partPath.c_str(), filename.c_str());
+    DownloadFailureLog::line("rename %s -> %s FAILED", partPath.c_str(), filename.c_str());
+    Storage.remove(partPath.c_str());
+    dlResult = HttpDownloader::FILE_ERROR;
+  }
+
   if (dlResult != HttpDownloader::OK) {
     {
       RenderLock lock(*this);
       state = ERROR;
-      strlcpy(errorMsg, tr(STR_DOWNLOAD_FAILED), sizeof(errorMsg));
+      describeDownloadFailure(dlResult, HttpDownloader::lastHttpStatus(), Storage.exists(partPath.c_str()), errorMsg,
+                              sizeof(errorMsg));
     }
+    DownloadFailureLog::line("verdict: FAILED result=%d http=%d partialKept=%d shown=\"%s\"",
+                             static_cast<int>(dlResult), HttpDownloader::lastHttpStatus(),
+                             Storage.exists(partPath.c_str()) ? 1 : 0, errorMsg);
     requestUpdate();
     return;
   }
+  DownloadFailureLog::line("verdict: OK file=%s", filename.c_str());
 
   // EPUB transfer done — the remaining work (metadata parse, sidecar write,
   // optional cover fallback, progress sync) is silent on the network and SD
@@ -1039,7 +1150,15 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
   }
 
   if (state == ERROR) {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, errorMsg, true, EpdFontFamily::BOLD);
+    // Failure reasons run to a few sentences; wrap them and centre the block
+    // on the same midline a one-line message has always used.
+    const auto lines = renderer.wrappedText(UI_10_FONT_ID, errorMsg, pageWidth - 40, 6, EpdFontFamily::BOLD);
+    const int lineH = renderer.getLineHeight(UI_10_FONT_ID) + 4;
+    int y = pageHeight / 2 - (static_cast<int>(lines.size()) - 1) * lineH / 2;
+    for (const auto& line : lines) {
+      renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str(), true, EpdFontFamily::BOLD);
+      y += lineH;
+    }
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     if (SETTINGS.darkMode) renderer.invertScreen();

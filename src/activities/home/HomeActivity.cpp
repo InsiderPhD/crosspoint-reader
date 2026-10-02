@@ -11,6 +11,7 @@
 #include <Xtc.h>
 #include <esp_heap_caps.h>
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "BookFusionBookIdStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "LibraryScan.h"
 #include "MappedInputManager.h"
 #include "ReadingStatsDetailActivity.h"
 #include "RecentBooksStore.h"
@@ -39,10 +41,15 @@ int HomeActivity::getMenuItemCount() const {
 int HomeActivity::getCoverSlotsUsed() const { return static_cast<int>(recentBooks.size()); }
 
 void HomeActivity::loadRecentBooks(int maxBooks) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
   recentBooks.clear();
-  const auto& books = RECENT_BOOKS.getBooks();
-  recentBooks.reserve(std::min(static_cast<int>(books.size()), maxBooks));
+  recentBooks.reserve(maxBooks);
+  homeSelectorIndex = 0;
 
+  if (metrics.homePinnedBooks) loadPinnedBooks(maxBooks);
+  const int pinnedCount = static_cast<int>(recentBooks.size());
+
+  const auto& books = RECENT_BOOKS.getBooks();
   for (const RecentBook& book : books) {
     // Limit to maximum number of recent books
     if (recentBooks.size() >= maxBooks) {
@@ -54,8 +61,150 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
       continue;
     }
 
+    // A pinned book that is also a recent is already on the shelf.
+    if (pinnedCount > 0 && RECENT_BOOKS.isPinned(book.path)) {
+      continue;
+    }
+
+    if (recentBooks.size() == static_cast<size_t>(pinnedCount)) homeSelectorIndex = pinnedCount;
     recentBooks.push_back(book);
   }
+
+  if (metrics.homeBackfillFromLibrary) backfillFromLibrary(maxBooks);
+}
+
+namespace {
+
+// FNV-1a over the path: a stable rank for backfill picks, so the same library
+// books stand on the shelf from one visit to the next.
+uint32_t backfillRank(const std::string& path) {
+  uint32_t h = 2166136261u;
+  for (const char c : path) h = (h ^ static_cast<uint8_t>(c)) * 16777619u;
+  return h;
+}
+
+// Fills `out` from the book's existing metadata cache. False when there is
+// none (a book never opened on this device): with buildIfMissing false the
+// EPUB load fails on its single book.bin open instead of parsing the file.
+bool loadCachedBookMeta(const std::string& path, RecentBook& out) {
+  out.path = path;
+  out.progressPercent = -1;
+  out.pinned = false;
+  if (FsHelpers::hasEpubExtension(path)) {
+    Epub epub(path, "/.crosspoint");
+    if (!epub.load(/*buildIfMissing=*/false, /*skipLoadingCss=*/true)) return false;
+    out.title = epub.getTitle();
+    out.author = epub.getAuthor();
+    out.coverBmpPath = epub.getThumbBmpPath();
+    return true;
+  }
+  if (FsHelpers::hasXtcExtension(path)) {
+    Xtc xtc(path, "/.crosspoint");
+    if (!xtc.load()) return false;
+    out.title = xtc.getTitle();
+    out.author = xtc.getAuthor();
+    out.coverBmpPath = xtc.getThumbBmpPath();
+    return true;
+  }
+  return false;
+}
+
+// A filler for a book with no cache: its file name, no author, no cover (so
+// the Bookshelf stands it spine-out, the way the Library lists such a book).
+void fileNameBookMeta(const std::string& path, RecentBook& out) {
+  out.path = path;
+  out.progressPercent = -1;
+  out.pinned = false;
+  const auto slash = path.find_last_of('/');
+  const auto dot = path.find_last_of('.');
+  out.title = path.substr(slash + 1, dot == std::string::npos || dot < slash ? std::string::npos : dot - slash - 1);
+  out.author.clear();
+  out.coverBmpPath.clear();
+}
+
+}  // namespace
+
+void HomeActivity::loadPinnedBooks(const int maxBooks) {
+  const auto& recents = RECENT_BOOKS.getBooks();
+  RecentBook book;
+  for (const std::string& path : RECENT_BOOKS.getPinnedPaths()) {
+    if (static_cast<int>(recentBooks.size()) >= maxBooks) break;
+    if (!Storage.exists(path.c_str())) continue;  // pinned, then removed from the card
+    const auto it =
+        std::find_if(recents.begin(), recents.end(), [&path](const RecentBook& b) { return b.path == path; });
+    if (it != recents.end()) {
+      book = *it;  // keeps the recents' progress
+    } else if (!loadCachedBookMeta(path, book)) {
+      fileNameBookMeta(path, book);
+    }
+    book.pinned = true;
+    recentBooks.push_back(book);
+  }
+}
+
+// A shelf with gaps looks wrong, and the recents store only holds books that
+// were opened here (10 at most), so after a few Shelve Books there is nothing
+// left to show. Fill the remaining slots from the library instead:
+//  - LibraryScan reuses its persisted index, so this is a file read plus one
+//    directory stat each once the Library has been opened; on a card with no
+//    index yet it is the one-off SD walk the Library would have done.
+//  - Books already listed or shelved are skipped; the rest rank by a hash of
+//    their path, so the picks (and their cached shelf covers) are stable.
+//  - Metadata comes from each pick's cache. Books with a cache are preferred,
+//    probing at most a few candidates per slot (each probe is a book.bin open:
+//    ~20-25 ms on the X3); whatever is still short is filled by file name.
+void HomeActivity::backfillFromLibrary(const int maxBooks) {
+  const int need = maxBooks - static_cast<int>(recentBooks.size());
+  if (need <= 0) return;
+
+  std::vector<std::string> paths;
+  LibraryScan::enumerateBooks(paths);
+  if (paths.empty()) return;
+
+  // (rank, index into paths) for every eligible book; 8 bytes each, sorted once.
+  struct Candidate {
+    uint32_t rank;
+    uint32_t index;
+  };
+  std::vector<Candidate> candidates;
+  candidates.reserve(paths.size());
+  for (size_t i = 0; i < paths.size(); ++i) {
+    const std::string& path = paths[i];
+    const bool listed =
+        std::any_of(recentBooks.begin(), recentBooks.end(), [&path](const RecentBook& b) { return b.path == path; });
+    if (listed || RECENT_BOOKS.isShelved(path)) continue;
+    candidates.push_back({backfillRank(path), static_cast<uint32_t>(i)});
+  }
+  std::sort(candidates.begin(), candidates.end(),
+            [](const Candidate& a, const Candidate& b) { return a.rank < b.rank; });
+
+  constexpr int kProbesPerSlot = 3;
+  const int probeBudget = need * kProbesPerSlot;
+  std::vector<uint32_t> uncached;  // candidates probed and found cacheless, in rank order
+  uncached.reserve(probeBudget);
+
+  recentBooks.reserve(maxBooks);
+  int probes = 0;
+  RecentBook book;
+  for (const Candidate& c : candidates) {
+    if (static_cast<int>(recentBooks.size()) >= maxBooks || probes >= probeBudget) break;
+    ++probes;
+    if (loadCachedBookMeta(paths[c.index], book)) {
+      recentBooks.push_back(book);
+    } else {
+      uncached.push_back(c.index);
+    }
+  }
+  for (size_t i = 0; i < uncached.size() && static_cast<int>(recentBooks.size()) < maxBooks; ++i) {
+    fileNameBookMeta(paths[uncached[i]], book);
+    recentBooks.push_back(book);
+  }
+  // Candidates past the probe budget, when every probed one was cacheless.
+  for (size_t i = probes; i < candidates.size() && static_cast<int>(recentBooks.size()) < maxBooks; ++i) {
+    fileNameBookMeta(paths[candidates[i].index], book);
+    recentBooks.push_back(book);
+  }
+  LOG_DBG("HOME", "Backfilled %d shelf slot(s) from %zu library books (%d probed)", need, paths.size(), probes);
 }
 
 // Mirrors loadRecentCovers' conditions: true only when that pass would actually generate a thumb.
@@ -170,9 +319,8 @@ void HomeActivity::onEnter() {
     }
   }
 
-  selectorIndex = 0;
-
   loadRecentBooks(UITheme::getInstance().getMetrics().homeRecentBooksCount);
+  selectorIndex = homeSelectorIndex;
 
   // Trigger first update
   requestUpdate();
@@ -237,7 +385,7 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
   auto reloadRecents = [this] {
     recentBooks.clear();
     loadRecentBooks(UITheme::getInstance().getMetrics().homeRecentBooksCount);
-    selectorIndex = 0;
+    selectorIndex = homeSelectorIndex;
     recentsLoaded = false;
     recentsLoading = false;
     coverRendered = false;
@@ -256,9 +404,12 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
       RECENT_BOOKS.saveToFile();
       reloadRecents();
       break;
+    case BookContextMenu::Action::Pin:
+      RECENT_BOOKS.togglePin(path);
+      reloadRecents();
+      break;
     case BookContextMenu::Action::Shelve:
-      RECENT_BOOKS.removeBook(path);
-      RECENT_BOOKS.saveToFile();
+      RECENT_BOOKS.shelveBook(path);
       reloadRecents();
       break;
     case BookContextMenu::Action::Reindex:

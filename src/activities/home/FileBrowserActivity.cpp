@@ -379,9 +379,11 @@ void FileBrowserActivity::loop() {
         RECENT_BOOKS.updateProgress(path, -1);
         RECENT_BOOKS.saveToFile();
         reload();
+      } else if (opt == UITheme::BOOK_OPT_PIN) {
+        RECENT_BOOKS.togglePin(path);
+        reload();
       } else if (opt == UITheme::BOOK_OPT_SHELVE) {
-        RECENT_BOOKS.removeBook(path);
-        RECENT_BOOKS.saveToFile();
+        RECENT_BOOKS.shelveBook(path);
         reload();
       } else if (opt == UITheme::BOOK_OPT_REINDEX) {
         if (FsHelpers::hasEpubExtension(path)) {
@@ -795,9 +797,9 @@ void FileBrowserActivity::render(RenderLock&&) {
     const auto lastSlash = bookOptionsPath.rfind('/');
     const std::string folder =
         (lastSlash != std::string::npos) ? bookOptionsPath.substr(0, lastSlash) : bookOptionsPath;
-    const auto layout =
-        UITheme::drawBookOptionsPopup(renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(), folder.c_str(),
-                                      bookOptionsProgress, bookOptionsIndex, bookOptionsHasClippings);
+    const auto layout = UITheme::drawBookOptionsPopup(renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(),
+                                                      folder.c_str(), bookOptionsProgress, bookOptionsIndex,
+                                                      bookOptionsHasClippings, RECENT_BOOKS.isPinned(bookOptionsPath));
     bookOptionsPopupX = layout.popup.x;
     bookOptionsPopupY = layout.popup.y;
     bookOptionsPopupW = layout.popup.width;

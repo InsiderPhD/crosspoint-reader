@@ -46,6 +46,7 @@ enum class SettingAction {
   FontLayoutPreview,
   SleepStats,
   Dictionary,
+  FrontlightSchedule,  // frontlight boards only
 };
 
 struct SettingInfo {

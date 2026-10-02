@@ -3,7 +3,6 @@
 #if CROSSPOINT_SD_PLUGINS  // SD-card plugins: PSRAM boards only, see lib/DevicePolicy
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <FreeInkUIIcon.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -17,16 +16,18 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <new>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "PluginCatalogActivity.h"
+#include "PluginInfoActivity.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
-#include "components/CatalogScreens.h"
 #include "components/UITheme.h"
-#include "components/icons/search32.h"
+#include "fontIds.h"
 #include "network/HttpDownloader.h"
 #include "util/BookCacheUtils.h"
 #include "util/ButtonNavigator.h"
@@ -34,8 +35,7 @@
 #include "util/PluginLocations.h"
 #include "util/QrUtils.h"
 #include "util/StringUtils.h"
-
-namespace fui = freeink::ui;
+#include "util/TouchListNav.h"
 
 // Template/JSON/transport primitives shared with the plugin event drain.
 using pluginhttp::readHeaders;
@@ -45,11 +45,6 @@ using pluginhttp::splitPath;
 using pluginhttp::substituteAll;
 using pluginhttp::urlEncodeQuery;
 using pluginhttp::variantToString;
-
-// Header search action, tapped on the browsing screen's search icon. The base
-// reserves ACTION_ROW (1); subclass action ids start at ACTION_USER (2).
-constexpr fui::ActionId ACTION_SEARCH = 2;
-constexpr fui::ActionId ACTION_CANCEL = 3;
 
 namespace {
 constexpr size_t MAX_MANIFEST_SIZE = 8 * 1024;
@@ -372,8 +367,11 @@ std::vector<PluginRef> discoverPlugins() {
     ref.name = e.name;
     ref.title = e.name;
     // Browser-only plugins (no device.json) stay listed so an install is
-    // visibly installed, but carry no manifest to open (empty manifestPath).
+    // visibly installed, but carry no manifest to open (empty manifestPath);
+    // the picker opens their README instead.
     if (e.hasDevice) ref.manifestPath = e.dir + "/device.json";
+    const std::string readmePath = e.dir + "/README.md";
+    if (Storage.exists(readmePath.c_str())) ref.readmePath = readmePath;
     // manifest.json first, then device.json overrides (on-device authority).
     if (e.hasManifest) readTitleDesc(e.dir + "/manifest.json", ref);
     if (e.hasDevice) readTitleDesc(ref.manifestPath, ref);
@@ -479,6 +477,16 @@ bool PluginCatalogActivity::loadToken() {
 
 void PluginCatalogActivity::loadConfig() { pluginhttp::loadConfigFile(manifest.configFile, config); }
 
+bool PluginCatalogActivity::configReady() {
+  // Only a config file that is missing (or unparseable) means "not set up";
+  // keys the file leaves out substitute as empty (see substituted()), which
+  // is what a server with defaults expects.
+  if (manifest.configFile.empty() || !config.empty()) return true;
+  LOG_ERR("PCAT", "plugin config missing or unreadable: %s", manifest.configFile.c_str());
+  fail(StrId::STR_PLUGIN_NOT_CONFIGURED);
+  return false;
+}
+
 void PluginCatalogActivity::fail(const StrId msg) {
   state = State::ERROR;
   errorMessage = I18N.get(msg);
@@ -502,6 +510,15 @@ std::vector<std::pair<std::string, std::string>> PluginCatalogActivity::substitu
 std::string PluginCatalogActivity::substituted(std::string tpl, const Item* item) const {
   substituteAll(tpl, "{token}", token);
   for (const auto& kv : config) substituteAll(tpl, ("{cfg." + kv.first + "}").c_str(), kv.second);
+  // A key the config file leaves out becomes an empty value rather than a
+  // literal "{cfg.key}" on the wire: plugin READMEs document omitted keys as
+  // "use the server's default", and a server cannot parse the braces anyway.
+  for (size_t at = tpl.find("{cfg."); at != std::string::npos; at = tpl.find("{cfg.", at)) {
+    const size_t end = tpl.find('}', at);
+    if (end == std::string::npos) break;
+    LOG_DBG("PCAT", "config key %s not set; substituting empty", tpl.substr(at, end - at + 1).c_str());
+    tpl.erase(at, end - at + 1);
+  }
   char num[16];
   snprintf(num, sizeof(num), "%d", page);
   substituteAll(tpl, "{page}", num);
@@ -519,7 +536,7 @@ std::string PluginCatalogActivity::substituted(std::string tpl, const Item* item
 }
 
 PluginCatalogActivity::PluginCatalogActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : UiListActivity("PluginCatalog", renderer, mappedInput) {}
+    : Activity("PluginCatalog", renderer, mappedInput) {}
 
 PluginCatalogActivity::~PluginCatalogActivity() = default;
 
@@ -536,9 +553,7 @@ int PluginCatalogActivity::apiRequestToFile(const std::string& url, const std::s
 }
 
 void PluginCatalogActivity::onEnter() {
-  UiListActivity::onEnter();
-  app.on(ACTION_SEARCH, &PluginCatalogActivity::onSearchEvent, this);
-  app.on(ACTION_CANCEL, &PluginCatalogActivity::onCancelEvent, this);
+  Activity::onEnter();
   enterPluginPicker();
 }
 
@@ -560,18 +575,16 @@ void PluginCatalogActivity::enterPluginPicker() {
   browseCurrentUrl.clear();
   errorMessage.clear();
   session.reset();  // no TLS while only picking
-  releaseRows();
-  nav.reset();
+  selectedIndex = 0;
   state = State::PLUGIN_PICKER;
-  if (pickerReturnRow > 0 && pickerReturnRow < rowCount()) moveSelectionTo(pickerReturnRow);
+  if (pickerReturnRow > 0 && pickerReturnRow < rowCount()) selectedIndex = pickerReturnRow;
   requestUpdate();
 }
 
 void PluginCatalogActivity::enterCatalog() {
   state = State::CHECK_WIFI;
   items.clear();
-  releaseRows();
-  nav.reset();
+  selectedIndex = 0;
   page = 1;
   hasMore = false;
   currentList = -1;
@@ -634,8 +647,7 @@ void PluginCatalogActivity::startBrowse() {
     items.clear();
     page = 1;
     hasMore = false;
-    releaseRows();
-    nav.reset();
+    selectedIndex = 0;
     state = State::LIST_PICKER;
     requestUpdate();
     return;
@@ -644,26 +656,19 @@ void PluginCatalogActivity::startBrowse() {
   fetchPage(1);
 }
 
-void PluginCatalogActivity::onSearchEvent(const fui::ActionEvent&, void* user) {
-  auto* self = static_cast<PluginCatalogActivity*>(user);
-  if (self->state == State::BROWSING && self->manifest.hasSearch()) self->launchSearch();
-}
-
-void PluginCatalogActivity::onCancelEvent(const fui::ActionEvent&, void* user) {
-  auto* self = static_cast<PluginCatalogActivity*>(user);
-  if (self->state != State::DOWNLOADING) return;
-  self->app.clearTapFlash();
-  self->cancelDownload = true;
-}
-
 void PluginCatalogActivity::pumpDownloadInput() {
   mappedInput.update();
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
+  // The transfer runs synchronously, so the main loop's action-bar dispatch
+  // never sees a tap: any tap on the Downloading screen is the Cancel the
+  // footer offers.
+  int tx = 0;
+  int ty = 0;
+  if (mappedInput.wasScreenTapped(tx, ty)) cancelDownload = true;
   if (mappedInput.wasHomeGesture()) {
     cancelDownload = true;
     goHomeAfterCancel = true;
   }
-  routeTouch(mappedInput);
 }
 
 // Shared progress callback for single-file and bundle downloads: updates the
@@ -671,6 +676,7 @@ void PluginCatalogActivity::pumpDownloadInput() {
 // percent steps.
 void PluginCatalogActivity::onDownloadProgress(const size_t downloaded, const size_t total) {
   downloadProgress = downloaded;
+  downloadTotal = total;
   pumpDownloadInput();
   const int percent = total > 0 ? static_cast<int>(static_cast<uint64_t>(downloaded) * 100 / total) : 0;
   const unsigned long now = millis();
@@ -712,8 +718,7 @@ void PluginCatalogActivity::performSearch(const std::string& query) {
   searchQuery = query;
   searchActive = true;
   currentList = -1;  // search spans the whole catalog, not a single list
-  releaseRows();
-  nav.reset();
+  selectedIndex = 0;
   beginLoading();
   fetchPage(1);
 }
@@ -766,6 +771,7 @@ int PluginCatalogActivity::browseRequestToFile(const std::string& urlTemplate, c
 
 void PluginCatalogActivity::fetchXmlList() {
   loadConfig();
+  if (!configReady()) return;
   if (!loadToken() && !(manifest.hasPasswordGrant() && refreshCredentialToken())) {
     state = State::NO_TOKEN;
     requestUpdate();
@@ -810,7 +816,6 @@ void PluginCatalogActivity::fetchXmlList() {
   }
   Storage.remove(BROWSE_TMP_PATH);
 
-  releaseRows();
   items.clear();
   items.reserve(rows.size());
   for (const auto& row : rows) {
@@ -836,7 +841,7 @@ void PluginCatalogActivity::fetchXmlList() {
     return strcasecmp(a.title.c_str(), b.title.c_str()) < 0;
   });
   hasMore = false;
-  nav.reset();
+  selectedIndex = 0;
   state = State::BROWSING;
   requestUpdate();
 }
@@ -876,6 +881,7 @@ void PluginCatalogActivity::fetchPage(const int newPage) {
   }
   page = newPage;
   loadConfig();
+  if (!configReady()) return;
   if (!loadToken() && !(manifest.hasPasswordGrant() && refreshCredentialToken())) {
     state = State::NO_TOKEN;
     requestUpdate();
@@ -935,7 +941,6 @@ void PluginCatalogActivity::fetchPage(const int newPage) {
 
   JsonVariantConst itemsNode = resolvePath(doc.as<JsonVariantConst>(), manifest.itemsPath);
   JsonArrayConst arr = itemsNode.as<JsonArrayConst>();
-  releaseRows();
   items.clear();
   if (!arr.isNull()) {
     items.reserve(manifest.pageSize);
@@ -963,7 +968,7 @@ void PluginCatalogActivity::fetchPage(const int newPage) {
   hasMore = static_cast<int>(items.size()) > manifest.pageSize;
   if (hasMore) items.resize(manifest.pageSize);
   computeInstallStatus();
-  nav.reset();
+  selectedIndex = 0;
   state = State::BROWSING;
   requestUpdate();
 }
@@ -1072,6 +1077,7 @@ void PluginCatalogActivity::downloadItem(const Item& item) {
   state = State::DOWNLOADING;
   statusMessage = item.title;
   downloadProgress = 0;
+  downloadTotal = 0;
   cancelDownload = false;
   goHomeAfterCancel = false;
   requestUpdate(true);
@@ -1256,20 +1262,21 @@ void PluginCatalogActivity::downloadItem(const Item& item) {
   requestUpdate();
 }
 
-// Every state except BROWSING/LIST_PICKER consumes the pass here; the base
-// list protocol (Back/Confirm, touch routing, swipe scroll, button
-// navigation) only ever runs for the two list states.
-bool PluginCatalogActivity::handleCustomInput() {
-  if (state == State::WIFI_SELECTION || state == State::DOWNLOADING) return true;
+// --- Input ------------------------------------------------------------------
+
+void PluginCatalogActivity::loop() {
+  // Child activities (Wi-Fi picker, keyboard, plugin info) own the input while
+  // they are up; the download runs synchronously and pumps its own input.
+  if (state == State::WIFI_SELECTION || state == State::DOWNLOADING || infoOpen) return;
 
   if (state == State::AUTH) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       state = State::NO_TOKEN;
       requestUpdate();
-      return true;
+      return;
     }
     if (static_cast<long>(millis() - authNextPollMs) >= 0) pollAuth();
-    return true;
+    return;
   }
 
   if (state == State::ERROR || state == State::NO_TOKEN) {
@@ -1289,12 +1296,12 @@ bool PluginCatalogActivity::handleCustomInput() {
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       exitCatalog();
     }
-    return true;
+    return;
   }
 
   if (state == State::CHECK_WIFI || state == State::LOADING) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) exitCatalog();
-    return true;
+    return;
   }
 
   if (state == State::DONE) {
@@ -1305,34 +1312,91 @@ bool PluginCatalogActivity::handleCustomInput() {
       // The just-finished download may have installed/updated a plugin; refresh
       // the install badges so the row no longer reads "Update".
       computeInstallStatus();
-      releaseRows();
       state = State::BROWSING;
       requestUpdate();
     }
-    return true;
+    return;
   }
 
-  // The header search icon is reachable by buttons too: on the top row, where
-  // previous-nav is a no-op, a previous-nav press launches the query. It is
-  // never a list row. Touch taps the icon, routed as ACTION_SEARCH.
-  // Upstream's single Button::NavPrevious doesn't exist here; this fork spells
-  // previous-nav as the Up/Left pair ButtonNavigator uses.
-  const auto previousNavReleased = [this] {
-    const auto buttons = ButtonNavigator::getPreviousButtons();
-    return std::any_of(buttons.begin(), buttons.end(),
-                       [this](const MappedInputManager::Button button) { return mappedInput.wasReleased(button); });
-  };
-  if (state == State::BROWSING && manifest.hasSearch() && nav.selected == 0 && previousNavReleased()) {
-    launchSearch();
-    return true;
-  }
-
-  return false;
+  handleListInput();
 }
 
-// Back on the picker leaves the activity; the base routes it here via
-// handleButtons. The catalog states route their Back through exitCatalog()
-// instead, landing back on the picker.
+// The three list states share one input model, the same as the BookFusion
+// browser: Full Touch taps select then activate a row (TouchListNav), Confirm
+// activates the highlighted row, Back climbs out, a tap on the side keys steps
+// the selection and a hold (or a vertical swipe) pages it.
+void PluginCatalogActivity::handleListInput() {
+  const int total = rowCount();
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    onBackButton();
+    return;
+  }
+
+  // On the top row of a searchable catalog the previous-nav slot becomes
+  // Search (front Left / Up), mirroring the OPDS browser's side-button search.
+  // The X4 Pro's action bar draws that slot too (drawFooter passes allSlots).
+  if (state == State::BROWSING && manifest.hasSearch() && selectedIndex == 0) {
+    const auto buttons = ButtonNavigator::getPreviousButtons();
+    const bool previousNavReleased =
+        std::any_of(buttons.begin(), buttons.end(),
+                    [this](const MappedInputManager::Button b) { return mappedInput.wasReleased(b); });
+    if (previousNavReleased) {
+      launchSearch();
+      return;
+    }
+  }
+
+  int tappedIndex;
+  switch (TouchListNav::tapRow(mappedInput, listRect(), total, selectedIndex, rowsHaveSubtitle(), tappedIndex)) {
+    case TouchListNav::TapResult::SelectionMoved:
+      selectedIndex = tappedIndex;
+      requestUpdate();
+      return;
+    case TouchListNav::TapResult::Activated:
+      selectedIndex = tappedIndex;
+      activateIndex(selectedIndex);
+      return;
+    case TouchListNav::TapResult::None:
+      break;
+  }
+
+  // Press, not release, like Settings and the BookFusion browser: the press
+  // that opened this screen from the Settings row is already consumed there,
+  // so its release cannot open the first plugin on its own.
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    if (total > 0) activateIndex(selectedIndex);
+    return;
+  }
+  if (total <= 0) return;
+
+  // Visual page size, the same calculation drawList uses, so a page jump
+  // matches one screen of rows exactly.
+  const int pageItems = UITheme::getNumberOfItemsPerPage(renderer, true, false, true, rowsHaveSubtitle());
+  buttonNavigator.onNextRelease([this, total] {
+    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, total);
+    requestUpdate();
+  });
+  buttonNavigator.onPreviousRelease([this, total] {
+    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, total);
+    requestUpdate();
+  });
+  if (TouchListNav::pageSwipe(mappedInput, total, pageItems, selectedIndex)) {
+    requestUpdate();
+    return;
+  }
+  buttonNavigator.onNextContinuous([this, total, pageItems] {
+    selectedIndex = ButtonNavigator::nextPageIndex(selectedIndex, total, pageItems);
+    requestUpdate();
+  });
+  buttonNavigator.onPreviousContinuous([this, total, pageItems] {
+    selectedIndex = ButtonNavigator::previousPageIndex(selectedIndex, total, pageItems);
+    requestUpdate();
+  });
+}
+
+// Back on the picker leaves the activity. The catalog states route their Back
+// through exitCatalog() instead, landing back on the picker.
 void PluginCatalogActivity::onBackButton() {
   if (state == State::PLUGIN_PICKER) {
     finish();  // the caller (Settings, File Transfer picker) pushed us
@@ -1363,9 +1427,19 @@ void PluginCatalogActivity::activateIndex(const int index) {
   if (state == State::PLUGIN_PICKER) {
     if (index < 0 || index >= rowCount()) return;
     const PluginRef& plugin = installedPlugins[index];
-    if (plugin.manifestPath.empty()) return;  // web-only: nothing to open
-    app.clearTapFlash();                      // the row leaves this screen
     pickerReturnRow = index;
+    if (plugin.manifestPath.empty()) {
+      // Web-only: no catalog to open, so show its description + README (how
+      // to use it from the web interface) instead.
+      infoOpen = true;
+      startActivityForResult(std::make_unique<PluginInfoActivity>(renderer, mappedInput, plugin),
+                             [this](const ActivityResult&) {
+                               infoOpen = false;
+                               if (pickerReturnRow >= 0 && pickerReturnRow < rowCount())
+                                 selectedIndex = pickerReturnRow;
+                             });
+      return;
+    }
     manifestPath = plugin.manifestPath;
     catalogTitle = plugin.title;
     enterCatalog();
@@ -1373,7 +1447,6 @@ void PluginCatalogActivity::activateIndex(const int index) {
   }
   if (state == State::LIST_PICKER) {
     if (index < 0 || index >= static_cast<int>(manifest.browseLists.size())) return;
-    app.clearTapFlash();
     currentList = index;
     startBrowse();
     return;
@@ -1382,12 +1455,10 @@ void PluginCatalogActivity::activateIndex(const int index) {
   // page 1, "Next page" after them while more pages exist.
   const int itemIndex = index - (prevRowVisible() ? 1 : 0);
   if (itemIndex == -1 || (nextRowVisible() && itemIndex == static_cast<int>(items.size()))) {
-    app.clearTapFlash();
     beginLoading();
     fetchPage(itemIndex == -1 ? page - 1 : page + 1);
     return;
   }
-  app.clearTapFlash();  // the row leaves this screen (folder, download view)
   activateItem(itemIndex);
 }
 
@@ -1404,25 +1475,199 @@ void PluginCatalogActivity::activateItem(const int itemIndex) {
   downloadItem(item);
 }
 
+// --- Rendering --------------------------------------------------------------
+
+bool PluginCatalogActivity::rowsHaveSubtitle() const {
+  if (state == State::PLUGIN_PICKER) return true;  // description / web-only hint
+  if (state != State::BROWSING) return false;      // browse-list titles only
+  for (const auto& item : items) {
+    if (!item.author.empty()) return true;
+  }
+  return false;
+}
+
+Rect PluginCatalogActivity::listRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  // drawList takes the page-counter strip out of the rect it is handed.
+  const int contentHeight = renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
+std::string PluginCatalogActivity::browsingHeaderLabel() const {
+  std::string label = catalogTitle;
+  if (searchActive) {
+    label = std::string(tr(STR_SEARCH)) + ": " + searchQuery;
+  } else if (state == State::BROWSING && currentList >= 0 &&
+             currentList < static_cast<int>(manifest.browseLists.size())) {
+    label = manifest.browseLists[currentList].title;
+  }
+  return label;
+}
+
+void PluginCatalogActivity::drawListScreen() {
+  const int total = rowCount();
+  if (total == 0) {
+    renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2,
+                              state == State::PLUGIN_PICKER ? tr(STR_NO_PLUGINS_INSTALLED) : tr(STR_NO_ENTRIES));
+    return;
+  }
+
+  const Rect rect = listRect();
+  if (state == State::PLUGIN_PICKER) {
+    GUI.drawList(
+        renderer, rect, total, selectedIndex, [this](int i) -> std::string { return installedPlugins[i].title; },
+        [this](int i) -> std::string {
+          // A missing description falls back to the web-only hint so the row
+          // still says what kind of plugin it is.
+          const PluginRef& p = installedPlugins[i];
+          if (!p.description.empty()) return p.description;
+          return p.manifestPath.empty() ? std::string(tr(STR_PLUGIN_WEB_ONLY)) : std::string();
+        });
+    return;
+  }
+  if (state == State::LIST_PICKER) {
+    GUI.drawList(renderer, rect, total, selectedIndex,
+                 [this](int i) -> std::string { return manifest.browseLists[i].title; });
+    return;
+  }
+
+  // BROWSING: pager rows bracket the items. These pages are the SERVER's, not
+  // this rect's rows, so the counter strip gets our wording ("2 / 2+" while
+  // the server says more exist); XML folders page by their own rows.
+  const int prevOff = prevRowVisible() ? 1 : 0;
+  const auto rowItem = [this, prevOff](const int i) -> const Item* {
+    const int itemIndex = i - prevOff;
+    return itemIndex >= 0 && itemIndex < static_cast<int>(items.size()) ? &items[itemIndex] : nullptr;
+  };
+  const bool hasSubtitle = rowsHaveSubtitle();
+  char indicator[24] = {0};
+  const char* indicatorOverride = nullptr;
+  if (!manifest.isXmlList()) {
+    snprintf(indicator, sizeof(indicator), hasMore ? "%d / %d+" : "%d / %d", page, page);
+    indicatorOverride = indicator;
+  }
+  // Optional columns are empty std::functions when unused (drawList treats a
+  // null callback as "no such column").
+  std::function<std::string(int)> subtitle;
+  if (hasSubtitle) {
+    subtitle = [rowItem](int i) -> std::string {
+      const Item* item = rowItem(i);
+      return item ? item->author : std::string();
+    };
+  }
+  // Install/update badge (plugin-store style catalogs); folders and pager
+  // rows never carry one.
+  std::function<std::string(int)> value;
+  if (manifest.tracksInstalls()) {
+    value = [rowItem](int i) -> std::string {
+      const Item* item = rowItem(i);
+      return item && !item->isDir ? item->status : std::string();
+    };
+  }
+  GUI.drawList(
+      renderer, rect, total, selectedIndex,
+      [this, rowItem, prevOff](int i) -> std::string {
+        if (const Item* item = rowItem(i)) return item->title;
+        return std::string(i < prevOff ? tr(STR_PREV_PAGE) : tr(STR_NEXT_PAGE));
+      },
+      subtitle,
+      [rowItem](int i) -> UIIcon {
+        const Item* item = rowItem(i);
+        if (!item) return UIIcon::Arrow;  // pager row
+        return item->isDir ? UIIcon::Folder : UIIcon::File;
+      },
+      value, false, nullptr, indicatorOverride);
+}
+
+// Device-code sign-in: verification URL (text), the user code (bold) and a QR
+// of the URL, then the polling notice.
+void PluginCatalogActivity::drawAuthScreen() {
+  const int pageWidth = renderer.getScreenWidth();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int lineH = renderer.getLineHeight(UI_10_FONT_ID) + 6;
+  const int codeH = renderer.getLineHeight(UI_12_FONT_ID) + 10;
+  constexpr int qrSize = 180;
+  constexpr int gap = 12;
+  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int bottom = renderer.getScreenHeight() - metrics.buttonHintsHeight;
+  const int stackH = lineH + codeH + qrSize + gap + lineH;
+  int y = std::max(top, (top + bottom) / 2 - stackH / 2);
+
+  renderer.drawCenteredText(UI_10_FONT_ID, y,
+                            renderer.truncatedText(UI_10_FONT_ID, authVerifyUrl.c_str(), pageWidth - 40).c_str());
+  y += lineH;
+  renderer.drawCenteredText(UI_12_FONT_ID, y, authUserCode.c_str(), true, EpdFontFamily::BOLD);
+  y += codeH;
+  QrUtils::drawQrCode(renderer, Rect{(pageWidth - qrSize) / 2, y, qrSize, qrSize}, authVerifyUrl);
+  y += qrSize + gap;
+  renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_PLUGIN_AUTH_WAITING));
+}
+
+// Transfer screen: item title, the Downloading label and the running byte
+// count (or a progress bar once the server has said how big the file is).
+void PluginCatalogActivity::drawDownloadScreen() {
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  constexpr int lineH = 34;
+  int y = pageHeight / 2 - lineH - lineH / 2;
+
+  renderer.drawCenteredText(UI_10_FONT_ID, y,
+                            renderer.truncatedText(UI_10_FONT_ID, statusMessage.c_str(), pageWidth - 40).c_str(), true,
+                            EpdFontFamily::BOLD);
+  y += lineH;
+  renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_DOWNLOADING));
+  y += lineH;
+  char bytes[32];
+  if (downloadProgress >= 1024 * 1024) {
+    snprintf(bytes, sizeof(bytes), "%.1f MB", downloadProgress / (1024.0f * 1024.0f));
+  } else {
+    snprintf(bytes, sizeof(bytes), "%u KB", static_cast<unsigned>(downloadProgress / 1024));
+  }
+  renderer.drawCenteredText(UI_10_FONT_ID, y, bytes);
+  y += lineH;
+  if (downloadTotal > 0) {
+    const int barW = pageWidth - 2 * metrics.contentSidePadding - 40;
+    GUI.drawProgressBar(renderer, Rect{(pageWidth - barW) / 2, y, barW, metrics.progressBarHeight}, downloadProgress,
+                        downloadTotal);
+  }
+}
+
+// Centered message block: an optional bold heading, a wrapped body and an
+// optional trailing hint line (the error, sign-in and done screens).
+void PluginCatalogActivity::drawCenteredLines(const char* heading, const char* body, const char* hint) {
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  const int lineH = renderer.getLineHeight(UI_10_FONT_ID) + 4;
+  const auto lines = renderer.wrappedText(UI_10_FONT_ID, body ? body : "", pageWidth - 40, 6);
+  const int count = (heading ? 1 : 0) + static_cast<int>(lines.size()) + (hint ? 1 : 0);
+  int y = pageHeight / 2 - (count - 1) * lineH / 2;
+  if (heading) {
+    renderer.drawCenteredText(UI_10_FONT_ID, y, heading, true, EpdFontFamily::BOLD);
+    y += lineH;
+  }
+  for (const auto& line : lines) {
+    renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str());
+    y += lineH;
+  }
+  if (hint) renderer.drawCenteredText(SMALL_FONT_ID, y, hint);
+}
+
 void PluginCatalogActivity::drawFooter() {
   MappedInputManager::Labels labels;
+  bool allSlots = false;
   switch (state) {
     case State::BROWSING:
     case State::LIST_PICKER:
     case State::PLUGIN_PICKER: {
       const int count = rowCount();
-      const int prevOff = prevRowVisible() ? 1 : 0;
-      const int itemSel = nav.selected - prevOff;
+      const int itemSel = selectedIndex - (prevRowVisible() ? 1 : 0);
       const char* confirmLabel;
       if (state != State::BROWSING) {
+        // Every picker row opens something: a catalog, a browse list, or a
+        // web-only plugin's info screen.
         confirmLabel = count > 0 ? tr(STR_OPEN) : "";
-        // A selected web-only plugin row has nothing to open.
-        if (state == State::PLUGIN_PICKER && nav.selected >= 0 && nav.selected < count) {
-          const int pi = nav.selected;
-          if (pi >= 0 && pi < static_cast<int>(installedPlugins.size()) && installedPlugins[pi].manifestPath.empty()) {
-            confirmLabel = "";
-          }
-        }
       } else {
         // Folders open; items and the pager rows both fetch from the server.
         const bool onDir =
@@ -1430,8 +1675,9 @@ void PluginCatalogActivity::drawFooter() {
         confirmLabel = count == 0 ? "" : (onDir ? tr(STR_OPEN) : tr(STR_FETCH));
       }
       // On the top row of a searchable catalog the previous-nav slot becomes
-      // Search (front Left), mirroring the OPDS browser's side-button search.
-      const bool searchable = state == State::BROWSING && manifest.hasSearch() && nav.selected == 0;
+      // Search; it is an action there, so the touch action bar draws it too.
+      const bool searchable = state == State::BROWSING && manifest.hasSearch() && selectedIndex == 0;
+      allSlots = searchable;
       const char* up = searchable ? tr(STR_SEARCH) : (count > 1 ? tr(STR_DIR_UP) : "");
       const char* down = count > 1 ? tr(STR_DIR_DOWN) : "";
       labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, up, down);
@@ -1450,197 +1696,48 @@ void PluginCatalogActivity::drawFooter() {
       labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
       break;
   }
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, allSlots);
 }
 
-void PluginCatalogActivity::buildScreen(UiScreen& screen) {
-  // One header renderer for every state (catalogScreenHeader), so the header
-  // never changes size or shifts as the plugin moves between states. The search
-  // icon rides along only while browsing a searchable catalog; the picker and
-  // the status screens show the plain plugin title.
-  const bool listState = state == State::BROWSING || state == State::LIST_PICKER;
-  const std::string title = listState ? browsingHeaderLabel() : catalogTitle;
-  const bool withSearch = state == State::BROWSING && manifest.hasSearch();
-  catalogScreenHeader(screen, renderer, title.c_str(),
-                      withSearch ? fui::bitmapFromIcon(icon_search_32) : fui::BitmapRef{},
-                      withSearch ? ACTION_SEARCH : fui::NO_ACTION);
+void PluginCatalogActivity::render(RenderLock&&) {
+  renderer.clearScreen();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+
+  // One header for every state, so it never shifts as the plugin moves
+  // between them; the list states carry the list / search label.
+  const std::string title = isListState() ? browsingHeaderLabel() : catalogTitle;
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight}, title.c_str());
 
   switch (state) {
     case State::BROWSING:
     case State::LIST_PICKER:
     case State::PLUGIN_PICKER:
-      buildBrowsingScreen(screen);
-      return;
+      drawListScreen();
+      break;
     case State::AUTH:
-      buildAuthScreen(screen);
-      return;
+      drawAuthScreen();
+      break;
     case State::DOWNLOADING:
-      catalogDownloadScreen(screen, statusMessage.c_str(), downloadProgress, 0, ACTION_CANCEL,
-                            CatalogDownloadProgressStyle::TransferredBytes);
-      return;
+      drawDownloadScreen();
+      break;
     case State::DONE:
-      catalogCenteredBlock(screen, {{tr(STR_DOWNLOAD_COMPLETE), true}, {statusMessage.c_str()}});
-      return;
+      drawCenteredLines(tr(STR_DOWNLOAD_COMPLETE), statusMessage.c_str(), nullptr);
+      break;
     case State::ERROR:
-      if (mappedInput.hasTouch()) {
-        catalogCenteredBlock(screen, {{tr(STR_ERROR_MSG), true}, {errorMessage.c_str()}, {tr(STR_TAP_TO_RETRY)}});
-      } else {
-        catalogCenteredBlock(screen, {{tr(STR_ERROR_MSG), true}, {errorMessage.c_str()}});
-      }
-      return;
+      drawCenteredLines(tr(STR_ERROR_MSG), errorMessage.c_str(),
+                        mappedInput.hasTouch() ? tr(STR_TAP_TO_RETRY) : nullptr);
+      break;
     case State::NO_TOKEN:
-      catalogCenteredBlock(screen,
-                           {{manifest.hasDeviceCode() ? tr(STR_PLUGIN_SIGN_IN_HINT) : tr(STR_PLUGIN_NOT_SIGNED_IN)}});
-      return;
+      drawCenteredLines(nullptr, manifest.hasDeviceCode() ? tr(STR_PLUGIN_SIGN_IN_HINT) : tr(STR_PLUGIN_NOT_SIGNED_IN),
+                        nullptr);
+      break;
     default:  // CHECK_WIFI / LOADING (and the brief child-activity handoffs)
-      screen.centeredText(statusMessage.c_str(), screen.theme().bodyText);
-      return;
-  }
-}
-
-// Device-code sign-in: verification URL (text + QR) and the user code. The QR
-// bitmap itself is painted by render() into the rect measured here.
-void PluginCatalogActivity::buildAuthScreen(UiScreen& screen) {
-  fui::TextStyle centered = screen.theme().bodyText;
-  centered.align = fui::TextAlign::Center;
-  fui::TextStyle code = screen.theme().titleText;
-  code.align = fui::TextAlign::Center;
-  code.bold = true;
-  const int16_t lh = screen.target().lineHeight(centered.font);
-  const int16_t gap = screen.theme().spaceMd;
-
-  screen.target().text(screen.takeTop(lh, gap), authVerifyUrl.c_str(), centered);
-  screen.target().text(screen.takeTop(screen.target().lineHeight(code.font), gap), authUserCode.c_str(), code);
-
-  constexpr int16_t qrSize = 180;
-  const fui::Rect band = screen.takeTop(qrSize, gap);
-  authQrRect = fui::Rect{static_cast<int16_t>(band.x + (band.width - qrSize) / 2), band.y, qrSize, qrSize};
-
-  screen.target().text(screen.takeTop(lh), tr(STR_PLUGIN_AUTH_WAITING), centered);
-}
-
-std::string PluginCatalogActivity::browsingHeaderLabel() const {
-  std::string label = catalogTitle;
-  if (searchActive) {
-    label = std::string(tr(STR_SEARCH)) + ": " + searchQuery;
-  } else if (state == State::BROWSING && currentList >= 0 &&
-             currentList < static_cast<int>(manifest.browseLists.size())) {
-    label = manifest.browseLists[currentList].title;
-  }
-  if (state == State::BROWSING && page > 1) {
-    char suffix[16];
-    snprintf(suffix, sizeof(suffix), " %d", page);
-    label += suffix;
-  }
-  return label;
-}
-
-void PluginCatalogActivity::buildBrowsingScreen(UiScreen& screen) {
-  if (rowsDirty) {
-    rebuildRowItems();
-    rowsDirty = false;
+      renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2, statusMessage.c_str());
+      break;
   }
 
-  if (rowItems.empty()) {
-    screen.centeredText(state == State::PLUGIN_PICKER ? tr(STR_NO_PLUGINS_INSTALLED) : tr(STR_NO_ENTRIES),
-                        screen.theme().bodyText);
-    return;
-  }
-
-  fui::ListProps props;
-  props.items = rowItems.data();
-  props.count = static_cast<uint16_t>(rowItems.size());
-  props.action = ACTION_ROW;
-  props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
-  props.valueInset = 8;               // air between the nav chevron and the row edge
-  if (state == State::PLUGIN_PICKER) {
-    // Let a long plugin description wrap onto a second line under the title;
-    // the row grows to fit it. maxLines=2 also marks the style caller-owned
-    // (an all-default smallText fails textStyleUnset and the list would
-    // resubstitute).
-    props.subtitleText = screen.theme().smallText;
-    props.subtitleText.maxLines = 2;
-  }
-  syncListViewport(screen, props, /*hasSubtitle=*/true);
-  screen.list(props);
-}
-
-// Derives rowItems from the current state's row source: the browse lists
-// (LIST_PICKER) or the pager rows bracketing the items (BROWSING). Labels
-// point into `manifest`/`items` strings, which outlive the buffer.
-void PluginCatalogActivity::rebuildRowItems() {
-  rowItems.clear();
-  rowItems.reserve(rowCount());
-  if (state == State::PLUGIN_PICKER) {
-    for (const auto& plugin : installedPlugins) {
-      fui::ListItem item;
-      item.label = plugin.title.c_str();
-      // Web-only plugins are listed (so an install is visibly installed) but
-      // inert: the hint replaces the description and there is no chevron.
-      if (plugin.manifestPath.empty()) {
-        item.subtitle = tr(STR_PLUGIN_WEB_ONLY);
-      } else {
-        if (!plugin.description.empty()) item.subtitle = plugin.description.c_str();
-        item.value = ">";
-      }
-      item.actionValue = static_cast<int16_t>(rowItems.size());
-      rowItems.push_back(item);
-    }
-    return;
-  }
-  if (state == State::LIST_PICKER) {
-    for (const auto& list : manifest.browseLists) {
-      fui::ListItem item;
-      item.label = list.title.c_str();
-      item.actionValue = static_cast<int16_t>(rowItems.size());
-      rowItems.push_back(item);
-    }
-    return;
-  }
-  if (prevRowVisible()) {
-    fui::ListItem prev;
-    prev.label = tr(STR_PREV_PAGE);
-    prev.value = ">";
-    prev.actionValue = static_cast<int16_t>(rowItems.size());
-    rowItems.push_back(prev);
-  }
-  for (const auto& entry : items) {
-    fui::ListItem item;
-    item.label = entry.title.c_str();
-    if (!entry.author.empty()) item.subtitle = entry.author.c_str();
-    if (entry.isDir) item.value = ">";
-    // Install/update badge (plugin-store style catalogs); folders never carry
-    // one, so it can't collide with the chevron.
-    else if (!entry.status.empty())
-      item.value = entry.status.c_str();
-    item.actionValue = static_cast<int16_t>(rowItems.size());
-    rowItems.push_back(item);
-  }
-  if (nextRowVisible()) {
-    fui::ListItem next;
-    next.label = tr(STR_NEXT_PAGE);
-    next.value = ">";
-    next.actionValue = static_cast<int16_t>(rowItems.size());
-    rowItems.push_back(next);
-  }
-}
-
-void PluginCatalogActivity::releaseRows() {
-  // The app's interaction table holds row indices (and hit rects) for the old
-  // rows; stop routing touches against it until the next render.
-  closeRouting();
-  rowsDirty = true;
-}
-
-void PluginCatalogActivity::render(RenderLock&&) {
-  renderer.clearScreen();
-  renderUi();
-  // The QR is a raw-renderer overlay: FreeInkUI has no QR component, and
-  // QrUtils draws straight into the framebuffer the app just painted.
-  if (state == State::AUTH && authQrRect.width > 0) {
-    QrUtils::drawQrCode(renderer, Rect{authQrRect.x, authQrRect.y, authQrRect.width, authQrRect.height}, authVerifyUrl);
-  }
   drawFooter();
+  if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
 
