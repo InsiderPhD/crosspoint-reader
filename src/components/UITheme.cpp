@@ -135,31 +135,35 @@ UIIcon UITheme::getFileIcon(const std::string& filename) {
   return File;
 }
 
-int UITheme::getStatusBarHeight() {
+bool UITheme::statusBarHasElements(const StatusBarSide side) {
+  const bool top = side == StatusBarSide::Top;
+  for (uint8_t element = 0; element < CrossPointSettings::STATUS_BAR_ELEMENT_COUNT; element++) {
+    if (SETTINGS.statusBarPos(element, top) != CrossPointSettings::SB_POS_HIDE) return true;
+  }
+  return false;
+}
+
+int UITheme::getStatusBarHeight(const StatusBarSide side) {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
 
-  // Add status bar margin. The text lane is reserved when any positionable
-  // element is placed (not Hidden); the fill bar reserves its own strip below.
-  const bool showStatusBar = SETTINGS.statusBarBatteryPos != CrossPointSettings::SB_POS_HIDE ||
-                             SETTINGS.statusBarBookTitlePos != CrossPointSettings::SB_POS_HIDE ||
-                             SETTINGS.statusBarChapterTitlePos != CrossPointSettings::SB_POS_HIDE ||
-                             SETTINGS.statusBarBookPercentPos != CrossPointSettings::SB_POS_HIDE ||
-                             SETTINGS.statusBarChapterPagePos != CrossPointSettings::SB_POS_HIDE ||
-                             SETTINGS.statusBarBookTimeLeftPos != CrossPointSettings::SB_POS_HIDE ||
-                             SETTINGS.statusBarChapterTimeLeftPos != CrossPointSettings::SB_POS_HIDE ||
-                             SETTINGS.statusBarClockPos != CrossPointSettings::SB_POS_HIDE ||
-                             SETTINGS.statusBarBookmarkPos != CrossPointSettings::SB_POS_HIDE ||
-                             SETTINGS.statusBarBluetoothPos != CrossPointSettings::SB_POS_HIDE;
-  const bool showProgressBar =
-      SETTINGS.statusBarProgressBar != CrossPointSettings::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS;
-  // User-adjustable extra gap above the bar; reserved only when something is shown.
+  // The text lane is reserved when any positionable element is placed on this
+  // bar; the fill bar reserves its own strip beyond it (below for the bottom
+  // bar, above for the top bar).
+  const bool showStatusBar = statusBarHasElements(side);
+  const int progressBarHeight = getProgressBarHeight(side);
+  // User-adjustable extra gap between the bar and the body text; reserved only
+  // when something is shown. One setting serves both bars.
   const uint8_t topMarginSetting = SETTINGS.statusBarTopMargin > CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX
                                        ? CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX
                                        : SETTINGS.statusBarTopMargin;
-  const int topMargin = (showStatusBar || showProgressBar) ? topMarginSetting : 0;
+  const int topMargin = (showStatusBar || progressBarHeight > 0) ? topMarginSetting : 0;
   return topMargin + (showStatusBar ? (metrics.statusBarVerticalMargin + metrics.statusBarContentGap) : 0) +
-         (showProgressBar ? (((SETTINGS.statusBarProgressBarThickness + 1) * 2) + metrics.progressBarMarginTop) : 0);
+         progressBarHeight;
 }
+
+int UITheme::getStatusBarHeight() { return getStatusBarHeight(StatusBarSide::Bottom); }
+
+int UITheme::getTopStatusBarHeight() { return getStatusBarHeight(StatusBarSide::Top); }
 
 namespace {
 const char* bookOptionLabel(int optionId, const bool pinned) {
@@ -313,12 +317,16 @@ void UITheme::drawSyncProgressPopup(GfxRenderer& renderer, const char* title, co
   }
 }
 
-int UITheme::getProgressBarHeight() {
+int UITheme::getProgressBarHeight(const StatusBarSide side) {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
-  const bool showProgressBar =
-      SETTINGS.statusBarProgressBar != CrossPointSettings::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS;
-  return (showProgressBar ? (((SETTINGS.statusBarProgressBarThickness + 1) * 2) + metrics.progressBarMarginTop) : 0);
+  const uint8_t mode = side == StatusBarSide::Top ? SETTINGS.statusBarTopProgressBar : SETTINGS.statusBarProgressBar;
+  const uint8_t thickness =
+      side == StatusBarSide::Top ? SETTINGS.statusBarTopProgressBarThickness : SETTINGS.statusBarProgressBarThickness;
+  const bool showProgressBar = mode != CrossPointSettings::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS;
+  return showProgressBar ? (((thickness + 1) * 2) + metrics.progressBarMarginTop) : 0;
 }
+
+int UITheme::getProgressBarHeight() { return getProgressBarHeight(StatusBarSide::Bottom); }
 
 UITheme::HintReserve UITheme::getHintReserve(const GfxRenderer& renderer, const int sideGutter,
                                              const int invertedTopGutter) {

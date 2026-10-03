@@ -31,8 +31,20 @@ class UITheme {
   static constexpr size_t COVER_THUMB_HEIGHT_COUNT = 3;
   static const int* getCoverThumbHeights();
   static UIIcon getFileIcon(const std::string& filename);
+  // Height the body layout gives up for the BOTTOM status bar (text lane when
+  // any element is placed there, its fill bar, and the user's extra gap).
   static int getStatusBarHeight();
+  // Same for the top bar. 0 when nothing is placed on it and its fill bar is
+  // hidden, which is the default, so existing layouts and section caches are
+  // untouched until a user puts something up there.
+  static int getTopStatusBarHeight();
+  static int getStatusBarHeight(StatusBarSide side);
+  // Height of the fill bar strip alone (0 when hidden), per bar.
   static int getProgressBarHeight();
+  static int getProgressBarHeight(StatusBarSide side);
+  // Whether any text/icon element is placed on the given bar. Shared by the
+  // height maths and the themes' draw routine so the two never disagree.
+  static bool statusBarHasElements(StatusBarSide side);
 
   // Book context menu — shared across HomeActivity, FileBrowserActivity,
   // and RecentBooksActivity.

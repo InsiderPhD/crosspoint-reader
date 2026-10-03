@@ -109,6 +109,11 @@ enum UIIcon {
 
 enum class KeyboardKeyType { Normal, Shift, Mode, Space, Del, Ok, Disabled };
 
+// The two reader status bars. Each bar has its own per-element positions
+// (CrossPointSettings::statusBarPos(element, topBar)) and its own fill bar
+// settings; everything else (fonts, clusters, truncation) is shared.
+enum class StatusBarSide : uint8_t { Bottom, Top };
+
 // Default theme implementation (Classic Theme)
 // Additional themes can inherit from this and override methods as needed
 
@@ -309,16 +314,29 @@ class BaseTheme {
                               const std::function<UIIcon(int index)>& rowIcon) const;
   virtual Rect drawPopup(const GfxRenderer& renderer, const char* message) const;
   virtual void fillPopupProgress(const GfxRenderer& renderer, const Rect& layout, const int progress) const;
-  // Draws the reader status bar. Each element (battery, book/chapter title,
-  // book %, chapter page count, book/chapter time-left, clock, bookmark) carries
-  // its own Hide/Left/Middle/Right position in settings and is laid out into the
+  // Draws the BOTTOM reader status bar. Each element (battery, book/chapter
+  // title, book %, chapter page count, book/chapter time-left, clock, bookmark,
+  // bluetooth) carries its own position in settings and is laid out into the
   // matching cluster here. centerOverride, when non-empty, replaces the titles
   // with a single centred string (used for the auto page-turn banner).
+  // Equivalent to drawStatusBarSide(Bottom, Bottom, ...).
   virtual void drawStatusBar(GfxRenderer& renderer, float bookProgress, int currentPage, int pageCount,
                              const std::string& bookTitle, const std::string& chapterTitle,
                              uint32_t chapterTimeLeftSeconds = 0, uint32_t bookTimeLeftSeconds = 0,
                              bool isPageBookmarked = false, int paddingBottom = 0, int textYOffset = 0,
                              const std::string& centerOverride = std::string()) const;
+  // Draws one status bar. drawSide is the screen edge painted; configSide picks
+  // which bar's elements and fill-bar settings are shown there. They differ only
+  // for the XTC reader's legacy "Top" mode, which paints the bottom bar's
+  // configuration along the top edge. edgePadding pushes the bar away from the
+  // screen edge it hangs off (bottom: lifts it above the button hints; top: a
+  // preview can place it below a header). textYOffset / centerOverride are the
+  // auto page-turn banner's and only apply to the bottom bar.
+  virtual void drawStatusBarSide(GfxRenderer& renderer, StatusBarSide drawSide, StatusBarSide configSide,
+                                 float bookProgress, int currentPage, int pageCount, const std::string& bookTitle,
+                                 const std::string& chapterTitle, uint32_t chapterTimeLeftSeconds = 0,
+                                 uint32_t bookTimeLeftSeconds = 0, bool isPageBookmarked = false, int edgePadding = 0,
+                                 int textYOffset = 0, const std::string& centerOverride = std::string()) const;
   virtual void drawHelpText(const GfxRenderer& renderer, Rect rect, const char* label) const;
   virtual void drawTextField(const GfxRenderer& renderer, Rect rect, const int textWidth, bool cursorMode = false,
                              int contentStartX = 0, int contentWidth = 0) const;

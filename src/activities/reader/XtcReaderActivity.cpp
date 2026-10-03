@@ -467,15 +467,25 @@ void XtcReaderActivity::renderStatusBarOverlay(const StatusBarOverlayPosition po
   if (SETTINGS.statusBarHidden) {
     return;
   }
-  const bool drawBottom = SETTINGS.xtcStatusBarMode == CrossPointSettings::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_BOTTOM &&
-                          position == StatusBarOverlayPosition::Bottom;
-  const bool drawTop = SETTINGS.xtcStatusBarMode == CrossPointSettings::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_TOP &&
-                       position == StatusBarOverlayPosition::Top;
-  if (!drawBottom && !drawTop) {
+  // XTC pages are pre-rendered full-screen, so the bars are overlays and the
+  // mode says which edges get one. Legacy TOP paints the *bottom* bar's
+  // configuration along the top edge, so a setting from before the top bar
+  // existed keeps looking the same; BOTH paints each bar where it belongs.
+  using CPS = CrossPointSettings;
+  const uint8_t mode = SETTINGS.xtcStatusBarMode;
+  StatusBarSide configSide;
+  if (position == StatusBarOverlayPosition::Bottom) {
+    if (mode != CPS::XTC_STATUS_BAR_BOTTOM && mode != CPS::XTC_STATUS_BAR_BOTH) return;
+    configSide = StatusBarSide::Bottom;
+  } else if (mode == CPS::XTC_STATUS_BAR_TOP) {
+    configSide = StatusBarSide::Bottom;
+  } else if (mode == CPS::XTC_STATUS_BAR_BOTH) {
+    configSide = StatusBarSide::Top;
+  } else {
     return;
   }
 
-  const int statusBarHeight = UITheme::getInstance().getStatusBarHeight();
+  const int statusBarHeight = UITheme::getStatusBarHeight(configSide);
   if (statusBarHeight <= 0) {
     return;
   }
@@ -484,20 +494,16 @@ void XtcReaderActivity::renderStatusBarOverlay(const StatusBarOverlayPosition po
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                    &orientedMarginLeft);
 
+  // Blank the strip the bar is about to overlay so page pixels never show through it.
   int clearY;
-  int paddingBottom = 0;
+  int clearHeight;
   if (position == StatusBarOverlayPosition::Bottom) {
-    clearY = renderer.getScreenHeight() - orientedMarginBottom - statusBarHeight - 4;
-    if (clearY < 0) {
-      clearY = 0;
-    }
+    clearY = std::max(0, renderer.getScreenHeight() - orientedMarginBottom - statusBarHeight - 4);
+    clearHeight = renderer.getScreenHeight() - orientedMarginBottom - clearY;
   } else {
     clearY = orientedMarginTop;
-    paddingBottom = renderer.getScreenHeight() - statusBarHeight - orientedMarginBottom - orientedMarginTop - 4;
+    clearHeight = statusBarHeight + 4;
   }
-  const int clearHeight = position == StatusBarOverlayPosition::Bottom
-                              ? renderer.getScreenHeight() - orientedMarginBottom - clearY
-                              : statusBarHeight + 4;
   if (clearHeight > 0) {
     renderer.fillRect(0, clearY, renderer.getScreenWidth(), clearHeight, false);
   }
@@ -506,9 +512,11 @@ void XtcReaderActivity::renderStatusBarOverlay(const StatusBarOverlayPosition po
   const int displayPage = static_cast<int>(currentPage) + 1;
   const float progress = pageCount > 0 ? (static_cast<float>(displayPage) * 100.0f) / pageCount : 0.0f;
   const auto pageInfo = getStatusBarInfo();
-  GUI.drawStatusBar(renderer, progress, pageInfo.currentPage, pageInfo.pageCount, pageInfo.bookTitle,
-                    pageInfo.chapterTitle, /*chapterTimeLeftSeconds=*/0, /*bookTimeLeftSeconds=*/0,
-                    /*isPageBookmarked=*/false, paddingBottom);
+  const StatusBarSide drawSide =
+      position == StatusBarOverlayPosition::Bottom ? StatusBarSide::Bottom : StatusBarSide::Top;
+  GUI.drawStatusBarSide(renderer, drawSide, configSide, progress, pageInfo.currentPage, pageInfo.pageCount,
+                        pageInfo.bookTitle, pageInfo.chapterTitle, /*chapterTimeLeftSeconds=*/0,
+                        /*bookTimeLeftSeconds=*/0, /*isPageBookmarked=*/false);
 }
 
 void XtcReaderActivity::renderPage() {
@@ -678,11 +686,9 @@ void XtcReaderActivity::renderPage() {
 
   free(pageBuffer);
 
-  if (SETTINGS.xtcStatusBarMode == CrossPointSettings::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_TOP) {
-    renderStatusBarOverlay(StatusBarOverlayPosition::Top);
-  } else {
-    renderStatusBarOverlay(StatusBarOverlayPosition::Bottom);
-  }
+  // Each call paints only when the mode puts a bar on that edge.
+  renderStatusBarOverlay(StatusBarOverlayPosition::Top);
+  renderStatusBarOverlay(StatusBarOverlayPosition::Bottom);
 
   // Display with appropriate refresh
   if (pagesUntilFullRefresh <= 1) {

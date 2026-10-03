@@ -10,6 +10,7 @@
 
 #include "BitmapHelpers.h"
 #include "BufferedPrint.h"
+#include "CoverToneCurve.h"
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS - Same as JpegToBmpConverter for consistency
@@ -264,6 +265,19 @@ static int pngIdatReadCallback(uzlib_uncomp* uncomp) {
   uncomp->source = ctx->readBuf + 1;
   uncomp->source_limit = ctx->readBuf + bytesRead;
   return ctx->readBuf[0];
+}
+
+// Puts the decoder back at the first IDAT byte so the scanline loop can run a
+// second time: fresh inflate state and dictionary, zeroed previous row.
+static bool rewindToFirstIdat(PngDecodeContext& ctx, const size_t idatDataPos, const uint32_t idatLen) {
+  if (!ctx.file->seek(idatDataPos)) return false;
+  ctx.chunkBytesRemaining = idatLen;
+  ctx.idatFinished = false;
+  memset(ctx.previousRow, 0, ctx.rawRowBytes);
+  if (!ctx.reader.init(true)) return false;
+  ctx.reader.setReadCallback(pngIdatReadCallback);
+  ctx.reader.skipZlibHeader();
+  return true;
 }
 
 // Decode one scanline: decompress filter byte + raw bytes, then unfilter
@@ -556,6 +570,11 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
     return false;
   }
 
+  // Where the first IDAT's data starts: the luminance pre-pass below runs the
+  // scanline loop once, then the decoder rewinds here for the real pass.
+  const size_t firstIdatDataPos = pngFile.position();
+  const uint32_t firstIdatLen = ctx.chunkBytesRemaining;
+
   // Initialize streaming decompressor with 32KB ring buffer for back-reference history
   if (!ctx.reader.init(true)) {
     LOG_ERR("PNG", "Failed to init inflate reader");
@@ -566,6 +585,47 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
   ctx.reader.setReadCallback(pngIdatReadCallback);
   // PNG IDAT data is zlib-wrapped: consume the 2-byte zlib header (CMF + FLG)
   ctx.reader.skipZlibHeader();
+
+  // Grayscale row buffer: each scanline is batch-converted once, so the hot
+  // loops never pay the per-pixel getPixelGray() switch.
+  auto* grayRow = static_cast<uint8_t*>(malloc(width));
+  if (!grayRow) {
+    LOG_ERR("PNG", "Failed to allocate grayscale row buffer");
+    free(ctx.currentRow);
+    free(ctx.previousRow);
+    return false;
+  }
+
+  // Luminance pre-pass for the cover tone curve (see CoverToneCurve.h). PNG has
+  // no cheap reduced decode, so this is a full first inflate of the image —
+  // covers convert once and are cached, so the one-time cost is accepted. A
+  // failure here is not fatal: the cover converts with the identity curve.
+  LumaHistogram hist;
+  for (uint32_t y = 0; y < height; y++) {
+    if (!decodeScanline(ctx)) {
+      LOG_ERR("PNG", "Luminance pre-pass failed at scanline %u; converting without tone curve", y);
+      hist.reset();
+      break;
+    }
+    convertScanlineToGray(ctx, grayRow);
+    hist.addRow(grayRow, width);
+    uint8_t* temp = ctx.previousRow;
+    ctx.previousRow = ctx.currentRow;
+    ctx.currentRow = temp;
+  }
+  CoverToneCurve& toneCurve = sharedCoverToneCurve();
+  toneCurve.build(hist);
+  const uint8_t* toneLut = toneCurve.table();
+  LOG_DBG("PNG", "Cover luma: mean=%u gain=%u/256 black=%u%s", (unsigned)hist.mean(), (unsigned)toneCurve.gain256(),
+          (unsigned)toneCurve.blackPoint(), toneCurve.isIdentity() ? " (identity)" : "");
+
+  if (!rewindToFirstIdat(ctx, firstIdatDataPos, firstIdatLen)) {
+    LOG_ERR("PNG", "Failed to rewind IDAT stream for the real pass");
+    free(grayRow);
+    free(ctx.currentRow);
+    free(ctx.previousRow);
+    return false;
+  }
 
   // Calculate output dimensions (same logic as JpegToBmpConverter)
   int outWidth = width;
@@ -619,6 +679,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
   auto* rowBuffer = static_cast<uint8_t*>(malloc(bytesPerRow));
   if (!rowBuffer) {
     LOG_ERR("PNG", "Failed to allocate row buffer");
+    free(grayRow);
     free(ctx.currentRow);
     free(ctx.previousRow);
     return false;
@@ -651,22 +712,6 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
     nextOutY_srcStart = scaleY_fp;
   }
 
-  // Allocate grayscale row buffer - batch-convert each scanline to avoid
-  // per-pixel getPixelGray() switch overhead in the hot loops
-  auto* grayRow = static_cast<uint8_t*>(malloc(width));
-  if (!grayRow) {
-    LOG_ERR("PNG", "Failed to allocate grayscale row buffer");
-    delete[] rowAccum;
-    delete[] rowCount;
-    delete atkinsonDitherer;
-    delete fsDitherer;
-    delete atkinson1BitDitherer;
-    free(rowBuffer);
-    free(ctx.currentRow);
-    free(ctx.previousRow);
-    return false;
-  }
-
   bool success = true;
 
   // Process each scanline
@@ -687,12 +732,13 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
 
       if (USE_8BIT_OUTPUT && !oneBit) {
         for (int x = 0; x < outWidth; x++) {
-          rowBuffer[x] = adjustPixel(grayRow[x]);
+          rowBuffer[x] = adjustPixel(toneLut[grayRow[x]]);
         }
       } else if (oneBit) {
         for (int x = 0; x < outWidth; x++) {
+          const uint8_t gray = toneLut[grayRow[x]];
           const uint8_t bit =
-              atkinson1BitDitherer ? atkinson1BitDitherer->processPixel(grayRow[x], x) : quantize1bit(grayRow[x], x, y);
+              atkinson1BitDitherer ? atkinson1BitDitherer->processPixel(gray, x) : quantize1bit(gray, x, y);
           const int byteIndex = x / 8;
           const int bitOffset = 7 - (x % 8);
           rowBuffer[byteIndex] |= (bit << bitOffset);
@@ -700,7 +746,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
         if (atkinson1BitDitherer) atkinson1BitDitherer->nextRow();
       } else {
         for (int x = 0; x < outWidth; x++) {
-          const uint8_t gray = adjustPixel(grayRow[x]);
+          const uint8_t gray = adjustPixel(toneLut[grayRow[x]]);
           uint8_t twoBit;
           if (atkinsonDitherer) {
             twoBit = atkinsonDitherer->processPixel(gray, x);
@@ -751,12 +797,12 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
 
         if (USE_8BIT_OUTPUT && !oneBit) {
           for (int x = 0; x < outWidth; x++) {
-            const uint8_t gray = (rowCount[x] > 0) ? (rowAccum[x] / rowCount[x]) : 0;
+            const uint8_t gray = toneLut[static_cast<uint8_t>((rowCount[x] > 0) ? (rowAccum[x] / rowCount[x]) : 0)];
             rowBuffer[x] = adjustPixel(gray);
           }
         } else if (oneBit) {
           for (int x = 0; x < outWidth; x++) {
-            const uint8_t gray = (rowCount[x] > 0) ? (rowAccum[x] / rowCount[x]) : 0;
+            const uint8_t gray = toneLut[static_cast<uint8_t>((rowCount[x] > 0) ? (rowAccum[x] / rowCount[x]) : 0)];
             const uint8_t bit =
                 atkinson1BitDitherer ? atkinson1BitDitherer->processPixel(gray, x) : quantize1bit(gray, x, currentOutY);
             const int byteIndex = x / 8;
@@ -766,7 +812,8 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
           if (atkinson1BitDitherer) atkinson1BitDitherer->nextRow();
         } else {
           for (int x = 0; x < outWidth; x++) {
-            const uint8_t gray = adjustPixel((rowCount[x] > 0) ? (rowAccum[x] / rowCount[x]) : 0);
+            const uint8_t gray =
+                adjustPixel(toneLut[static_cast<uint8_t>((rowCount[x] > 0) ? (rowAccum[x] / rowCount[x]) : 0)]);
             uint8_t twoBit;
             if (atkinsonDitherer) {
               twoBit = atkinsonDitherer->processPixel(gray, x);

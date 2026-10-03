@@ -177,6 +177,9 @@ class BluetoothHIDManager {
     byteIndex = _lastPressSigIndex;
     value = _lastPressSigValue;
   }
+  // Direction the most recent press decoded to (the same decision the injector
+  // makes). The settings screen's test box shows back and forward separately.
+  bool lastPressWasBack() const { return _lastPressIsBack; }
   // True once a connected remote's learned idle report shows the stored back
   // signature is unmatchable — the mapping was captured against a bad baseline
   // and every press will page forward until the wizard is re-run.
@@ -335,6 +338,7 @@ class BluetoothHIDManager {
   // fields, same cross-task pattern as ConnectedDevice::lastRemoteInputMs.
   volatile uint8_t _lastPressSigIndex = 0xFF;
   volatile uint8_t _lastPressSigValue = 0;
+  volatile bool _lastPressIsBack = false;
   volatile bool _injectionSuppressed = false;
   bool _debugCaptureEnabled = false;
   bool _memoryPaused = false;

@@ -539,7 +539,7 @@ Go to **Settings → System → Bluetooth Page Turner**. First time through, it 
 
 When it connects, KatiePoint spends about a second watching the remote sit idle so it can learn what "no button pressed" looks like for that model. **Don't hold a button during those first couple of seconds after connecting.**
 
-The main Bluetooth screen has a **live press test** box: press a button on the remote and it tells you it saw the press. Use it to confirm the remote is really talking to the device.
+The main Bluetooth screen has a **live press test** box: press a button on the remote and it splits into a **Page Back** tile and a **Page Forward** tile, each with its own press count. The tile for the button you just pressed fills in, so you can see not only that the remote is talking to the device but which way each button is mapped.
 
 ### Mapping buttons (optional)
 
@@ -639,29 +639,36 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 #### Customise Status Bar
 
-Every status-bar element is positioned independently. Each one cycles **Hide → Left → Center → Right**, so you can put anything in any cluster:
+There are two status bars, one along the bottom of the page and one along the top, and each is customised on its own page: **Bottom Status Bar** and **Top Status Bar**. On each page every element has its own **Hide → Left → Center → Right** picker for that bar, so the two bars are laid out independently and the same element (the clock, say) can sit on both. A bar with nothing placed on it takes no space at all, so the top bar costs nothing until you use it. Each page previews its bar live: the bottom bar near the bottom edge, the top bar directly under the header.
 
-| Element | Default |
-|---------|---------|
-| **Battery** | Left |
-| **Bookmark** — a marker shown only on pages that carry a bookmark | Left |
-| **Chapter Title** | Center |
-| **Book Title** | Hide |
-| **Book Progress %** | Right |
-| **Chapter Page Count** | Right |
-| **Book Time Left** | Hide |
-| **Chapter Time Left** | Hide |
-| **Clock** | Hide |
-| **Bluetooth** — Off / On (no remote) / Connected | Hide |
+| Element | Bottom bar default | Top bar default |
+|---------|--------------------|-----------------|
+| **Battery** | Left | Hide |
+| **Bookmark** — a marker shown only on pages that carry a bookmark | Left | Hide |
+| **Chapter Title** | Center | Hide |
+| **Book Title** | Hide | Hide |
+| **Book Progress %** | Right | Hide |
+| **Chapter Page Count** | Right | Hide |
+| **Book Time Left** | Hide | Hide |
+| **Chapter Time Left** | Hide | Hide |
+| **Clock** | Hide | Hide |
+| **Bluetooth** — Off / On (no remote) / Connected | Hide | Hide |
 
-Plus:
+Each bar's page also has its own **Progress Bar** (Book / Chapter / Hide) and **Progress Bar Thickness** (Thin / Medium / Thick): the bottom bar's fill bar runs along the bottom edge, the top bar's along the top edge above its text.
 
-- **Hide status bar** — master toggle. The layout still reserves the bar's strip so your cached pages stay valid; the reader just skips drawing it and re-centres the page in the freed space. Also available as a bindable **Hide Status Bar** reader action.
-- **Progress Bar** — Book / Chapter / Hide, and its **thickness** (Thin / Medium / Thick).
-- **Top Margin** — 0–20 px of extra space between the body text and the bar, in 4 px steps.
+The **Customise Status Bar** screen itself holds the settings both bars share:
+
+- **Hide status bar** — master toggle for both bars. The layout still reserves their strips so your cached pages stay valid; the reader just skips drawing them and re-centres the page in the freed space. Also available as a bindable **Hide Status Bar** reader action.
+- **Percentage Format** — show book progress as `10%`, `10.1%` or `10.12%`.
+- **Top Margin** — 0–20 px of extra space between the body text and each bar, in 4 px steps.
+- **XTC Status Bar** — XTC pages are pre-rendered, so the bars are overlays: Hide / Bottom / Top / Both. *Top* paints the bottom bar's layout along the top edge (as it did before the top bar existed); *Both* paints each bar where it belongs.
 - **Clock** extras — UTC offset and 12h/24h format.
 
+Placing the first element on an empty bar (or clearing the last one) changes the text area, so the chapter is re-paginated the next time you open it (the cached layout is keyed on the viewport).
+
 All of these are also editable from the web settings page.
+
+**Clock Outside Reader** (*Settings → Display*) shows the time after the date on the header line of the Home, Library and Settings screens. It uses the same clock as the date and hides while the device has no trustworthy time.
 
 > [!NOTE]
 > If you're upgrading, your old show/hide status-bar settings are migrated to the new per-element positions automatically on first boot.

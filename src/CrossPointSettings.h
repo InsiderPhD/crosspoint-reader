@@ -63,21 +63,49 @@ class CrossPointSettings {
     TIME_LEFT_BOOK = 2,
     STATUS_BAR_TIME_LEFT_COUNT
   };
+  // XTC pages are pre-rendered full-screen, so the bars are overlays and the
+  // reader needs telling which to paint. BOTTOM/TOP predate the top bar: TOP
+  // paints the *bottom* bar's elements along the top edge (kept so an existing
+  // setting keeps looking the same). BOTH paints each bar where it belongs.
   enum XTC_STATUS_BAR_MODE {
     XTC_STATUS_BAR_HIDE = 0,
     XTC_STATUS_BAR_BOTTOM = 1,
     XTC_STATUS_BAR_TOP = 2,
+    XTC_STATUS_BAR_BOTH = 3,
     XTC_STATUS_BAR_MODE_COUNT
   };
-  // Per-element status-bar position. Each element cycles Hide -> Left -> Middle
-  // -> Right; this single picker replaces the old show/hide toggles and
-  // Book/Chapter enums so any element can sit in any cluster independently.
+  // Where an element sits on a status bar: hidden, or in the Left / Middle /
+  // Right cluster. Every element carries one of these per bar (statusBar*Pos
+  // for the bottom bar, statusBarTop*Pos for the top bar), so the two bars are
+  // laid out independently and the same element may appear on both.
   enum STATUS_BAR_POS : uint8_t {
     SB_POS_HIDE = 0,
     SB_POS_LEFT = 1,
     SB_POS_MIDDLE = 2,
     SB_POS_RIGHT = 3,
     STATUS_BAR_POS_COUNT
+  };
+  // The positionable status-bar elements, for the statusBarPos() lookups.
+  enum STATUS_BAR_ELEMENT : uint8_t {
+    SB_ELEM_BATTERY = 0,
+    SB_ELEM_BOOK_TITLE,
+    SB_ELEM_CHAPTER_TITLE,
+    SB_ELEM_BOOK_PERCENT,
+    SB_ELEM_CHAPTER_PAGE,
+    SB_ELEM_BOOK_TIME_LEFT,
+    SB_ELEM_CHAPTER_TIME_LEFT,
+    SB_ELEM_CLOCK,
+    SB_ELEM_BOOKMARK,
+    SB_ELEM_BLUETOOTH,
+    STATUS_BAR_ELEMENT_COUNT
+  };
+  // Decimal places shown after a book-progress percentage: 10% / 10.1% / 10.12%.
+  // The value doubles as the printf precision.
+  enum STATUS_BAR_PERCENTAGE_FORMAT : uint8_t {
+    PERCENTAGE_WHOLE = 0,
+    PERCENTAGE_ONE_DECIMAL = 1,
+    PERCENTAGE_TWO_DECIMALS = 2,
+    STATUS_BAR_PERCENTAGE_FORMAT_COUNT
   };
 
   enum ORIENTATION {
@@ -412,13 +440,18 @@ class CrossPointSettings {
   uint8_t statusBarBookProgressPercentage = 1;
   uint8_t statusBarProgressBar = HIDE_PROGRESS;
   uint8_t statusBarProgressBarThickness = PROGRESS_BAR_NORMAL;
+  // The top bar's own fill bar, drawn along the top edge above its text lane.
+  uint8_t statusBarTopProgressBar = HIDE_PROGRESS;
+  uint8_t statusBarTopProgressBarThickness = PROGRESS_BAR_NORMAL;
+  // STATUS_BAR_PERCENTAGE_FORMAT, shared by both bars' Book Progress % element.
+  uint8_t statusBarPercentageFormat = PERCENTAGE_WHOLE;
   uint8_t statusBarTitle = CHAPTER_TITLE;
   uint8_t statusBarBattery = 1;
   uint8_t statusBarTimeLeft = TIME_LEFT_HIDE;
   uint8_t xtcStatusBarMode = XTC_STATUS_BAR_HIDE;
-  // Per-element cluster positions (STATUS_BAR_POS). Defaults reproduce the
-  // classic layout: battery + bookmark on the left, chapter title centred,
-  // chapter page count and book percentage on the right.
+  // Bottom bar: per-element cluster positions (STATUS_BAR_POS). Defaults
+  // reproduce the classic layout: battery + bookmark on the left, chapter title
+  // centred, chapter page count and book percentage on the right.
   uint8_t statusBarBatteryPos = SB_POS_LEFT;
   uint8_t statusBarBookTitlePos = SB_POS_HIDE;
   uint8_t statusBarChapterTitlePos = SB_POS_MIDDLE;
@@ -432,6 +465,18 @@ class CrossPointSettings {
   // Bluetooth remote state: reports Down (stack off) / Up (on, no remote linked)
   // / Connected. Hidden by default — opt-in for page-turner users.
   uint8_t statusBarBluetoothPos = SB_POS_HIDE;
+  // Top bar: the same elements, placed independently. Empty by default so the
+  // top strip is only reserved once something is put there.
+  uint8_t statusBarTopBatteryPos = SB_POS_HIDE;
+  uint8_t statusBarTopBookTitlePos = SB_POS_HIDE;
+  uint8_t statusBarTopChapterTitlePos = SB_POS_HIDE;
+  uint8_t statusBarTopBookPercentPos = SB_POS_HIDE;
+  uint8_t statusBarTopChapterPagePos = SB_POS_HIDE;
+  uint8_t statusBarTopBookTimeLeftPos = SB_POS_HIDE;
+  uint8_t statusBarTopChapterTimeLeftPos = SB_POS_HIDE;
+  uint8_t statusBarTopClockPos = SB_POS_HIDE;
+  uint8_t statusBarTopBookmarkPos = SB_POS_HIDE;
+  uint8_t statusBarTopBluetoothPos = SB_POS_HIDE;
   // Master hide toggled by READER_ACTION_HIDE_STATUS_BAR. Layout still reserves
   // the bar's strip so the section cache stays valid; readers skip drawing the
   // bar and the EPUB reader re-centres the page in the freed space at draw time.
@@ -446,6 +491,10 @@ class CrossPointSettings {
   uint8_t statusBarTopMargin = 0;
   // Clock display in status bar (X3 only, requires DS3231 RTC)
   uint8_t statusBarClock = 0;
+  // Show the time next to the date on the header top line of the non-reader
+  // screens (Home, Library, Settings...). Uses the same timestamp as the date,
+  // so it works on every board once the clock is valid and hides while stale.
+  uint8_t showClockOutsideReader = 0;
   // Clock UTC offset in quarter-hour steps, biased by 48 so it fits in uint8_t.
   // Value 48 = UTC+0, 0 = UTC-12:00, 104 = UTC+14:00.
   // Quarter-hour granularity supports oddball zones like Nepal (+5:45) and Chatham (+12:45).
@@ -761,6 +810,15 @@ class CrossPointSettings {
   // legacy status-bar show/hide toggles and Book/Chapter enums. Called when a
   // settings file predates the position fields (they are absent from the JSON).
   static void migrateStatusBarPositions(CrossPointSettings& settings);
+
+  // One element's STATUS_BAR_POS on one bar (STATUS_BAR_ELEMENT, topBar selects
+  // the statusBarTop*Pos field). The read clamps an out-of-range value to
+  // SB_POS_HIDE so a corrupt field never lands on a bar.
+  uint8_t statusBarPos(uint8_t element, bool topBar) const;
+  uint8_t& statusBarPosRef(uint8_t element, bool topBar);
+  // True when the element is placed on either bar (the readers use this to skip
+  // building a value nobody shows).
+  bool statusBarElementPlaced(uint8_t element) const;
 
  private:
   bool loadFromBinaryFile();

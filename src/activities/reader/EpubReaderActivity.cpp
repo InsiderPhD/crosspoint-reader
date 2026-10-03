@@ -936,7 +936,7 @@ void EpubReaderActivity::maybeRefreshForRemoteConnect() {
     return;
   }
   statusBarShowsRemote = true;  // one request per connect, even before the render lands
-  if (SETTINGS.statusBarHidden || SETTINGS.statusBarBluetoothPos == CrossPointSettings::SB_POS_HIDE || !section) {
+  if (SETTINGS.statusBarHidden || !SETTINGS.statusBarElementPlaced(CrossPointSettings::SB_ELEM_BLUETOOTH) || !section) {
     return;
   }
   LOG_DBG("BT", "Remote connected, redrawing page for the status bar icon");
@@ -1940,7 +1940,11 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
                                                 int& orientedMarginBottom, int& orientedMarginLeft) const {
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                    &orientedMarginLeft);
-  orientedMarginTop += SETTINGS.screenMargin;
+  // The top status bar takes the top edge the same way the bottom bar takes
+  // the bottom one. Its height is 0 until something is placed on it, so the
+  // viewport (and with it the section-cache key) is unchanged for everyone else.
+  const uint8_t topStatusBarHeight = UITheme::getTopStatusBarHeight();
+  orientedMarginTop += std::max(SETTINGS.screenMargin, topStatusBarHeight);
   orientedMarginLeft += SETTINGS.screenMargin;
   orientedMarginRight += SETTINGS.screenMargin;
 
@@ -1956,12 +1960,16 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
     orientedMarginBottom += std::max(SETTINGS.screenMargin, statusBarHeight);
   }
 
-  // Status bar hidden via READER_ACTION_HIDE_STATUS_BAR: pagination must not
+  // Status bars hidden via READER_ACTION_HIDE_STATUS_BAR: pagination must not
   // change (top+bottom sum — and therefore the viewport/section-cache key —
-  // stays identical), so move half the strip the bar would have used from the
-  // bottom margin to the top, re-centring the text block in the freed space.
-  if (SETTINGS.statusBarHidden && statusBarHeight > SETTINGS.screenMargin) {
-    const int shift = (statusBarHeight - SETTINGS.screenMargin) / 2;
+  // stays identical), so move half the difference between the strips the two
+  // bars would have used from the larger margin to the smaller, re-centring
+  // the text block in the freed space. With no top bar this is the classic
+  // "half the bottom strip moves up".
+  if (SETTINGS.statusBarHidden) {
+    const int bottomExtra = std::max(0, static_cast<int>(statusBarHeight) - SETTINGS.screenMargin);
+    const int topExtra = std::max(0, static_cast<int>(topStatusBarHeight) - SETTINGS.screenMargin);
+    const int shift = (bottomExtra - topExtra) / 2;
     orientedMarginTop += shift;
     orientedMarginBottom -= shift;
   }
@@ -3057,11 +3065,11 @@ void EpubReaderActivity::renderStatusBar() const {
   // Book and chapter titles are independent, positionable elements; only build the
   // ones that are actually placed (the chapter lookup touches the TOC).
   std::string bookTitle;
-  if (SETTINGS.statusBarBookTitlePos != CPS::SB_POS_HIDE) {
+  if (SETTINGS.statusBarElementPlaced(CPS::SB_ELEM_BOOK_TITLE)) {
     bookTitle = epub->getTitle();
   }
   std::string chapterTitle;
-  if (SETTINGS.statusBarChapterTitlePos != CPS::SB_POS_HIDE) {
+  if (SETTINGS.statusBarElementPlaced(CPS::SB_ELEM_CHAPTER_TITLE)) {
     chapterTitle = tr(STR_UNNAMED);
     const int tocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);
     if (tocIndex != -1) {
@@ -3075,13 +3083,13 @@ void EpubReaderActivity::renderStatusBar() const {
   uint32_t chapterTimeLeftSeconds = 0;
   uint32_t bookTimeLeftSeconds = 0;
   if (SETTINGS.readingSpeedSecondsPerPage > 0) {
-    if (SETTINGS.statusBarChapterTimeLeftPos != CPS::SB_POS_HIDE) {
+    if (SETTINGS.statusBarElementPlaced(CPS::SB_ELEM_CHAPTER_TIME_LEFT)) {
       const int pagesLeft = static_cast<int>(pageCount) - currentPage;
       if (pagesLeft > 0) {
         chapterTimeLeftSeconds = static_cast<uint32_t>(pagesLeft) * SETTINGS.readingSpeedSecondsPerPage;
       }
     }
-    if (SETTINGS.statusBarBookTimeLeftPos != CPS::SB_POS_HIDE) {
+    if (SETTINGS.statusBarElementPlaced(CPS::SB_ELEM_BOOK_TIME_LEFT)) {
       int pagesLeft = 0;
       if (!spinePageCountCache.empty() && cachedTotalBookPages > 0) {
         // Book: use actual per-chapter page counts from cache
@@ -3107,8 +3115,15 @@ void EpubReaderActivity::renderStatusBar() const {
 
   // When space is reserved for the hint bar, lift the status bar above it.
   const int statusPaddingBottom = hintsReserved ? UITheme::getInstance().getMetrics().buttonHintsHeight : 0;
+  const bool pageBookmarked = isCurrentPageBookmarked();
   GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, bookTitle, chapterTitle, chapterTimeLeftSeconds,
-                    bookTimeLeftSeconds, isCurrentPageBookmarked(), statusPaddingBottom, textYOffset, centerOverride);
+                    bookTimeLeftSeconds, pageBookmarked, statusPaddingBottom, textYOffset, centerOverride);
+  // The top bar shows whatever elements were placed on it; the layout already
+  // reserved its strip in computeOrientedMargins.
+  if (UITheme::getTopStatusBarHeight() > 0) {
+    GUI.drawStatusBarSide(renderer, StatusBarSide::Top, StatusBarSide::Top, bookProgress, currentPage, pageCount,
+                          bookTitle, chapterTitle, chapterTimeLeftSeconds, bookTimeLeftSeconds, pageBookmarked);
+  }
 
   renderStatusBarTail(hintsActive);
 }

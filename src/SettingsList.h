@@ -170,6 +170,9 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
                                    StrId::STR_CAT_DISPLAY),
                SettingInfo::Toggle(StrId::STR_READER_DARK_MODE, &CrossPointSettings::darkMode, "darkMode",
                                    StrId::STR_CAT_DISPLAY),
+               // Time next to the date on the header top line of the non-reader screens.
+               SettingInfo::Toggle(StrId::STR_CLOCK_OUTSIDE_READER, &CrossPointSettings::showClockOutsideReader,
+                                   "showClockOutsideReader", StrId::STR_CAT_DISPLAY),
            });
 }
 
@@ -447,57 +450,26 @@ inline void appendOpdsSettings(std::vector<SettingInfo>& v) {
 inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
   v.insert(v.end(),
            {
-               // Per-element cluster positions (Hide / Left / Center / Right). These replace
-               // the legacy show/hide toggles and Book/Chapter enums; every element can now
-               // sit in any cluster independently.
-               SettingInfo::Enum(StrId::STR_BATTERY, &CrossPointSettings::statusBarBatteryPos,
-                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
-                                 "statusBarBatteryPos", StrId::STR_CUSTOMISE_STATUS_BAR),
-               SettingInfo::Enum(StrId::STR_BOOK_TITLE, &CrossPointSettings::statusBarBookTitlePos,
-                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
-                                 "statusBarBookTitlePos", StrId::STR_CUSTOMISE_STATUS_BAR),
-               SettingInfo::Enum(StrId::STR_CHAPTER_TITLE, &CrossPointSettings::statusBarChapterTitlePos,
-                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
-                                 "statusBarChapterTitlePos", StrId::STR_CUSTOMISE_STATUS_BAR),
-               SettingInfo::Enum(StrId::STR_BOOK_PROGRESS_PERCENTAGE, &CrossPointSettings::statusBarBookPercentPos,
-                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
-                                 "statusBarBookPercentPos", StrId::STR_CUSTOMISE_STATUS_BAR),
-               SettingInfo::Enum(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPagePos,
-                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
-                                 "statusBarChapterPagePos", StrId::STR_CUSTOMISE_STATUS_BAR),
-               SettingInfo::Enum(StrId::STR_BOOK_TIME_LEFT, &CrossPointSettings::statusBarBookTimeLeftPos,
-                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
-                                 "statusBarBookTimeLeftPos", StrId::STR_CUSTOMISE_STATUS_BAR),
-               SettingInfo::Enum(StrId::STR_CHAPTER_TIME_LEFT, &CrossPointSettings::statusBarChapterTimeLeftPos,
-                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
-                                 "statusBarChapterTimeLeftPos", StrId::STR_CUSTOMISE_STATUS_BAR),
-               SettingInfo::Enum(StrId::STR_BOOKMARK, &CrossPointSettings::statusBarBookmarkPos,
-                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
-                                 "statusBarBookmarkPos", StrId::STR_CUSTOMISE_STATUS_BAR),
-               SettingInfo::Enum(StrId::STR_BLUETOOTH, &CrossPointSettings::statusBarBluetoothPos,
-                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
-                                 "statusBarBluetoothPos", StrId::STR_CUSTOMISE_STATUS_BAR),
+               // Settings both bars share.
                // Master hide, toggled from the reader via READER_ACTION_HIDE_STATUS_BAR;
                // listed here so it persists and is visible/reversible from the web UI.
                SettingInfo::Toggle(StrId::STR_HIDE_STATUS_BAR, &CrossPointSettings::statusBarHidden, "statusBarHidden",
                                    StrId::STR_CUSTOMISE_STATUS_BAR),
-               SettingInfo::Enum(StrId::STR_PROGRESS_BAR, &CrossPointSettings::statusBarProgressBar,
-                                 {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE}, "statusBarProgressBar",
-                                 StrId::STR_CUSTOMISE_STATUS_BAR),
-               SettingInfo::Enum(
-                   StrId::STR_PROGRESS_BAR_THICKNESS, &CrossPointSettings::statusBarProgressBarThickness,
-                   {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM, StrId::STR_PROGRESS_BAR_THICK},
-                   "statusBarProgressBarThickness", StrId::STR_CUSTOMISE_STATUS_BAR),
-               // Extra empty pixels reserved between the body text and the status bar.
+               SettingInfo::Enum(StrId::STR_PERCENTAGE_FORMAT, &CrossPointSettings::statusBarPercentageFormat,
+                                 {StrId::STR_PERCENTAGE_FORMAT_WHOLE, StrId::STR_PERCENTAGE_FORMAT_ONE_DECIMAL,
+                                  StrId::STR_PERCENTAGE_FORMAT_TWO_DECIMALS},
+                                 "statusBarPercentageFormat", StrId::STR_CUSTOMISE_STATUS_BAR),
+               // XTC pages are pre-rendered, so the bars are overlays: which edges get one.
+               SettingInfo::Enum(StrId::STR_XTC_STATUS_BAR, &CrossPointSettings::xtcStatusBarMode,
+                                 {StrId::STR_HIDE, StrId::STR_BOTTOM, StrId::STR_TOP, StrId::STR_BOTH},
+                                 "xtcStatusBarMode", StrId::STR_CUSTOMISE_STATUS_BAR),
+               // Extra empty pixels reserved between the body text and each bar.
                SettingInfo::Value(
                    StrId::STR_STATUS_BAR_TOP_MARGIN, &CrossPointSettings::statusBarTopMargin,
                    {0, CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX, CrossPointSettings::STATUS_BAR_TOP_MARGIN_STEP},
                    "statusBarTopMargin", StrId::STR_CUSTOMISE_STATUS_BAR),
                // Clock entries (web settings only; device UI uses ClockOffsetActivity for the offset).
                // Range 0..104 = quarter-hour steps from UTC-12:00 to UTC+14:00, biased by 48.
-               SettingInfo::Enum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClockPos,
-                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
-                                 "statusBarClockPos", StrId::STR_CUSTOMISE_STATUS_BAR),
                SettingInfo::Value(StrId::STR_CLOCK_UTC_OFFSET, &CrossPointSettings::clockUtcOffsetQ, {0, 104, 1},
                                   "clockUtcOffsetQ", StrId::STR_CUSTOMISE_STATUS_BAR),
                SettingInfo::Enum(StrId::STR_CLOCK_FORMAT, &CrossPointSettings::clockFormat,
@@ -507,6 +479,85 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                // on next WiFi connect, which is useful when crossing time zones.
                SettingInfo::Toggle(StrId::STR_CLOCK_SYNCED, &CrossPointSettings::clockHasBeenSynced,
                                    "clockHasBeenSynced", StrId::STR_CUSTOMISE_STATUS_BAR),
+               // Bottom bar: every element's Hide / Left / Center / Right cluster, then the
+               // bar's own fill bar. These replace the legacy show/hide toggles and
+               // Book/Chapter enums.
+               SettingInfo::Enum(StrId::STR_BATTERY, &CrossPointSettings::statusBarBatteryPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBatteryPos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOK_TITLE, &CrossPointSettings::statusBarBookTitlePos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBookTitlePos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CHAPTER_TITLE, &CrossPointSettings::statusBarChapterTitlePos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarChapterTitlePos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOK_PROGRESS_PERCENTAGE, &CrossPointSettings::statusBarBookPercentPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBookPercentPos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPagePos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarChapterPagePos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOK_TIME_LEFT, &CrossPointSettings::statusBarBookTimeLeftPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBookTimeLeftPos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CHAPTER_TIME_LEFT, &CrossPointSettings::statusBarChapterTimeLeftPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarChapterTimeLeftPos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOKMARK, &CrossPointSettings::statusBarBookmarkPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBookmarkPos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BLUETOOTH, &CrossPointSettings::statusBarBluetoothPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarBluetoothPos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClockPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarClockPos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_PROGRESS_BAR, &CrossPointSettings::statusBarProgressBar,
+                                 {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE}, "statusBarProgressBar",
+                                 StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(
+                   StrId::STR_PROGRESS_BAR_THICKNESS, &CrossPointSettings::statusBarProgressBarThickness,
+                   {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM, StrId::STR_PROGRESS_BAR_THICK},
+                   "statusBarProgressBarThickness", StrId::STR_BOTTOM_STATUS_BAR),
+               // Top bar: the same elements placed independently, with its own fill bar
+               // along the top edge above the text lane.
+               SettingInfo::Enum(StrId::STR_BATTERY, &CrossPointSettings::statusBarTopBatteryPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarTopBatteryPos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOK_TITLE, &CrossPointSettings::statusBarTopBookTitlePos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarTopBookTitlePos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CHAPTER_TITLE, &CrossPointSettings::statusBarTopChapterTitlePos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarTopChapterTitlePos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOK_PROGRESS_PERCENTAGE, &CrossPointSettings::statusBarTopBookPercentPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarTopBookPercentPos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarTopChapterPagePos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarTopChapterPagePos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOK_TIME_LEFT, &CrossPointSettings::statusBarTopBookTimeLeftPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarTopBookTimeLeftPos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CHAPTER_TIME_LEFT, &CrossPointSettings::statusBarTopChapterTimeLeftPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarTopChapterTimeLeftPos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BOOKMARK, &CrossPointSettings::statusBarTopBookmarkPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarTopBookmarkPos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_BLUETOOTH, &CrossPointSettings::statusBarTopBluetoothPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarTopBluetoothPos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_CLOCK, &CrossPointSettings::statusBarTopClockPos,
+                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                 "statusBarTopClockPos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(StrId::STR_PROGRESS_BAR, &CrossPointSettings::statusBarTopProgressBar,
+                                 {StrId::STR_BOOK, StrId::STR_CHAPTER, StrId::STR_HIDE}, "statusBarTopProgressBar",
+                                 StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(
+                   StrId::STR_PROGRESS_BAR_THICKNESS, &CrossPointSettings::statusBarTopProgressBarThickness,
+                   {StrId::STR_PROGRESS_BAR_THIN, StrId::STR_PROGRESS_BAR_MEDIUM, StrId::STR_PROGRESS_BAR_THICK},
+                   "statusBarTopProgressBarThickness", StrId::STR_TOP_STATUS_BAR),
            });
 }
 
@@ -515,7 +566,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 inline const std::vector<SettingInfo>& getSettingsList() {
   static const std::vector<SettingInfo> list = [] {
     std::vector<SettingInfo> v;
-    v.reserve(68);
+    v.reserve(86);
     SettingsListDetail::appendDisplaySettings(v);
     SettingsListDetail::appendReaderTypographySettings(v);
     SettingsListDetail::appendReaderBehaviourSettings(v);

@@ -48,14 +48,25 @@ std::string HeaderDateUtils::getDisplayDateText() {
 }
 
 void HeaderDateUtils::drawTopLine(GfxRenderer& renderer) {
-  const std::string dateText = getDisplayDateText();
-  if (dateText.empty()) {
+  const auto info = getDisplayDateInfo();
+  std::string text = formatHeaderDateText(info.timestamp, info.usedFallback);
+  if (text.empty()) {
     return;
+  }
+  // Clock Outside Reader: the time follows the date, from the same timestamp,
+  // and only while that timestamp is live -- a stale fallback date is still
+  // right most of the day, a stale time never is.
+  if (SETTINGS.showClockOutsideReader && !info.usedFallback) {
+    const std::string timeText = TimeUtils::formatTime(info.timestamp);
+    if (!timeText.empty()) {
+      text += "  ";
+      text += timeText;
+    }
   }
   const auto& metrics = UITheme::getInstance().getMetrics();
   // Draw on the LEFT, vertically aligned with battery-percentage on the right.
   // The "+5" matches the y-offset the themes use for battery text.
-  renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, metrics.topPadding + 5, dateText.c_str());
+  renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, metrics.topPadding + 5, text.c_str());
 }
 
 void HeaderDateUtils::drawHeaderWithDate(GfxRenderer& renderer, const char* title, const char* subtitle) {

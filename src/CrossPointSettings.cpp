@@ -149,6 +149,47 @@ void CrossPointSettings::migrateStatusBarPositions(CrossPointSettings& settings)
   settings.statusBarBookmarkPos = SB_POS_LEFT;
 }
 
+uint8_t& CrossPointSettings::statusBarPosRef(const uint8_t element, const bool topBar) {
+  switch (element) {
+    case SB_ELEM_BATTERY:
+      return topBar ? statusBarTopBatteryPos : statusBarBatteryPos;
+    case SB_ELEM_BOOK_TITLE:
+      return topBar ? statusBarTopBookTitlePos : statusBarBookTitlePos;
+    case SB_ELEM_CHAPTER_TITLE:
+      return topBar ? statusBarTopChapterTitlePos : statusBarChapterTitlePos;
+    case SB_ELEM_BOOK_PERCENT:
+      return topBar ? statusBarTopBookPercentPos : statusBarBookPercentPos;
+    case SB_ELEM_CHAPTER_PAGE:
+      return topBar ? statusBarTopChapterPagePos : statusBarChapterPagePos;
+    case SB_ELEM_BOOK_TIME_LEFT:
+      return topBar ? statusBarTopBookTimeLeftPos : statusBarBookTimeLeftPos;
+    case SB_ELEM_CHAPTER_TIME_LEFT:
+      return topBar ? statusBarTopChapterTimeLeftPos : statusBarChapterTimeLeftPos;
+    case SB_ELEM_CLOCK:
+      return topBar ? statusBarTopClockPos : statusBarClockPos;
+    case SB_ELEM_BOOKMARK:
+      return topBar ? statusBarTopBookmarkPos : statusBarBookmarkPos;
+    case SB_ELEM_BLUETOOTH:
+      return topBar ? statusBarTopBluetoothPos : statusBarBluetoothPos;
+    default:
+      break;
+  }
+  // Unknown element: a throwaway slot that always reads as hidden, so a stale
+  // index can neither land on a bar nor scribble over a real field.
+  static uint8_t unknownElement = SB_POS_HIDE;
+  unknownElement = SB_POS_HIDE;
+  return unknownElement;
+}
+
+uint8_t CrossPointSettings::statusBarPos(const uint8_t element, const bool topBar) const {
+  const uint8_t pos = const_cast<CrossPointSettings*>(this)->statusBarPosRef(element, topBar);
+  return pos < STATUS_BAR_POS_COUNT ? pos : static_cast<uint8_t>(SB_POS_HIDE);
+}
+
+bool CrossPointSettings::statusBarElementPlaced(const uint8_t element) const {
+  return statusBarPos(element, false) != SB_POS_HIDE || statusBarPos(element, true) != SB_POS_HIDE;
+}
+
 void CrossPointSettings::validateFrontButtonMapping(CrossPointSettings& settings) {
   const uint8_t mapping[] = {settings.frontButtonBack, settings.frontButtonConfirm, settings.frontButtonLeft,
                              settings.frontButtonRight};

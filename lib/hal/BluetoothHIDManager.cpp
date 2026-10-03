@@ -1640,6 +1640,7 @@ void BluetoothHIDManager::onHIDNotify(NimBLERemoteCharacteristic* pChar, uint8_t
   // signature.
   g_instance->_lastPressSigIndex = device->lastPressSigIndex;
   g_instance->_lastPressSigValue = device->lastPressSigValue;
+  g_instance->_lastPressIsBack = device->lastPressIsBack;
   device->lastRemoteInputMs = nowMs;
 
   // The mapping wizard captures presses without letting them drive the menu it

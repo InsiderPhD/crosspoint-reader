@@ -4,6 +4,35 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ---
 
+## Unreleased
+
+### Two reader status bars and status bar options from CrossInk
+
+- **Top and bottom status bars, customised separately.** *Customise Status Bar* is now a hub with a **Bottom Status Bar** page and a **Top Status Bar** page; on each, every element (including the bookmark and Bluetooth icons CrossInk does not have) has its own Hide / Left / Center / Right picker for that bar, so the two layouts are independent and one element can appear on both. The top bar gets a second set of position fields (`statusBarTop*Pos`, all Hide by default, so an existing `settings.json` reads back unchanged and no migration runs); `STATUS_BAR_POS` stays at its four values and `STATUS_BAR_ELEMENT` + `CrossPointSettings::statusBarPos(element, topBar)` / `statusBarPosRef` / `statusBarElementPlaced` are the one lookup path the themes, readers and settings screen share. The hub keeps the shared settings (Percentage Format, Top Margin, XTC bar, clock). `UITheme::getStatusBarHeight(StatusBarSide)` / `getTopStatusBarHeight()` reserve the top strip only when something is placed there (0 by default, so no section cache is invalidated for anyone who does not use it); `BaseTheme::drawStatusBarSide(drawSide, configSide, ...)` is the one draw routine, with `drawStatusBar` a bottom-bar wrapper whose geometry is byte-identical to before (the auto page-turn banner's offset arithmetic depends on it). The EPUB reader adds the top strip to its top margin (the viewport change re-keys the section cache), the TXT reader adds it to `linesPerPage` (its page index already keys on that), and the hide-status-bar re-centring now moves half the *difference* between the two strips. Settings screen previews the top bar directly under its header and keeps the list clear of both previews.
+- **Top progress bar** with its own Book / Chapter / Hide and thickness, drawn along the top edge above the top bar's text lane; configured on the Top Status Bar page.
+- **Percentage Format** — `10%` / `10.1%` / `10.12%` for the Book Progress % element (one setting for both bars).
+- **XTC Status Bar: Both.** `XTC_STATUS_BAR_BOTH` paints each bar where it belongs; the legacy `Top` keeps painting the bottom bar's layout along the top edge, as CrossInk's `xtcStatusBarConfigPosition` does. The overlay no longer fakes the top position with a bottom padding.
+- **Clock Outside Reader** (*Settings → Display*, `showClockOutsideReader`): the time follows the date on the header top line, from the same timestamp, and only while that timestamp is live.
+- Not ported: CrossInk's Stable Page Numbers element (no reference-page infrastructure here) and tap-on-the-bar-to-hide (we have the bindable Hide Status Bar action and the X4 Pro hold zones).
+
+**Files changed**: `src/CrossPointSettings.{h,cpp}`, `src/JsonSettingsIO.cpp`, `src/components/UITheme.*`, `src/components/themes/BaseTheme.*`, `src/activities/reader/{EpubReaderActivity.cpp,TxtReaderActivity.cpp,XtcReaderActivity.cpp}`, `src/activities/settings/StatusBarSettingsActivity.*`, `src/SettingsList.h`, `src/util/HeaderDateUtils.cpp`, `lib/I18n/translations/english.yaml`, `USER_GUIDE.md`.
+
+### Bluetooth test box shows Back and Forward separately
+
+- The live press test on the Bluetooth Page Turner screen was one line with a total press count, which could not tell a mis-mapped remote (every press paging forward) from a working one. After the first press it now splits into a **Page Back** tile and a **Page Forward** tile, each with its own count; the tile for the direction just pressed is filled for 4s. `BluetoothHIDManager::lastPressWasBack()` publishes the decode result alongside the press signature (same volatile cross-task pattern, written before the input stamp so the loop task never pairs a fresh stamp with a stale direction). The Bluetooth-off and no-press-yet states keep the single hint box, since the waiting text doubles as the reconnect hint.
+
+**Files changed**: `lib/hal/BluetoothHIDManager.{h,cpp}`, `src/activities/settings/BluetoothSettingsActivity.{h,cpp}`, `lib/I18n/translations/english.yaml`, `USER_GUIDE.md`.
+
+### Adaptive lift for dark covers
+
+- **Why.** On the home and library screens a 2-bit cover is drawn with only its brightest level as white (`GfxRenderer::drawBitmap`, BW mode: `val < 3` is black), and the 2-bit Atkinson quantizer puts that level at source gray >= 140. A dark cover whose title sits at 80–130 therefore rendered as a black block.
+- **What.** `lib/GfxRenderer/CoverToneCurve.{h,cpp}` (new): a 32-bin `LumaHistogram` filled by a pre-pass over the source image, and a `CoverToneCurve` that bakes a per-cover contrast stretch into a 256-byte table — black point at the 2nd percentile, gain chosen so the 90th percentile lands at 230, capped at 3x, faded in by the cover's mean (full below 90, identity at or above 150). Integer-only; a light cover gets the identity table, a dark cover with an already-white title is left alone because its bright percentile is already at the top. Both converters apply the table per pixel ahead of the ditherer, so the 1-bit thumbs, the 2-bit thumbs and the full `cover.bmp` all see it.
+- **Pre-pass cost.** JPEG: a `JPEG_SCALE_EIGHTH` decode (DC-only IDCT) into the histogram, then the decoder is closed and re-opened for the real pass — no extra allocation, a fraction of the real pass. PNG has no reduced decode, so it is a full first inflate (`rewindToFirstIdat` re-seeks the first IDAT and re-inits the `InflateReader`); accepted because covers convert once and are cached. A pre-pass failure logs and falls back to the identity curve rather than failing the conversion.
+- **Cache.** Thumb and cover BMPs are keyed on existence only, so already-generated covers keep their old tone until their `thumb_*.bmp` / `cover*.bmp` are deleted from the book's `.crosspoint/epub_*/` directory.
+- Host test: `test/run_cover_tone_curve_test.sh`.
+
+**Files changed**: `lib/GfxRenderer/CoverToneCurve.{h,cpp}` (new), `lib/JpegToBmpConverter/JpegToBmpConverter.cpp`, `lib/PngToBmpConverter/PngToBmpConverter.cpp`, `test/cover_tone_curve/CoverToneCurveTest.cpp` (new), `test/run_cover_tone_curve_test.sh` (new).
+
 ## 1.12.0 — October 2026
 
 ### Plugins: native lists, README info screen, headless runner, 4096-bit TLS *(X4 Pro / X4C)*

@@ -1,19 +1,29 @@
+<p align="center"><img src="./docs/images/readme/logo-small.png" alt="KatiePoint Reader logo"></p>
+
 # KatiePoint Reader
 
 A heavily-customised personal fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) — open-source firmware for **Xteink** e-paper devices (unaffiliated with Xteink). Built using **PlatformIO**.
 
-| Device | MCU | Status |
-| ------ | --- | ------ |
-| **Xteink X4** | ESP32-C3 | Primary target |
-| **Xteink X3** | ESP32-C3 | Supported — same binary, board profile picked at boot |
-| **Xteink X4 Pro** | ESP32-S3 | **Experimental**, in bring-up — separate binary (`pio run -e x4pro`), touch + frontlight |
-| **Xteink X4C** | ESP32-S3 | **Experimental** — separate binary (`pio run -e x4c`), X4 buttons, tilt page turn, Bluetooth alongside WiFi |
+| ![Home screen with a Start Reading hero card, a shelf of recent books and the main menu](./docs/images/readme/home-screen.png) | ![Reader Controls action picker binding a gesture to Refresh, Dark, Footnotes, Auto-turn, Stats, Bionic and more](./docs/images/readme/reader-customisation.png) | ![BookFusion All Books list with synced and downloadable titles](./docs/images/readme/bookfusion-sync.png) |
+| :---: | :---: | :---: |
+| **New home screens** — hero card, bookshelf of recent reads, library grid and more themes to pick from | **A customisable reading experience** — bind any button, tap zone or swipe to the reader action you want | **Native BookFusion sync** — browse your cloud library, download books and sync progress on-device |
+| ![Bluetooth Page Turner settings with a connected remote and mapped Page Back / Page Forward buttons](./docs/images/readme/bluetooth.png) | ![Statistics month view with a reading-time calendar heat-map, month total, days read and best day](./docs/images/readme/reading-stats.png) | ![Sleep screen with a stats box showing the week streak, daily goal met and current book progress](./docs/images/readme/sleep-screen.png) |
+| **Bluetooth page turners** — pair a cheap BLE clicker and map its buttons to page back / forward | **Detailed reading stats** — streaks, goals, a month heat-map and more, with syncing to [Hardcover](https://hardcover.app) | **Sleep screen widgets** — up to three stats on the sleep screen: streak, daily goal, book progress and more |
 
-![](./docs/images/logo.png)
+This gives you an idea of what features are avaliable for which device, I frequently add features or port from crosspoint and crossink when I like a feature, but I also take requests. Feel free to make asks on GitHub issues, in the Bookfusion Discord and the Micro eReaders Community Discord, or on Twitter @insiderphd.
+
+| Device | Chip | Status |
+| ------ | --- | ------ |
+| **Xteink X4** | ESP32-C3 | BookFusion, Hardcover (but limited autosync), (restricted) Bluetooth, stats, remapable controls, customisable reader, lirary view, sortable lists, inline footnotes, clippings, SD flashing (no brick club here)  |
+| **Xteink X3** | ESP32-C3 | Same as X4, plus: tilt to turn page, accurate time, button hints are remapped |
+| **Xteink X4C** | ESP32-S3 | Same as X3 plus: sd-plugins, autosync for hardcover/bookfusion/KOReader, Bluetooth unrestricted |
+| **Xteink X4 Pro** | ESP32-S3 | Same as X4C, plus: touchscreen, keyboard for searches, light (with nightshift to customize settings based on time)  |
+
+You won't see any progress bars on this firmware, this is intentional, when we need memory for things like downloading books I intentially use the memory that the screen usually takes up to get a few more KB out of the device. 
 
 ## What's different in this fork
 
-Everything below has been added or significantly reworked on top of the upstream CrossPoint codebase. See [CHANGES.md](./CHANGES.md) for the full technical writeup.
+Everything below has been added or significantly reworked on top of the upstream CrossPoint codebase. See [CHANGES.md](./CHANGES.md) for the full technical writeup, honestly though I am pretty far behind with actually documenting everything...
 
 - **Library cover grid** — paginated 3×N grid of every book on the SD card, opened from **Library** in the home menu on every theme. Cover thumbnails cached to SD; same Book Options menu (Book Info, Mark as Read, Remove from Recents, Delete from Device — plus Reset Progress / Delete Book Cache / Regenerate Cover in Developer Mode) as the home recents tile.
 - **BookFusion sync** — OAuth device-code account linking, browse your cloud library by category (Currently Reading / Favorites / Plan to Read / Completed / All Books), download EPUBs directly to the SD card, and sync reading progress *and reading time* bidirectionally via long-press Confirm. Pulls rich metadata (series, bookshelf, tags, rating, lists, description) that feeds the Book Info panel, and adds *BookFusion first/last* and *Tag A–Z/Z–A* sort modes. A `& ` prefix marker shows synced books across all list views.

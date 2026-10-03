@@ -133,7 +133,11 @@ void TxtReaderActivity::initializeReader() {
   // Calculate viewport dimensions
   renderer.getOrientedViewableTRBL(&cachedOrientedMarginTop, &cachedOrientedMarginRight, &cachedOrientedMarginBottom,
                                    &cachedOrientedMarginLeft);
-  cachedOrientedMarginTop += cachedScreenMargin;
+  // Each status bar claims its edge; a bar with nothing placed on it is 0 high.
+  // linesPerPage follows the viewport, and the page-index cache keys on it, so
+  // moving an element between bars re-indexes the file automatically.
+  cachedOrientedMarginTop +=
+      std::max(cachedScreenMargin, static_cast<uint8_t>(UITheme::getInstance().getTopStatusBarHeight()));
   cachedOrientedMarginLeft += cachedScreenMargin;
   cachedOrientedMarginRight += cachedScreenMargin;
   cachedOrientedMarginBottom +=
@@ -439,9 +443,9 @@ void TxtReaderActivity::renderStatusBar() const {
   // placed (chapter takes precedence, matching the default centred layout).
   std::string bookTitle;
   std::string chapterTitle;
-  if (SETTINGS.statusBarChapterTitlePos != CPS::SB_POS_HIDE) {
+  if (SETTINGS.statusBarElementPlaced(CPS::SB_ELEM_CHAPTER_TITLE)) {
     chapterTitle = txt->getTitle();
-  } else if (SETTINGS.statusBarBookTitlePos != CPS::SB_POS_HIDE) {
+  } else if (SETTINGS.statusBarElementPlaced(CPS::SB_ELEM_BOOK_TITLE)) {
     bookTitle = txt->getTitle();
   }
 
@@ -452,15 +456,19 @@ void TxtReaderActivity::renderStatusBar() const {
     const int pagesLeft = totalPages - currentPage - 1;
     if (pagesLeft > 0) {
       const uint32_t seconds = static_cast<uint32_t>(pagesLeft) * SETTINGS.readingSpeedSecondsPerPage;
-      if (SETTINGS.statusBarChapterTimeLeftPos != CPS::SB_POS_HIDE) {
+      if (SETTINGS.statusBarElementPlaced(CPS::SB_ELEM_CHAPTER_TIME_LEFT)) {
         chapterTimeLeftSeconds = seconds;
-      } else if (SETTINGS.statusBarBookTimeLeftPos != CPS::SB_POS_HIDE) {
+      } else if (SETTINGS.statusBarElementPlaced(CPS::SB_ELEM_BOOK_TIME_LEFT)) {
         bookTimeLeftSeconds = seconds;
       }
     }
   }
   GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, bookTitle, chapterTitle, chapterTimeLeftSeconds,
                     bookTimeLeftSeconds);
+  if (UITheme::getTopStatusBarHeight() > 0) {
+    GUI.drawStatusBarSide(renderer, StatusBarSide::Top, StatusBarSide::Top, progress, currentPage + 1, totalPages,
+                          bookTitle, chapterTitle, chapterTimeLeftSeconds, bookTimeLeftSeconds);
+  }
 }
 
 void TxtReaderActivity::saveProgress() const {

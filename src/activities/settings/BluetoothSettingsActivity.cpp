@@ -646,10 +646,35 @@ bool BluetoothSettingsActivity::pollRemoteTest() {
     return false;
   }
   lastSeenRemoteInputMs = stamp;
-  lastRemotePressAtMs = millis();
-  remotePressCount++;
-  LOG_DBG("BT", "Remote test: press %u", static_cast<unsigned>(remotePressCount));
+  const bool back = btMgr->lastPressWasBack();
+  if (back) {
+    lastRemoteBackAtMs = millis();
+    remoteBackCount++;
+  } else {
+    lastRemoteFwdAtMs = millis();
+    remoteFwdCount++;
+  }
+  LOG_DBG("BT", "Remote test: %s press (back %u, fwd %u)", back ? "back" : "forward",
+          static_cast<unsigned>(remoteBackCount), static_cast<unsigned>(remoteFwdCount));
   return true;
+}
+
+void BluetoothSettingsActivity::renderRemoteTestTile(const int x, const int y, const int width, const int height,
+                                                     const char* label, const uint32_t count, const bool recent) const {
+  const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
+  // A recent press fills the tile; e-ink can't animate, so the count beside the
+  // label is what proves a second press of the same button registered.
+  if (recent) {
+    renderer.fillRoundedRect(x, y, width, height, 6, Color::Black);
+  } else {
+    renderer.drawRoundedRect(x, y, width, height, 1, 6, true);
+  }
+  char buf[48];
+  snprintf(buf, sizeof(buf), "%s (%u)", label, static_cast<unsigned>(count));
+  const std::string text = renderer.truncatedText(UI_10_FONT_ID, buf, width - 8);
+  const int textW = renderer.getTextWidth(UI_10_FONT_ID, text.c_str(), EpdFontFamily::BOLD);
+  renderer.drawText(UI_10_FONT_ID, x + (width - textW) / 2, y + (height - lineH) / 2, text.c_str(), !recent,
+                    EpdFontFamily::BOLD);
 }
 
 void BluetoothSettingsActivity::renderRemoteTestBox(const int boxTop, const int boxHeight) const {
@@ -659,32 +684,39 @@ void BluetoothSettingsActivity::renderRemoteTestBox(const int boxTop, const int 
   const int boxLeft = metrics.contentSidePadding;
   const int boxWidth = pageWidth - metrics.contentSidePadding * 2;
 
+  // A press counts as "just now" for a few seconds.
+  static constexpr unsigned long RECENT_PRESS_MS = 4000;
+  const unsigned long now = millis();
+  const bool backRecent = remoteBackCount > 0 && (now - lastRemoteBackAtMs) <= RECENT_PRESS_MS;
+  const bool fwdRecent = remoteFwdCount > 0 && (now - lastRemoteFwdAtMs) <= RECENT_PRESS_MS;
+
+  // Once a press has arrived the box splits into a Back tile and a Forward
+  // tile, so the user can see not just that the remote is talking but which
+  // way each button decoded — the question a one-button or mis-mapped remote
+  // leaves open when every press pages forward.
+  if (btMgr && btMgr->isEnabled() && (remoteBackCount > 0 || remoteFwdCount > 0)) {
+    const int gap = metrics.verticalSpacing;
+    const int tileWidth = (boxWidth - gap) / 2;
+    renderRemoteTestTile(boxLeft, boxTop, tileWidth, boxHeight, tr(STR_BT_TEST_BACK), remoteBackCount, backRecent);
+    renderRemoteTestTile(boxLeft + tileWidth + gap, boxTop, boxWidth - tileWidth - gap, boxHeight,
+                         tr(STR_BT_TEST_FORWARD), remoteFwdCount, fwdRecent);
+    return;
+  }
+
   renderer.drawRoundedRect(boxLeft, boxTop, boxWidth, boxHeight, 1, 6, true);
 
-  // A press counts as "just now" for a few seconds. E-ink can't animate, so the
-  // count is what proves a second press registered when the text doesn't change.
-  static constexpr unsigned long RECENT_PRESS_MS = 4000;
-  const bool recent = remotePressCount > 0 && (millis() - lastRemotePressAtMs) <= RECENT_PRESS_MS;
-
-  std::string message;
+  const char* message;
   if (!btMgr || !btMgr->isEnabled()) {
     message = tr(STR_BT_TEST_NEEDS_ON);
-  } else if (remotePressCount == 0) {
+  } else {
     // Also the reconnect hint: a sleeping remote only advertises once a button
     // is pressed, so this is exactly what the user should do either way.
     message = tr(STR_BT_TEST_WAITING);
-  } else {
-    // tr() is a macro over a StrId name, so pick the id first.
-    const StrId id = recent ? StrId::STR_BT_TEST_PRESSED : StrId::STR_BT_TEST_PRESSED_EARLIER;
-    char buf[64];
-    snprintf(buf, sizeof(buf), I18n::getInstance().get(id), static_cast<unsigned>(remotePressCount));
-    message = buf;
   }
 
   const int textY = boxTop + (boxHeight - lineH) / 2;
-  const std::string line =
-      renderer.truncatedText(UI_10_FONT_ID, message.c_str(), boxWidth - metrics.contentSidePadding * 2);
-  renderer.drawCenteredText(UI_10_FONT_ID, textY, line.c_str(), recent, EpdFontFamily::BOLD);
+  const std::string line = renderer.truncatedText(UI_10_FONT_ID, message, boxWidth - metrics.contentSidePadding * 2);
+  renderer.drawCenteredText(UI_10_FONT_ID, textY, line.c_str(), true, EpdFontFamily::BOLD);
 }
 
 void BluetoothSettingsActivity::render(RenderLock&&) {

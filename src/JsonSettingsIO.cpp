@@ -460,6 +460,39 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     if (needsResave) *needsResave = true;
   }
 
+  // Carry-over for a settings file written by a development build (never
+  // released) that packed the top bar into the bottom field as positions 4..6.
+  // The generic loop above has clamped those to Hide, so re-read each raw and
+  // move it onto the matching top-bar field.
+  {
+    struct PackedPos {
+      const char* bottomKey;
+      uint8_t element;
+    };
+    static constexpr PackedPos kPacked[] = {
+        {"statusBarBatteryPos", S::SB_ELEM_BATTERY},
+        {"statusBarBookTitlePos", S::SB_ELEM_BOOK_TITLE},
+        {"statusBarChapterTitlePos", S::SB_ELEM_CHAPTER_TITLE},
+        {"statusBarBookPercentPos", S::SB_ELEM_BOOK_PERCENT},
+        {"statusBarChapterPagePos", S::SB_ELEM_CHAPTER_PAGE},
+        {"statusBarBookTimeLeftPos", S::SB_ELEM_BOOK_TIME_LEFT},
+        {"statusBarChapterTimeLeftPos", S::SB_ELEM_CHAPTER_TIME_LEFT},
+        {"statusBarClockPos", S::SB_ELEM_CLOCK},
+        {"statusBarBookmarkPos", S::SB_ELEM_BOOKMARK},
+        {"statusBarBluetoothPos", S::SB_ELEM_BLUETOOTH},
+    };
+    constexpr uint8_t PACKED_TOP_FIRST = S::STATUS_BAR_POS_COUNT;    // 4 = Top Left
+    constexpr uint8_t PACKED_TOP_END = S::STATUS_BAR_POS_COUNT + 3;  // one past Top Right
+    for (const auto& p : kPacked) {
+      const uint8_t raw = doc[p.bottomKey] | static_cast<uint8_t>(0);
+      if (raw >= PACKED_TOP_FIRST && raw < PACKED_TOP_END) {
+        s.statusBarPosRef(p.element, true) = static_cast<uint8_t>(raw - PACKED_TOP_FIRST + S::SB_POS_LEFT);
+        s.statusBarPosRef(p.element, false) = S::SB_POS_HIDE;
+        if (needsResave) *needsResave = true;
+      }
+    }
+  }
+
   LOG_DBG("CPS", "Settings loaded from file");
 
   return true;

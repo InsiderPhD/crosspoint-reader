@@ -1072,6 +1072,17 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
                               const uint32_t chapterTimeLeftSeconds, const uint32_t bookTimeLeftSeconds,
                               const bool isPageBookmarked, const int paddingBottom, const int textYOffset,
                               const std::string& centerOverride) const {
+  drawStatusBarSide(renderer, StatusBarSide::Bottom, StatusBarSide::Bottom, bookProgress, currentPage, pageCount,
+                    bookTitle, chapterTitle, chapterTimeLeftSeconds, bookTimeLeftSeconds, isPageBookmarked,
+                    paddingBottom, textYOffset, centerOverride);
+}
+
+void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide drawSide, const StatusBarSide configSide,
+                                  const float bookProgress, const int currentPage, const int pageCount,
+                                  const std::string& bookTitle, const std::string& chapterTitle,
+                                  const uint32_t chapterTimeLeftSeconds, const uint32_t bookTimeLeftSeconds,
+                                  const bool isPageBookmarked, const int edgePadding, const int textYOffset,
+                                  const std::string& centerOverride) const {
   using CPS = CrossPointSettings;
   auto metrics = UITheme::getInstance().getMetrics();
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
@@ -1080,39 +1091,65 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
 
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
-  // getStatusBarHeight() now includes statusBarContentGap plus the user's extra top margin to
-  // reserve breathing room above the bar in the body layout; add both back here so the bar text
-  // stays anchored to the bottom and the reserved space stays empty.
+  const bool drawAtTop = drawSide == StatusBarSide::Top;
+
+  // Which elements and fill-bar settings this bar shows come from configSide;
+  // where it is painted comes from drawSide. The two differ only for the XTC
+  // reader's legacy "Top" mode (bottom bar's configuration along the top edge).
+  const bool configTop = configSide == StatusBarSide::Top;
+  // An element's cluster on this bar, SB_POS_HIDE when it is not placed here.
+  auto posOf = [configTop](const uint8_t element) { return SETTINGS.statusBarPos(element, configTop); };
+  const uint8_t progressMode = configTop ? SETTINGS.statusBarTopProgressBar : SETTINGS.statusBarProgressBar;
+  const uint8_t progressThickness =
+      configTop ? SETTINGS.statusBarTopProgressBarThickness : SETTINGS.statusBarProgressBarThickness;
+  const int progressStrip = (progressThickness + 1) * 2;
+  const int progressBarHeight = UITheme::getProgressBarHeight(configSide);  // 0 when hidden
+
+  // --- Vertical placement ---
+  // Bottom: unchanged from the single-bar layout. getStatusBarHeight() includes
+  // statusBarContentGap plus the user's extra margin to reserve breathing room
+  // above the bar in the body layout; add both back here so the bar text stays
+  // anchored to the bottom and the reserved space stays empty. (The auto
+  // page-turn banner's textYOffset relies on this exact arithmetic.)
+  // Top: the fill bar hugs the top edge and the text lane sits just under it,
+  // leaving the reserved gap between the lane and the body text.
   const uint8_t topMargin = SETTINGS.statusBarTopMargin > CPS::STATUS_BAR_TOP_MARGIN_MAX
                                 ? CPS::STATUS_BAR_TOP_MARGIN_MAX
                                 : SETTINGS.statusBarTopMargin;
-  const int textY = screenHeight - UITheme::getInstance().getStatusBarHeight() - orientedMarginBottom - paddingBottom -
-                    4 + metrics.statusBarContentGap + topMargin;
+  constexpr int TOP_TEXT_INSET = 2;
+  int textY;
+  int progressBarY;
+  if (drawAtTop) {
+    const int barTop = orientedMarginTop + edgePadding;
+    progressBarY = barTop;
+    textY = barTop + progressBarHeight + TOP_TEXT_INSET;
+  } else {
+    textY = screenHeight - UITheme::getStatusBarHeight(configSide) - orientedMarginBottom - edgePadding - 4 +
+            metrics.statusBarContentGap + topMargin;
+    progressBarY = screenHeight - orientedMarginBottom - progressStrip - edgePadding;
+  }
   const int contentY = textY - textYOffset;
 
   // --- Progress fill bar (full width, independent of the positioned text elements) ---
-  if (SETTINGS.statusBarProgressBar != CPS::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS) {
+  if (progressMode != CPS::STATUS_BAR_PROGRESS_BAR::HIDE_PROGRESS) {
     const int progressBarMaxWidth = screenWidth - orientedMarginLeft - orientedMarginRight;
-    const int progressBarY =
-        screenHeight - orientedMarginBottom - ((SETTINGS.statusBarProgressBarThickness + 1) * 2) - paddingBottom;
     size_t progress;
-    if (SETTINGS.statusBarProgressBar == CPS::STATUS_BAR_PROGRESS_BAR::BOOK_PROGRESS) {
+    if (progressMode == CPS::STATUS_BAR_PROGRESS_BAR::BOOK_PROGRESS) {
       progress = static_cast<size_t>(bookProgress);
     } else {
       progress = (pageCount > 0) ? (static_cast<float>(currentPage) / pageCount) * 100 : 0;
     }
     const int barWidth = progressBarMaxWidth * progress / 100;
-    renderer.fillRect(orientedMarginLeft, progressBarY, barWidth, ((SETTINGS.statusBarProgressBarThickness + 1) * 2),
-                      true);
+    renderer.fillRect(orientedMarginLeft, progressBarY, barWidth, progressStrip, true);
   }
 
   const bool showBatteryPercentage = SETTINGS.hideBatteryPercentage == CPS::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER;
   constexpr int elementGap = 10;
 
-  // --- Build the ordered element list, each with its Hide/Left/Middle/Right position ---
+  // --- Build the ordered element list, each with its Left/Middle/Right cluster ---
   // kind: 0 = text, 1 = battery icon, 2 = bookmark icon, 3 = bluetooth icon.
   struct SbItem {
-    uint8_t pos;
+    uint8_t pos;  // cluster: SB_POS_LEFT / SB_POS_MIDDLE / SB_POS_RIGHT
     uint8_t kind;
     std::string text;
     int width;
@@ -1121,66 +1158,73 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   std::vector<SbItem> items;
   items.reserve(11);
 
-  auto validPos = [](const uint8_t p) { return p != CPS::SB_POS_HIDE && p < CPS::STATUS_BAR_POS_COUNT; };
-  auto addText = [&](const uint8_t pos, std::string s) {
-    if (!validPos(pos) || s.empty()) return;
+  auto addText = [&](const uint8_t element, std::string s) {
+    const uint8_t pos = posOf(element);
+    if (pos == CPS::SB_POS_HIDE || s.empty()) return;
     const int w = renderer.getTextWidth(SMALL_FONT_ID, s.c_str());
     if (w <= 0) return;
     items.push_back(SbItem{pos, 0, std::move(s), w});
   };
 
   // Battery (icon + optional percentage)
-  if (validPos(SETTINGS.statusBarBatteryPos)) {
+  if (const uint8_t pos = posOf(CPS::SB_ELEM_BATTERY); pos != CPS::SB_POS_HIDE) {
     int w = metrics.batteryWidth;
     if (showBatteryPercentage) {
       char pctBuf[8];
       snprintf(pctBuf, sizeof(pctBuf), "%u%%", powerManager.getBatteryPercentage());
       w += batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, pctBuf);
     }
-    items.push_back(SbItem{SETTINGS.statusBarBatteryPos, 1, std::string(), w});
+    items.push_back(SbItem{pos, 1, std::string(), w});
   }
   // Bookmark indicator (only on a bookmarked page)
-  if (isPageBookmarked && validPos(SETTINGS.statusBarBookmarkPos)) {
-    items.push_back(SbItem{SETTINGS.statusBarBookmarkPos, 2, std::string(), bookmarkStatusIconWidth});
+  if (const uint8_t pos = posOf(CPS::SB_ELEM_BOOKMARK); isPageBookmarked && pos != CPS::SB_POS_HIDE) {
+    items.push_back(SbItem{pos, 2, std::string(), bookmarkStatusIconWidth});
   }
   // Titles — suppressed while an override banner (auto page-turn) owns the centre.
   if (centerOverride.empty()) {
-    addText(SETTINGS.statusBarBookTitlePos, bookTitle);
-    addText(SETTINGS.statusBarChapterTitlePos, chapterTitle);
+    addText(CPS::SB_ELEM_BOOK_TITLE, bookTitle);
+    addText(CPS::SB_ELEM_CHAPTER_TITLE, chapterTitle);
   }
   // Chapter page count (current / total) then book percentage — this order keeps
   // the classic right-cluster reading of "12/32  45%" when both are placed together.
   {
     char b[24];
     snprintf(b, sizeof(b), "%d/%d", currentPage, pageCount);
-    addText(SETTINGS.statusBarChapterPagePos, b);
+    addText(CPS::SB_ELEM_CHAPTER_PAGE, b);
   }
   {
+    // Decimal places follow the shared Percentage Format setting (10% / 10.1% / 10.12%).
+    const int precision = SETTINGS.statusBarPercentageFormat < CPS::STATUS_BAR_PERCENTAGE_FORMAT_COUNT
+                              ? SETTINGS.statusBarPercentageFormat
+                              : CPS::PERCENTAGE_WHOLE;
     char b[16];
-    snprintf(b, sizeof(b), "%.0f%%", bookProgress);
-    addText(SETTINGS.statusBarBookPercentPos, b);
+    snprintf(b, sizeof(b), "%.*f%%", precision, bookProgress);
+    addText(CPS::SB_ELEM_BOOK_PERCENT, b);
   }
   // Time-left (book and chapter are independent elements)
-  if (bookTimeLeftSeconds > 0) addText(SETTINGS.statusBarBookTimeLeftPos, formatTimeLeft(bookTimeLeftSeconds));
-  if (chapterTimeLeftSeconds > 0) addText(SETTINGS.statusBarChapterTimeLeftPos, formatTimeLeft(chapterTimeLeftSeconds));
+  if (bookTimeLeftSeconds > 0) addText(CPS::SB_ELEM_BOOK_TIME_LEFT, formatTimeLeft(bookTimeLeftSeconds));
+  if (chapterTimeLeftSeconds > 0) addText(CPS::SB_ELEM_CHAPTER_TIME_LEFT, formatTimeLeft(chapterTimeLeftSeconds));
   // Clock (X3 only — DS3231 RTC)
-  if (validPos(SETTINGS.statusBarClockPos) && halClock.isAvailable()) {
+  if (posOf(CPS::SB_ELEM_CLOCK) != CPS::SB_POS_HIDE && halClock.isAvailable()) {
     char timeBuf[9];
     if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
-      addText(SETTINGS.statusBarClockPos, timeBuf);
+      addText(CPS::SB_ELEM_CLOCK, timeBuf);
     }
   }
   // Bluetooth remote state, shown as an icon:
   //   off (stack down) -> bluetooth-off, on but no remote -> bluetooth, connected -> remote-control.
-  if (validPos(SETTINGS.statusBarBluetoothPos)) {
+  if (const uint8_t pos = posOf(CPS::SB_ELEM_BLUETOOTH); pos != CPS::SB_POS_HIDE) {
     const auto& btMgr = BluetoothHIDManager::getInstance();
     const uint8_t* btIcon = !btMgr.isEnabled()           ? BluetoothoffIcon
                             : btMgr.hasConnectedDevice() ? RemotecontrolIcon
                                                          : BluetoothIcon;
-    items.push_back(SbItem{SETTINGS.statusBarBluetoothPos, 3, std::string(), btStatusIconSize, btIcon});
+    items.push_back(SbItem{pos, 3, std::string(), btStatusIconSize, btIcon});
   }
   // Auto page-turn banner takes the middle cluster.
-  if (!centerOverride.empty()) addText(CPS::SB_POS_MIDDLE, centerOverride);
+  if (!centerOverride.empty()) {
+    const int w = renderer.getTextWidth(SMALL_FONT_ID, centerOverride.c_str());
+    if (w > 0) items.push_back(SbItem{CPS::SB_POS_MIDDLE, 0, centerOverride, w});
+  }
 
   // --- Cluster layout: left grows rightward, right grows leftward, middle centres ---
   auto zoneWidth = [&items](const uint8_t zone) {
@@ -1231,10 +1275,10 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
   middleX = std::min(middleX, rightStart - (rightW > 0 ? elementGap : 0) - middleW);
   if (middleX < leftEnd) middleX = leftEnd;
 
-  // Running cursor per cluster (indexed by SB_POS_* value; HIDE slot unused).
-  int cursor[CPS::STATUS_BAR_POS_COUNT] = {0, leftEdge, middleX, rightStart};
+  // Running cursor per cluster (indexed by the bottom-bar SB_POS_* value; HIDE slot unused).
+  int cursor[4] = {0, leftEdge, middleX, rightStart};
   for (const auto& it : items) {
-    if (it.pos == CPS::SB_POS_HIDE || it.pos >= CPS::STATUS_BAR_POS_COUNT) continue;
+    if (it.pos == CPS::SB_POS_HIDE || it.pos > CPS::SB_POS_RIGHT) continue;
     const int x = cursor[it.pos];
     cursor[it.pos] += it.width + elementGap;
     if (it.kind == 1) {

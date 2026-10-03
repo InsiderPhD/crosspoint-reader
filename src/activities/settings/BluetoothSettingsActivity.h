@@ -49,9 +49,13 @@ class BluetoothSettingsActivity : public Activity {
 
   // Live remote test box on the main menu. The manager timestamps every report
   // it receives; we watch that value for changes so each press is counted once.
+  // Back and forward are tracked separately so the box can show which way a
+  // press decoded, which is the thing a freshly mapped remote needs checking.
   unsigned long lastSeenRemoteInputMs = 0;
-  unsigned long lastRemotePressAtMs = 0;
-  uint32_t remotePressCount = 0;
+  unsigned long lastRemoteBackAtMs = 0;
+  unsigned long lastRemoteFwdAtMs = 0;
+  uint32_t remoteBackCount = 0;
+  uint32_t remoteFwdCount = 0;
 
   // Button-mapping wizard state. Each step locks a signature after two matching
   // presses; the back step's result is held here until the forward step confirms.
@@ -97,6 +101,9 @@ class BluetoothSettingsActivity : public Activity {
   // "Press a button on your remote" box, so a user can confirm the remote works
   // without leaving Settings and opening a book.
   void renderRemoteTestBox(int boxTop, int boxHeight) const;
+  // One half of the test box: a Back or Forward tile with its press count,
+  // filled while that direction's last press is still recent.
+  void renderRemoteTestTile(int x, int y, int width, int height, const char* label, uint32_t count, bool recent) const;
   // Polls the manager for a new remote report; returns true if one arrived.
   bool pollRemoteTest();
   // Header + subheader shared by every screen in the pairing flow, matching the
