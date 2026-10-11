@@ -309,6 +309,29 @@ static bool loadSleepFrameBuffer() {
   return true;
 }
 
+namespace {
+constexpr uint8_t TILT_SLEEP_MAX_ATTEMPTS = 3;
+constexpr uint16_t TILT_SLEEP_RETRY_DELAY_MS = 10;
+
+// Wherever the IMU's supply survives deep sleep, a sleep command that does not
+// land leaves its sensor engine running until the next wake.
+// HalTiltSensor::deepSleep() refuses within 15 ms of a wake() and can fail on an
+// I2C NAK; one unchecked call silently lost both cases.
+void putTiltSensorToSleepForDeepSleep() {
+  if (!halTiltSensor.isAvailable()) {
+    return;
+  }
+
+  for (uint8_t attempt = 0; attempt < TILT_SLEEP_MAX_ATTEMPTS; ++attempt) {
+    if (halTiltSensor.deepSleep()) {
+      return;
+    }
+    delay(TILT_SLEEP_RETRY_DELAY_MS);
+  }
+  LOG_ERR("MAIN", "Tilt sensor did not confirm sleep before deep sleep");
+}
+}  // namespace
+
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
@@ -359,7 +382,7 @@ void enterDeepSleep(bool fromTimeout) {
   HardcoverSync::pushBeforeSleep(renderer);
 
   halFrontlight.off();
-  halTiltSensor.deepSleep();
+  putTiltSensorToSleepForDeepSleep();
   display.deepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
 
