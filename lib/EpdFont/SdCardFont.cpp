@@ -177,6 +177,15 @@ bool SdCardFont::loadStyleKernLigatureData(PerStyle& s) {
       freeStyleKernLigatureData(s);
       return false;
     }
+    // Fonts are user-supplied files: a class ID past the matrix would index
+    // outside the kernRightClassCount-byte row buffer and seek past the matrix
+    // in buildMiniKernMatrix(). Treat such entries as unkerned (class 0).
+    for (uint16_t i = 0; i < s.header.kernLeftEntryCount; i++) {
+      if (s.kernLeftClasses[i].classId > s.header.kernLeftClassCount) s.kernLeftClasses[i].classId = 0;
+    }
+    for (uint16_t i = 0; i < s.header.kernRightEntryCount; i++) {
+      if (s.kernRightClasses[i].classId > s.header.kernRightClassCount) s.kernRightClasses[i].classId = 0;
+    }
   }
 
   if (hasLig) {
@@ -258,16 +267,16 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
   uint8_t rightRenumber[256] = {};
   uint8_t newToOldLeft[256] = {};
   uint8_t newToOldRight[256] = {};
-  uint8_t numLeft = 0, numRight = 0;
+  uint16_t numLeft = 0, numRight = 0;  // up to 255: a uint8_t loop counter would never end
   for (int i = 1; i < 256; i++) {
     if (usedLeft[i]) {
       numLeft++;
-      leftRenumber[i] = numLeft;
+      leftRenumber[i] = static_cast<uint8_t>(numLeft);
       newToOldLeft[numLeft] = static_cast<uint8_t>(i);
     }
     if (usedRight[i]) {
       numRight++;
-      rightRenumber[i] = numRight;
+      rightRenumber[i] = static_cast<uint8_t>(numRight);
       newToOldRight[numRight] = static_cast<uint8_t>(i);
     }
   }
@@ -335,7 +344,7 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
     return false;
   }
 
-  for (uint8_t newL = 1; newL <= numLeft; newL++) {
+  for (uint16_t newL = 1; newL <= numLeft; newL++) {
     const uint8_t oldL = newToOldLeft[newL];
     const uint32_t rowFileOff = s.kernMatrixFileOffset + (oldL - 1u) * s.header.kernRightClassCount;
     if (!file.seekSet(rowFileOff)) {
@@ -350,15 +359,15 @@ bool SdCardFont::buildMiniKernMatrix(PerStyle& s, const uint32_t* codepoints, ui
       return false;
     }
     int8_t* miniRow = s.miniKernMatrix + (newL - 1u) * numRight;
-    for (uint8_t newR = 1; newR <= numRight; newR++) {
+    for (uint16_t newR = 1; newR <= numRight; newR++) {
       miniRow[newR - 1] = rowBuf[newToOldRight[newR] - 1u];
     }
   }
 
   s.miniKernLeftEntryCount = lIdx;
   s.miniKernRightEntryCount = rIdx;
-  s.miniKernLeftClassCount = numLeft;
-  s.miniKernRightClassCount = numRight;
+  s.miniKernLeftClassCount = static_cast<uint8_t>(numLeft);
+  s.miniKernRightClassCount = static_cast<uint8_t>(numRight);
 
   LOG_DBG("SDCF", "Built mini kern: %u×%u matrix (%u bytes, full was %u×%u = %u bytes)", numLeft, numRight, matrixBytes,
           s.header.kernLeftClassCount, s.header.kernRightClassCount,
@@ -889,11 +898,10 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   // per-page mini kern matrix restricted to class pairs reachable from this
   // page's codepoints. Skip during metadata-only prewarm — layout only needs
   // advanceX and the mini kern would be thrown away before rendering.
-  bool kernLigOk = false;
+  bool tablesOk = false;
   if (!metadataOnly) {
-    if (loadStyleKernLigatureData(s)) {
-      kernLigOk = buildMiniKernMatrix(s, codepoints, cpCount);
-    }
+    tablesOk = loadStyleKernLigatureData(s);
+    if (tablesOk) buildMiniKernMatrix(s, codepoints, cpCount);
   }
 
   // Populate miniData and swap
@@ -906,7 +914,9 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   s.miniData.ascender = s.header.ascender;
   s.miniData.descender = s.header.descender;
   s.miniData.is2Bit = s.header.is2Bit;
-  if (kernLigOk) {
+  if (tablesOk) {
+    // A failed kern build leaves the mini kern empty (freeStyleMiniKern nulls the
+    // matrix, so getKerning() returns 0): the page keeps its ligatures.
     applyKernLigaturePointers(s, s.miniData);
   }
   s.miniData.glyphMissHandler = &SdCardFont::onGlyphMiss;
