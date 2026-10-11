@@ -24,6 +24,13 @@ class HalPowerManager {
   mutable int _batteryCachedPercent = 0;         // Last read battery percentage (0-100)
   mutable unsigned long _batteryLastPollMs = 0;  // Timestamp of last battery read in milliseconds
 
+  // X3 BQ27220 design-capacity load (stepBatteryGaugeCapacityLoad). Mutable for
+  // the same reason as the cache above: startDeepSleep() is const and has to
+  // drive a load that is still in flight to its sealed end.
+  mutable bool gaugeCapacityLoadStarted = false;  // the SDK began writing to the gauge
+  mutable bool gaugeCapacityLoadDone = false;     // terminal for this boot, whatever the outcome
+  mutable unsigned long gaugeCapacityLoadStartMs = 0;
+
   enum LockMode { None, NormalSpeed };
   LockMode currentLockMode = None;
   SemaphoreHandle_t modeMutex = nullptr;  // Protect access to currentLockMode
@@ -75,6 +82,20 @@ class HalPowerManager {
 
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;
+
+  // X3 only; a no-op returning false on every other board. The X3's BQ27220
+  // forgets its Design Capacity whenever it loses power and comes back at TI's
+  // 3000 mAh default against a 650 mAh cell, which is what makes the reported
+  // percentage wrong. This checks the gauge and, only if it reads that default
+  // (or a full-charge capacity learned against it), loads the board profile's
+  // capacity. A gauge that already holds a sane value is not written.
+  //
+  // One short non-blocking step per call (tens of ms at most, ~8 s end to end
+  // when a load is needed): call it from loop() until it returns false, with
+  // the render lock held so a step never interleaves with the render task's
+  // gauge reads. Every wait is bounded inside the SDK; a failed or interrupted
+  // load is terminal for this boot and retried on the next one.
+  bool stepBatteryGaugeCapacityLoad() const;
 
   // RAII helper class to manage power saving locks
   // Usage: create an instance of Lock in a scope to disable power saving, for example when running a task that needs

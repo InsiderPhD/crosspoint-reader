@@ -865,6 +865,19 @@ void loop() {
 
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
 
+  // X3: make sure the BQ27220 fuel gauge holds the cell's real capacity (it
+  // reverts to TI's 3000 mAh default when it loses power). One short step per
+  // pass until the HAL reports it is finished; every other board answers false
+  // on the first call. Under the render lock so a step never overlaps the
+  // themes' gauge reads, and never waited for.
+  static bool gaugeCapacityPending = true;
+  if (gaugeCapacityPending) {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock()) {
+      gaugeCapacityPending = powerManager.stepBatteryGaugeCapacityLoad();
+    }
+  }
+
   // Frontlight schedules: once a minute, switch the light at a window edge.
   // Cheap no-op on boards without a light.
   FrontlightScheduler::tick();

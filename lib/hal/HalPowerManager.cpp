@@ -42,6 +42,87 @@ static RTC_NOINIT_ATTR AbortedSleepRecord abortedSleepRecord;
 
 HalPowerManager powerManager;  // Singleton instance
 
+namespace {
+// Upper bound on finishing an in-flight gauge capacity load before deep sleep.
+// A full load is ~8 s from its first key; this only has to cover the remainder.
+// If it is not enough the gauge is left open and the next boot closes it.
+constexpr unsigned long GAUGE_CAPACITY_SLEEP_DRAIN_MS = 10000;
+
+#if defined(FREEINK_BATTERY_HAS_DESIGN_CAPACITY)
+const char* gaugeCapacityResultName(const BatteryMonitor::DesignCapacityResult result) {
+  switch (result) {
+    case BatteryMonitor::DesignCapacityResult::Pending:
+      return "still pending";
+    case BatteryMonitor::DesignCapacityResult::NotApplicable:
+      return "not applicable to this board";
+    case BatteryMonitor::DesignCapacityResult::GaugeUnreachable:
+      return "skipped, gauge did not answer";
+    case BatteryMonitor::DesignCapacityResult::NotNeeded:
+      return "already set, nothing written";
+    case BatteryMonitor::DesignCapacityResult::Loaded:
+      return "loaded";
+    case BatteryMonitor::DesignCapacityResult::Resealed:
+      return "interrupted load closed and sealed";
+    case BatteryMonitor::DesignCapacityResult::Incomplete:
+      return "FAILED, retrying next boot";
+  }
+  return "unknown";
+}
+#endif
+}  // namespace
+
+bool HalPowerManager::stepBatteryGaugeCapacityLoad() const {
+  if (gaugeCapacityLoadDone) {
+    return false;
+  }
+  if (!gpio.deviceIsX3()) {
+    gaugeCapacityLoadDone = true;
+    return false;
+  }
+#if defined(FREEINK_BATTERY_HAS_DESIGN_CAPACITY)
+  // The SDK owns the whole sequence (BatteryMonitor.cpp, bq27220LoadStep): it
+  // reads DesignCapacity() first and returns without a single write unless the
+  // gauge needs the load, and it brings the I2C bus up itself.
+  if (BatteryMonitor::loadDesignCapacity()) {
+    if (!gaugeCapacityLoadStarted) {
+      gaugeCapacityLoadStarted = true;
+      gaugeCapacityLoadStartMs = millis();
+      const auto report = BatteryMonitor::designCapacityReport();
+      LOG_INF("PWR", "X3 gauge: design capacity reads %u mAh (FCC %u), loading %u mAh",
+              static_cast<unsigned>(report.designCapacityBeforeMah),
+              static_cast<unsigned>(report.fullChargeCapacityBeforeMah), static_cast<unsigned>(report.targetMah));
+    }
+    return true;
+  }
+
+  gaugeCapacityLoadDone = true;
+  const auto report = BatteryMonitor::designCapacityReport();
+  const unsigned long tookMs = gaugeCapacityLoadStarted ? millis() - gaugeCapacityLoadStartMs : 0;
+  const bool failed = report.result == BatteryMonitor::DesignCapacityResult::GaugeUnreachable ||
+                      report.result == BatteryMonitor::DesignCapacityResult::Incomplete;
+  if (failed) {
+    LOG_ERR("PWR", "X3 gauge: design capacity %s (target %u mAh, read %u mAh, %lu ms)",
+            gaugeCapacityResultName(report.result), static_cast<unsigned>(report.targetMah),
+            static_cast<unsigned>(report.designCapacityBeforeMah), tookMs);
+  } else {
+    LOG_INF("PWR", "X3 gauge: design capacity %s (target %u mAh, read %u mAh, %lu ms)",
+            gaugeCapacityResultName(report.result), static_cast<unsigned>(report.targetMah),
+            static_cast<unsigned>(report.designCapacityBeforeMah), tookMs);
+  }
+  if (gaugeCapacityLoadStarted) {
+    // The gauge reinitialised: drop the cached percentage's freshness so the
+    // next battery read samples the corrected state of charge.
+    _batteryLastPollMs = 0;
+  }
+  return false;
+#else
+  // Built against an SDK revision without BatteryMonitor::loadDesignCapacity().
+  gaugeCapacityLoadDone = true;
+  LOG_INF("PWR", "X3 gauge: this SDK cannot load the design capacity, gauge left as is");
+  return false;
+#endif
+}
+
 void HalPowerManager::begin() {
   if (gpio.deviceIsX3()) {
     // X3 uses an I2C fuel gauge for battery monitoring.
@@ -118,6 +199,22 @@ void HalPowerManager::setPowerSaving(bool enabled) {
 }
 
 void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
+  // A gauge capacity load that has started must not be abandoned half way: the
+  // BQ27220 would sit unsealed in CONFIG UPDATE, not gauging, for the whole
+  // sleep. Step it to its sealed end first. Bounded twice over: the SDK caps
+  // each wait, and this loop gives up after GAUGE_CAPACITY_SLEEP_DRAIN_MS. Only
+  // ever runs when sleep is requested within seconds of a boot that needed the
+  // load; otherwise it costs nothing.
+  if (gaugeCapacityLoadStarted && !gaugeCapacityLoadDone) {
+    const unsigned long drainStartMs = millis();
+    while (stepBatteryGaugeCapacityLoad() && millis() - drainStartMs < GAUGE_CAPACITY_SLEEP_DRAIN_MS) {
+      delay(20);
+    }
+    if (!gaugeCapacityLoadDone) {
+      LOG_ERR("PWR", "X3 gauge: capacity load still open at sleep, next boot closes it");
+    }
+  }
+
   // Ensure that the power button has been released to avoid immediately turning back on if you're holding it
   while (gpio.isPressed(HalGPIO::BTN_POWER)) {
     delay(50);
