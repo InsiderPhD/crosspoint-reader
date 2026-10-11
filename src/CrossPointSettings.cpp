@@ -26,6 +26,9 @@ namespace {
 constexpr uint8_t SETTINGS_FILE_VERSION = 1;
 constexpr char SETTINGS_FILE_BIN[] = "/.crosspoint/settings.bin";
 constexpr char SETTINGS_FILE_JSON[] = "/.crosspoint/settings.json";
+// Atomic-save scratch and last-known-good copy; see saveToFile().
+constexpr char SETTINGS_FILE_JSON_TMP[] = "/.crosspoint/settings.json.tmp";
+constexpr char SETTINGS_FILE_JSON_BAK[] = "/.crosspoint/settings.json.bak";
 constexpr char SETTINGS_FILE_BAK[] = "/.crosspoint/settings.bin.bak";
 
 // Convert legacy front button layout into explicit logical->hardware mapping.
@@ -282,16 +285,77 @@ bool CrossPointSettings::isUnavailableReaderAction(const uint8_t action) {
 bool CrossPointSettings::saveToFile() const {
   if (frontlightBrightness > 0) frontlightLastBrightness = frontlightBrightness;
   Storage.mkdir("/.crosspoint");
-  return JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON);
+
+  // Never write settings.json in place: the old path removed the file and then
+  // streamed the new one, so a power cut or card error mid-write left a
+  // truncated document, which fails to parse and silently reset every setting
+  // to its default on the next boot. Write the whole document to a scratch
+  // file first; only a complete, closed file is ever published.
+  //
+  // FAT has no replace-by-rename (SdFat's rename refuses an existing target),
+  // so the previous file is parked as .bak, the scratch file renamed in, and
+  // the .bak deliberately left behind as the last known good copy for
+  // loadFromFile(). No extra heap: the document is serialised once, as before,
+  // and the three paths are flash constants.
+  if (!JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON_TMP)) {
+    LOG_ERR("CPS", "Failed to write %s; settings.json left untouched", SETTINGS_FILE_JSON_TMP);
+    Storage.remove(SETTINGS_FILE_JSON_TMP);
+    return false;
+  }
+
+  const bool hadPrevious = Storage.exists(SETTINGS_FILE_JSON);
+  if (hadPrevious) {
+    if (Storage.exists(SETTINGS_FILE_JSON_BAK) && !Storage.remove(SETTINGS_FILE_JSON_BAK)) {
+      LOG_ERR("CPS", "Could not drop the old %s", SETTINGS_FILE_JSON_BAK);
+      Storage.remove(SETTINGS_FILE_JSON_TMP);
+      return false;
+    }
+    if (!Storage.rename(SETTINGS_FILE_JSON, SETTINGS_FILE_JSON_BAK)) {
+      LOG_ERR("CPS", "Could not park settings.json as %s", SETTINGS_FILE_JSON_BAK);
+      Storage.remove(SETTINGS_FILE_JSON_TMP);
+      return false;
+    }
+  }
+  if (!Storage.rename(SETTINGS_FILE_JSON_TMP, SETTINGS_FILE_JSON)) {
+    LOG_ERR("CPS", "Could not publish %s", SETTINGS_FILE_JSON_TMP);
+    if (hadPrevious && !Storage.rename(SETTINGS_FILE_JSON_BAK, SETTINGS_FILE_JSON)) {
+      // loadFromFile() promotes the .bak when settings.json is missing.
+      LOG_ERR("CPS", "Previous settings remain at %s", SETTINGS_FILE_JSON_BAK);
+    }
+    Storage.remove(SETTINGS_FILE_JSON_TMP);
+    return false;
+  }
+  return true;
 }
 
 bool CrossPointSettings::loadFromFile() {
+  // Finish (or undo) a save that was interrupted between its two renames:
+  // settings.json is gone, and either the complete scratch file or the parked
+  // previous file is still there. The scratch file is the newer of the two.
+  if (!Storage.exists(SETTINGS_FILE_JSON)) {
+    if (Storage.exists(SETTINGS_FILE_JSON_TMP) && Storage.rename(SETTINGS_FILE_JSON_TMP, SETTINGS_FILE_JSON)) {
+      LOG_INF("CPS", "Recovered settings.json from an interrupted save");
+    } else if (Storage.exists(SETTINGS_FILE_JSON_BAK) && Storage.rename(SETTINGS_FILE_JSON_BAK, SETTINGS_FILE_JSON)) {
+      LOG_INF("CPS", "Restored settings.json from %s", SETTINGS_FILE_JSON_BAK);
+    }
+  }
+
   // Try JSON first
   if (Storage.exists(SETTINGS_FILE_JSON)) {
     String json = Storage.readFile(SETTINGS_FILE_JSON);
+    bool resave = false;
+    bool result = !json.isEmpty() && JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
+    if (!result && Storage.exists(SETTINGS_FILE_JSON_BAK)) {
+      // settings.json is empty or does not parse (loadSettings() fails only on
+      // a JSON parse error, before it has touched any field). Fall back to the
+      // copy the last successful save left behind rather than to defaults, and
+      // rewrite settings.json from it.
+      LOG_ERR("CPS", "settings.json is unreadable; loading %s", SETTINGS_FILE_JSON_BAK);
+      json = Storage.readFile(SETTINGS_FILE_JSON_BAK);
+      result = !json.isEmpty() && JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
+      if (result) resave = true;
+    }
     if (!json.isEmpty()) {
-      bool resave = false;
-      bool result = JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
       if (result) {
         // Only write back when something actually changed. This used to set
         // resave unconditionally, which re-serialised the whole settings
