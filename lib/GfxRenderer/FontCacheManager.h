@@ -4,7 +4,7 @@
 
 #include <cstdint>
 #include <map>
-#include <string>
+#include <string>  // not used here; kept so includers relying on it transitively still build
 
 class FontDecompressor;
 class SdCardFont;
@@ -65,13 +65,40 @@ class FontCacheManager {
   enum class ScanMode : uint8_t { None, Scanning };
   ScanMode scanMode_ = ScanMode::None;
 
-  // Per-font scan accumulator. A page may mix fonts (e.g. a <pre> code block in the
-  // monospace font alongside body text in the reader font); each must be prewarmed
-  // independently, otherwise the un-prewarmed font's glyphs are loaded one-at-a-time
-  // through the on-demand overflow ring (slow SD I/O for SD-card fonts).
-  struct ScanEntry {
-    std::string text;
-    uint32_t styleCounts[4] = {};
-  };
-  std::map<int, ScanEntry> scanEntries_;
+  // Scan accumulator: every (font, resolved style, codepoint) seen during the
+  // scan pass, packed into one uint32_t and deduplicated on insert. A page may
+  // mix fonts (e.g. a <pre> block in the monospace font beside body text in the
+  // reader font, plus the status bar's UI font); each (font, style) group is
+  // prewarmed on its own with exactly the codepoints it draws, otherwise the
+  // un-prewarmed font's glyphs load one at a time through the on-demand
+  // overflow ring (slow SD I/O for SD-card fonts).
+  //
+  // Fixed storage, no heap: this replaced a per-render std::map<int, ScanEntry>
+  // whose std::string grew by reallocation to the page's full text every render.
+  // Cost is ~2.1KB of static DRAM (the manager is a global in main.cpp).
+  // Fonts past MAX_SCAN_FONTS and codepoints past MAX_SCAN_CODEPOINTS are not
+  // batched; they fall back to on-demand glyph loading during the draw pass.
+  static constexpr uint8_t MAX_SCAN_FONTS = 6;
+  static constexpr uint16_t MAX_SCAN_CODEPOINTS = 512;
+  static constexpr uint8_t SCAN_STYLE_SHIFT = 21;  // Unicode needs 21 bits
+  static constexpr uint8_t SCAN_FONT_SHIFT = SCAN_STYLE_SHIFT + 2;
+  static constexpr uint32_t SCAN_CODEPOINT_MASK = (1U << SCAN_STYLE_SHIFT) - 1;
+  static constexpr uint8_t SCAN_GROUP_COUNT = MAX_SCAN_FONTS * 4;
+
+  // Maps a requested style to the one render will actually draw (a missing
+  // italic resolves to regular, etc.) so two requested styles that share glyph
+  // data land in one group instead of being prewarmed twice.
+  uint8_t resolveScanStyle(int fontId, EpdFontFamily::Style style) const;
+  void resetScan();
+
+  // Font ids are FNV hashes cast to int and routinely negative, so occupancy is
+  // tracked by scanFontCount_, not by a sentinel id.
+  int scanFontIds_[MAX_SCAN_FONTS] = {};
+  // +1: endScanAndPrewarm() re-encodes each group to UTF-8 in place and the last
+  // group's NUL terminator may land one entry past its codepoints.
+  uint32_t scanCodepoints_[MAX_SCAN_CODEPOINTS + 1] = {};
+  uint16_t scanGroupCounts_[SCAN_GROUP_COUNT] = {};
+  uint16_t scanCodepointCount_ = 0;
+  uint8_t scanFontCount_ = 0;
+  bool scanOverflowWarned_ = false;
 };
