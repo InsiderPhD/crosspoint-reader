@@ -45,7 +45,16 @@ int zipReadCallback(uzlib_uncomp* uncomp) {
   if (ctx->fileRemaining == 0) return -1;
 
   const size_t toRead = ctx->fileRemaining < ctx->readBufSize ? ctx->fileRemaining : ctx->readBufSize;
-  const size_t bytesRead = ctx->file->read(ctx->readBuf, toRead);
+  const int result = ctx->file->read(ctx->readBuf, toRead);
+  // HalFile::read() returns a negative int on error. Treat it as end-of-stream
+  // rather than letting the negative-to-size_t conversion underflow fileRemaining
+  // and report a huge bytesRead, which would have the inflate library read past
+  // the end of readBuf.
+  if (result < 0) {
+    LOG_ERR("ZIP", "Failed to read compressed data: %d", result);
+    return -1;
+  }
+  const size_t bytesRead = static_cast<size_t>(result);
   ctx->fileRemaining -= bytesRead;
 
   if (bytesRead == 0) return -1;
@@ -197,7 +206,7 @@ long ZipFile::getDataOffset(const FileStatSlim& fileStat) {
   const uint64_t fileOffset = fileStat.localHeaderOffset;
 
   file.seek(fileOffset);
-  const size_t read = file.read(pLocalHeader, localHeaderSize);
+  const int read = file.read(pLocalHeader, localHeaderSize);
 
   if (read != localHeaderSize) {
     LOG_ERR("ZIP", "Something went wrong reading the local header");
@@ -239,7 +248,11 @@ bool ZipFile::loadZipDetails() {
   }
 
   file.seek(fileSize - scanRange);
-  file.read(buffer, scanRange);
+  if (file.read(buffer, scanRange) != scanRange) {
+    LOG_ERR("ZIP", "Failed to read EOCD scan window");
+    free(buffer);
+    return false;
+  }
 
   // Scan backwards for the signature
   int foundOffset = -1;
@@ -387,10 +400,10 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
 
   if (fileStat.method == ZIP_METHOD_STORED) {
     // no deflation, just read content
-    const size_t dataRead = file.read(data, inflatedDataSize);
+    const int dataRead = file.read(data, inflatedDataSize);
 
-    if (dataRead != inflatedDataSize) {
-      LOG_ERR("ZIP", "Failed to read data");
+    if (dataRead < 0 || static_cast<uint32_t>(dataRead) != inflatedDataSize) {
+      LOG_ERR("ZIP", "Failed to read data, expected %u got %d", inflatedDataSize, dataRead);
       free(data);
       return nullptr;
     }
@@ -405,10 +418,10 @@ uint8_t* ZipFile::readFileToMemory(const char* filename, size_t* size, const boo
       return nullptr;
     }
 
-    const size_t dataRead = file.read(deflatedData, deflatedDataSize);
+    const int dataRead = file.read(deflatedData, deflatedDataSize);
 
-    if (dataRead != deflatedDataSize) {
-      LOG_ERR("ZIP", "Failed to read data, expected %d got %d", deflatedDataSize, dataRead);
+    if (dataRead < 0 || static_cast<uint32_t>(dataRead) != deflatedDataSize) {
+      LOG_ERR("ZIP", "Failed to read data, expected %u got %d", deflatedDataSize, dataRead);
       free(deflatedData);
       free(data);
       return nullptr;
@@ -465,12 +478,15 @@ bool ZipFile::readFileToStream(const char* filename, Print& out, const size_t ch
 
     size_t remaining = inflatedDataSize;
     while (remaining > 0) {
-      const size_t dataRead = file.read(buffer, remaining < chunkSize ? remaining : chunkSize);
-      if (dataRead == 0) {
-        LOG_ERR("ZIP", "Could not read more bytes");
+      const int result = file.read(buffer, remaining < chunkSize ? remaining : chunkSize);
+      // A negative error result must not reach the size_t arithmetic below: it would
+      // underflow `remaining` and hand out.write() a buffer length far past `buffer`.
+      if (result <= 0) {
+        LOG_ERR("ZIP", "Could not read more bytes (%d)", result);
         free(buffer);
         return false;
       }
+      const size_t dataRead = static_cast<size_t>(result);
 
       if (out.write(buffer, dataRead) != dataRead) {
         LOG_ERR("ZIP", "Failed to write all output bytes to stream");
