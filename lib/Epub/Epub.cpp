@@ -210,18 +210,11 @@ bool Epub::parseTocNcxFile() const {
 
   LOG_DBG("EBP", "Parsing toc ncx file: %s", tocNcxItem.c_str());
 
-  const auto tmpNcxPath = getCachePath() + "/toc.ncx";
-  FsFile tempNcxFile;
-  if (!Storage.openFileForWrite("EBP", tmpNcxPath, tempNcxFile)) {
+  size_t ncxSize = 0;
+  if (!getItemSize(tocNcxItem, &ncxSize)) {
+    LOG_ERR("EBP", "Could not get size of toc ncx file");
     return false;
   }
-  readItemContentsToStream(tocNcxItem, tempNcxFile, 1024);
-  // Explicitly close() file before reopening for reading
-  tempNcxFile.close();
-  if (!Storage.openFileForRead("EBP", tmpNcxPath, tempNcxFile)) {
-    return false;
-  }
-  const auto ncxSize = tempNcxFile.size();
 
   TocNcxParser ncxParser(contentBasePath, ncxSize, bookMetadataCache.get());
 
@@ -230,28 +223,14 @@ bool Epub::parseTocNcxFile() const {
     return false;
   }
 
-  const auto ncxBuffer = static_cast<uint8_t*>(malloc(1024));
-  if (!ncxBuffer) {
-    LOG_ERR("EBP", "Could not allocate memory for toc ncx parser");
+  // Stream the inflated NCX straight into the parser (a Print) instead of round-tripping
+  // through a temp file on the SD card (inflate -> write -> reopen -> reread -> delete).
+  // Same shape as the content.opf parse above; the parser sees its end-of-document from
+  // the inflated size, which for a plain ZIP entry is exactly what the stream delivers.
+  if (!readItemContentsToStream(tocNcxItem, ncxParser, 1024)) {
+    LOG_ERR("EBP", "Could not read toc ncx file");
     return false;
   }
-
-  while (tempNcxFile.available()) {
-    const auto readSize = tempNcxFile.read(ncxBuffer, 1024);
-    if (readSize == 0) break;
-    const auto processedSize = ncxParser.write(ncxBuffer, readSize);
-
-    if (processedSize != readSize) {
-      LOG_ERR("EBP", "Could not process all toc ncx data");
-      free(ncxBuffer);
-      return false;
-    }
-  }
-
-  free(ncxBuffer);
-  // Explicitly close() file before calling Storage.remove()
-  tempNcxFile.close();
-  Storage.remove(tmpNcxPath.c_str());
 
   LOG_DBG("EBP", "Parsed TOC items");
   return true;
@@ -266,18 +245,11 @@ bool Epub::parseTocNavFile() const {
 
   LOG_DBG("EBP", "Parsing toc nav file: %s", tocNavItem.c_str());
 
-  const auto tmpNavPath = getCachePath() + "/toc.nav";
-  FsFile tempNavFile;
-  if (!Storage.openFileForWrite("EBP", tmpNavPath, tempNavFile)) {
+  size_t navSize = 0;
+  if (!getItemSize(tocNavItem, &navSize)) {
+    LOG_ERR("EBP", "Could not get size of toc nav file");
     return false;
   }
-  readItemContentsToStream(tocNavItem, tempNavFile, 1024);
-  // Explicitly close() file before reopening for reading
-  tempNavFile.close();
-  if (!Storage.openFileForRead("EBP", tmpNavPath, tempNavFile)) {
-    return false;
-  }
-  const auto navSize = tempNavFile.size();
 
   // Note: We can't use `contentBasePath` here as the nav file may be in a different folder to the content.opf
   // and the HTMLX nav file will have hrefs relative to itself
@@ -289,27 +261,11 @@ bool Epub::parseTocNavFile() const {
     return false;
   }
 
-  const auto navBuffer = static_cast<uint8_t*>(malloc(1024));
-  if (!navBuffer) {
-    LOG_ERR("EBP", "Could not allocate memory for toc nav parser");
+  // Stream the inflated nav document straight into the parser; see parseTocNcxFile().
+  if (!readItemContentsToStream(tocNavItem, navParser, 1024)) {
+    LOG_ERR("EBP", "Could not read toc nav file");
     return false;
   }
-
-  while (tempNavFile.available()) {
-    const auto readSize = tempNavFile.read(navBuffer, 1024);
-    const auto processedSize = navParser.write(navBuffer, readSize);
-
-    if (processedSize != readSize) {
-      LOG_ERR("EBP", "Could not process all toc nav data");
-      free(navBuffer);
-      return false;
-    }
-  }
-
-  free(navBuffer);
-  // Explicitly close() file before calling Storage.remove()
-  tempNavFile.close();
-  Storage.remove(tmpNavPath.c_str());
 
   LOG_DBG("EBP", "Parsed TOC nav items");
   return true;
