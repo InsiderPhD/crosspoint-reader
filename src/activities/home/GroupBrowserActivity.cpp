@@ -257,9 +257,13 @@ void GroupBrowserActivity::loadLibraryKeys() {
       snprintf(msg, sizeof(msg), "%s %d / %d", tr(STR_CACHING), static_cast<int>(i) + 1, total);
       renderer.clearScreen();
       GUI.drawPopup(renderer, msg);
-      if (SETTINGS.darkMode) renderer.invertScreen();
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-      if (SETTINGS.darkMode) renderer.invertScreen();
+      // drawPopup() has already pushed this frame; only dark mode, whose
+      // polarity differs from what drawPopup showed, refreshes again.
+      if (SETTINGS.darkMode) {
+        renderer.invertScreen();
+        renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+        renderer.invertScreen();
+      }
     }
     // Yield every iteration: a cache-miss triggers a full OPF/TOC parse (~0.5-2s), so
     // yielding only every N books could block the task past the watchdog timeout.
@@ -733,9 +737,14 @@ void GroupBrowserActivity::render(RenderLock&&) {
   // Deferred whole-library load behind a "Loading…" popup on first entry.
   if (initialLoadPending) {
     GUI.drawPopup(renderer, tr(STR_LOADING));
-    if (SETTINGS.darkMode) renderer.invertScreen();
-    renderer.displayBuffer();
-    if (SETTINGS.darkMode) renderer.invertScreen();
+    // drawPopup() has already pushed this frame. In light mode a second
+    // displayBuffer() would repaint the identical buffer, so only dark mode
+    // (where the polarity differs from what drawPopup showed) refreshes again.
+    if (SETTINGS.darkMode) {
+      renderer.invertScreen();
+      renderer.displayBuffer();
+      renderer.invertScreen();
+    }
     loadLibraryKeys();
     initialLoadPending = false;
   }

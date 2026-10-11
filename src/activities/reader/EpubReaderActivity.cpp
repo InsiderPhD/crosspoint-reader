@@ -1021,8 +1021,13 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
     flushProgress();
     if (SETTINGS.darkMode) renderer.invertScreen();
     GUI.drawPopup(renderer, turningOn ? tr(STR_BT_TURNING_ON) : tr(STR_BT_TURNING_OFF));
-    if (SETTINGS.darkMode) renderer.invertScreen();
-    renderer.displayBuffer();
+    // drawPopup() has already pushed this frame; repainting the identical
+    // buffer in light mode is a wasted refresh. Dark mode still refreshes: it
+    // re-inverts first, so that frame differs from the one drawPopup showed.
+    if (SETTINGS.darkMode) {
+      renderer.invertScreen();
+      renderer.displayBuffer();
+    }
   }
   if (turningOn) {
     // The BLE stack wants ~56KB and the page must still be renderable
@@ -1063,8 +1068,11 @@ void EpubReaderActivity::toggleBluetoothFromReader() {
       RenderLock lock(*this);
       if (SETTINGS.darkMode) renderer.invertScreen();
       GUI.drawPopup(renderer, restartWouldHelp ? tr(STR_BT_RESTART_FOR_MEMORY) : tr(STR_BT_ENABLE_FAILED));
-      if (SETTINGS.darkMode) renderer.invertScreen();
-      renderer.displayBuffer();
+      // As above: drawPopup() already displayed; only dark mode's re-inverted frame differs.
+      if (SETTINGS.darkMode) {
+        renderer.invertScreen();
+        renderer.displayBuffer();
+      }
       vTaskDelay(2500 / portTICK_PERIOD_MS);
     }
     // The Epub comes back whether or not enable() succeeded — the reader
@@ -2057,8 +2065,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     dictionaryPopupOverlayOnly = false;
     if (showDictionaryMessage) {
       // I18N.get, not tr(): the message is chosen at runtime.
+      // drawPopup() pushes the frame itself; nothing touches the buffer after
+      // it, so a displayBuffer() here only repainted the same pixels.
       GUI.drawPopup(renderer, I18N.get(dictionaryMessage));
-      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     }
     return;
   }

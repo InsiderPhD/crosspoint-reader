@@ -207,8 +207,8 @@ void BluetoothSettingsActivity::activateMainMenuItem() {
     // Toggle Bluetooth — stack start/stop blocks for up to a second or two.
     {
       RenderLock lock(*this);
+      // drawPopup() displays the frame itself; no second refresh of the same buffer.
       GUI.drawPopup(renderer, btMgr->isEnabled() ? tr(STR_BT_TURNING_OFF) : tr(STR_BT_TURNING_ON));
-      renderer.displayBuffer();
     }
     if (btMgr->isEnabled()) {
       LOG_INF("BT", "Disabling Bluetooth...");
@@ -265,8 +265,8 @@ void BluetoothSettingsActivity::activateMainMenuItem() {
       if (!btMgr->isEnabled()) {
         {
           RenderLock lock(*this);
+          // drawPopup() displays the frame itself; no second refresh of the same buffer.
           GUI.drawPopup(renderer, tr(STR_BT_TURNING_ON));
-          renderer.displayBuffer();
         }
         // Arm auto-restore, same as the toggle row: the stack should return by
         // itself after memory-critical operations tear it down.

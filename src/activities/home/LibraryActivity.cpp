@@ -312,9 +312,14 @@ void LibraryActivity::render(RenderLock&&) {
   // populated page paints in the same render call.
   if (initialLoadPending) {
     GUI.drawPopup(renderer, tr(STR_LOADING));
-    if (SETTINGS.darkMode) renderer.invertScreen();
-    renderer.displayBuffer();
-    if (SETTINGS.darkMode) renderer.invertScreen();
+    // drawPopup() has already pushed this frame. In light mode a second
+    // displayBuffer() would repaint the identical buffer, so only dark mode
+    // (where the polarity differs from what drawPopup showed) refreshes again.
+    if (SETTINGS.darkMode) {
+      renderer.invertScreen();
+      renderer.displayBuffer();
+      renderer.invertScreen();
+    }
 
     // Preempt the background boot-time NTP sync (if still running) so its WiFi
     // stack heap is freed before the metadata recache's heavy allocations —
@@ -335,9 +340,14 @@ void LibraryActivity::render(RenderLock&&) {
   // running the rebuild so the user sees feedback rather than a frozen modal.
   if (pendingSortRebuild) {
     GUI.drawPopup(renderer, tr(STR_SORTING));
-    if (SETTINGS.darkMode) renderer.invertScreen();
-    renderer.displayBuffer();
-    if (SETTINGS.darkMode) renderer.invertScreen();
+    // drawPopup() has already pushed this frame. In light mode a second
+    // displayBuffer() would repaint the identical buffer, so only dark mode
+    // (where the polarity differs from what drawPopup showed) refreshes again.
+    if (SETTINGS.darkMode) {
+      renderer.invertScreen();
+      renderer.displayBuffer();
+      renderer.invertScreen();
+    }
 
     {
       const uint32_t t0 = millis();
