@@ -1,4 +1,5 @@
-#include <BoardConfig.h>  // hasHomeKey(): board-profile capability, not a runtime probe
+#include <BatteryMonitor.h>  // X3 USB/charging inference: gauge Current() via the SDK
+#include <BoardConfig.h>     // hasHomeKey(): board-profile capability, not a runtime probe
 #include <HalGPIO.h>
 #include <Logging.h>
 #include <Preferences.h>
@@ -18,9 +19,10 @@ HalGPIO gpio;
 namespace {
 constexpr unsigned long VIRTUAL_BUTTON_REPRESS_DEBOUNCE_MS = 250;
 // USB presence is sampled at most this often from update(). A probe costs a
-// 1.5 ms busy-wait on the S3 boards and up to two BQ27220 I2C transactions on
-// the X3; paying that on every 10 ms loop tick bought nothing, since the only
-// consumers are the battery icon and its plug/unplug repaint.
+// 1.5 ms busy-wait on the S3 boards and up to two BQ27220 I2C reads (through the
+// SDK's BatteryMonitor) on the X3; paying that on every 10 ms loop tick bought
+// nothing, since the only consumers are the battery icon and its plug/unplug
+// repaint.
 constexpr unsigned long USB_POLL_INTERVAL_MS = 1000;
 }  // namespace
 
@@ -70,15 +72,6 @@ bool readI2CReg16LE(uint8_t addr, uint8_t reg, uint16_t* outValue) {
   const uint8_t lo = Wire.read();
   const uint8_t hi = Wire.read();
   *outValue = (static_cast<uint16_t>(hi) << 8) | lo;
-  return true;
-}
-
-bool readBQ27220CurrentMA(int16_t* outCurrent) {
-  uint16_t raw = 0;
-  if (!readI2CReg16LE(I2C_ADDR_BQ27220, BQ27220_CUR_REG, &raw)) {
-    return false;
-  }
-  *outCurrent = static_cast<int16_t>(raw);
   return true;
 }
 
@@ -532,16 +525,29 @@ bool HalGPIO::isUsbConnected() const {
   return REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG) != first;
 #else
   if (deviceIsX3()) {
-    // X3: infer USB/charging via BQ27220 Current() register (0x0C, signed mA).
-    // Positive current means charging.
+    // X3: GPIO20 is the I2C SDA line there, not a USB-detect input, so infer
+    // USB/charging from the BQ27220 Current() register (0x0C, signed mA):
+    // positive current means charging. The read goes through the SDK's
+    // BatteryMonitor rather than raw Wire, because the SDK brings the gauge's
+    // bus up before it reads; a raw read issued before anything had called
+    // Wire.begin() only produced I2C errors. Caveat, unchanged: a full battery
+    // on the cable draws no charge current and reads as "not connected".
+    static const BatteryMonitor battery;
+#if defined(FREEINK_BATTERY_HAS_CURRENT_READ)
     for (uint8_t attempt = 0; attempt < 2; ++attempt) {
       int16_t currentMa = 0;
-      if (X3GPIO::readBQ27220CurrentMA(&currentMa)) {
+      if (battery.readCurrentMilliamps(currentMa)) {
         return currentMa > 0;
       }
       delay(2);
     }
     return false;
+#else
+    // Older SDK: no raw current read. isCharging() is the same Current() sign
+    // on a board with a gauge and no charger IC; it just cannot retry, because
+    // it reports a failed read as "not charging".
+    return battery.isCharging();
+#endif
   }
   // U0RXD/GPIO20 reads HIGH when USB is connected
   return digitalRead(UART0_RXD) == HIGH;
