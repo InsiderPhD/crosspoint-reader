@@ -26,3 +26,6 @@ build
 
 # Release firmware images copied out of .pio for upload (e.g. x4c_firmware.bin)
 *_firmware.bin
+
+# Desktop simulator sandboxed "SD card" (pio run -e simulator); books live in fs_/books/
+/fs_/

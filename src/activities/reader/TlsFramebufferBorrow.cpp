@@ -3,9 +3,11 @@
 #include <DevicePolicy.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
+#ifndef SIMULATOR
 #include <multi_heap.h>
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfcrypt/memory.h>
+#endif
 
 #include <cstdint>
 #include <cstdlib>
@@ -91,11 +93,13 @@ TlsFramebufferBorrow::TlsFramebufferBorrow(GfxRenderer& renderer) {
   // first-ever TLS session lazily init them INSIDE a borrow would place them
   // in the arena — clobbered by the next paint and freed across the arena
   // boundary later. One-time; wolfSSL_Init is refcounted and never cleaned up.
+#ifndef SIMULATOR  // the host build has no wolfSSL; HTTPS goes through the simulator's curl shim
   static bool wolfSslInitDone = false;
   if (!wolfSslInitDone) {
     wolfSSL_Init();
     wolfSslInitDone = true;
   }
+#endif
 
 #if !CROSSPOINT_FB_SCRATCH_BORROW
   // PSRAM-equipped board (X4 Pro): wolfSSL's session and record buffers fit the
