@@ -16,6 +16,35 @@ constexpr size_t HIDDEN_ITEMS_COUNT = sizeof(HIDDEN_ITEMS) / sizeof(HIDDEN_ITEMS
 // ESP32 doesn't have real-time clock set by default, so we use a fixed epoch date
 // as a fallback. The date is not critical for WebDAV Class 1 operations.
 const char* FIXED_DATE = "Thu, 01 Jan 2024 00:00:00 GMT";
+
+// FAT cannot replace a file atomically. Park the previous file at a backup
+// path until the replacement is published, then drop the backup; never
+// remove-before-rename, which loses the original if the rename fails.
+// Refuse an occupied backup path: it may hold a file preserved by an earlier
+// failed rollback, or an unrelated user file.
+bool replaceFile(const String& source, const String& destination) {
+  const bool replacing = Storage.exists(destination.c_str());
+  const String backup = destination + ".davold";
+  if (Storage.exists(backup.c_str())) {
+    LOG_ERR("DAV", "Replacement blocked by existing backup: %s", backup.c_str());
+    return false;
+  }
+  if (replacing && !Storage.rename(destination.c_str(), backup.c_str())) {
+    LOG_ERR("DAV", "Could not preserve destination: %s", destination.c_str());
+    return false;
+  }
+  if (!Storage.rename(source.c_str(), destination.c_str())) {
+    LOG_ERR("DAV", "Could not publish replacement: %s", destination.c_str());
+    if (replacing && !Storage.rename(backup.c_str(), destination.c_str())) {
+      LOG_ERR("DAV", "Previous file preserved at: %s", backup.c_str());
+    }
+    return false;
+  }
+  if (replacing && !Storage.remove(backup.c_str())) {
+    LOG_ERR("DAV", "Replacement saved; previous file remains at: %s", backup.c_str());
+  }
+  return true;
+}
 }  // namespace
 
 // ── RequestHandler interface ─────────────────────────────────────────────────
@@ -94,17 +123,15 @@ void WebDAVHandler::raw(WebServer& server, const String& uri, HTTPRaw& raw) {
     }
 
   } else if (raw.status == RAW_END) {
-    if (_putFile) _putFile.close();
+    if (_putFile) {
+      // SdFat close() syncs the directory entry and FAT; a failed close means
+      // the temp file is not trustworthy, so do not publish it.
+      _putOk = _putFile.close() && _putOk;
+      if (!_putOk) LOG_ERR("DAV", "Failed to finish PUT: %s", _putPath.c_str());
+    }
     if (_putOk) {
       String tempPath = _putPath + ".davtmp";
-      if (_putExisted) Storage.remove(_putPath.c_str());
-      FsFile tmp = Storage.open(tempPath.c_str());
-      if (tmp) {
-        _putOk = tmp.rename(_putPath.c_str());
-        tmp.close();
-      } else {
-        _putOk = false;
-      }
+      _putOk = replaceFile(tempPath, _putPath);
       if (!_putOk) Storage.remove(tempPath.c_str());
     }
     LOG_DBG("DAV", "PUT END: %u bytes, ok=%d", raw.totalSize, _putOk);
@@ -537,21 +564,22 @@ void WebDAVHandler::handleMove(WebServer& s) {
     return;
   }
 
+  // Directory replacement needs recursive WebDAV semantics; never park an
+  // existing directory as a file backup that cannot be removed afterward.
   if (dstExists) {
-    Storage.remove(dstPath.c_str());
+    FsFile destination = Storage.open(dstPath.c_str());
+    const bool isFile = destination && !destination.isDirectory();
+    if (destination) destination.close();
+    if (!isFile) {
+      s.send(409, "text/plain", "Cannot replace destination directory");
+      return;
+    }
   }
 
-  FsFile file = Storage.open(srcPath.c_str());
-  if (!file) {
-    s.send(500, "text/plain", "Failed to open source");
-    return;
-  }
-
-  clearEpubCacheIfNeeded(srcPath);
-  bool success = file.rename(dstPath.c_str());
-  file.close();
+  const bool success = replaceFile(srcPath, dstPath);
 
   if (success) {
+    clearEpubCacheIfNeeded(srcPath);
     s.send(dstExists ? 204 : 201);
   } else {
     s.send(500, "text/plain", "Move failed");
