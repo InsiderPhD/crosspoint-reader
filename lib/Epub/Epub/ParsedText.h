@@ -30,6 +30,11 @@ class ParsedText {
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
   bool bionicReadingEnabled;
+  // True once a soft flush (layoutAndExtractLines with includeLastLine=false) has emitted
+  // this paragraph's opening line, so the next layout pass starts mid-paragraph: no
+  // first-line indent, no em-space. Cleared when the block is finalised, because the parser
+  // reuses an emptied ParsedText for the next paragraph. Ported from upstream d5693c321.
+  bool firstLineConsumed = false;
 
   struct LineScratch;
 
@@ -62,6 +67,9 @@ class ParsedText {
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
   bool isEmpty() const { return words.empty(); }
+  // True while the remaining words continue a paragraph whose opening lines were already
+  // extracted by a soft flush. The parser uses it to apply top spacing once per paragraph.
+  bool isContinuation() const { return firstLineConsumed; }
   // CONSUMES its source by default (laid-out words are moved out and erased). preserveSource
   // snapshots the word vectors on entry and restores them on return: layout also rewrites words
   // in place (em-space indent, fallback force-split), so skipping the erase alone is not enough.

@@ -229,6 +229,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
                                        const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
                                        const bool includeLastLine, const bool preserveSource) {
   if (words.empty()) {
+    if (includeLastLine && !preserveSource) firstLineConsumed = false;
     return;
   }
 
@@ -317,6 +318,15 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
     wordStyles.erase(wordStyles.begin(), wordStyles.begin() + consumed);
     wordContinues.erase(wordContinues.begin(), wordContinues.begin() + consumed);
   }
+
+  // A soft flush leaves the paragraph's tail behind: what is laid out next continues it.
+  // A finalising pass empties the block, and the parser may reuse this object for the next
+  // paragraph, so the flag must not outlive the paragraph it describes.
+  if (includeLastLine) {
+    firstLineConsumed = false;
+  } else if (lineCount > 0) {
+    firstLineConsumed = true;
+  }
 }
 
 std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int fontId) {
@@ -342,7 +352,7 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
   // it is structural (positions the bullet/marker), not decorative.
   const int firstLineIndent =
-      blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
+      !firstLineConsumed && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
               (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
           ? blockStyle.textIndent
           : 0;
@@ -452,7 +462,9 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 }
 
 void ParsedText::applyParagraphIndent() {
-  if (extraParagraphSpacing || words.empty()) {
+  // firstLineConsumed: these words continue a soft-flushed paragraph, whose real first
+  // word already took the em-space; indenting again would land mid-sentence.
+  if (extraParagraphSpacing || firstLineConsumed || words.empty()) {
     return;
   }
 
@@ -474,14 +486,14 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
   // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
   // it is structural (positions the bullet/marker), not decorative.
   const int firstLineIndent =
-      blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
+      !firstLineConsumed && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
               (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
           ? blockStyle.textIndent
           : 0;
 
   std::vector<size_t> lineBreakIndices;
   size_t currentIndex = 0;
-  bool isFirstLine = true;
+  bool isFirstLine = !firstLineConsumed;
 
   while (currentIndex < wordWidths.size()) {
     const size_t lineStart = currentIndex;
@@ -677,7 +689,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   // Positive text-indent (paragraph indent) is suppressed when extraParagraphSpacing is on.
   // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
   // it is structural (positions the bullet/marker), not decorative.
-  const bool isFirstLine = breakIndex == 0;
+  const bool isFirstLine = breakIndex == 0 && !firstLineConsumed;
   const int firstLineIndent =
       isFirstLine && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
               (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)

@@ -272,7 +272,9 @@ class ChapterHtmlSlimParser {
   void updateEffectiveInlineStyle();
   void startNewTextBlock(const BlockStyle& blockStyle);
   void flushPartWordBuffer();
-  void makePages();
+  // includeLastLine=false is a soft flush of an over-long paragraph: all but the last line
+  // are emitted and the block stays open, so no bottom spacing or footnote fallback runs.
+  void makePages(bool includeLastLine = true);
   void emitHorizontalRule(const BlockStyle& blockStyle);
   // Table grid
   bool heapAllowsTableRowLayout() const;

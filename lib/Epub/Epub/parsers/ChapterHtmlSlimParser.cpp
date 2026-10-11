@@ -1538,13 +1538,9 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
   // Spotted when reading Intermezzo, there are some really long text blocks in there.
   if (self->currentTextBlock->size() > 750) {
     LOG_DBG("EHP", "Text block too long, splitting into multiple pages");
-    const int horizontalInset = self->currentTextBlock->getBlockStyle().totalHorizontalInset();
-    const uint16_t effectiveWidth = (horizontalInset < self->viewportWidth)
-                                        ? static_cast<uint16_t>(self->viewportWidth - horizontalInset)
-                                        : self->viewportWidth;
-    self->currentTextBlock->layoutAndExtractLines(
-        self->renderer, self->fontId, effectiveWidth,
-        [self](std::unique_ptr<TextBlock> textBlock) { self->addLineToPage(std::move(textBlock)); }, false);
+    // Through makePages so the paragraph's top spacing lands before its first line here,
+    // not in front of the continuation when the block is finalised (upstream d5693c321).
+    self->makePages(/*includeLastLine=*/false);
   }
 }
 
@@ -2207,7 +2203,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
   currentPageNextY += lineHeight;
 }
 
-void ChapterHtmlSlimParser::makePages() {
+void ChapterHtmlSlimParser::makePages(const bool includeLastLine) {
   if (!currentTextBlock) {
     LOG_ERR("EHP", "!! No text block to make pages for !!");
     return;
@@ -2238,16 +2234,30 @@ void ChapterHtmlSlimParser::makePages() {
   // addLineToPage(), exactly as before.
   //
   // Padding never collapses in CSS, so it stays a plain addition.
+  //
+  // Once per paragraph: a long paragraph reaches here several times (soft flushes,
+  // then the finalising call), and only the pass that emits its opening line may add
+  // the top spacing. Re-adding it on a later pass opened a gap mid-paragraph. The
+  // block itself knows whether its opening line is gone; wordsExtractedInBlock cannot
+  // be used for this, it is not reset when an emptied block is reused.
   const BlockStyle& blockStyle = currentTextBlock->getBlockStyle();
-  const int16_t collapsedTopMargin =
-      static_cast<int16_t>(std::max(0, blockStyle.marginTop - previousBlockBottomMargin));
-  previousBlockBottomMargin = 0;
-  if (collapsedTopMargin > 0) {
-    currentPageNextY += collapsedTopMargin;
-  }
-  if (blockStyle.paddingTop > 0) {
-    currentPageNextY += blockStyle.paddingTop;
-  }
+  bool topSpacingPending = !currentTextBlock->isContinuation();
+  const auto applyTopSpacing = [this, &blockStyle, &topSpacingPending] {
+    topSpacingPending = false;
+    const int16_t collapsedTopMargin =
+        static_cast<int16_t>(std::max(0, blockStyle.marginTop - previousBlockBottomMargin));
+    previousBlockBottomMargin = 0;
+    if (collapsedTopMargin > 0) {
+      currentPageNextY += collapsedTopMargin;
+    }
+    if (blockStyle.paddingTop > 0) {
+      currentPageNextY += blockStyle.paddingTop;
+    }
+  };
+  // A finalising pass applies it up front, exactly as before (an empty block still
+  // contributes its spacing). A soft flush waits for a line to actually come out, so a
+  // flush that extracts nothing cannot charge the spacing twice.
+  if (topSpacingPending && includeLastLine) applyTopSpacing();
 
   // Calculate effective width accounting for horizontal margins/padding
   const int horizontalInset = blockStyle.totalHorizontalInset();
@@ -2256,7 +2266,17 @@ void ChapterHtmlSlimParser::makePages() {
 
   currentTextBlock->layoutAndExtractLines(
       renderer, fontId, effectiveWidth,
-      [this](std::unique_ptr<TextBlock> textBlock) { addLineToPage(std::move(textBlock)); });
+      [this, &topSpacingPending, &applyTopSpacing](std::unique_ptr<TextBlock> textBlock) {
+        if (topSpacingPending) applyTopSpacing();
+        addLineToPage(std::move(textBlock));
+      },
+      includeLastLine);
+
+  // Bottom spacing, the footnote fallback and paragraph spacing belong to the END of the
+  // paragraph: a soft flush leaves the block open, with its last line still to come.
+  if (!includeLastLine) {
+    return;
+  }
 
   // Fallback: transfer any remaining pending footnotes to current page.
   // Normally addLineToPage handles this via word-index tracking, but this catches

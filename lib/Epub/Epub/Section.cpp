@@ -21,7 +21,9 @@ namespace {
 //     text blob) instead of length-prefixed strings and per-field arrays.
 // 44: tables render as PageTableFragment grids (new page element TAG_PageTable = 4);
 //     also covers VoidTagCloser's layout change and hash-keyed shared img_ files.
-constexpr uint8_t SECTION_FILE_VERSION = 44;
+// 45: a long paragraph's soft flush no longer restarts the paragraph: first-line indent
+//     and top spacing apply once per paragraph (upstream d5693c321). Layout-only change.
+constexpr uint8_t SECTION_FILE_VERSION = 45;
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
                                  sizeof(uint8_t) + sizeof(uint8_t) + sizeof(bool) + sizeof(uint32_t) +
