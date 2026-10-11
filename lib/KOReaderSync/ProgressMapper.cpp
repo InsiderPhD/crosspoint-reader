@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "ChapterXPathResolver.h"
+#include "Epub/SpineSizeLookup.h"
 #include "Epub/htmlEntities.h"
 #include "Utf8.h"
 
@@ -607,11 +608,16 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
   if (xpathSpine >= 0 && xpathSpine < spineCount) {
     result.spineIndex = xpathSpine;
   } else {
-    for (int i = 0; i < spineCount; i++) {
-      if (epub->getCumulativeSpineItemSize(i) >= targetBytes) {
-        result.spineIndex = i;
-        break;
-      }
+    // First spine item whose end offset reaches the target. Cumulative sizes are
+    // nondecreasing, so this is the item the old front-to-back walk stopped at,
+    // found in O(log n) book.bin lookups instead of one per preceding chapter.
+    const int found = findSpineForSize(spineCount, targetBytes,
+                                       [&epub](int index) { return epub->getCumulativeSpineItemSize(index); });
+    // The walk left spineIndex at 0 when no item reached the target (float
+    // rounding can push targetBytes past the book size); the lookup answers
+    // "last item" there, so keep the old result for that case.
+    if (found >= 0 && epub->getCumulativeSpineItemSize(found) >= targetBytes) {
+      result.spineIndex = found;
     }
   }
   if (result.spineIndex >= spineCount) return result;
