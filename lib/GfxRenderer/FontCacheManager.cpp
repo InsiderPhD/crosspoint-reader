@@ -160,7 +160,8 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
   while (*cursor) {
     const uint32_t codepoint = utf8NextCodepoint(&cursor);
     if (codepoint == 0) break;
-    if (codepoint > SCAN_CODEPOINT_MASK) continue;  // not Unicode; would corrupt the packed group bits
+    if (utf8IsVariationSelector(codepoint)) continue;  // drawText drops these: never give one a scan slot
+    if (codepoint > SCAN_CODEPOINT_MASK) continue;     // not Unicode; would corrupt the packed group bits
 
     const uint32_t packed = groupBits | codepoint;
     bool found = false;

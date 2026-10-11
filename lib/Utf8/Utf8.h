@@ -40,3 +40,17 @@ inline bool utf8IsCombiningMark(const uint32_t cp) {
          || (cp >= 0x20D0 && cp <= 0x20FF)   // Combining Diacritical Marks for Symbols
          || (cp >= 0xFE20 && cp <= 0xFE2F);  // Combining Half Marks
 }
+
+// Returns true for Unicode variation selectors: VS1-16 (U+FE00-FE0F, including
+// the U+FE0E text / U+FE0F emoji presentation selectors), the ideographic
+// VS17-256 (U+E0100-E01EF) and the Mongolian free variation selectors
+// (U+180B-180D, U+180F). They only pick a presentation of the preceding
+// character. The bitmap font pipeline has no variation-sequence lookup, so
+// every loop that draws, measures or prewarms text must drop them: otherwise
+// they fall back to a visible replacement glyph and consume advance of their
+// own. A dropped selector leaves all per-character state untouched, so the
+// "previous codepoint" for kerning stays the base character before it.
+constexpr bool utf8IsVariationSelector(const uint32_t cp) {
+  return (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0xE0100 && cp <= 0xE01EF) || (cp >= 0x180B && cp <= 0x180D) ||
+         cp == 0x180F;
+}

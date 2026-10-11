@@ -730,7 +730,8 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
     while (*p) {
       uint32_t cp = utf8NextCodepoint(&p);
       if (cp == 0) break;
-      if (!unique.add(cp)) break;  // cap reached: the rest loads on demand
+      if (utf8IsVariationSelector(cp)) continue;  // never drawn: must not take a prewarm slot
+      if (!unique.add(cp)) break;                 // cap reached: the rest loads on demand
     }
     cpCount = unique.finish();  // sorted ascending
   }
@@ -1220,6 +1221,7 @@ int SdCardFont::buildAdvanceTable(const char* utf8Text, uint8_t styleMask) {
     while (*p) {
       uint32_t cp = utf8NextCodepoint(&p);
       if (cp == 0) break;
+      if (utf8IsVariationSelector(cp)) continue;  // never measured: must not take an advance-table slot
       if (!unique.add(cp)) {
         hitCap = true;
         break;

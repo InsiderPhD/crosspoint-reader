@@ -23,6 +23,11 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&string)))) {
+    // Variation selectors draw nothing and take no advance (see GfxRenderer::drawText).
+    // Skipped before the missing-glyph branch below, which would reset prevCp and
+    // drop the kern between the selector's neighbours.
+    if (utf8IsVariationSelector(cp)) continue;
+
     const bool isCombining = utf8IsCombiningMark(cp);
 
     if (!isCombining) {
@@ -139,7 +144,14 @@ uint32_t EpdFont::applyLigatures(uint32_t cp, const char*& text) const {
   }
   while (true) {
     const auto saved = reinterpret_cast<const uint8_t*>(text);
-    const uint32_t nextCp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text));
+    uint32_t nextCp;
+    // Look through variation selectors: callers drop them, so one sitting
+    // between two characters must not stop them forming a ligature. When no
+    // ligature forms the cursor is rewound to `saved` and the caller's own
+    // loop skips the selectors.
+    do {
+      nextCp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text));
+    } while (utf8IsVariationSelector(nextCp));
     if (nextCp == 0) break;
     const uint32_t lig = getLigature(cp, nextCp);
     if (lig == 0) {

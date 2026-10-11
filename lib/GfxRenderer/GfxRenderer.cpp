@@ -443,6 +443,12 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
+    // Variation selectors draw nothing and take no advance. Skipping here, before
+    // any state is touched, leaves prevCp / prevAdvanceFP / lastBase* on the base
+    // character, so the kern between the selector's neighbours is unchanged.
+    // getTextAdvanceX and EpdFont::getTextBounds skip at the same point.
+    if (utf8IsVariationSelector(cp)) continue;
+
     if (utf8IsCombiningMark(cp)) {
       const EpdGlyph* combiningGlyph = font.getGlyph(cp, style);
       if (!combiningGlyph) continue;
@@ -1588,19 +1594,29 @@ std::string GfxRenderer::truncatedText(const int fontId, const char* text, const
   // ellipsis. The old loop dropped one codepoint at a time and re-measured the
   // whole remainder each time (O(n^2) glyph lookups, plus a temporary
   // std::string per step); this is O(n log n) with one reserved buffer.
+  //
+  // Variation selectors are not counted: they have no width, and each stays
+  // glued to the character before it so a cut never separates the pair.
+  const auto characterEnd = [&item](size_t pos) {
+    ++pos;
+    while (pos < item.size() && (static_cast<unsigned char>(item[pos]) & 0xC0) == 0x80) ++pos;
+    while (pos < item.size()) {
+      const auto* const start = reinterpret_cast<const unsigned char*>(item.c_str()) + pos;
+      const auto* next = start;
+      if (!utf8IsVariationSelector(utf8NextCodepoint(&next))) break;
+      pos += static_cast<size_t>(next - start);
+    }
+    return pos;
+  };
+
   size_t charCount = 0;
-  for (const unsigned char c : item) {
-    if ((c & 0xC0) != 0x80) ++charCount;
-  }
+  for (size_t pos = 0; pos < item.size(); pos = characterEnd(pos)) ++charCount;
 
   std::string candidate;
   candidate.reserve(item.size() + 3);  // longest prefix + 3-byte ellipsis
   const auto setCandidate = [&](const size_t characterCount) {
     size_t end = 0;
-    for (size_t count = 0; end < item.size() && count < characterCount; ++count) {
-      ++end;
-      while (end < item.size() && (static_cast<unsigned char>(item[end]) & 0xC0) == 0x80) ++end;
-    }
+    for (size_t count = 0; end < item.size() && count < characterCount; ++count) end = characterEnd(end);
     candidate.assign(item.data(), end);
     candidate += ellipsis;
   };
@@ -1887,6 +1903,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
     const uint8_t styleIdx = resolveSdCardStyle(*sdIt->second, style);
     while (uint32_t cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text))) {
+      if (utf8IsVariationSelector(cp)) continue;  // no advance, and never in the advance table
       int32_t advFP = sdIt->second->getAdvance(cp, styleIdx);
       widthFP += isSupSub ? (advFP + 1) / 2 : advFP;
     }
@@ -1905,7 +1922,8 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
   const auto& font = fontIt->second;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    if (utf8IsCombiningMark(cp)) {
+    // Variation selectors take no advance and leave prevCp alone, exactly as in drawText.
+    if (utf8IsVariationSelector(cp) || utf8IsCombiningMark(cp)) {
       continue;
     }
     cp = font.applyLigatures(cp, text, style);
@@ -1981,6 +1999,8 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
+    if (utf8IsVariationSelector(cp)) continue;  // as drawText: nothing drawn, no advance, prevCp kept
+
     if (utf8IsCombiningMark(cp)) {
       const EpdGlyph* combiningGlyph = font.getGlyph(cp, style);
       if (!combiningGlyph) continue;
