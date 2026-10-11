@@ -170,9 +170,6 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
                                    StrId::STR_CAT_DISPLAY),
                SettingInfo::Toggle(StrId::STR_READER_DARK_MODE, &CrossPointSettings::darkMode, "darkMode",
                                    StrId::STR_CAT_DISPLAY),
-               // Time next to the date on the header top line of the non-reader screens.
-               SettingInfo::Toggle(StrId::STR_CLOCK_OUTSIDE_READER, &CrossPointSettings::showClockOutsideReader,
-                                   "showClockOutsideReader", StrId::STR_CAT_DISPLAY),
            });
 }
 
@@ -468,6 +465,9 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                    StrId::STR_STATUS_BAR_TOP_MARGIN, &CrossPointSettings::statusBarTopMargin,
                    {0, CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX, CrossPointSettings::STATUS_BAR_TOP_MARGIN_STEP},
                    "statusBarTopMargin", StrId::STR_CUSTOMISE_STATUS_BAR),
+               // Time next to the date on the header top line of the non-reader screens.
+               SettingInfo::Toggle(StrId::STR_CLOCK_OUTSIDE_READER, &CrossPointSettings::showClockOutsideReader,
+                                   "showClockOutsideReader", StrId::STR_CUSTOMISE_STATUS_BAR),
                // Clock entries (web settings only; device UI uses ClockOffsetActivity for the offset).
                // Range 0..104 = quarter-hour steps from UTC-12:00 to UTC+14:00, biased by 48.
                SettingInfo::Value(StrId::STR_CLOCK_UTC_OFFSET, &CrossPointSettings::clockUtcOffsetQ, {0, 104, 1},

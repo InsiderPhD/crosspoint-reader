@@ -668,7 +668,7 @@ Placing the first element on an empty bar (or clearing the last one) changes the
 
 All of these are also editable from the web settings page.
 
-**Clock Outside Reader** (*Settings → Display*) shows the time after the date on the header line of the Home, Library and Settings screens. It uses the same clock as the date and hides while the device has no trustworthy time.
+**Clock Outside Reader** (on this screen) shows the time after the date on the header line of the Home, Library and Settings screens. It uses the same clock as the date and hides while the device has no trustworthy time.
 
 > [!NOTE]
 > If you're upgrading, your old show/hide status-bar settings are migrated to the new per-element positions automatically on first boot.

@@ -27,16 +27,17 @@ enum HubItem {
   HUB_PERCENTAGE_FORMAT,
   HUB_TOP_MARGIN,
   HUB_XTC_STATUS_BAR,
-  HUB_CLOCK_FORMAT,      // X3 only
-  HUB_CLOCK_UTC_OFFSET,  // X3 only, launches ClockOffsetActivity
-  HUB_CLOCK_SYNC,        // X3 only, launches ClockSyncActivity
+  HUB_CLOCK_OUTSIDE_READER,  // Time after the date on the non-reader headers
+  HUB_CLOCK_FORMAT,          // X3 only
+  HUB_CLOCK_UTC_OFFSET,      // X3 only, launches ClockOffsetActivity
+  HUB_CLOCK_SYNC,            // X3 only, launches ClockSyncActivity
   HUB_COUNT
 };
 constexpr int HUB_BASE_ITEMS = HUB_CLOCK_FORMAT;  // Rows shown on every device
 const StrId hubNames[HUB_COUNT] = {
-    StrId::STR_BOTTOM_STATUS_BAR,     StrId::STR_TOP_STATUS_BAR, StrId::STR_PERCENTAGE_FORMAT,
-    StrId::STR_STATUS_BAR_TOP_MARGIN, StrId::STR_XTC_STATUS_BAR, StrId::STR_CLOCK_FORMAT,
-    StrId::STR_CLOCK_UTC_OFFSET,      StrId::STR_CLOCK_SYNC_NOW,
+    StrId::STR_BOTTOM_STATUS_BAR,     StrId::STR_TOP_STATUS_BAR,   StrId::STR_PERCENTAGE_FORMAT,
+    StrId::STR_STATUS_BAR_TOP_MARGIN, StrId::STR_XTC_STATUS_BAR,   StrId::STR_CLOCK_OUTSIDE_READER,
+    StrId::STR_CLOCK_FORMAT,          StrId::STR_CLOCK_UTC_OFFSET, StrId::STR_CLOCK_SYNC_NOW,
 };
 
 // --- Bar rows: the positionable elements in display order, then the bar's own
@@ -257,6 +258,9 @@ void StatusBarSettingsActivity::handleSelection() {
       case HUB_XTC_STATUS_BAR:
         SETTINGS.xtcStatusBarMode = (SETTINGS.xtcStatusBarMode + 1) % XTC_STATUS_BAR_ITEMS;
         break;
+      case HUB_CLOCK_OUTSIDE_READER:
+        SETTINGS.showClockOutsideReader = SETTINGS.showClockOutsideReader ? 0 : 1;
+        break;
       case HUB_CLOCK_FORMAT:
         SETTINGS.clockFormat = (SETTINGS.clockFormat + 1) % CLOCK_FORMAT_ITEMS;
         break;
@@ -307,6 +311,8 @@ std::string StatusBarSettingsActivity::valueText(const int index) const {
       }
       case HUB_XTC_STATUS_BAR:
         return I18N.get(xtcStatusBarNames[SETTINGS.xtcStatusBarMode]);
+      case HUB_CLOCK_OUTSIDE_READER:
+        return SETTINGS.showClockOutsideReader ? tr(STR_SHOW) : tr(STR_HIDE);
       case HUB_CLOCK_FORMAT: {
         const uint8_t fmt = SETTINGS.clockFormat < CLOCK_FORMAT_ITEMS ? SETTINGS.clockFormat : 0;
         return std::string(I18N.get(clockFormatNames[fmt]));

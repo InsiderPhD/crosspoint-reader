@@ -25,6 +25,10 @@ You won't see any progress bars on this firmware, this is intentional, when we n
 
 Everything below has been added or significantly reworked on top of the upstream CrossPoint codebase. See [CHANGES.md](./CHANGES.md) for the full technical writeup, honestly though I am pretty far behind with actually documenting everything...
 
+In general I will take features from Crosspoint, CrossInk and others and where possible I will try to copy their implementation so you can easily swap between firmware without losing any settings. But with a preference for preserving the native features of this firmware.
+
+With that in mind, basically all non-english translations are non-existant, sorry.
+
 - **Library cover grid** — paginated 3×N grid of every book on the SD card, opened from **Library** in the home menu on every theme. Cover thumbnails cached to SD; same Book Options menu (Book Info, Mark as Read, Remove from Recents, Delete from Device — plus Reset Progress / Delete Book Cache / Regenerate Cover in Developer Mode) as the home recents tile.
 - **BookFusion sync** — OAuth device-code account linking, browse your cloud library by category (Currently Reading / Favorites / Plan to Read / Completed / All Books), download EPUBs directly to the SD card, and sync reading progress *and reading time* bidirectionally via long-press Confirm. Pulls rich metadata (series, bookshelf, tags, rating, lists, description) that feeds the Book Info panel, and adds *BookFusion first/last* and *Tag A–Z/Z–A* sort modes. A `& ` prefix marker shows synced books across all list views.
 - **Bionic Reading** — optional mode that bolds the leading portion of each word to guide the eye. Toggle in reader settings or bind it to a button.

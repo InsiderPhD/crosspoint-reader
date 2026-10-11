@@ -12,7 +12,7 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 - **Top progress bar** with its own Book / Chapter / Hide and thickness, drawn along the top edge above the top bar's text lane; configured on the Top Status Bar page.
 - **Percentage Format** — `10%` / `10.1%` / `10.12%` for the Book Progress % element (one setting for both bars).
 - **XTC Status Bar: Both.** `XTC_STATUS_BAR_BOTH` paints each bar where it belongs; the legacy `Top` keeps painting the bottom bar's layout along the top edge, as CrossInk's `xtcStatusBarConfigPosition` does. The overlay no longer fakes the top position with a bottom padding.
-- **Clock Outside Reader** (*Settings → Display*, `showClockOutsideReader`): the time follows the date on the header top line, from the same timestamp, and only while that timestamp is live.
+- **Clock Outside Reader** (*Customise Status Bar*, `showClockOutsideReader`): the time follows the date on the header top line, from the same timestamp, and only while that timestamp is live.
 - Not ported: CrossInk's Stable Page Numbers element (no reference-page infrastructure here) and tap-on-the-bar-to-hide (we have the bindable Hide Status Bar action and the X4 Pro hold zones).
 
 **Files changed**: `src/CrossPointSettings.{h,cpp}`, `src/JsonSettingsIO.cpp`, `src/components/UITheme.*`, `src/components/themes/BaseTheme.*`, `src/activities/reader/{EpubReaderActivity.cpp,TxtReaderActivity.cpp,XtcReaderActivity.cpp}`, `src/activities/settings/StatusBarSettingsActivity.*`, `src/SettingsList.h`, `src/util/HeaderDateUtils.cpp`, `lib/I18n/translations/english.yaml`, `USER_GUIDE.md`.
