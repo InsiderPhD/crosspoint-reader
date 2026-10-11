@@ -65,7 +65,21 @@ def inject_version(env):
     branch = get_git_branch(project_dir)
     version_string = f'Dev-KT-v{base_version}-dev+{branch}'
 
-    env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
+    def add_version(build_env, node):
+        # A global CPPDEFINES entry changes the command line of every object,
+        # so switching branch rebuilt the whole firmware and every library.
+        # Define it only for translation units that name the macro. This is a
+        # textual check of the .cpp itself: CROSSPOINT_VERSION must not be used
+        # from a header (none do today), or its includers would lose the define.
+        if b'CROSSPOINT_VERSION' not in node.srcnode().get_contents():
+            return node
+        version_env = build_env.Clone()
+        version_env.Append(CPPDEFINES=[('CROSSPOINT_VERSION', f'\\"{version_string}\\"')])
+        return version_env.Object(node)
+
+    # Registered from a pre: script, so library builders (which clone this env
+    # afterwards) inherit it too: lib/hal and lib/HardcoverSync use the macro.
+    env.AddBuildMiddleware(add_version)
     print(f'KatiePoint build version: {version_string}')
 
 
@@ -77,7 +91,7 @@ try:
     inject_version(env)     # noqa: F821  # type: ignore[name-defined]
 except NameError:
     class _Env(dict):
-        def Append(self, **_): pass
+        def AddBuildMiddleware(self, _): pass
 
     _project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     inject_version(_Env({'PIOENV': 'default', 'PROJECT_DIR': _project_dir}))
