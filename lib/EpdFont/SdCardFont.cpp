@@ -57,6 +57,14 @@ void SdCardFont::freeStyleMiniData(PerStyle& s) {
 }
 
 void SdCardFont::freeStyleKernLigatureData(PerStyle& s) {
+  // Both font views borrow the resident ligature table (stubData since
+  // loadStyleKernLigatureData, miniData via applyKernLigaturePointers). Null
+  // them before the delete[] so a draw after clearCachesDeep()/release cannot
+  // walk a freed table.
+  s.stubData.ligaturePairs = nullptr;
+  s.stubData.ligaturePairCount = 0;
+  s.miniData.ligaturePairs = nullptr;
+  s.miniData.ligaturePairCount = 0;
   delete[] s.kernLeftClasses;
   s.kernLeftClasses = nullptr;
   delete[] s.kernRightClasses;
