@@ -1,13 +1,20 @@
 #pragma once
 
 #include <functional>
-#include <vector>
+#include <initializer_list>
+#include <vector>  // not used here; kept because includers have relied on it transitively
 
 #include "MappedInputManager.h"
 
 class ButtonNavigator final {
   using Callback = std::function<void()>;
-  using Buttons = std::vector<MappedInputManager::Button>;
+  // A borrowed view over a constant array: consumed synchronously inside the
+  // on*() call and never stored. This was std::vector, so every poll of every
+  // list screen heap-allocated (and freed) a two-element vector per on*() call,
+  // i.e. several small malloc/free pairs per loop pass for the whole time a
+  // menu was open. A braced list of enum constants is backed by a static
+  // read-only array, so call sites keep writing {Button::Left}.
+  using Buttons = std::initializer_list<MappedInputManager::Button>;
 
   const uint16_t continuousStartMs;
   const uint16_t continuousIntervalMs;
@@ -44,10 +51,14 @@ class ButtonNavigator final {
   [[nodiscard]] static int nextPageIndex(int currentIndex, int totalItems, int itemsPerPage);
   [[nodiscard]] static int previousPageIndex(int currentIndex, int totalItems, int itemsPerPage);
 
+  // Static storage: returning a braced list directly would hand back a view of
+  // an array that dies with the function's return statement.
   [[nodiscard]] static Buttons getNextButtons() {
-    return {MappedInputManager::Button::Down, MappedInputManager::Button::Right};
+    static constexpr Buttons buttons = {MappedInputManager::Button::Down, MappedInputManager::Button::Right};
+    return buttons;
   }
   [[nodiscard]] static Buttons getPreviousButtons() {
-    return {MappedInputManager::Button::Up, MappedInputManager::Button::Left};
+    static constexpr Buttons buttons = {MappedInputManager::Button::Up, MappedInputManager::Button::Left};
+    return buttons;
   }
 };

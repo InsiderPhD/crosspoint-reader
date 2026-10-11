@@ -597,16 +597,12 @@ void HomeActivity::loop() {
     }
     requestUpdate();
   };
-  // Static: built once, not a heap vector per direction on every loop pass.
+  // Braced lists bind to ButtonNavigator's initializer_list view: constant arrays, no heap.
   using Button = MappedInputManager::Button;
-  static const std::vector<Button> kDown{Button::Down};
-  static const std::vector<Button> kRight{Button::Right};
-  static const std::vector<Button> kUp{Button::Up};
-  static const std::vector<Button> kLeft{Button::Left};
-  buttonNavigator.onPressAndContinuous(kDown, [&] { navigate(BaseTheme::NavDirection::Down, true); });
-  buttonNavigator.onPressAndContinuous(kRight, [&] { navigate(BaseTheme::NavDirection::Right, true); });
-  buttonNavigator.onPressAndContinuous(kUp, [&] { navigate(BaseTheme::NavDirection::Up, false); });
-  buttonNavigator.onPressAndContinuous(kLeft, [&] { navigate(BaseTheme::NavDirection::Left, false); });
+  buttonNavigator.onPressAndContinuous({Button::Down}, [&] { navigate(BaseTheme::NavDirection::Down, true); });
+  buttonNavigator.onPressAndContinuous({Button::Right}, [&] { navigate(BaseTheme::NavDirection::Right, true); });
+  buttonNavigator.onPressAndContinuous({Button::Up}, [&] { navigate(BaseTheme::NavDirection::Up, false); });
+  buttonNavigator.onPressAndContinuous({Button::Left}, [&] { navigate(BaseTheme::NavDirection::Left, false); });
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     // If this release was the menu's confirmation/dismissal, the helper has
