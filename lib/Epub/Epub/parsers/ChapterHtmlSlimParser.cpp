@@ -1567,6 +1567,12 @@ void XMLCALL ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const X
 void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* name) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
 
+  // Set before any early return below: once the root element has closed, whatever
+  // follows is not part of the document (see the parse loop in parseAndBuildPages).
+  if (strcmp(name, "html") == 0) {
+    self->htmlEnded = true;
+  }
+
   // Check if any style state will change after we decrement depth
   // If so, we MUST flush the partWordBuffer with the CURRENT style first
   // Note: depth hasn't been decremented yet, so we check against (depth - 1)
@@ -1869,6 +1875,7 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
 
   XML_Parser parser = XML_ParserCreate(nullptr);
   int done;
+  htmlEnded = false;
 
   if (!parser) {
     LOG_ERR("EHP", "Couldn't allocate memory for parser");
@@ -1917,6 +1924,13 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
     done = file.available() == 0;
 
     if (XML_ParseBuffer(parser, static_cast<int>(len), done) == XML_STATUS_ERROR) {
+      if (htmlEnded) {
+        // Junk after </html> (stray markup, a second document, NULs) is "junk after
+        // document element" to expat. Every page is already laid out, so finish the
+        // chapter normally instead of throwing the whole section away.
+        LOG_DBG("EHP", "Ignoring trailing data after </html>: %s", XML_ErrorString(XML_GetErrorCode(parser)));
+        break;
+      }
       LOG_ERR("EHP", "Parse error at line %lu:\n%s", XML_GetCurrentLineNumber(parser),
               XML_ErrorString(XML_GetErrorCode(parser)));
       destroyXmlParser(parser);
