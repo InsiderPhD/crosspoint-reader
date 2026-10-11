@@ -4,6 +4,7 @@
 #include <HalFrontlight.h>
 #include <HalTiltSensor.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <vector>
 
@@ -561,12 +562,33 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
            });
 }
 
+// Exact number of entries the append helpers below getSettingsList() add, so the
+// one reserve() is the list's only allocation and leaves no spare capacity.
+// The vector lives for the whole run, and overshooting is expensive: growing a
+// full vector reallocates at roughly double, i.e. ~86 dead SettingInfo slots
+// (~176 bytes each, about 15KB) pinned in DRAM. That is what the old flat
+// reserve(86) did on every board except a tilt-less C3: an IMU board inserted
+// an 87th entry, and a frontlight board appended 88.
+// Recount when adding or removing an entry; getSettingsList() logs a mismatch.
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 86;
+#if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
+constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
+#elif FREEINK_CAP_FRONTLIGHT
+constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 1;  // brightness
+#else
+constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 0;
+#endif
+
 }  // namespace SettingsListDetail
 
 inline const std::vector<SettingInfo>& getSettingsList() {
   static const std::vector<SettingInfo> list = [] {
+    // Runtime-detected, so it is counted here rather than in a constant.
+    const bool hasTiltSensor = halTiltSensor.isAvailable();
+    const size_t expectedCount = SettingsListDetail::SETTINGS_LIST_UNCONDITIONAL_COUNT +
+                                 SettingsListDetail::SETTINGS_LIST_FRONTLIGHT_COUNT + (hasTiltSensor ? 1 : 0);
     std::vector<SettingInfo> v;
-    v.reserve(86);
+    v.reserve(expectedCount);
     SettingsListDetail::appendDisplaySettings(v);
     SettingsListDetail::appendReaderTypographySettings(v);
     SettingsListDetail::appendReaderBehaviourSettings(v);
@@ -578,8 +600,10 @@ inline const std::vector<SettingInfo>& getSettingsList() {
     SettingsListDetail::appendOpdsSettings(v);
     SettingsListDetail::appendStatusBarSettings(v);
     // Only show tilt page turn setting when the QMI8658 IMU is present (X3)
-    if (halTiltSensor.isAvailable()) {
-      // Insert after the short power button setting (end of Controls section)
+    if (hasTiltSensor) {
+      // Insert after the short power button setting (end of Controls section).
+      // Its slot is already in the reserve above, so this shifts the tail in
+      // place and does not reallocate.
       for (auto it = v.begin(); it != v.end(); ++it) {
         if (it->nameId == StrId::STR_SHORT_PWR_BTN) {
           v.insert(it + 1, SettingInfo::Enum(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn,
@@ -588,6 +612,10 @@ inline const std::vector<SettingInfo>& getSettingsList() {
           break;
         }
       }
+    }
+    if (v.size() != expectedCount) {
+      LOG_ERR("SET", "Settings list has %u entries but %u were reserved: update SETTINGS_LIST_*_COUNT",
+              static_cast<unsigned>(v.size()), static_cast<unsigned>(expectedCount));
     }
     return v;
   }();
