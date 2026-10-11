@@ -9,6 +9,7 @@
 #include "../Memory/Memory.h"
 #include "BitmapHelpers.h"
 #include "FontCacheManager.h"
+#include "GlyphBitmap.h"
 
 namespace {
 uint8_t resolveSdCardStyle(const SdCardFont& font, const EpdFontFamily::Style style) {
@@ -253,81 +254,107 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   }
 
   const uint8_t* bitmap = renderer.getGlyphBitmap(fontData, glyph);
+  if (bitmap == nullptr) return;
 
-  if (bitmap != nullptr) {
-    // For Normal:  outer loop advances screenY, inner loop advances screenX
-    // For Rotated: outer loop advances screenX, inner loop advances screenY (in reverse)
-    int outerBase, innerBase;
-    if constexpr (rotation == TextRotation::Rotated90CW) {
-      outerBase = cursorX + fontData->ascender - top;  // screenX = outerBase + glyphY
-      innerBase = cursorY - left;                      // screenY = innerBase - glyphX
-    } else {
-      outerBase = cursorY - top;   // screenY = outerBase + glyphY
-      innerBase = cursorX + left;  // screenX = innerBase + glyphX
-    }
-
-    if (is2Bit) {
-      int pixelPosition = 0;
-      for (int glyphY = 0; glyphY < height; glyphY++) {
-        const int outerCoord = outerBase + glyphY;
-        for (int glyphX = 0; glyphX < width; glyphX++, pixelPosition++) {
-          int screenX, screenY;
-          if constexpr (rotation == TextRotation::Rotated90CW) {
-            screenX = outerCoord;
-            screenY = innerBase - glyphX;
-          } else {
-            screenX = innerBase + glyphX;
-            screenY = outerCoord;
-          }
-
-          const uint8_t byte = bitmap[pixelPosition >> 2];
-          const uint8_t bit_index = (3 - (pixelPosition & 3)) * 2;
-          // the direct bit from the font is 0 -> white, 1 -> light gray, 2 -> dark gray, 3 -> black
-          // we swap this to better match the way images and screen think about colors:
-          // 0 -> black, 1 -> dark grey, 2 -> light grey, 3 -> white
-          const uint8_t bmpVal = 3 - ((byte >> bit_index) & 0x3);
-
-          if (renderMode == GfxRenderer::BW && bmpVal < 3) {
-            // Black (also paints over the grays in BW mode)
-            renderer.drawPixel(screenX, screenY, pixelState);
-          } else if (renderMode == GfxRenderer::GRAYSCALE_LSB || renderMode == GfxRenderer::GRAYSCALE_MSB) {
-            // Overlay masks only flag the two intermediate levels and leave
-            // black/white to the B/W base; absolute planes carry every pixel.
-            // grayPlanePixel() owns that difference for text, images and bitmaps
-            // alike, so one pass cannot mix encodings.
-            const auto pixel =
-                grayPlanePixel(bmpVal, renderMode == GfxRenderer::GRAYSCALE_MSB, renderer.grayPlanesAreAbsolute());
-            if (pixel.write) renderer.drawPixel(screenX, screenY, pixel.black);
-          }
-        }
-      }
-    } else {
-      int pixelPosition = 0;
-      for (int glyphY = 0; glyphY < height; glyphY++) {
-        const int outerCoord = outerBase + glyphY;
-        for (int glyphX = 0; glyphX < width; glyphX++, pixelPosition++) {
-          int screenX, screenY;
-          if constexpr (rotation == TextRotation::Rotated90CW) {
-            screenX = outerCoord;
-            screenY = innerBase - glyphX;
-          } else {
-            screenX = innerBase + glyphX;
-            screenY = outerCoord;
-          }
-
-          const uint8_t byte = bitmap[pixelPosition >> 3];
-          const uint8_t bit_index = 7 - (pixelPosition & 7);
-
-          if ((byte >> bit_index) & 1) {
-            renderer.drawPixel(screenX, screenY, pixelState);
-          }
-        }
-      }
-    }
+  // Logical placement of glyph pixel (0, 0) and the logical step for one move
+  // along each glyph axis.
+  //   Normal:  screenX = (cursorX + left) + glyphX,           screenY = (cursorY - top) + glyphY
+  //   Rotated: screenX = (cursorX + ascender - top) + glyphY, screenY = (cursorY - left) - glyphX
+  glyphBitmap::Frame frame;
+  if constexpr (rotation == TextRotation::Rotated90CW) {
+    frame = {cursorX + fontData->ascender - top, cursorY - left, 0, -1, 1, 0};
+  } else {
+    frame = {cursorX + left, cursorY - top, 1, 0, 0, 1};
   }
+  renderer.drawGlyphBitmap(bitmap, width, height, frame, is2Bit, renderMode, pixelState);
 }
 
 static constexpr uint32_t MAX_LOGGED_OUT_OF_RANGE = 4;
+
+namespace {
+// What each packed glyph value does in `mode`, as destination set/clear masks.
+// Derived from the same predicates the per-pixel loop used, so the two cannot
+// drift: BW paints every non-white value with `state`; the gray planes ask
+// grayPlanePixel(), which owns the overlay-mask vs absolute-plane difference.
+glyphBitmap::Levels glyphLevels(const bool twoBit, const GfxRenderer::RenderMode mode, const bool state,
+                                const bool absolutePlanes) {
+  glyphBitmap::Levels levels{0, 0};
+  if (!twoBit) {
+    // 1bpp: value 1 is ink, drawn with `state` in every render mode.
+    (state ? levels.clearBits : levels.setBits) = 0x02;
+    return levels;
+  }
+  for (uint8_t raw = 0; raw < 4; raw++) {
+    // Font data is 0 = white .. 3 = black; images and the panel use the
+    // reverse (0 = black, 1 = dark, 2 = light, 3 = white).
+    const uint8_t bmpVal = 3 - raw;
+    const uint8_t bit = static_cast<uint8_t>(1u << raw);
+    if (mode == GfxRenderer::BW) {
+      // Black (also paints over the grays in BW mode)
+      if (bmpVal < 3) (state ? levels.clearBits : levels.setBits) |= bit;
+    } else if (mode == GfxRenderer::GRAYSCALE_LSB || mode == GfxRenderer::GRAYSCALE_MSB) {
+      // Overlay masks only flag the two intermediate levels and leave
+      // black/white to the B/W base; absolute planes carry every pixel.
+      const auto pixel = grayPlanePixel(bmpVal, mode == GfxRenderer::GRAYSCALE_MSB, absolutePlanes);
+      if (pixel.write) (pixel.black ? levels.clearBits : levels.setBits) |= bit;
+    }
+  }
+  return levels;
+}
+}  // namespace
+
+void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const int height,
+                                  const glyphBitmap::Frame& frame, const bool twoBit, const RenderMode mode,
+                                  const bool state) const {
+  if (bitmap == nullptr || width <= 0 || height <= 0) return;
+
+  const glyphBitmap::Levels levels = glyphLevels(twoBit, mode, state, absoluteGrayPlanes);
+
+  // Rotate the glyph origin once, then derive the two physical axes by
+  // rotating its neighbours along each logical axis. rotateCoordinates() is an
+  // axis-aligned flip/transpose in every orientation, so together these encode
+  // the text rotation and the panel orientation as one orthogonal transform.
+  glyphBitmap::Target target{getWriteTarget(), panelWidth, panelWidthBytes, getWriteOriginY(), getWriteRows(), {}};
+  glyphBitmap::Frame& physical = target.frame;
+  rotateCoordinates(orientation, frame.x, frame.y, &physical.x, &physical.y, panelWidth, panelHeight);
+  int nextX = 0, nextY = 0;
+  rotateCoordinates(orientation, frame.x + frame.dxX, frame.y + frame.dxY, &nextX, &nextY, panelWidth, panelHeight);
+  physical.dxX = nextX - physical.x;
+  physical.dxY = nextY - physical.y;
+  rotateCoordinates(orientation, frame.x + frame.dyX, frame.y + frame.dyY, &nextX, &nextY, panelWidth, panelHeight);
+  physical.dyX = nextX - physical.x;
+  physical.dyY = nextY - physical.y;
+
+  // Physical position of the glyph corner opposite its origin.
+  const int farX = physical.x + (width - 1) * physical.dxX + (height - 1) * physical.dyX;
+  const int farY = physical.y + (width - 1) * physical.dxY + (height - 1) * physical.dyY;
+  const bool onPanel = std::min(physical.x, farX) >= 0 && std::max(physical.x, farX) < panelWidth &&
+                       std::min(physical.y, farY) >= 0 && std::max(physical.y, farY) < panelHeight;
+
+  if (!onPanel || target.buffer == nullptr) {
+    // The glyph overhangs the panel. Rare (a misplaced string), and drawPixel()
+    // both clips it and feeds the off-panel diagnostics in displayBuffer(), so
+    // take the per-pixel route rather than clip silently.
+    const uint8_t painted = levels.setBits | levels.clearBits;
+    int pixelPosition = 0;
+    for (int glyphY = 0; glyphY < height; glyphY++) {
+      for (int glyphX = 0; glyphX < width; glyphX++, pixelPosition++) {
+        const uint8_t value = twoBit ? ((bitmap[pixelPosition >> 2] >> ((3 - (pixelPosition & 3)) * 2)) & 0x3)
+                                     : ((bitmap[pixelPosition >> 3] >> (7 - (pixelPosition & 7))) & 0x1);
+        const uint8_t bit = static_cast<uint8_t>(1u << value);
+        if ((painted & bit) == 0) continue;
+        drawPixel(frame.x + glyphX * frame.dxX + glyphY * frame.dyX, frame.y + glyphX * frame.dxY + glyphY * frame.dyY,
+                  (levels.clearBits & bit) != 0);
+      }
+    }
+    return;
+  }
+
+  // Fully on the panel: the only clipping left is the strip band, which
+  // glyphBitmap::draw() applies from target.originY/rows -- the same rows
+  // drawPixel() would have dropped.
+  glyphBitmap::draw(bitmap, width, height, twoBit, levels, target, glyphBitmap::Clip{0, 0, width, height});
+}
 
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and
 // efficient as possible.
