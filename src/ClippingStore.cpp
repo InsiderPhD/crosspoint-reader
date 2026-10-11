@@ -316,7 +316,8 @@ bool ClippingStore::writeToFile() const {
 
 bool ClippingStore::hasAnyClippings() {
   if (!Storage.exists(CLIPPINGS_DIR)) return false;
-  return !Storage.listFiles(CLIPPINGS_DIR).empty();
+  // Emptiness only: stop at the first file instead of building up to 200 Strings.
+  return !Storage.listFiles(CLIPPINGS_DIR, 1).empty();
 }
 
 bool ClippingStore::getAllClippedBooks(std::vector<ClippedBookEntry>& out) {
