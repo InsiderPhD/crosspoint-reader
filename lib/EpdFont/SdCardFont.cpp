@@ -2,6 +2,7 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
+#include <UniqueCodepointSet.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -670,10 +671,9 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   unsigned long startMs = millis();
 
   // Step 1: Extract unique codepoints from UTF-8 text (shared across all styles).
-  // Dedup uses O(n^2) linear scan — worst case is MAX_PAGE_GLYPHS (512) unique codepoints
-  // = ~131K comparisons, but in practice pages contain far fewer unique codepoints so the
-  // actual cost is much lower. This is dwarfed by SD I/O that follows. Alternatives (hash
-  // set, bitmap) exceed the 256-byte stack limit or add template bloat.
+  // Dedup goes through UniqueCodepointSet (ASCII bitmap + sorted buffer) rather
+  // than a linear scan per character, so cost no longer grows with the number
+  // of unique codepoints on the page (CJK pages approach MAX_PAGE_GLYPHS).
   // Heap-allocated: MAX_PAGE_GLYPHS * 4 = 2048 bytes, too large for stack (limit < 256 bytes)
   std::unique_ptr<uint32_t[]> codepoints(new (std::nothrow) uint32_t[MAX_PAGE_GLYPHS]);
   if (!codepoints) {
@@ -681,36 +681,19 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
     return -1;
   }
   uint32_t cpCount = 0;
-
-  const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8Text);
-  while (*p && cpCount < MAX_PAGE_GLYPHS) {
-    uint32_t cp = utf8NextCodepoint(&p);
-    if (cp == 0) break;
-
-    bool found = false;
-    for (uint32_t i = 0; i < cpCount; i++) {
-      if (codepoints[i] == cp) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      codepoints[cpCount++] = cp;
-    }
-  }
-
-  // Always include the replacement character
   {
-    bool hasReplacement = false;
-    for (uint32_t i = 0; i < cpCount; i++) {
-      if (codepoints[i] == REPLACEMENT_GLYPH) {
-        hasReplacement = true;
-        break;
-      }
+    UniqueCodepointSet unique(codepoints.get(), MAX_PAGE_GLYPHS);
+    // Always include the replacement character; added first so it has a slot
+    // even when the page text alone would fill the buffer.
+    unique.add(REPLACEMENT_GLYPH);
+
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8Text);
+    while (*p) {
+      uint32_t cp = utf8NextCodepoint(&p);
+      if (cp == 0) break;
+      if (!unique.add(cp)) break;  // cap reached: the rest loads on demand
     }
-    if (!hasReplacement && cpCount < MAX_PAGE_GLYPHS) {
-      codepoints[cpCount++] = REPLACEMENT_GLYPH;
-    }
+    cpCount = unique.finish();  // sorted ascending
   }
 
   // Add ligature output codepoints from all styles being prewarmed.
@@ -718,6 +701,14 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
   // kern/lig data for all styles upfront (~22KB per style). Kern/lig is
   // loaded per-style in prewarmStyle() during the full render prewarm instead.
   if (!metadataOnly) {
+    // codepoints[0..textCount) is the sorted text set; ligature outputs are
+    // appended unsorted after it (a handful at most) and scanned linearly.
+    const uint32_t textCount = cpCount;
+    const auto hasCodepoint = [&codepoints, &cpCount, textCount](const uint32_t cp) {
+      const uint32_t* const begin = codepoints.get();
+      return std::binary_search(begin, begin + textCount, cp) ||
+             std::find(begin + textCount, begin + cpCount, cp) != begin + cpCount;
+    };
     for (uint8_t si = 0; si < MAX_STYLES; si++) {
       if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
       auto& s = styles_[si];
@@ -729,22 +720,10 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
           uint32_t rightCp = s.ligaturePairs[li].pair & 0xFFFF;
           uint32_t outCp = s.ligaturePairs[li].ligatureCp;
 
-          bool hasLeft = false, hasRight = false;
-          for (uint32_t i = 0; i < cpCount; i++) {
-            if (codepoints[i] == leftCp) hasLeft = true;
-            if (codepoints[i] == rightCp) hasRight = true;
-            if (hasLeft && hasRight) break;
-          }
-          if (!hasLeft || !hasRight) continue;
-
-          bool hasOut = false;
-          for (uint32_t i = 0; i < cpCount; i++) {
-            if (codepoints[i] == outCp) {
-              hasOut = true;
-              break;
-            }
-          }
-          if (!hasOut) {
+          // An input may itself be an appended ligature output (ff + i -> ffi),
+          // so membership covers the appended tail as well as the sorted text set.
+          if (!hasCodepoint(leftCp) || !hasCodepoint(rightCp)) continue;
+          if (!hasCodepoint(outCp)) {
             codepoints[cpCount++] = outCp;
           }
         }
@@ -752,7 +731,8 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
     }
   }
 
-  // Sort codepoints for ordered interval building
+  // Sort codepoints for ordered interval building (the text set is already
+  // sorted; this folds in any appended ligature outputs).
   std::sort(codepoints.get(), codepoints.get() + cpCount);
 
   // Prewarm each requested style
@@ -1137,36 +1117,26 @@ int SdCardFont::buildAdvanceTable(const char* utf8Text, uint8_t styleMask) {
   uint32_t cpCount = 0;
   bool hitCap = false;
 
-  // Second pass: collect unique codepoints via O(n²) dedup.
-  // Bounded by uniqueCount × totalChars comparisons. For 2000 unique from 2291 total,
-  // worst case ~4.6M comparisons of uint32_t — ~30ms on 160MHz RISC-V, acceptable
-  // for one-time section indexing.
-  const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8Text);
-  while (*p) {
-    uint32_t cp = utf8NextCodepoint(&p);
-    if (cp == 0) break;
-
-    bool found = false;
-    for (uint32_t i = 0; i < cpCount; i++) {
-      if (codepoints[i] == cp) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      if (cpCount >= maxUniqueCodepoints) {
+  // Collect unique codepoints. UniqueCodepointSet keeps ASCII in a bitmap and
+  // binary-searches the rest, replacing an O(unique x chars) linear dedup that
+  // cost millions of compares on a CJK chapter. finish() leaves the buffer
+  // sorted, which is the order the glyph index mapping and final table need.
+  {
+    UniqueCodepointSet unique(codepoints, maxUniqueCodepoints);
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8Text);
+    while (*p) {
+      uint32_t cp = utf8NextCodepoint(&p);
+      if (cp == 0) break;
+      if (!unique.add(cp)) {
         hitCap = true;
         break;
       }
-      codepoints[cpCount++] = cp;
     }
+    cpCount = unique.finish();
   }
   if (hitCap) {
     LOG_ERR("SDCF", "buildAdvanceTable: unique codepoint cap (%u) hit, layout may be approximate", maxUniqueCodepoints);
   }
-
-  // Sort for ordered glyph index mapping and final table output
-  std::sort(codepoints, codepoints + cpCount);
 
   // Step 2: For each requested style, fetch any codepoints not yet cached and
   // merge them into the persistent advance table.
