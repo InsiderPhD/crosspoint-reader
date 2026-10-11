@@ -214,6 +214,29 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
 
   prevRowY += 1;
 
+  if (bpp == 1 && nativePalette && !atkinsonDitherer && !fsDitherer) {
+    // 1-bit sources (home thumbnails, sleep wallpapers) only ever produce two
+    // output levels, so the per-pixel path computed adjustPixel(lum) >> 6 for
+    // one of two inputs, width times. Resolve both levels once per row and
+    // expand four source pixels per table lookup: expanded[n] has 0b11 in each
+    // 2-bit slot whose source bit is set, so (zero ^ (expanded & difference))
+    // selects level 1 there and level 0 elsewhere. Output is byte-identical to
+    // the generic path. The table is flash-resident; no extra buffer is needed.
+    static constexpr uint8_t expanded[16] = {0x00, 0x03, 0x0C, 0x0F, 0x30, 0x33, 0x3C, 0x3F,
+                                             0xC0, 0xC3, 0xCC, 0xCF, 0xF0, 0xF3, 0xFC, 0xFF};
+    const uint8_t zero = static_cast<uint8_t>(((adjustPixel(paletteLum[0]) >> 6) & 0x03) * 0x55);
+    const uint8_t one = static_cast<uint8_t>(((adjustPixel(paletteLum[1]) >> 6) & 0x03) * 0x55);
+    const uint8_t difference = zero ^ one;
+    const int outputBytes = (width + 3) / 4;
+    for (int i = 0; i < outputBytes; ++i) {
+      const uint8_t nibble = (rowBuffer[i >> 1] >> ((i & 1) ? 0 : 4)) & 0x0F;
+      data[i] = zero ^ (expanded[nibble] & difference);
+    }
+    // The generic path leaves the unused low slots of a partial last byte at 0.
+    if (width & 3) data[outputBytes - 1] &= static_cast<uint8_t>(0xFF << (2 * (4 - (width & 3))));
+    return BmpReaderError::Ok;
+  }
+
   uint8_t* outPtr = data;
   uint8_t currentOutByte = 0;
   int bitShift = 6;
