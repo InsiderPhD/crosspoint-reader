@@ -139,6 +139,10 @@ class SdCardFont {
 
     // Full intervals loaded from file (kept in RAM for codepoint lookup)
     EpdUnicodeInterval* fullIntervals = nullptr;
+    // True when fullIntervals points at an earlier style's table rather than
+    // this style's own allocation (byte-identical on disk — see load()). Only
+    // the owning style frees it; see freeStyleAll().
+    bool intervalsShared = false;
 
     // Persistent kern-class + ligature tables (lazy-loaded on first prewarm).
     // The full kern MATRIX is NOT resident — on Literata-class fonts a single

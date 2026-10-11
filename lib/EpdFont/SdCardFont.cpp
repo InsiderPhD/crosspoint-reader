@@ -89,8 +89,11 @@ void SdCardFont::freeStyleMiniKern(PerStyle& s) {
 
 void SdCardFont::freeStyleAll(PerStyle& s) {
   freeStyleMiniData(s);
-  delete[] s.fullIntervals;
+  // A shared table is owned by the style it was aliased from — that style's own
+  // freeStyleAll() call frees it. Deleting it here too would double-free.
+  if (!s.intervalsShared) delete[] s.fullIntervals;
   s.fullIntervals = nullptr;
+  s.intervalsShared = false;
   freeStyleKernLigatureData(s);
   s.present = false;
 }
@@ -506,28 +509,82 @@ bool SdCardFont::load(const char* path) {
     auto& s = styles_[i];
     if (!s.present) continue;
 
-    s.fullIntervals = new (std::nothrow) EpdUnicodeInterval[s.header.intervalCount];
-    if (!s.fullIntervals) {
-      LOG_ERR("SDCF", "Failed to allocate %u intervals for style %u", s.header.intervalCount, i);
-      freeAll();
-      return false;
-    }
-
     if (!file.seekSet(s.intervalsFileOffset)) {
       LOG_ERR("SDCF", "Failed to seek to intervals for style %u", i);
       freeAll();
       return false;
     }
-    size_t intervalsBytes = s.header.intervalCount * sizeof(EpdUnicodeInterval);
-    if (file.read(reinterpret_cast<uint8_t*>(s.fullIntervals), intervalsBytes) != static_cast<int>(intervalsBytes)) {
-      LOG_ERR("SDCF", "Failed to read intervals for style %u", i);
-      freeAll();
-      return false;
+
+    // Regular/bold/italic weights of one family almost always cover the same
+    // codepoint set, so a later style's interval table is usually a byte-for-byte
+    // copy of an earlier one's. Compare the on-disk records against the tables
+    // already resident BEFORE allocating: aliasing saves the whole table per
+    // style and, unlike allocate-then-dedupe, never needs both copies at once.
+    // The compare streams through a 192-byte stack chunk, so it costs no heap.
+    uint8_t shareCandidates = 0;
+    if (s.header.intervalCount > 0) {
+      for (uint8_t k = 0; k < i; k++) {
+        const auto& owner = styles_[k];
+        if (!owner.present || !owner.fullIntervals || owner.header.intervalCount != s.header.intervalCount) continue;
+        shareCandidates |= static_cast<uint8_t>(1u << k);
+      }
+    }
+    if (shareCandidates != 0) {
+      static constexpr uint32_t CHUNK_RECORDS = 16;
+      EpdUnicodeInterval chunk[CHUNK_RECORDS];
+      for (uint32_t j = 0; j < s.header.intervalCount && shareCandidates != 0; j += CHUNK_RECORDS) {
+        const uint32_t n = std::min(CHUNK_RECORDS, s.header.intervalCount - j);
+        const size_t bytes = n * sizeof(EpdUnicodeInterval);
+        if (file.read(reinterpret_cast<uint8_t*>(chunk), bytes) != static_cast<int>(bytes)) {
+          LOG_ERR("SDCF", "Failed to read intervals for style %u", i);
+          freeAll();
+          return false;
+        }
+        for (uint8_t k = 0; k < i; k++) {
+          if ((shareCandidates & (1u << k)) == 0) continue;
+          // EpdUnicodeInterval is 3 x uint32_t (static_assert: 12 bytes), so no padding to confuse memcmp.
+          if (memcmp(styles_[k].fullIntervals + j, chunk, bytes) != 0) {
+            shareCandidates &= static_cast<uint8_t>(~(1u << k));
+          }
+        }
+      }
+    }
+
+    if (shareCandidates != 0) {
+      // Survived every record. Lowest surviving index is the original owner
+      // (a style that itself aliases style k can only come after k).
+      uint8_t ownerIdx = 0;
+      while ((shareCandidates & (1u << ownerIdx)) == 0) ownerIdx++;
+      s.fullIntervals = styles_[ownerIdx].fullIntervals;
+      s.intervalsShared = true;
+      LOG_DBG("SDCF", "Style %u: sharing style %u's %u-interval table (%u B not allocated)", i, ownerIdx,
+              s.header.intervalCount, s.header.intervalCount * static_cast<uint32_t>(sizeof(EpdUnicodeInterval)));
+    } else {
+      s.fullIntervals = new (std::nothrow) EpdUnicodeInterval[s.header.intervalCount];
+      if (!s.fullIntervals) {
+        LOG_ERR("SDCF", "Failed to allocate %u intervals for style %u", s.header.intervalCount, i);
+        freeAll();
+        return false;
+      }
+      // The compare pass above may have advanced the file position.
+      if (!file.seekSet(s.intervalsFileOffset)) {
+        LOG_ERR("SDCF", "Failed to seek to intervals for style %u", i);
+        freeAll();
+        return false;
+      }
+      size_t intervalsBytes = s.header.intervalCount * sizeof(EpdUnicodeInterval);
+      if (file.read(reinterpret_cast<uint8_t*>(s.fullIntervals), intervalsBytes) != static_cast<int>(intervalsBytes)) {
+        LOG_ERR("SDCF", "Failed to read intervals for style %u", i);
+        freeAll();
+        return false;
+      }
     }
 
     // Validate interval contents before any later code (findGlobalGlyphIndex,
     // glyph reads) trusts them. A malformed file could otherwise drive
-    // out-of-range glyph indices into bogus on-disk reads.
+    // out-of-range glyph indices into bogus on-disk reads. This runs for a
+    // shared table too: the checks depend on THIS style's glyphCount, which
+    // can differ from the owner's even when the records are identical.
     {
       uint32_t expectedOffset = 0;
       uint32_t prevLast = 0;
