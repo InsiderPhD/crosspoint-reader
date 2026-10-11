@@ -93,7 +93,7 @@ void applyLegacyStatusBarSettings(CrossPointSettings& settings) {
 
 // ---- CrossPointState ----
 
-bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
+void JsonSettingsIO::serializeState(const CrossPointState& s, String& json) {
   JsonDocument doc;
   doc["openEpubPath"] = s.openEpubPath;
   doc["readerTimeLeftBookPath"] = s.readerTimeLeftBookPath;
@@ -108,9 +108,8 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   doc["lastHardcoverSyncDay"] = s.lastHardcoverSyncDay;
   doc["showBootScreen"] = s.showBootScreen;
 
-  String json;
+  json = "";
   serializeJson(doc, json);
-  return Storage.writeFile(path, json);
 }
 
 bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {

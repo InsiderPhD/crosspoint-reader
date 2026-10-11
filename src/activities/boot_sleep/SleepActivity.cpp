@@ -142,7 +142,6 @@ void SleepActivity::renderCustomSleepScreen() const {
       FsFile randFile;
       if (Storage.openFileForRead("SLP", filename, randFile)) {
         LOG_DBG("SLP", "Randomly loading: %s/%s", sleepDir, files[randomFileIndex].c_str());
-        delay(100);
         Bitmap bitmap(randFile, true);
         if (bitmap.parseHeaders() == BmpReaderError::Ok) {
           renderBitmapSleepScreen(bitmap);

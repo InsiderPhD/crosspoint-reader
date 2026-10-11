@@ -1,5 +1,7 @@
 #pragma once
 
+#include <WString.h>
+
 #include <vector>
 
 class CrossPointSettings;
@@ -18,7 +20,9 @@ bool saveSettings(const CrossPointSettings& s, const char* path);
 bool loadSettings(CrossPointSettings& s, const char* json, bool* needsResave = nullptr);
 
 // CrossPointState
-bool saveState(const CrossPointState& s, const char* path);
+// Produces the on-disk form without writing it, so CrossPointState::saveToFile()
+// can fingerprint exactly what would be written and skip an unchanged save.
+void serializeState(const CrossPointState& s, String& json);
 bool loadState(CrossPointState& s, const char* json);
 
 // WifiCredentialStore

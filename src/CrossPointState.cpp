@@ -4,6 +4,7 @@
 #include <JsonSettingsIO.h>
 #include <Logging.h>
 #include <Serialization.h>
+#include <esp_rom_crc.h>
 
 #include <algorithm>
 
@@ -38,11 +39,40 @@ void CrossPointState::registerValidTimeSync(const uint32_t validTimestamp) {
 }
 
 bool CrossPointState::saveToFile() const {
+  // Serialise first and fingerprint the exact bytes that would be written. The
+  // String is the one a save always built; the CRC adds no allocation.
+  String json;
+  JsonSettingsIO::serializeState(*this, json);
+  const uint32_t crc = esp_rom_crc32_le(0, reinterpret_cast<const uint8_t*>(json.c_str()), json.length());
+
+  // Skip the card write when the file already holds these bytes. saveToFile()
+  // runs on every sleep entry, every wake and every reader open, and most of
+  // those change nothing; each skipped call saves a FAT directory update and a
+  // data-sector rewrite. exists() keeps the skip honest if the file was removed
+  // behind our back (cache clear, file transfer).
+  if (lastSavedCrcValid && crc == lastSavedCrc && Storage.exists(STATE_FILE_JSON)) {
+    return true;
+  }
+
+  // A second task saving while this write is in flight (the boot NTP task) may
+  // land after it; the generation check then drops the remembered CRC rather
+  // than trusting one that no longer describes the file.
+  const uint32_t generation = ++saveGeneration;
+  lastSavedCrcValid = false;
   Storage.mkdir("/.crosspoint");
-  return JsonSettingsIO::saveState(*this, STATE_FILE_JSON);
+  if (!Storage.writeFile(STATE_FILE_JSON, json)) {
+    return false;
+  }
+  if (saveGeneration == generation) {
+    lastSavedCrc = crc;
+    lastSavedCrcValid = true;
+  }
+  return true;
 }
 
 bool CrossPointState::loadFromFile() {
+  // A reload replaces the in-memory state; forget the remembered snapshot.
+  lastSavedCrcValid = false;
   // Try JSON first
   if (Storage.exists(STATE_FILE_JSON)) {
     String json = Storage.readFile(STATE_FILE_JSON);

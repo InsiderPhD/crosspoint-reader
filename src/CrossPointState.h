@@ -52,6 +52,11 @@ class CrossPointState {
 
  private:
   bool loadFromBinaryFile();
+  // CRC32 of the JSON last written successfully, so saveToFile() can skip a
+  // card write that would change nothing. Valid only while lastSavedCrcValid.
+  mutable uint32_t lastSavedCrc = 0;
+  mutable uint32_t saveGeneration = 0;
+  mutable bool lastSavedCrcValid = false;
 };
 
 // Helper macro to access settings
