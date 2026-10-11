@@ -4,6 +4,7 @@
 #include <GfxRenderer.h>
 #include <HalFrontlight.h>
 #include <Logging.h>
+#include <WiFi.h>
 
 #include <cstring>
 
@@ -34,6 +35,7 @@
 #include "SdCardFontGlobals.h"
 #include "SdFirmwareUpdateActivity.h"
 #include "SettingsList.h"
+#include "SilentRestart.h"
 #include "SleepStatsSettingsActivity.h"
 #include "StatsDataActivity.h"
 #include "StatusBarSettingsActivity.h"
@@ -436,7 +438,23 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<CalibreSettingsActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::Network:
-        startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false), resultHandler);
+        startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false),
+                               [](const ActivityResult&) {
+                                 SETTINGS.saveToFile();
+                                 // Every other WiFi consumer is a parent activity whose own onExit()
+                                 // disconnects and silent-restarts. This row only saves credentials, and
+                                 // popping the child runs just the child's onExit(), which deliberately
+                                 // leaves the radio to its parent -- so nothing ever released the
+                                 // driver (tens of KB of heap, plus the radio itself). The scan alone
+                                 // brings it up, so tear down whether or not the user joined a network.
+                                 if (WiFi.getMode() == WIFI_MODE_NULL) return;
+                                 WiFi.disconnect(false);
+                                 delay(30);
+                                 // Runs from the loop task with no lock held: take the render lock so
+                                 // the restart cannot cut the render task off mid-refresh.
+                                 RenderLock lock;
+                                 silentRestartToSettings();
+                               });
         break;
       case SettingAction::Bluetooth:
         startActivityForResult(std::make_unique<BluetoothSettingsActivity>(renderer, mappedInput), resultHandler);
