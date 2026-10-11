@@ -59,9 +59,14 @@ void logPrintf(const char* level, const char* origin, const char* format, ...) {
     }
   }
   va_end(args);
-  if (logSerial) {
-    logSerial.print(buf);
-  }
+  // Write even when `logSerial` reports disconnected. After a brief SOF-watchdog
+  // flap (common at the 10 MHz low-power clock, where late ticks make the USB
+  // Serial/JTAG monitor miss start-of-frames) HWCDC keeps `connected` false until
+  // its next TX interrupt, and gating on it here dropped every line in that
+  // window. HWCDC::write() re-checks the connection itself: when disconnected it
+  // only pushes into its TX ring (oldest bytes dropped, no waiting) and re-arms
+  // the interrupt that sets `connected` again; before Serial.begin() it returns 0.
+  logSerial.print(buf);
   addToLogRingBuffer(buf);
 }
 
