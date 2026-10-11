@@ -96,6 +96,11 @@ class HalFile : public Print {
   int read();  // read a single byte
   size_t write(const void* buf, size_t count);
   size_t write(uint8_t b) override;
+  // Print's block write. Without this override a block written through a Print&
+  // (BufferedPrint flushes, readFileToStream sinks) falls into Arduino's default
+  // Print::write(const uint8_t*, size_t), which loops over write(uint8_t): one
+  // storage-mutex round trip per byte.
+  size_t write(const uint8_t* buf, size_t count) override { return write(static_cast<const void*>(buf), count); }
   bool rename(const char* newPath);
   bool isDirectory() const;
   void rewindDirectory();
