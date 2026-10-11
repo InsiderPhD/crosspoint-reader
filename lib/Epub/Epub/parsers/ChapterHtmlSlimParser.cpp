@@ -825,7 +825,6 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 extractSuccess = self->epub->readItemContentsToStream(resolvedPath, cachedImageFile, 4096);
                 cachedImageFile.flush();
                 cachedImageFile.close();
-                delay(50);  // Give SD card time to sync
                 if (extractSuccess) extractSuccess = Storage.rename(partPath.c_str(), cachedImagePath.c_str());
                 if (!extractSuccess) Storage.remove(partPath.c_str());
               }
@@ -860,7 +859,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
               if (!gotDimensions) {
                 // Unrecognised header (rare) - fall back to the decoder. Retried
                 // to absorb SD-card sync latency on slow cards, which otherwise
-                // produced the same permanent silent drop.
+                // produced the same permanent silent drop. This retry is the only
+                // wait now: the blanket delay(50) after every extraction is gone.
                 ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(cachedImagePath);
                 for (int attempt = 0; attempt < 3 && !gotDimensions; attempt++) {
                   if (attempt > 0) {
