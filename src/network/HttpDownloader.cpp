@@ -13,6 +13,7 @@
 
 #include "CrossPointSettings.h"
 #include "DownloadFailureLog.h"
+#include "WifiPowerSaveGuard.h"
 
 // wolfSSL's Arduino port leaves its logging hook to the application
 // (wolfcrypt/src/logging.c calls it whenever logging is enabled; the reference
@@ -55,6 +56,8 @@ void configureRequest(freeink::SecureHttpClient& http, const std::string& url, b
 }  // namespace
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent) {
+  // Modem sleep off for the request; declared first so it outlives `http`.
+  WifiPowerSaveGuard wifiPowerSaveGuard;
   freeink::SecureHttpClient http;
 
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
@@ -116,6 +119,9 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
                                                              const std::string& username, const std::string& password,
                                                              const std::vector<Header>& headers, bool resumePartial) {
   gLastHttpStatus = 0;
+  // Modem sleep off for the whole transfer (BookFusion, OPDS, plugins, fonts,
+  // dictionaries, firmware); declared first so it outlives `http`.
+  WifiPowerSaveGuard wifiPowerSaveGuard;
   freeink::SecureHttpClient http;
 
   LOG_DBG("HTTP", "Downloading: %s", url.c_str());

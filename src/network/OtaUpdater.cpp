@@ -4,11 +4,11 @@
 #include <Logging.h>
 #include <ReleaseJsonParser.h>
 #include <SecureHttpClient.h>
-#include <esp_wifi.h>
 
 #include "CrossPointSettings.h"
 #include "FirmwareFlasher.h"
 #include "HttpDownloader.h"
+#include "WifiPowerSaveGuard.h"
 
 namespace {
 constexpr char latestReleaseUrl[] = "https://api.github.com/repos/InsiderPhD/crosspoint-reader/releases/latest";
@@ -186,8 +186,9 @@ OtaUpdater::OtaUpdaterError OtaUpdater::downloadUpdate() {
     return INTERNAL_UPDATE_ERROR;
   }
 
-  /* Disable WiFi power saving for a stable download. */
-  esp_wifi_set_ps(WIFI_PS_NONE);
+  // Modem sleep stays off across the retries, not just inside each
+  // downloadToFile() (which holds its own nested guard); restored on return.
+  WifiPowerSaveGuard wifiPowerSaveGuard;
 
   // Download firmware.bin to SD, quietly: the caller holds the framebuffer
   // lent to this transfer's TLS session, so nothing may render — progress is a
@@ -216,8 +217,6 @@ OtaUpdater::OtaUpdaterError OtaUpdater::downloadUpdate() {
     if (dlResult == HttpDownloader::OK) break;
     LOG_ERR("OTA", "Firmware download attempt %d/%d failed: %d", attempt, kMaxDownloadAttempts, dlResult);
   }
-
-  esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 
   if (dlResult != HttpDownloader::OK) {
     Storage.remove(kTmpPath);

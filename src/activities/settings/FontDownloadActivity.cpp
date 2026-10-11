@@ -8,7 +8,6 @@
 #include <StreamingJsonParser.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
-#include <esp_wifi.h>
 
 #include <cstring>
 
@@ -20,6 +19,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "network/WifiPowerSaveGuard.h"
 #include "util/HardcoverSync.h"
 #include "util/TouchListNav.h"
 
@@ -434,10 +434,7 @@ void FontDownloadActivity::downloadFamily(ManifestFamily& family) {
   // link (the user just sat on the family list) surfaces as a TCP connect
   // failure on the first request (observed on-device). Restored on every
   // return path.
-  esp_wifi_set_ps(WIFI_PS_NONE);
-  struct PsRestore {
-    ~PsRestore() { esp_wifi_set_ps(WIFI_PS_MIN_MODEM); }
-  } psRestore;
+  WifiPowerSaveGuard wifiPowerSaveGuard;
 
   for (size_t i = 0; i < family.files.size(); i++) {
     const auto& file = family.files[i];

@@ -8,7 +8,6 @@
 #include <StreamingJsonParser.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
-#include <esp_wifi.h>
 
 #include <cstring>
 
@@ -20,6 +19,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "network/WifiPowerSaveGuard.h"
 #include "util/DictionaryRegistry.h"
 #include "util/HardcoverSync.h"
 #include "util/TouchListNav.h"
@@ -399,10 +399,7 @@ void DictionaryDownloadActivity::downloadEntry(CatalogEntry& entry) {
   // Keep the radio awake for the whole dictionary: WiFi power-save on an idle
   // link (the user has just been sitting on the list) surfaces as a TCP connect
   // failure on the first request. Restored on every return path.
-  esp_wifi_set_ps(WIFI_PS_NONE);
-  struct PsRestore {
-    ~PsRestore() { esp_wifi_set_ps(WIFI_PS_MIN_MODEM); }
-  } psRestore;
+  WifiPowerSaveGuard wifiPowerSaveGuard;
 
   for (size_t i = 0; i < entry.files.size(); i++) {
     const auto& file = entry.files[i];
