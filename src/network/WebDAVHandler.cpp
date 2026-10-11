@@ -326,12 +326,22 @@ void WebDAVHandler::handleGet(WebServer& s) {
   }
 
   String contentType = getMimeType(path);
-  s.setContentLength(file.size());
+  const size_t fileSize = file.size();
+  file.close();
+
+  s.setContentLength(fileSize);
   s.send(200, contentType.c_str(), "");
 
+  // This used to be `client.write(file)`, which sent exactly one byte. It
+  // matched NetworkClient::write(Stream&) while Storage.open() returned an
+  // SdFat FsFile; HalFile derives from Print, not Stream, so the compiler fell
+  // back to HalFile::operator bool() -> uint8_t -> Print::write(uint8_t) and
+  // wrote a single 0x01 under a correct Content-Length. readFileToStream()
+  // takes a Print& and opens the path itself, hence the early close above.
   NetworkClient client = s.client();
-  client.write(file);
-  file.close();
+  if (!Storage.readFileToStream(path.c_str(), client)) {
+    LOG_ERR("DAV", "GET %s: failed to stream file", path.c_str());
+  }
 }
 
 // ── HEAD ─────────────────────────────────────────────────────────────────────
