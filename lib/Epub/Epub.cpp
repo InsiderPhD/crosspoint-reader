@@ -1005,7 +1005,20 @@ int Epub::getSpineItemsCount() const {
   return bookMetadataCache->getSpineCount();
 }
 
-size_t Epub::getCumulativeSpineItemSize(const int spineIndex) const { return getSpineItem(spineIndex).cumulativeSize; }
+size_t Epub::getCumulativeSpineItemSize(const int spineIndex) const {
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    LOG_ERR("EBP", "getCumulativeSpineItemSize called but cache not loaded");
+    return 0;
+  }
+
+  // Same out-of-range behaviour as getSpineItem(): fall back to the first entry.
+  if (spineIndex < 0 || spineIndex >= bookMetadataCache->getSpineCount()) {
+    LOG_ERR("EBP", "getCumulativeSpineItemSize index:%d is out of range", spineIndex);
+    return bookMetadataCache->getSpineCount() > 0 ? bookMetadataCache->getSpineCumulativeSize(0) : 0;
+  }
+
+  return bookMetadataCache->getSpineCumulativeSize(spineIndex);
+}
 
 BookMetadataCache::SpineEntry Epub::getSpineItem(const int spineIndex) const {
   if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {

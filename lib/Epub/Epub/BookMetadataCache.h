@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <deque>
+#include <memory>
 #include <string>
 
 class BookMetadataCache {
@@ -66,6 +67,17 @@ class BookMetadataCache {
   bool loaded;
   bool buildMode;
 
+  // Reader-session cache of every spine item's cumulative size, so progress and
+  // percent lookups stop costing two SD seeks each. Filled lazily by the first
+  // getSpineCumulativeSize() call: the ~25 metadata-only load() callers (Home,
+  // Library, Recents, sleep screen) never ask for a size and so never pay the
+  // read or the RAM. Bounded at MAX_CACHED_CUMULATIVE_SIZES entries (4KB); larger
+  // spines, or a failed allocation, keep using the per-call SD lookup. Freed with
+  // this object (Epub resets its BookMetadataCache on every load/unload).
+  std::unique_ptr<uint32_t[]> cumulativeSizes;
+  uint16_t cumulativeSizeCount = 0;
+  bool cumulativeSizesTried = false;
+
   FsFile bookFile;
   // Temp file handles during build
   FsFile spineFile;
@@ -96,6 +108,7 @@ class BookMetadataCache {
   uint32_t writeTocEntry(FsFile& file, const TocEntry& entry) const;
   SpineEntry readSpineEntry(FsFile& file) const;
   TocEntry readTocEntry(FsFile& file) const;
+  void cacheSpineCumulativeSizes();
 
  public:
   BookMetadata coreMetadata;
@@ -125,6 +138,9 @@ class BookMetadataCache {
   // Reading phase (read mode)
   bool load();
   SpineEntry getSpineEntry(int index);
+  // Cumulative size of spine item `index` without materialising its href. Served
+  // from RAM when the bounded size cache is populated, otherwise read from SD.
+  CacheSize getSpineCumulativeSize(int index);
   TocEntry getTocEntry(int index);
   int getSpineCount() const { return spineCount; }
   int getTocCount() const { return tocCount; }

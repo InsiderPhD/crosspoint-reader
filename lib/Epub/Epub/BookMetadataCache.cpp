@@ -1,9 +1,11 @@
 #include "BookMetadataCache.h"
 
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 #include <ZipFile.h>
 
+#include <cstring>
 #include <deque>
 
 #include "FsHelpers.h"
@@ -14,8 +16,20 @@ namespace {
 // rebuild of stale book.bin so the fix applies without a manual recache.
 constexpr uint8_t BOOK_CACHE_VERSION = 12;
 constexpr char bookBinFile[] = "/book.bin";
+// Cap on the in-RAM cumulative spine size table: 1024 x 4 bytes = 4KB, held for
+// the reading session. Books with more spine items keep the on-disk lookup.
+constexpr uint16_t MAX_CACHED_CUMULATIVE_SIZES = 1024;
+// Transient read buffer used only while filling that table (heap: over the
+// 256-byte stack-local budget; freed before the fill returns).
+constexpr size_t CUMULATIVE_SIZE_READ_CHUNK = 1024;
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
+
+// HalFile::read() returns a negative int on error; never compare it to a size_t directly.
+bool readExact(FsFile& file, void* out, const size_t count) {
+  const int got = file.read(out, count);
+  return got >= 0 && static_cast<size_t>(got) == count;
+}
 }  // namespace
 
 /* ============= WRITING / BUILDING FUNCTIONS ================ */
@@ -405,6 +419,10 @@ bool BookMetadataCache::load() {
     return false;
   }
 
+  cumulativeSizes.reset();
+  cumulativeSizeCount = 0;
+  cumulativeSizesTried = false;
+
   uint8_t version;
   serialization::readPod(bookFile, version);
   if (version != BOOK_CACHE_VERSION) {
@@ -453,6 +471,110 @@ BookMetadataCache::SpineEntry BookMetadataCache::getSpineEntry(const int index) 
   serialization::readPod(bookFile, spineEntryPos);
   bookFile.seek(spineEntryPos);
   return readSpineEntry(bookFile);
+}
+
+void BookMetadataCache::cacheSpineCumulativeSizes() {
+  // One attempt per load(): a failed allocation or a short read must not turn
+  // every later lookup into another failed attempt.
+  cumulativeSizesTried = true;
+  cumulativeSizeCount = 0;
+  if (spineCount == 0 || spineCount > MAX_CACHED_CUMULATIVE_SIZES) {
+    return;
+  }
+
+  auto sizes = makeUniqueNoThrow<uint32_t[]>(spineCount);
+  auto chunk = makeUniqueNoThrow<uint8_t[]>(CUMULATIVE_SIZE_READ_CHUNK);
+  if (!sizes || !chunk) {
+    LOG_DBG("BMC", "Could not allocate %u-byte cumulative size cache; using SD lookups",
+            static_cast<unsigned>(spineCount * sizeof(uint32_t)));
+    return;
+  }
+
+  // Spine entries are written back to back in spine order (buildBookBin), so one
+  // forward pass from the first entry covers them all.
+  uint32_t firstEntryPos = 0;
+  if (!bookFile.seek(lutOffset) || !readExact(bookFile, &firstEntryPos, sizeof(firstEntryPos)) ||
+      !bookFile.seek(firstEntryPos)) {
+    LOG_DBG("BMC", "Could not seek to spine data for cumulative size cache; using SD lookups");
+    return;
+  }
+
+  size_t fill = 0;
+  size_t off = 0;
+  // Copies (dst != nullptr) or skips the next n bytes of the stream, refilling the chunk as needed.
+  const auto pull = [&](uint8_t* dst, size_t n) -> bool {
+    while (n > 0) {
+      if (off == fill) {
+        const int got = bookFile.read(chunk.get(), CUMULATIVE_SIZE_READ_CHUNK);
+        if (got <= 0) return false;
+        fill = static_cast<size_t>(got);
+        off = 0;
+      }
+      const size_t take = std::min(n, fill - off);
+      if (dst) {
+        memcpy(dst, chunk.get() + off, take);
+        dst += take;
+      }
+      off += take;
+      n -= take;
+    }
+    return true;
+  };
+
+  for (uint16_t i = 0; i < spineCount; ++i) {
+    // Entry layout (writeSpineEntry): u32 hrefLen, href bytes, u32 cumulativeSize, i16 tocIndex.
+    // Fields are copied out bytewise: they sit at unaligned offsets in the chunk.
+    uint32_t hrefLen = 0;
+    uint8_t raw[sizeof(uint32_t)];
+    uint32_t size = 0;
+    if (!pull(raw, sizeof(raw))) break;
+    memcpy(&hrefLen, raw, sizeof(hrefLen));
+    if (!pull(nullptr, hrefLen) || !pull(raw, sizeof(raw)) || !pull(nullptr, sizeof(int16_t))) break;
+    memcpy(&size, raw, sizeof(size));
+    sizes[i] = size;
+    cumulativeSizeCount = static_cast<uint16_t>(i + 1);
+  }
+
+  if (cumulativeSizeCount != spineCount) {
+    LOG_DBG("BMC", "Could not populate cumulative size cache; using SD lookups");
+    cumulativeSizeCount = 0;
+    return;
+  }
+
+  cumulativeSizes = std::move(sizes);
+}
+
+BookMetadataCache::CacheSize BookMetadataCache::getSpineCumulativeSize(const int index) {
+  if (!loaded) {
+    LOG_ERR("BMC", "getSpineCumulativeSize called but cache not loaded");
+    return 0;
+  }
+
+  if (index < 0 || index >= static_cast<int>(spineCount)) {
+    LOG_ERR("BMC", "getSpineCumulativeSize index %d out of range", index);
+    return 0;
+  }
+
+  if (!cumulativeSizesTried) {
+    cacheSpineCumulativeSizes();
+  }
+  if (cumulativeSizes && index < static_cast<int>(cumulativeSizeCount)) {
+    return cumulativeSizes[index];
+  }
+
+  // Uncached (spine over the cap, or no memory): LUT seek + entry seek, reading
+  // only the size field rather than building the whole SpineEntry.
+  uint32_t spineEntryPos = 0;
+  uint32_t hrefLen = 0;
+  CacheSize size = 0;
+  if (!bookFile.seek(lutOffset + sizeof(uint32_t) * index) ||
+      !readExact(bookFile, &spineEntryPos, sizeof(spineEntryPos)) || !bookFile.seek(spineEntryPos) ||
+      !readExact(bookFile, &hrefLen, sizeof(hrefLen)) || !bookFile.seekCur(hrefLen) ||
+      !readExact(bookFile, &size, sizeof(size))) {
+    LOG_ERR("BMC", "Failed to read cumulative size for spine item %d", index);
+    return 0;
+  }
+  return size;
 }
 
 BookMetadataCache::TocEntry BookMetadataCache::getTocEntry(const int index) {
