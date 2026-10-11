@@ -25,13 +25,20 @@ class BookMetadataCache {
     std::string bookshelf;  // BookFusion "bookshelf" Calibre custom column value
   };
 
+  // Offsets/sizes stored in book.bin are 4-byte on disk (writeHeader computes
+  // lutOffset as uint32_t) and readPod() fills sizeof(field) bytes, so the
+  // in-memory fields must be exactly 32-bit. size_t is 4 bytes on the device but
+  // 8 on the 64-bit desktop simulator, where it pulled the read stream 4 bytes
+  // off and left every spine href empty. Byte-identical on the device.
+  using CacheSize = uint32_t;
+
   struct SpineEntry {
     std::string href;
-    size_t cumulativeSize;
+    CacheSize cumulativeSize;
     int16_t tocIndex;
 
     SpineEntry() : cumulativeSize(0), tocIndex(-1) {}
-    SpineEntry(std::string href, const size_t cumulativeSize, const int16_t tocIndex)
+    SpineEntry(std::string href, const CacheSize cumulativeSize, const int16_t tocIndex)
         : href(std::move(href)), cumulativeSize(cumulativeSize), tocIndex(tocIndex) {}
   };
 
@@ -53,7 +60,7 @@ class BookMetadataCache {
 
  private:
   std::string cachePath;
-  size_t lutOffset;
+  CacheSize lutOffset;
   uint16_t spineCount;
   uint16_t tocCount;
   bool loaded;
