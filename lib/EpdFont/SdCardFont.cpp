@@ -985,6 +985,19 @@ void SdCardFont::clearCache() {
   }
 }
 
+void SdCardFont::releaseResidentCaches() {
+  clearOverflow();
+  clearPersistentCache();
+  for (uint8_t i = 0; i < MAX_STYLES; i++) {
+    if (!styles_[i].present) continue;
+    freeStyleMiniData(styles_[i]);  // also frees the mini kern and points epdFont back at the stub
+    // Nulls the stub/mini ligature views before freeing the table, and clears
+    // kernLigLoaded so the next full prewarm lazily reloads it.
+    freeStyleKernLigatureData(styles_[i]);
+    applyGlyphMissCallback(i);  // keep the on-demand miss path alive on the stub
+  }
+}
+
 // --- Advance table ---
 
 void SdCardFont::clearPersistentCache() {

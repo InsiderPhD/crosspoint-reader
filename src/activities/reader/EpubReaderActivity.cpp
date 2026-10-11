@@ -612,6 +612,14 @@ void EpubReaderActivity::onExit() {
       ProgressAutoSync::pushBlocking(*exitPayload);
     }
   }
+
+  // Last, once nothing in the reader can render again: drop the SD-font caches
+  // (mini glyph data, kern/ligature tables, advance tables) so they do not sit
+  // in the middle of the heap for the next activity. All rebuilt on re-entry.
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    fcm->releaseSdFontCaches();
+  }
+  LOG_INF("MEM", "reader exit: free=%u max_block=%u", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 }
 
 void EpubReaderActivity::loop() {
