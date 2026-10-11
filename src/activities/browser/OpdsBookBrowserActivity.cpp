@@ -171,6 +171,21 @@ void OpdsBookBrowserActivity::loop() {
   }
 }
 
+bool OpdsBookBrowserActivity::preventAutoSleep() {
+  switch (state) {
+    case BrowserState::CHECK_WIFI:
+    case BrowserState::WIFI_SELECTION:
+    case BrowserState::LOADING:
+    case BrowserState::DOWNLOADING:
+    case BrowserState::SEARCH_INPUT:
+      return true;
+    case BrowserState::BROWSING:
+    case BrowserState::ERROR:
+      return false;
+  }
+  return false;
+}
+
 void OpdsBookBrowserActivity::render(RenderLock&&) {
   renderer.clearScreen();
   const auto pageWidth = renderer.getScreenWidth();

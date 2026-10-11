@@ -58,5 +58,7 @@ class OpdsBookBrowserActivity final : public Activity {
   void downloadBook(const OpdsEntry& book);
   void launchSearch();
   void performSearch(const std::string& query);
-  bool preventAutoSleep() override { return true; }
+  // Holds the device awake only while something is in flight. An idle catalog
+  // list or an error screen sleeps on the normal timeout like any other screen.
+  bool preventAutoSleep() override;
 };
