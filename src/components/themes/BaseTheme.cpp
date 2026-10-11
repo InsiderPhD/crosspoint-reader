@@ -53,7 +53,7 @@ void drawBatteryIcon(const GfxRenderer& renderer, int x, int y, int battWidth, i
   // Draw battery outline (shared code)
   BaseTheme::drawBatteryOutline(renderer, x, y, battWidth, rectHeight);
 
-  const bool charging = gpio.isUsbConnected();
+  const bool charging = gpio.isUsbConnectedCached();
 
   // The +1 is to round up, so that we always fill at least one pixel
   const int maxFillWidth = battWidth - 5;

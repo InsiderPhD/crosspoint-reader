@@ -17,7 +17,12 @@ HalGPIO gpio;
 
 namespace {
 constexpr unsigned long VIRTUAL_BUTTON_REPRESS_DEBOUNCE_MS = 250;
-}
+// USB presence is sampled at most this often from update(). A probe costs a
+// 1.5 ms busy-wait on the S3 boards and up to two BQ27220 I2C transactions on
+// the X3; paying that on every 10 ms loop tick bought nothing, since the only
+// consumers are the battery icon and its plug/unplug repaint.
+constexpr unsigned long USB_POLL_INTERVAL_MS = 1000;
+}  // namespace
 
 // The X3 fingerprint probe and its BQ27220 helpers are ESP32-C3 ONLY. They drive
 // I2C on SDA=20/SCL=0, which is the Xteink C3 pinout; on the ESP32-S3 (X4 Pro)
@@ -244,12 +249,49 @@ void HalGPIO::update() {
   pendingVirtualPresses = 0;
 
   inputMgr.update();
-  const bool connected = isUsbConnected();
+
+  // An edge is reported for exactly one update(), as before; ticks that skip the
+  // sample report no edge.
+  usbStateChanged = false;
+  const unsigned long now = millis();
+  if (usbStateSampled && now - lastUsbPollMs < USB_POLL_INTERVAL_MS) {
+    return;
+  }
+
+  const bool connected = sampleUsbConnected();
   usbStateChanged = (connected != lastUsbConnected);
   lastUsbConnected = connected;
+  lastUsbPollMs = now;
+  usbStateSampled = true;
 }
 
 bool HalGPIO::wasUsbStateChanged() const { return usbStateChanged; }
+
+bool HalGPIO::isUsbConnectedCached() const { return usbStateSampled ? lastUsbConnected : isUsbConnected(); }
+
+bool HalGPIO::sampleUsbConnected() {
+#if FREEINK_MCU_S3
+  // A host clocks one start-of-frame per millisecond, so the 11-bit frame
+  // counter has moved since the poll a second ago whenever a host is attached:
+  // comparing against the previous poll's value answers without waiting.
+  const uint32_t frame = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG);
+  const bool advanced = usbStateSampled && frame != lastUsbFrameNumber;
+  lastUsbFrameNumber = frame;
+  if (advanced) {
+    return true;
+  }
+  // Counter unchanged (or no previous poll to compare with): either no host, or
+  // the gap between polls happened to be a whole number of 2048 ms counter
+  // wraps. Settle it with the direct 1.5 ms probe rather than report a false
+  // unplug. This is the only blocking path left and it runs at most once a
+  // second, and only while the counter is not moving.
+  const bool connected = isUsbConnected();
+  lastUsbFrameNumber = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG);
+  return connected;
+#else
+  return isUsbConnected();
+#endif
+}
 
 // --- Capacitive touch passthrough --------------------------------------------
 // One-line forwarders. On X3/X4 the board profile has no touch controller, so

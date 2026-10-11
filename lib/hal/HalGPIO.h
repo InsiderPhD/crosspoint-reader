@@ -60,6 +60,17 @@ class HalGPIO {
 
   bool lastUsbConnected = false;
   bool usbStateChanged = false;
+  // update() owns a throttled USB sample: usbStateSampled says lastUsbConnected
+  // holds a real reading, lastUsbPollMs is when it was taken.
+  bool usbStateSampled = false;
+  unsigned long lastUsbPollMs = 0;
+#if FREEINK_MCU_S3
+  // USB start-of-frame counter as seen by the previous poll (S3 boards only).
+  uint32_t lastUsbFrameNumber = 0;
+#endif
+
+  // Takes the periodic sample for update(). Never blocks while a host is attached.
+  bool sampleUsbConnected();
 
  public:
   enum class DeviceType : uint8_t { X4, X3 };
@@ -113,8 +124,15 @@ class HalGPIO {
   // Should only be called when wakeup reason is PowerButton.
   void verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPressAllowed);
 
-  // Check if USB is connected
+  // Check if USB is connected. A direct hardware probe: ~1.5 ms blocking on the
+  // S3 boards, up to two fuel-gauge I2C reads on the X3. Use it for one-shot
+  // boot decisions; anything on the loop or render path wants the cached getter.
   bool isUsbConnected() const;
+
+  // The latest sample update() took (refreshed at most once a second). Before
+  // the first update() it falls back to a direct probe, so setup-time callers
+  // still report external power.
+  bool isUsbConnectedCached() const;
 
   // Returns true once per edge (plug or unplug) since the last update()
   bool wasUsbStateChanged() const;
