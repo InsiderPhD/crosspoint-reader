@@ -61,6 +61,13 @@ class HalClock {
   // so the HAL stays free of any app-layer settings dependency.
   bool syncFromNTP();
 
+  // Set the ESP32 system clock (UTC) from NTP; needs no RTC. Requires WiFi to be
+  // connected and blocks the caller for up to timeoutMs. Runs one sync at a
+  // time: a call made while another task is syncing waits for it first. The
+  // SNTP client is started and stopped inside the call, so nothing keeps
+  // polling afterwards.
+  bool syncSystemClockFromNtp(uint32_t timeoutMs = 5000);
+
  private:
   // Write the full date and time to the RTC (freeink::Rtc::set writes the whole
   // struct; only the time is read back for the status-bar clock). UTC in, 2000-2099.

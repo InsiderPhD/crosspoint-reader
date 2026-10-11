@@ -3,7 +3,9 @@
 #include <Arduino.h>
 #include <HalClock.h>
 #include <Logging.h>
-#include <esp_sntp.h>
+#ifdef SIMULATOR
+#include <esp_sntp.h>  // host shim: reports the (already correct) host clock as synced
+#endif
 #include <sys/time.h>
 
 #include <algorithm>
@@ -79,40 +81,31 @@ void TimeUtils::configureTimezone() {
   configuredTimeZonePreset = preset;
 }
 
-void TimeUtils::stopNtp() {
-  if (esp_sntp_enabled()) {
-    esp_sntp_stop();
-  }
-}
-
 bool TimeUtils::syncTimeWithNtp(const uint32_t timeoutMs) {
   configureTimezone();
-  stopNtp();
 
-  const bool initialClockValid = isClockValid(static_cast<uint32_t>(time(nullptr)));
-  esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-  esp_sntp_setservername(0, "pool.ntp.org");
-  esp_sntp_setservername(1, "time.nist.gov");
-  esp_sntp_init();
-
-  const uint32_t maxRetries = std::max<uint32_t>(1, timeoutMs / 100U);
-  for (uint32_t retry = 0; retry < maxRetries; ++retry) {
-    const time_t currentTime = time(nullptr);
-    const bool currentClockValid = isClockValid(static_cast<uint32_t>(currentTime));
-    const bool syncCompleted = sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED;
-    const bool clockJumpedToValid = !initialClockValid && currentClockValid;
-
-    if ((syncCompleted || clockJumpedToValid) && currentClockValid) {
-      syncedThisBoot = true;
-      // Park it in the RTC so the date survives the next power cycle even if
-      // this is the last network the device ever sees.
-      halClock.setUtcEpoch(static_cast<uint32_t>(currentTime));
-      return true;
-    }
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+#ifdef SIMULATOR
+  (void)timeoutMs;
+  const bool synced = sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED;
+#else
+  // The HAL runs the SNTP client through esp-netif, one sync at a time, and
+  // stops it again before returning.
+  const bool synced = halClock.syncSystemClockFromNtp(timeoutMs);
+#endif
+  if (!synced) {
+    return false;
   }
 
-  return false;
+  const time_t currentTime = time(nullptr);
+  if (!isClockValid(static_cast<uint32_t>(currentTime))) {
+    return false;
+  }
+
+  syncedThisBoot = true;
+  // Park it in the RTC so the date survives the next power cycle even if
+  // this is the last network the device ever sees.
+  halClock.setUtcEpoch(static_cast<uint32_t>(currentTime));
+  return true;
 }
 
 bool TimeUtils::isClockValid() { return isClockValid(static_cast<uint32_t>(time(nullptr))); }

@@ -6,7 +6,6 @@
 namespace TimeUtils {
 
 void configureTimezone();
-void stopNtp();
 bool syncTimeWithNtp(uint32_t timeoutMs = 5000);
 bool isClockValid();
 bool isClockValid(uint32_t epochSeconds);

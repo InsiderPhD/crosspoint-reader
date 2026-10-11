@@ -3,12 +3,50 @@
 #include <BoardConfig.h>
 #include <Logging.h>
 #include <WiFi.h>
-#include <esp_sntp.h>
+#include <esp_netif.h>
+#include <esp_netif_sntp.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <lwip/dns.h>
 #include <time.h>
 
 #include <cassert>
 
 HalClock halClock;  // Singleton instance
+
+namespace {
+// esp_netif_sntp keeps one process-wide state block, and its deinit frees the
+// semaphore a concurrent esp_netif_sntp_sync_wait() would be blocked on. Syncs
+// are started from the loop task (WiFi flows, Sync clock now) and from the
+// silent boot task, so only one may own that state at a time. A flag under a
+// spinlock rather than a mutex: nothing to allocate, and it is held for two
+// instructions.
+portMUX_TYPE ntpSyncMux = portMUX_INITIALIZER_UNLOCKED;
+bool ntpSyncBusy = false;
+
+bool tryClaimNtpSync() {
+  bool claimed = false;
+  portENTER_CRITICAL(&ntpSyncMux);
+  if (!ntpSyncBusy) {
+    ntpSyncBusy = true;
+    claimed = true;
+  }
+  portEXIT_CRITICAL(&ntpSyncMux);
+  return claimed;
+}
+
+void releaseNtpSync() {
+  portENTER_CRITICAL(&ntpSyncMux);
+  ntpSyncBusy = false;
+  portEXIT_CRITICAL(&ntpSyncMux);
+}
+
+// Runs on the lwIP thread via esp_netif_tcpip_exec(), i.e. under the core lock.
+esp_err_t clearDnsCacheLocked(void*) {
+  dns_clear_cache();
+  return ESP_OK;
+}
+}  // namespace
 
 void HalClock::begin() {
   // Any board whose profile declares an RTC: the X3's DS3231, the X4 Pro's
@@ -165,33 +203,75 @@ bool HalClock::formatTime(char* buf, size_t bufSize, uint8_t utcOffsetQuarterHou
 bool HalClock::syncFromNTP() {
   if (!_available) return false;
 
+  if (!syncSystemClockFromNtp()) return false;
+
+  time_t now = time(nullptr);
+  struct tm timeinfo;
+  gmtime_r(&now, &timeinfo);
+
+  if (!writeDateTime(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min,
+                     timeinfo.tm_sec)) {
+    return false;
+  }
+  LOG_INF("CLK", "RTC set to %04d-%02d-%02d %02d:%02d:%02d UTC", timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
+          timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+  return true;
+}
+
+bool HalClock::syncSystemClockFromNtp(const uint32_t timeoutMs) {
   if (WiFi.status() != WL_CONNECTED) {
     LOG_ERR("CLK", "WiFi not connected, cannot sync NTP");
     return false;
   }
 
-  LOG_INF("CLK", "Starting NTP sync...");
-  configTzTime("UTC0", "pool.ntp.org", "time.nist.gov");
-
-  // Wait for SNTP sync to complete (up to 5 seconds)
-  constexpr int maxAttempts = 50;
-  for (int i = 0; i < maxAttempts; i++) {
-    if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
-      time_t now = time(nullptr);
-      struct tm timeinfo;
-      gmtime_r(&now, &timeinfo);
-
-      if (writeDateTime(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday, timeinfo.tm_hour,
-                        timeinfo.tm_min, timeinfo.tm_sec)) {
-        LOG_INF("CLK", "RTC set to %04d-%02d-%02d %02d:%02d:%02d UTC", timeinfo.tm_year + 1900, timeinfo.tm_mon + 1,
-                timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-        return true;
-      }
+  // One sync at a time (see ntpSyncBusy). A second caller waits its turn for at
+  // most its own timeout, then runs normally.
+  const unsigned long claimStartMs = millis();
+  while (!tryClaimNtpSync()) {
+    if (millis() - claimStartMs >= timeoutMs) {
+      LOG_ERR("CLK", "NTP sync busy on another task, giving up");
       return false;
     }
-    delay(100);
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
 
-  LOG_ERR("CLK", "NTP sync timed out");
-  return false;
+  LOG_INF("CLK", "Starting NTP sync...");
+  // esp-netif owns the SNTP client's state, runs every lwIP call on the TCP/IP
+  // thread, and signals completion on a semaphore instead of being polled.
+  // Costs one small calloc and one binary semaphore, both released by
+  // esp_netif_sntp_deinit() below.
+  esp_sntp_config_t config = {};
+  config.wait_for_sync = true;
+  config.start = true;
+  config.ip_event_to_renew = IP_EVENT_STA_GOT_IP;  // unused: renew_servers_after_new_IP stays false
+  config.num_of_servers = 2;
+  config.servers[0] = "pool.ntp.org";
+  config.servers[1] = "time.nist.gov";
+
+  const esp_err_t initResult = esp_netif_sntp_init(&config);
+  if (initResult != ESP_OK) {
+    LOG_ERR("CLK", "Failed to start NTP sync: %s", esp_err_to_name(initResult));
+    releaseNtpSync();
+    return false;
+  }
+
+  const esp_err_t syncResult = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(timeoutMs));
+
+  // An SNTP timeout can leave the client's DNS lookup pending, with its callback
+  // still registered in lwIP's DNS table. Arduino's hostByName() calls
+  // dns_clear_cache() from the application task, which would run that callback
+  // outside the core lock on the next hostname lookup (the sync or download
+  // that follows). Drain it here, on the TCP/IP thread, before stopping SNTP.
+  const esp_err_t clearResult = esp_netif_tcpip_exec(clearDnsCacheLocked, nullptr);
+  esp_netif_sntp_deinit();
+  releaseNtpSync();
+
+  if (clearResult != ESP_OK) {
+    LOG_ERR("CLK", "Failed to clear DNS after NTP sync: %s", esp_err_to_name(clearResult));
+  }
+  if (syncResult != ESP_OK) {
+    LOG_ERR("CLK", "NTP sync failed: %s", esp_err_to_name(syncResult));
+    return false;
+  }
+  return true;
 }
