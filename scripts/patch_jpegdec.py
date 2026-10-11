@@ -1,5 +1,7 @@
 """
-PlatformIO pre-build script: patch JPEGDEC for MCU_SKIP wild pointer crash.
+PlatformIO pre-build script: inline patches for the pinned JPEGDEC.
+
+--- Patch 1: MCU_SKIP wild pointer crash ---
 
 Problem:
   JPEGDecodeMCU_P computes pMCU = &sMCUs[iMCU & 0xffffff].  When iMCU is
@@ -17,7 +19,22 @@ Fix:
   the DC write at sMCUs[0] is already guarded by the existing `if (iMCU >= 0)`
   check.
 
-Applied idempotently — safe to run on every build.
+--- Patch 2: progressive JPEGs with separated component scans ---
+
+Problem:
+  With EIGHT_BIT_GRAYSCALE output DecodeJPEG still has to consume the chroma
+  entropy data, so after each luma MCU it calls JPEGDecodeMCU_P(MCU_SKIP) once
+  for Cb and once for Cr, unconditionally.  A progressive file is free to put
+  each component in its own scan (non-interleaved); in a luma-only scan there
+  is no chroma data at all, so the two skip calls eat luma bits, the bitstream
+  desynchronises and the image decodes blank.  When Cr is present its skip call
+  also ran with the Cb Huffman tables still selected.
+
+Fix (upstream crosspoint-reader 6230eba2d):
+  Only skip a chroma component whose JPCI[n].component_needed is set for the
+  current scan, and select cACTable2/cDCTable2 before skipping the second one.
+
+Both are applied idempotently — safe to run on every build.
 """
 
 Import("env")
@@ -32,6 +49,7 @@ def patch_jpegdec(env):
         jpeg_inl = os.path.join(libdeps_dir, env_dir, "JPEGDEC", "src", "jpeg.inl")
         if os.path.isfile(jpeg_inl):
             _apply_mcu_skip_pointer_fix(jpeg_inl)
+            _apply_separated_scan_fix(env, jpeg_inl)
 
 
 def _apply_mcu_skip_pointer_fix(filepath):
@@ -62,6 +80,47 @@ def _apply_mcu_skip_pointer_fix(filepath):
     with open(filepath, "w") as f:
         f.write(content)
     print("Patched JPEGDEC: safe pMCU for MCU_SKIP in JPEGDecodeMCU_P: %s" % filepath)
+
+
+def _apply_separated_scan_fix(env, filepath):
+    MARKER = "// CrossPoint patch: skip only chroma present in this scan"
+    with open(filepath, "r") as f:
+        content = f.read()
+
+    if MARKER in content:
+        return  # already patched
+
+    # The unconditional chroma skips in DecodeJPEG's grayscale branch.
+    OLD = (
+        "                        iErr |= JPEGDecodeMCU_P(pJPEG, MCU_SKIP, &iDCPred1);\n"
+        "                        iErr |= JPEGDecodeMCU_P(pJPEG, MCU_SKIP, &iDCPred2);\n"
+    )
+
+    NEW = (
+        "                        " + MARKER + "\n"
+        "                        if (pJPEG->JPCI[1].component_needed)\n"
+        "                            iErr |= JPEGDecodeMCU_P(pJPEG, MCU_SKIP, &iDCPred1);\n"
+        "                        if (pJPEG->JPCI[2].component_needed) {\n"
+        "                            pJPEG->ucACTable = cACTable2;\n"
+        "                            pJPEG->ucDCTable = cDCTable2;\n"
+        "                            iErr |= JPEGDecodeMCU_P(pJPEG, MCU_SKIP, &iDCPred2);\n"
+        "                        }\n"
+    )
+
+    # Unlike patch 1 this one fails the build: a silently unpatched decoder
+    # renders these covers blank, which looks like a cache or image bug.
+    if content.count(OLD) != 1:
+        print(
+            "ERROR: JPEGDEC separated-scan patch anchor found %d times (expected 1) in %s "
+            "- the JPEGDEC pin changed; re-review scripts/patch_jpegdec.py"
+            % (content.count(OLD), filepath)
+        )
+        env.Exit(1)
+
+    content = content.replace(OLD, NEW, 1)
+    with open(filepath, "w") as f:
+        f.write(content)
+    print("Patched JPEGDEC: skip only chroma present in this scan: %s" % filepath)
 
 
 # Run immediately at script import time (before compilation).
