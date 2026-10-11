@@ -5,8 +5,10 @@
 #include <InflateReader.h>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "Epub.h"
 #include "EpubReaderActivity.h"
+#include "RecentBooksStore.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
 #include "Xtc.h"
@@ -14,6 +16,15 @@
 #include "activities/util/BmpViewerActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
 #include "components/UITheme.h"
+
+void RenderedBookGate::forgetOpenBook() { APP_STATE.openEpubPath.clear(); }
+
+void RenderedBookGate::rememberOpenBook(const std::string& path, const std::string& title, const std::string& author,
+                                        const std::string& thumbBmpPath) {
+  APP_STATE.openEpubPath = path;
+  APP_STATE.saveToFile();  // no card write when the path is the one already on disk
+  RECENT_BOOKS.addBook(path, title, author, thumbBmpPath);
+}
 
 bool ReaderActivity::isXtcFile(const std::string& path) { return FsHelpers::hasXtcExtension(path); }
 
@@ -139,6 +150,12 @@ void ReaderActivity::onEnter() {
     onGoToBmpViewer(initialBookPath);  // BmpViewerActivity draws its own loading popup
     return;
   }
+
+  // Forget the remembered book until this one has rendered a page (upstream
+  // a70ade72e): if it fails to load or index, sleeping on the failure must wake
+  // to Home, not back into the same unreadable book. The reader that renders
+  // it writes the path back (RenderedBookGate).
+  RenderedBookGate::forgetOpenBook();
 
   // Opening a book is synchronous and can take several seconds on a cold cache:
   // the metadata parse (and, on a cache-version bump, a full inflate of the

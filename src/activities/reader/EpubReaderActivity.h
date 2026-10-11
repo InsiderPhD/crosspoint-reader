@@ -9,6 +9,7 @@
 #include "BookmarkEntry.h"
 #include "CrossPointSettings.h"
 #include "EpubReaderMenuActivity.h"
+#include "ReaderActivity.h"
 #include "activities/Activity.h"
 #include "util/DictionaryLookup.h"
 #include "util/ProgressAutoSync.h"
@@ -47,6 +48,10 @@ class EpubReaderActivity final : public Activity {
   unsigned long readingSessionStartMs = 0UL;
   uint32_t sessionPageTurns = 0;
   bool bookFinishedRecorded = false;
+  // Remembers this book as the one to wake into, once a page has rendered.
+  RenderedBookGate openGate;
+  // renderLockHeld: true from onExit(), which already runs under the RenderLock.
+  void rememberBookOnceRendered(bool renderLockHeld);
   unsigned long pageTurnDuration = 0UL;
   // Signals that the next render should reposition within the newly loaded section
   // based on a cross-book percentage jump.

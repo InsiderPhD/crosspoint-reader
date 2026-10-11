@@ -519,10 +519,8 @@ void EpubReaderActivity::onEnter() {
     }
   }
 
-  // Save current epub as last opened epub and add to recent books
-  APP_STATE.openEpubPath = epub->getPath();
-  APP_STATE.saveToFile();
-  RECENT_BOOKS.addBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+  // APP_STATE.openEpubPath and the recents entry are NOT written here: see
+  // rememberBookOnceRendered(), which waits for the first rendered page.
   READING_STATS.beginSession(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
   CLIPPINGS.loadForBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), "epub");
 
@@ -554,8 +552,21 @@ void EpubReaderActivity::onEnter() {
   requestUpdate();
 }
 
+void EpubReaderActivity::rememberBookOnceRendered(const bool renderLockHeld) {
+  if (!epub || !openGate.takeFirstRender()) return;
+  // The render task also touches RECENT_BOOKS (progress saves walk the list
+  // this is about to insert into); keep it out for the duration.
+  std::optional<RenderLock> lock;
+  if (!renderLockHeld) lock.emplace();
+  RenderedBookGate::rememberOpenBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
+}
+
 void EpubReaderActivity::onExit() {
   Activity::onExit();
+
+  // A page rendered but loop() has not run since (sleep or Home in that gap):
+  // remember the book now, ahead of the APP_STATE save below.
+  rememberBookOnceRendered(true);
 
   // Land any debounced position while epub is still alive. onExit() runs under
   // the ActivityManager's RenderLock, so the render task can't race this.
@@ -627,6 +638,10 @@ void EpubReaderActivity::loop() {
     finish();
     return;
   }
+
+  // Ahead of all input handling: nothing below may open a sub-activity (sync,
+  // menu) or leave the reader before a rendered book has been remembered.
+  rememberBookOnceRendered(false);
 
   READING_STATS.tickActiveSession();
 
@@ -2090,6 +2105,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     automaticPageTurnActive = false;
+    openGate.markPageRendered();
     return;
   }
 
@@ -2144,6 +2160,13 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                                       ReaderUtils::effectiveFootnoteDisplay(), SETTINGS.bionicReading, popupFn)) {
         LOG_ERR("ERS", "Failed to persist page data to SD");
         section.reset();
+        // Say so, with a way out: this used to leave the "Indexing" popup on the
+        // panel with nothing to tell a failed build from a slow one.
+        renderer.clearScreen();
+        const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+        GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+        GUI.drawPopup(renderer, tr(STR_INDEX_FAILED));
+        automaticPageTurnActive = false;
         return;
       }
     } else {
@@ -2230,6 +2253,8 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
     automaticPageTurnActive = false;
+    // The section built; an empty chapter is a readable position in a good book.
+    openGate.markPageRendered();
     return;
   }
 
@@ -2268,6 +2293,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     // renderContents logs its own "Page render: ...total=" breakdown, which
     // covers exactly this span — no second timer needed.
     renderContents(*p, orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
+    openGate.markPageRendered();
 
     currentPageFootnotes = std::move(p->footnotes);
   }
@@ -3893,7 +3919,9 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
 
 void EpubReaderActivity::performBookFusionSync() {
   // Check if this is a BookFusion book
-  std::string epubPath = APP_STATE.openEpubPath;
+  // The book in hand, not APP_STATE.openEpubPath: that is only written once a
+  // page has rendered, and is cleared while another open is in flight.
+  const std::string epubPath = epub ? epub->getPath() : APP_STATE.openEpubPath;
   uint32_t bookId = BookFusionBookIdStore::loadBookId(epubPath.c_str());
 
   if (bookId == 0) {

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "CrossPointSettings.h"
+#include "ReaderActivity.h"
 #include "activities/Activity.h"
 
 class TxtReaderActivity final : public Activity {
@@ -32,6 +33,11 @@ class TxtReaderActivity final : public Activity {
   int cachedOrientedMarginRight = 0;
   int cachedOrientedMarginBottom = 0;
   int cachedOrientedMarginLeft = 0;
+
+  // Remembers this book as the one to wake into, once a page has rendered.
+  RenderedBookGate openGate;
+  // renderLockHeld: true from onExit(), which already runs under the RenderLock.
+  void rememberBookOnceRendered(bool renderLockHeld);
 
   void renderPage();
   void renderStatusBar() const;

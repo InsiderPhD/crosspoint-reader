@@ -45,10 +45,8 @@ void XtcReaderActivity::onEnter() {
   // Load saved progress
   loadProgress();
 
-  // Save current XTC as last opened book and add to recent books
-  APP_STATE.openEpubPath = xtc->getPath();
-  APP_STATE.saveToFile();
-  RECENT_BOOKS.addBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
+  // APP_STATE.openEpubPath and the recents entry are written by
+  // rememberBookOnceRendered(), once the first page has rendered.
   READING_STATS.beginSession(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
 
   readingSessionStartMs = millis();
@@ -58,8 +56,20 @@ void XtcReaderActivity::onEnter() {
   requestUpdate();
 }
 
+void XtcReaderActivity::rememberBookOnceRendered(const bool renderLockHeld) {
+  if (!xtc || !openGate.takeFirstRender()) return;
+  // The render task also touches RECENT_BOOKS (progress saves walk the list
+  // this is about to insert into); keep it out for the duration.
+  std::optional<RenderLock> lock;
+  if (!renderLockHeld) lock.emplace();
+  RenderedBookGate::rememberOpenBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
+}
+
 void XtcReaderActivity::onExit() {
   Activity::onExit();
+
+  // Rendered but not yet remembered by loop(): do it ahead of the save below.
+  rememberBookOnceRendered(true);
 
   APP_STATE.readerActivityLoadCount = 0;
   APP_STATE.saveToFile();
@@ -206,6 +216,7 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
 }
 
 void XtcReaderActivity::loop() {
+  rememberBookOnceRendered(false);
   READING_STATS.tickActiveSession();
 
   // ── Custom combos (chords) ───────────────────────────────────────────────
@@ -429,6 +440,7 @@ void XtcReaderActivity::render(RenderLock&&) {
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_END_OF_BOOK), true, EpdFontFamily::BOLD);
     renderer.displayBuffer();
+    openGate.markPageRendered();
     return;
   }
 
@@ -662,6 +674,7 @@ void XtcReaderActivity::renderPage() {
     free(pageBuffer);
 
     LOG_DBG("XTR", "Rendered page %lu/%lu (2-bit grayscale)", currentPage + 1, xtc->getPageCount());
+    openGate.markPageRendered();
     return;
   } else {
     // 1-bit mode: 8 pixels per byte, MSB first
@@ -700,6 +713,7 @@ void XtcReaderActivity::renderPage() {
   }
 
   LOG_DBG("XTR", "Rendered page %lu/%lu (%u-bit)", currentPage + 1, xtc->getPageCount(), bitDepth);
+  openGate.markPageRendered();
 }
 
 void XtcReaderActivity::saveProgress() const {

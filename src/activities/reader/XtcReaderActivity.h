@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "CrossPointSettings.h"
+#include "ReaderActivity.h"
 #include "activities/Activity.h"
 #include "util/ReaderCombos.h"
 
@@ -39,6 +40,11 @@ class XtcReaderActivity final : public Activity {
     std::string bookTitle;
     std::string chapterTitle;
   };
+
+  // Remembers this book as the one to wake into, once a page has rendered.
+  RenderedBookGate openGate;
+  // renderLockHeld: true from onExit(), which already runs under the RenderLock.
+  void rememberBookOnceRendered(bool renderLockHeld);
 
   void renderPage();
   void renderStatusBarOverlay(StatusBarOverlayPosition position) const;

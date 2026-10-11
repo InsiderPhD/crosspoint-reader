@@ -36,12 +36,10 @@ void TxtReaderActivity::onEnter() {
 
   txt->setupCacheDir();
 
-  // Save current txt as last opened file and add to recent books
+  // APP_STATE.openEpubPath and the recents entry are written by
+  // rememberBookOnceRendered(), once the first page has rendered.
   auto filePath = txt->getPath();
   auto fileName = filePath.substr(filePath.rfind('/') + 1);
-  APP_STATE.openEpubPath = filePath;
-  APP_STATE.saveToFile();
-  RECENT_BOOKS.addBook(filePath, fileName, "", "");
   READING_STATS.beginSession(filePath, fileName, "", "");
 
   readingSessionStartMs = millis();
@@ -51,8 +49,21 @@ void TxtReaderActivity::onEnter() {
   requestUpdate();
 }
 
+void TxtReaderActivity::rememberBookOnceRendered(const bool renderLockHeld) {
+  if (!txt || !openGate.takeFirstRender()) return;
+  // The render task also touches RECENT_BOOKS (progress saves walk the list
+  // this is about to insert into); keep it out for the duration.
+  std::optional<RenderLock> lock;
+  if (!renderLockHeld) lock.emplace();
+  const std::string filePath = txt->getPath();
+  RenderedBookGate::rememberOpenBook(filePath, filePath.substr(filePath.rfind('/') + 1), "", "");
+}
+
 void TxtReaderActivity::onExit() {
   Activity::onExit();
+
+  // Rendered but not yet remembered by loop(): do it ahead of the save below.
+  rememberBookOnceRendered(true);
 
   // Reset orientation back to portrait for the rest of the UI
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
@@ -74,6 +85,7 @@ void TxtReaderActivity::onExit() {
 }
 
 void TxtReaderActivity::loop() {
+  rememberBookOnceRendered(false);
   READING_STATS.tickActiveSession();
 
   // Long press BACK (1s+) goes to file selection
@@ -366,6 +378,7 @@ void TxtReaderActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
   renderPage();
+  openGate.markPageRendered();
 
   // Save progress
   saveProgress();
