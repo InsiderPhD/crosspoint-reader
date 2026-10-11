@@ -1,8 +1,10 @@
 #include "Bitmap.h"
 
 #include <Logging.h>
+
 #include <cstdlib>
 #include <cstring>
+#include <new>
 
 // ============================================================================
 // IMAGE PROCESSING OPTIONS
@@ -151,8 +153,8 @@ BmpReaderError Bitmap::parseHeaders() {
   const uint32_t expectedFileSize = bfOffBits + expectedImageSize;
   const uint32_t actualFileSize = file.size();
   if (actualFileSize < expectedFileSize) {
-    LOG_ERR("BMP", "Truncated file: expected %u bytes, got %u bytes (image: %u, header: %u)",
-            expectedFileSize, actualFileSize, expectedImageSize, bfOffBits);
+    LOG_ERR("BMP", "Truncated file: expected %u bytes, got %u bytes (image: %u, header: %u)", expectedFileSize,
+            actualFileSize, expectedImageSize, bfOffBits);
     return BmpReaderError::FileInvalid;
   }
 
@@ -179,10 +181,22 @@ BmpReaderError Bitmap::parseHeaders() {
   //  - High-color + dithering disabled → simple quantization (no error diffusion)
   const bool highColor = !nativePalette;
   if (highColor && dithering) {
+    // OOM here is not fatal: readNextRow() falls back to plain quantization
+    // when no ditherer is installed, so the image still draws (undithered).
     if (USE_ATKINSON) {
-      atkinsonDitherer = new AtkinsonDitherer(width);
+      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width);
+      if (!atkinsonDitherer || !atkinsonDitherer->isValid()) {
+        delete atkinsonDitherer;
+        atkinsonDitherer = nullptr;
+        LOG_ERR("BMP", "OOM: Atkinson ditherer (width %d); drawing undithered", width);
+      }
     } else {
-      fsDitherer = new FloydSteinbergDitherer(width);
+      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(width);
+      if (!fsDitherer || !fsDitherer->isValid()) {
+        delete fsDitherer;
+        fsDitherer = nullptr;
+        LOG_ERR("BMP", "OOM: Floyd-Steinberg ditherer (width %d); drawing undithered", width);
+      }
     }
   }
 

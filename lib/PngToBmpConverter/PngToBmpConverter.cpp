@@ -7,6 +7,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <new>
 
 #include "BitmapHelpers.h"
 #include "BufferedPrint.h"
@@ -690,13 +691,30 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
   FloydSteinbergDitherer* fsDitherer = nullptr;
   Atkinson1BitDitherer* atkinson1BitDitherer = nullptr;
 
+  // Nothrow throughout: under -fno-exceptions a failed throwing new aborts.
+  // A failure clears `success`, which skips the scanline loop and falls through
+  // to the single cleanup block below.
+  bool success = true;
+
   if (oneBit) {
-    atkinson1BitDitherer = new Atkinson1BitDitherer(outWidth);
+    atkinson1BitDitherer = new (std::nothrow) Atkinson1BitDitherer(outWidth);
+    if (!atkinson1BitDitherer || !atkinson1BitDitherer->isValid()) {
+      LOG_ERR("PNG", "OOM: Atkinson1BitDitherer or row buffers");
+      success = false;
+    }
   } else if (!USE_8BIT_OUTPUT) {
     if (USE_ATKINSON) {
-      atkinsonDitherer = new AtkinsonDitherer(outWidth);
+      atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(outWidth);
+      if (!atkinsonDitherer || !atkinsonDitherer->isValid()) {
+        LOG_ERR("PNG", "OOM: AtkinsonDitherer or row buffers");
+        success = false;
+      }
     } else if (USE_FLOYD_STEINBERG) {
-      fsDitherer = new FloydSteinbergDitherer(outWidth);
+      fsDitherer = new (std::nothrow) FloydSteinbergDitherer(outWidth);
+      if (!fsDitherer || !fsDitherer->isValid()) {
+        LOG_ERR("PNG", "OOM: FloydSteinbergDitherer or row buffers");
+        success = false;
+      }
     }
   }
 
@@ -706,16 +724,18 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
   int currentOutY = 0;
   uint32_t nextOutY_srcStart = 0;
 
-  if (needsScaling) {
-    rowAccum = new uint32_t[outWidth]();
-    rowCount = new uint16_t[outWidth]();
+  if (needsScaling && success) {
+    rowAccum = new (std::nothrow) uint32_t[outWidth]();
+    rowCount = new (std::nothrow) uint16_t[outWidth]();
+    if (!rowAccum || !rowCount) {
+      LOG_ERR("PNG", "OOM: scaling accumulators");
+      success = false;
+    }
     nextOutY_srcStart = scaleY_fp;
   }
 
-  bool success = true;
-
   // Process each scanline
-  for (uint32_t y = 0; y < height; y++) {
+  for (uint32_t y = 0; success && y < height; y++) {
     // Decode one scanline
     if (!decodeScanline(ctx)) {
       LOG_ERR("PNG", "Failed to decode scanline %u", y);

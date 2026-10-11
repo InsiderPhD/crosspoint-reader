@@ -743,13 +743,26 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
     ctx.nextOutY_srcStart = scaleY_fp;
   }
 
+  // The Cleanup guard above deletes whichever ditherer object was created.
   if (oneBit) {
     ctx.atkinson1BitDitherer = new (std::nothrow) Atkinson1BitDitherer(outWidth);
+    if (!ctx.atkinson1BitDitherer || !ctx.atkinson1BitDitherer->isValid()) {
+      LOG_ERR("JPG", "OOM: Atkinson1BitDitherer or row buffers");
+      return false;
+    }
   } else if (!USE_8BIT_OUTPUT) {
     if (USE_ATKINSON) {
       ctx.atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(outWidth);
+      if (!ctx.atkinsonDitherer || !ctx.atkinsonDitherer->isValid()) {
+        LOG_ERR("JPG", "OOM: AtkinsonDitherer or row buffers");
+        return false;
+      }
     } else if (USE_FLOYD_STEINBERG) {
       ctx.fsDitherer = new (std::nothrow) FloydSteinbergDitherer(outWidth);
+      if (!ctx.fsDitherer || !ctx.fsDitherer->isValid()) {
+        LOG_ERR("JPG", "OOM: FloydSteinbergDitherer or row buffers");
+        return false;
+      }
     }
   }
 
