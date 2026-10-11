@@ -26,6 +26,15 @@ bool CrossPointState::isRecentSleep(uint16_t idx, uint8_t checkCount) const {
   return false;
 }
 
+uint8_t CrossPointState::recentSleepAge(uint16_t idx) const {
+  const uint8_t fill = std::min(recentSleepFill, SLEEP_RECENT_COUNT);
+  for (uint8_t i = 0; i < fill; i++) {
+    const uint8_t slot = (recentSleepPos + SLEEP_RECENT_COUNT - 1 - i) % SLEEP_RECENT_COUNT;
+    if (recentSleepImages[slot] == idx) return i;
+  }
+  return SLEEP_NOT_RECENT;
+}
+
 void CrossPointState::pushRecentSleep(uint16_t idx) {
   recentSleepImages[recentSleepPos] = idx;
   recentSleepPos = (recentSleepPos + 1) % SLEEP_RECENT_COUNT;

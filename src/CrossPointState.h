@@ -31,6 +31,13 @@ class CrossPointState {
   uint32_t lastHardcoverSyncDay = 0;
   bool showBootScreen = true;
 
+  // recentSleepAge() result for an index that is not in the history.
+  static constexpr uint8_t SLEEP_NOT_RECENT = UINT8_MAX;
+
+  // How many picks ago idx was last shown: 0 = the most recent pick. Returns
+  // SLEEP_NOT_RECENT when idx is not in the history.
+  uint8_t recentSleepAge(uint16_t idx) const;
+
   // Returns true if idx was shown within the last checkCount picks.
   // Walks backwards from the most recently written slot.
   bool isRecentSleep(uint16_t idx, uint8_t checkCount) const;
