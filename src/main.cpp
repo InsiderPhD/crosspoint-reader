@@ -1162,10 +1162,25 @@ void loop() {
     }
   }
 
+  // skipLoopDelay() dereferences the current activity, which the render task
+  // may be drawing from right now. Read it under the render lock, but never
+  // wait for it: one non-blocking attempt, and if the render task holds the
+  // lock, give it the CPU for a tick instead of spinning through the tail (and
+  // possibly dropping the clock for "idle") while a page is being rendered.
+  bool skipLoopDelay = false;
+  {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (!lock.ownsLock()) {
+      delay(10);
+      return;
+    }
+    skipLoopDelay = activityManager.skipLoopDelay();
+  }
+
   // Add delay at the end of the loop to prevent tight spinning
   // When an activity requests skip loop delay (e.g., webserver running), use yield() for faster response
   // Otherwise, use longer delay to save power
-  if (activityManager.skipLoopDelay()) {
+  if (skipLoopDelay) {
     powerManager.setPowerSaving(false);  // Make sure we're at full performance when skipLoopDelay is requested
     yield();                             // Give FreeRTOS a chance to run tasks, but return immediately
   } else {

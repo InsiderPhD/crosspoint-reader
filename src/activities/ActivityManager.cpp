@@ -394,11 +394,11 @@ void ActivityManager::requestUpdateAndWait() {
 
 // RenderLock
 
-RenderLock::RenderLock() { isLocked = (xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY) == pdTRUE); }
-
-RenderLock::RenderLock([[maybe_unused]] Activity&) {
-  isLocked = (xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY) == pdTRUE);
+RenderLock::RenderLock(const Mode mode) {
+  isLocked = (xSemaphoreTake(activityManager.renderingMutex, mode == Mode::Try ? 0 : portMAX_DELAY) == pdTRUE);
 }
+
+RenderLock::RenderLock([[maybe_unused]] Activity&) : RenderLock(Mode::Blocking) {}
 
 RenderLock::~RenderLock() {
   if (isLocked) {
