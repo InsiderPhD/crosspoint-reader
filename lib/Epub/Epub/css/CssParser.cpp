@@ -429,6 +429,13 @@ CssStyle CssParser::parseDeclarations(std::string_view declBlock) {
 // Rule processing
 
 void CssParser::processRuleBlockWithStyle(std::string_view selectorGroup, const CssStyle& style) {
+  // A rule that sets no supported property can never change a resolved style
+  // (applyOver only copies defined properties), so storing it only costs a map
+  // node + key string per selector and a slot against MAX_RULES.
+  if (!style.defined.anySet()) {
+    return;
+  }
+
   // Check if we've reached the rule limit before processing
   if (rulesBySelector_.size() >= MAX_RULES) {
     LOG_DBG("CSS", "Reached max rules limit (%zu), stopping CSS parsing", MAX_RULES);
@@ -798,6 +805,11 @@ bool CssParser::loadFromCache() {
     rulesBySelector_.clear();
     return false;
   }
+
+  // Size the bucket array once (ruleCount is bounded by MAX_RULES above) instead of
+  // growing it through repeated rehashes, each of which allocates a larger bucket
+  // array and frees the old one while the rule nodes are interleaved on the heap.
+  rulesBySelector_.reserve(ruleCount);
 
   auto hasRemainingBytes = [&file](const size_t neededBytes) -> bool {
     return static_cast<size_t>(file.available()) >= neededBytes;
