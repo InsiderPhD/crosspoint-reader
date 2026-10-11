@@ -30,8 +30,8 @@ class FontCacheManager {
   // (network transfers); the cost is re-indexing on the next SD-font render.
   void clearCachesDeep();
   // Frees every rebuildable font cache while keeping the fonts loaded: the
-  // decompressor's page/group buffers and, per SD font, mini data, kern/ligature
-  // tables and the advance cache. For leaving the reader, so those blocks do
+  // decompressor's page/group buffers and, per SD font, mini glyph/kern data,
+  // ligature tables and the advance cache. For leaving the reader, so those blocks do
   // not pin the heap between reading sessions. Never call it between a prewarm
   // and its draw; the cost is a cold prewarm + re-index on the next SD-font use.
   void releaseSdFontCaches();
