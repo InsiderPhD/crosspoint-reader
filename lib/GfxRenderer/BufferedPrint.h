@@ -38,12 +38,12 @@ class BufferedPrint final : public Print {
   size_t write(const uint8_t b) override { return write(&b, 1); }
 
   size_t write(const uint8_t* data, const size_t n) override {
-    if (cap_ == 0) return out_.write(data, n);
+    if (cap_ == 0) return forward(data, n);
     // A payload that cannot fit is not worth splitting: drain first so ordering holds, then
     // hand it straight to the sink -- it is already a large write, the kind this exists to make.
     if (n >= cap_) {
       if (!flushBuffer()) return 0;
-      return out_.write(data, n);
+      return forward(data, n);
     }
     if (fill_ + n > cap_ && !flushBuffer()) return 0;
     memcpy(buf_.get() + fill_, data, n);
@@ -60,12 +60,28 @@ class BufferedPrint final : public Print {
     if (fill_ == 0) return true;
     const size_t n = fill_;
     fill_ = 0;  // cleared first: a failing sink must not make every later flush retry the same bytes
-    return out_.write(buf_.get(), n) == n;
+    return forward(buf_.get(), n) == n;
   }
 
+  // Sticky: true once the sink has refused or shortened ANY write. A buffered write() reports
+  // success as soon as the bytes are staged, so the failure only shows up at a later flush --
+  // possibly inside a write() whose return value the caller ignores. Callers that reuse one
+  // BufferedPrint across several units of work (a section's pages) check this after each
+  // flushBuffer() so a short write can never be reported as a complete file.
+  bool failed() const { return failed_; }
+  // False when the allocation failed and every write is passed straight through.
+  bool buffered() const { return cap_ != 0; }
+
  private:
+  size_t forward(const uint8_t* data, const size_t n) {
+    const size_t written = out_.write(data, n);
+    if (written != n) failed_ = true;
+    return written;
+  }
+
   Print& out_;
   std::unique_ptr<uint8_t[]> buf_;
   size_t cap_ = 0;
   size_t fill_ = 0;
+  bool failed_ = false;
 };

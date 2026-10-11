@@ -1,5 +1,6 @@
 #pragma once
 #include <HalStorage.h>
+#include <Print.h>
 
 #include <algorithm>
 #include <array>
@@ -35,7 +36,7 @@ class PageElement {
   explicit PageElement(const int16_t xPos, const int16_t yPos) : xPos(xPos), yPos(yPos) {}
   virtual ~PageElement() = default;
   virtual void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) = 0;
-  virtual bool serialize(FsFile& file) = 0;
+  virtual bool serialize(Print& file) = 0;
   virtual PageElementTag getTag() const = 0;  // Add type identification
 };
 
@@ -52,7 +53,7 @@ class PageLine final : public PageElement {
       : PageElement(xPos, yPos), block(std::move(block)) {}
   const std::unique_ptr<TextBlock>& getBlock() const { return block; }
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
-  bool serialize(FsFile& file) override;
+  bool serialize(Print& file) override;
   PageElementTag getTag() const override { return TAG_PageLine; }
   static std::unique_ptr<PageLine> deserialize(FsFile& file);
 };
@@ -68,7 +69,7 @@ class PageImage final : public PageElement {
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
   // Outline box in the image's reserved layout space, for the pre-decode pass.
   void renderPlaceholder(GfxRenderer& renderer, int xOffset, int yOffset) const;
-  bool serialize(FsFile& file) override;
+  bool serialize(Print& file) override;
   PageElementTag getTag() const override { return TAG_PageImage; }
   static std::unique_ptr<PageImage> deserialize(FsFile& file);
   const ImageBlock& getImageBlock() const { return *imageBlock; }
@@ -83,7 +84,7 @@ class PageHorizontalRule final : public PageElement {
       : PageElement(xPos, yPos), width(width), thickness(thickness) {}
 
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
-  bool serialize(FsFile& file) override;
+  bool serialize(Print& file) override;
   PageElementTag getTag() const override { return TAG_PageHorizontalRule; }
   static std::unique_ptr<PageHorizontalRule> deserialize(FsFile& file);
 };
@@ -125,7 +126,7 @@ class PageTableFragment final : public PageElement {
         hasBorder(hasBorder),
         rows(std::move(rows)) {}
   void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
-  bool serialize(FsFile& file) override;
+  bool serialize(Print& file) override;
   PageElementTag getTag() const override { return TAG_PageTable; }
   static std::unique_ptr<PageTableFragment> deserialize(FsFile& file);
   uint16_t getTotalHeight() const { return totalHeight; }
@@ -173,7 +174,12 @@ class Page {
   // Returns the byte offset in `text` where the (maxLines+1)-th wrapped line would begin.
   // Returns strlen(text) if the text fits in maxLines.
   static size_t splitWrappedAtLine(GfxRenderer& renderer, int fontId, const char* text, int maxLines, int maxWidth);
-  bool serialize(FsFile& file) const;
+  // Writes through a Print so Section can stage a page's hundreds of 1-4 byte fields in RAM
+  // (BufferedPrint) instead of taking the storage mutex for each. Use the Print overloads
+  // in <PrintSerialization.h>; the bytes are identical to writing the file directly. Do not
+  // pass a HalFile here even though it converts: wrap it in serialization::HalFilePrint, or
+  // every block write degrades to one locked call per byte on the device.
+  bool serialize(Print& file) const;
   static std::unique_ptr<Page> deserialize(FsFile& file);
 
   // Check if page contains any images (used to force full refresh)

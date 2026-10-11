@@ -1,10 +1,12 @@
 #include "Section.h"
 
 #include <Arduino.h>
+#include <BufferedPrint.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <InflateReader.h>
 #include <Logging.h>
+#include <PrintSerialization.h>
 #include <Serialization.h>
 #include <esp_heap_caps.h>
 
@@ -24,6 +26,11 @@ namespace {
 // 45: a long paragraph's soft flush no longer restarts the paragraph: first-line indent
 //     and top spacing apply once per paragraph (upstream d5693c321). Layout-only change.
 constexpr uint8_t SECTION_FILE_VERSION = 45;
+// Staging buffer for page serialization, one per section build (not per page). 2KB is four
+// SD sectors: a typical text page (~3-6KB serialized) goes out in two to four writes, and a
+// field larger than the buffer (a long line's word arena) bypasses it. Heap, not stack: 2KB
+// is far past the 256-byte limit for locals, on a task stack this build already runs deep in.
+constexpr size_t PAGE_WRITE_BUFFER_SIZE = 2048;
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
                                  sizeof(uint8_t) + sizeof(uint8_t) + sizeof(bool) + sizeof(uint32_t) +
@@ -36,14 +43,25 @@ struct PageLutEntry {
 };
 }  // namespace
 
-uint32_t Section::onPageComplete(std::unique_ptr<Page> page) {
+uint32_t Section::onPageComplete(std::unique_ptr<Page> page, BufferedPrint& out) {
   if (!file) {
     LOG_ERR("SCT", "File not open for writing page %d", pageCount);
     return 0;
   }
 
+  // Exact, because nothing is staged between pages: every exit below drains `out`.
   const uint32_t position = file.position();
-  if (!page->serialize(file)) {
+  // A page is hundreds of 1-4 byte fields. Staged in RAM they reach the card as a few
+  // PAGE_WRITE_BUFFER_SIZE writes instead of one storage-mutex take and SdFat call each;
+  // the bytes and their order are unchanged.
+  const bool serialized = page->serialize(out);
+  // Drained even when serialize() failed: bytes left staged would be credited to the next
+  // page's offset, and would be flushed into a file this build has by then closed.
+  const bool flushed = out.flushBuffer();
+  // failed() catches a short write that surfaced inside a serializer whose write result
+  // is not checked (the plain writePod calls): the bytes were staged successfully and only
+  // refused by the card at a later flush.
+  if (!serialized || !flushed || out.failed()) {
     LOG_ERR("SCT", "Failed to serialize page %d", pageCount);
     return 0;
   }
@@ -286,11 +304,32 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
     }
   }
 
+  // Allocated once here, before the parser starts competing for heap, and released when
+  // this function returns. BufferedPrint allocates nothrow and degrades to pass-through, so
+  // a refused allocation costs only the speed-up. It sits on HalFilePrint, not on the file
+  // itself: through a Print& a HalFile would be written one byte per call (see the adapter).
+  // The header above and the LUTs below are written to `file` directly; that is safe because
+  // onPageComplete leaves nothing staged.
+  serialization::HalFilePrint fileOut(file);
+  BufferedPrint pageOut(fileOut, PAGE_WRITE_BUFFER_SIZE);
+  if (!pageOut.buffered()) {
+    LOG_ERR("SCT", "Page write buffer alloc failed (%u bytes); writing pages unstaged",
+            static_cast<unsigned>(PAGE_WRITE_BUFFER_SIZE));
+  }
+  // One captured reference: three would outgrow std::function's two-pointer inline storage
+  // and move the closure to the heap.
+  struct PageSink {
+    Section& self;
+    std::vector<PageLutEntry>& lut;
+    BufferedPrint& out;
+  } pageSink{*this, lut, pageOut};
+
   ChapterHtmlSlimParser visitor(
       epub, tmpHtmlPath, renderer, fontId, codeFontId, lineCompression, extraParagraphSpacing, paragraphAlignment,
       viewportWidth, viewportHeight, hyphenationEnabled,
-      [this, &lut](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex) {
-        lut.push_back({this->onPageComplete(std::move(page)), paragraphIndex, listItemIndex});
+      [&pageSink](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex) {
+        pageSink.lut.push_back(
+            {pageSink.self.onPageComplete(std::move(page), pageSink.out), paragraphIndex, listItemIndex});
       },
       embeddedStyle, contentBase, imageBasePath, imageRendering, popupFn, cssParser, footnoteDisplay == 0,
       bionicReadingEnabled);

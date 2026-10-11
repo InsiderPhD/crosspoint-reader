@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <PrintSerialization.h>
 #include <Serialization.h>
 
 #include <cstring>
@@ -137,8 +138,8 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       // Bionic split: draw bold prefix then regular suffix using pre-computed pixel offset.
       // Max 9 codepoints = at most 36 UTF-8 bytes; stack buffer is safe.
       char boldBuf[40];
-      const size_t boldLen = std::min<size_t>({static_cast<size_t>(boundary), static_cast<size_t>(wordLen),
-                                               sizeof(boldBuf) - 1});
+      const size_t boldLen =
+          std::min<size_t>({static_cast<size_t>(boundary), static_cast<size_t>(wordLen), sizeof(boldBuf) - 1});
       memcpy(boldBuf, word, boldLen);
       boldBuf[boldLen] = '\0';
       const auto boldStyle = static_cast<EpdFontFamily::Style>(currentStyle | EpdFontFamily::BOLD);
@@ -179,7 +180,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   }
 }
 
-bool TextBlock::serialize(FsFile& file) const {
+bool TextBlock::serialize(Print& file) const {
   if (!isValid) {
     LOG_ERR("TXB", "Serialization failed: invalid block");
     return false;

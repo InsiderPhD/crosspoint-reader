@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <PrintSerialization.h>
 #include <Serialization.h>
 
 #include <cstring>
@@ -12,7 +13,7 @@ void PageLine::render(GfxRenderer& renderer, const int fontId, const int xOffset
   block->render(renderer, fontId, xPos + xOffset, yPos + yOffset);
 }
 
-bool PageLine::serialize(FsFile& file) {
+bool PageLine::serialize(Print& file) {
   serialization::writePod(file, xPos);
   serialization::writePod(file, yPos);
 
@@ -45,7 +46,7 @@ void PageImage::renderPlaceholder(GfxRenderer& renderer, const int xOffset, cons
   imageBlock->renderPlaceholder(renderer, xPos + xOffset, yPos + yOffset);
 }
 
-bool PageImage::serialize(FsFile& file) {
+bool PageImage::serialize(Print& file) {
   serialization::writePod(file, xPos);
   serialization::writePod(file, yPos);
 
@@ -77,7 +78,7 @@ void PageHorizontalRule::render(GfxRenderer& renderer, const int fontId, const i
   renderer.drawLine(xPos + xOffset, yPos + yOffset, xPos + xOffset + width - 1, yPos + yOffset, thickness, true);
 }
 
-bool PageHorizontalRule::serialize(FsFile& file) {
+bool PageHorizontalRule::serialize(Print& file) {
   serialization::writePod(file, xPos);
   serialization::writePod(file, yPos);
   serialization::writePod(file, width);
@@ -145,7 +146,7 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
   }
 }
 
-bool PageTableFragment::serialize(FsFile& file) {
+bool PageTableFragment::serialize(Print& file) {
   serialization::writePod(file, xPos);
   serialization::writePod(file, yPos);
   serialization::writePod(file, columnCount);
@@ -467,7 +468,7 @@ void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xO
   }
 }
 
-bool Page::serialize(FsFile& file) const {
+bool Page::serialize(Print& file) const {
   const uint16_t count = elements.size();
   serialization::writePod(file, count);
 
@@ -488,13 +489,13 @@ bool Page::serialize(FsFile& file) const {
     // Length-prefixed body, not a fixed field: a page's notes are short, and writing
     // the old 1KB worst case per entry cost the same again in every section file.
     const uint16_t textLen = fn.hasText() ? static_cast<uint16_t>(strlen(fn.text.get())) : 0;
-    if (file.write(fn.number, sizeof(fn.number)) != sizeof(fn.number) ||
-        file.write(fn.href, sizeof(fn.href)) != sizeof(fn.href)) {
+    if (file.write(reinterpret_cast<const uint8_t*>(fn.number), sizeof(fn.number)) != sizeof(fn.number) ||
+        file.write(reinterpret_cast<const uint8_t*>(fn.href), sizeof(fn.href)) != sizeof(fn.href)) {
       LOG_ERR("PGE", "Failed to write footnote");
       return false;
     }
     serialization::writePod(file, textLen);
-    if (textLen > 0 && file.write(fn.text.get(), textLen) != textLen) {
+    if (textLen > 0 && file.write(reinterpret_cast<const uint8_t*>(fn.text.get()), textLen) != textLen) {
       LOG_ERR("PGE", "Failed to write footnote text");
       return false;
     }

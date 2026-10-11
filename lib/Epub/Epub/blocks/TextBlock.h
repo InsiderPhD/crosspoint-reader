@@ -67,8 +67,7 @@ class TextBlock final : public Block {
   // is false — callers must check and drop the line rather than use it.
   explicit TextBlock(const std::vector<std::string>& words, const std::vector<int16_t>& wordXpos,
                      const std::vector<EpdFontFamily::Style>& wordStyles, const BlockStyle& blockStyle = BlockStyle(),
-                     const std::vector<uint8_t>& bionicBoundary = {},
-                     const std::vector<uint16_t>& bionicSuffixX = {});
+                     const std::vector<uint8_t>& bionicBoundary = {}, const std::vector<uint16_t>& bionicSuffixX = {});
   ~TextBlock() override = default;
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
@@ -96,6 +95,6 @@ class TextBlock final : public Block {
   // given a renderer works out where to break the words into lines
   void render(const GfxRenderer& renderer, int fontId, int x, int y) const;
   BlockType getType() override { return TEXT_BLOCK; }
-  bool serialize(FsFile& file) const;
+  bool serialize(Print& file) const;
   static std::unique_ptr<TextBlock> deserialize(FsFile& file);
 };

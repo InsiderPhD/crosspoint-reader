@@ -6,6 +6,7 @@
 
 #include "Epub.h"
 
+class BufferedPrint;
 class Page;
 class GfxRenderer;
 
@@ -20,7 +21,9 @@ class Section {
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
                               bool embeddedStyle, uint8_t imageRendering, uint8_t footnoteDisplay,
                               bool bionicReadingEnabled);
-  uint32_t onPageComplete(std::unique_ptr<Page> page);
+  // `out` is the build's staged view of `file` (see createSectionFile). It is empty on
+  // entry and on return, so file.position() is exact at every page boundary.
+  uint32_t onPageComplete(std::unique_ptr<Page> page, BufferedPrint& out);
 
  public:
   uint16_t pageCount = 0;
