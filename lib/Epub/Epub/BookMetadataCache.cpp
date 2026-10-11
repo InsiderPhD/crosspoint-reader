@@ -387,6 +387,19 @@ void BookMetadataCache::createTocEntry(const std::string& title, const std::stri
 
 /* ============= READING / LOADING FUNCTIONS ================ */
 
+bool BookMetadataCache::isCurrent(const std::string& cachePath) {
+  const std::string path = cachePath + bookBinFile;
+  // exists() first: openFileForRead logs an error for a missing file, and a
+  // missing book.bin is the normal first-open case, not a fault.
+  if (!Storage.exists(path.c_str())) return false;
+  FsFile file;
+  if (!Storage.openFileForRead("BMC", path, file)) return false;
+  uint8_t version = 0;
+  const bool ok = file.read(&version, 1) == 1 && version == BOOK_CACHE_VERSION;
+  file.close();
+  return ok;
+}
+
 bool BookMetadataCache::load() {
   if (!Storage.openFileForRead("BMC", cachePath + bookBinFile, bookFile)) {
     return false;

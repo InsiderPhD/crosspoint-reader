@@ -374,6 +374,12 @@ void Epub::parseCssFiles() const {
   LOG_DBG("EBP", "Loaded %zu CSS style rules from %zu files", cssParser->ruleCount(), cssFiles.size());
 }
 
+bool Epub::hasCache(const std::string& filepath, const std::string& cacheDir, const bool skipLoadingCss) {
+  const std::string path = cachePathFor(filepath, cacheDir);
+  if (!BookMetadataCache::isCurrent(path)) return false;
+  return skipLoadingCss || CssParser::cacheIsCurrent(path);
+}
+
 // load in the meta data for the epub file
 bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   LOG_DBG("EBP", "Loading ePub: %s", filepath.c_str());

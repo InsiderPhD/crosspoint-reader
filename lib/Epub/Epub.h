@@ -44,10 +44,18 @@ class Epub {
   static constexpr size_t MAX_DESCRIPTION_BYTES = 4096;
 
   explicit Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
-    // create a cache key based on the filepath
-    cachePath = cacheDir + "/epub_" + std::to_string(std::hash<std::string>{}(this->filepath));
+    cachePath = cachePathFor(this->filepath, cacheDir);
   }
   ~Epub() = default;
+  // Cache directory for a book: a key based on the filepath.
+  static std::string cachePathFor(const std::string& filepath, const std::string& cacheDir) {
+    return cacheDir + "/epub_" + std::to_string(std::hash<std::string>{}(filepath));
+  }
+  // True when load(true, skipLoadingCss) will take its fast path for this book: a
+  // book.bin of the current version exists and, unless CSS is skipped, so does a
+  // current CSS rules cache. Costs two file opens and two 1-byte reads, no parsing.
+  // A missing or stale cache returns false, i.e. "this open will rebuild something".
+  static bool hasCache(const std::string& filepath, const std::string& cacheDir, bool skipLoadingCss);
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
   bool clearCache() const;

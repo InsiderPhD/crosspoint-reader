@@ -689,6 +689,17 @@ constexpr char rulesCache[] = "/css_rules.cache";
 
 bool CssParser::hasCache() const { return Storage.exists((cachePath + rulesCache).c_str()); }
 
+bool CssParser::cacheIsCurrent(const std::string& cachePath) {
+  const std::string path = cachePath + rulesCache;
+  if (!Storage.exists(path.c_str())) return false;
+  FsFile file;
+  if (!Storage.openFileForRead("CSS", path, file)) return false;
+  uint8_t version = 0;
+  const bool ok = file.read(&version, 1) == 1 && version == CssParser::CSS_CACHE_VERSION;
+  file.close();
+  return ok;
+}
+
 void CssParser::deleteCache() const {
   if (hasCache()) Storage.remove((cachePath + rulesCache).c_str());
 }

@@ -118,6 +118,10 @@ class BookMetadataCache {
   // Post-processing to update mappings and sizes
   bool buildBookBin(const std::string& epubPath, const BookMetadata& metadata);
 
+  // Cheap check (no parsing): does a book.bin of the current version exist at
+  // cachePath? Predicts whether load() will succeed without doing the load.
+  static bool isCurrent(const std::string& cachePath);
+
   // Reading phase (read mode)
   bool load();
   SpineEntry getSpineEntry(int index);

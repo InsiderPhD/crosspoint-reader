@@ -150,7 +150,16 @@ void ReaderActivity::onEnter() {
   // load -- including while loadEpub() lends the framebuffer to the inflate --
   // until the reader replaces it with the page or with a build's "Indexing..."
   // popup.
-  GUI.drawPopup(renderer, tr(STR_LOADING));
+  //
+  // An EPUB whose book.bin (and CSS rules cache, when styles are on) is already
+  // current skips it: load() is then a header read, and the popup would only add
+  // a panel refresh in front of the reader's first page. XTC/TXT and any EPUB
+  // that has to build or rebuild a cache still get the popup.
+  const bool epubCacheReady = !isXtcFile(initialBookPath) && !isTxtFile(initialBookPath) &&
+                              Epub::hasCache(initialBookPath, "/.crosspoint", SETTINGS.embeddedStyle == 0);
+  if (!epubCacheReady) {
+    GUI.drawPopup(renderer, tr(STR_LOADING));
+  }
 
   if (isXtcFile(initialBookPath)) {
     auto xtc = loadXtc(initialBookPath);

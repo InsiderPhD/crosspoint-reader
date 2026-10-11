@@ -88,6 +88,13 @@ class CssParser {
   bool hasCache() const;
 
   /**
+   * Check, without loading any rules, that a rules cache of the current
+   * CSS_CACHE_VERSION exists under cachePath (i.e. loadFromCache() would not
+   * reject it as stale).
+   */
+  static bool cacheIsCurrent(const std::string& cachePath);
+
+  /**
    * Delete CSS rules cache file exists
    */
   void deleteCache() const;
