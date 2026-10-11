@@ -83,6 +83,13 @@ class GfxRenderer {
   void drawPixelDither(int x, int y) const;
   template <Color color>
   void fillArc(int maxRadius, int cx, int cy, int xDir, int yDir) const;
+  // Byte-aligned rectangle fill. Clips in logical space, rotates the rect's two
+  // opposite corners into physical-framebuffer space once, then walks each
+  // physical row with head-mask / middle memset / tail-mask byte writes: no
+  // per-pixel rotation, bounds check or read-modify-write. Honours the strip
+  // target exactly as drawPixel() does.
+  template <Color color>
+  void fillRectImpl(int x, int y, int width, int height) const;
 
  public:
   explicit GfxRenderer(HalDisplay& halDisplay)

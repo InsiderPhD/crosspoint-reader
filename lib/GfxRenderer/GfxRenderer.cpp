@@ -612,9 +612,153 @@ void GfxRenderer::drawRoundedRect(const int x, const int y, const int width, con
   }
 }
 
+template <Color C>
+void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const int height) const {
+  if constexpr (C == Color::Clear) {
+    return;
+  }
+  if (width <= 0 || height <= 0) return;
+  if constexpr (C == Color::Black || C == Color::White) {
+    // Solid fills used to go through drawLine(), which is a no-op while the
+    // font cache is scanning. The dithered fills never had that gate; keep both.
+    if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
+  }
+
+  // Clip in logical space. For every orientation rotateCoordinates() maps the
+  // logical screen rect one-to-one onto the panel rect, so this is the same
+  // pixel set drawPixel()'s physical bounds check would have let through.
+  const int lx0 = std::max(0, x);
+  const int ly0 = std::max(0, y);
+  const int lx1 = std::min(getScreenWidth(), x + width);    // exclusive
+  const int ly1 = std::min(getScreenHeight(), y + height);  // exclusive
+  if (lx0 >= lx1 || ly0 >= ly1) return;
+
+  // Every orientation is an axis-aligned flip/transpose, so the physical bbox
+  // of two opposite corners is exactly the image of the logical rect.
+  int paX = 0, paY = 0, pbX = 0, pbY = 0;
+  rotateCoordinates(orientation, lx0, ly0, &paX, &paY, panelWidth, panelHeight);
+  rotateCoordinates(orientation, lx1 - 1, ly1 - 1, &pbX, &pbY, panelWidth, panelHeight);
+  const int phyX0 = std::min(paX, pbX);
+  const int phyX1 = std::max(paX, pbX);  // inclusive
+  int phyY0 = std::min(paY, pbY);
+  int phyY1 = std::max(paY, pbY);  // inclusive
+
+  // Same target selection and band clip as drawPixel(): in strip mode writes go
+  // to the band scratch, rows outside [origin, origin + rows) are dropped.
+  uint8_t* const target = getWriteTarget();
+  if (!target) return;
+  const int originY = getWriteOriginY();
+  phyY0 = std::max(phyY0, originY);
+  phyY1 = std::min(phyY1, originY + getWriteRows() - 1);
+  if (phyY0 > phyY1) return;
+
+  // 1bpp, MSB first: physical x lives in byte (x >> 3), bit (7 - (x & 7)).
+  // headMask/tailMask select the in-rect bits of the first/last byte of a row.
+  const int byteStart = phyX0 >> 3;
+  const int byteEnd = phyX1 >> 3;  // inclusive
+  const uint8_t headMask = static_cast<uint8_t>(0xFFu >> (phyX0 & 7));
+  const uint8_t tailMask = static_cast<uint8_t>(0xFFu << (7 - (phyX1 & 7)));
+  const size_t stride = panelWidthBytes;
+  const size_t middleBytes = byteEnd > byteStart + 1 ? static_cast<size_t>(byteEnd - byteStart - 1) : 0;
+
+  if constexpr (C == Color::Black || C == Color::White) {
+    // Framebuffer polarity: 0 = black, 1 = white (drawPixel(true) clears the bit).
+    for (int py = phyY0; py <= phyY1; ++py) {
+      uint8_t* row = target + static_cast<size_t>(py - originY) * stride;
+      if (byteStart == byteEnd) {
+        const uint8_t mask = headMask & tailMask;
+        if constexpr (C == Color::Black) {
+          row[byteStart] &= static_cast<uint8_t>(~mask);
+        } else {
+          row[byteStart] |= mask;
+        }
+      } else if constexpr (C == Color::Black) {
+        row[byteStart] &= static_cast<uint8_t>(~headMask);
+        if (middleBytes) memset(row + byteStart + 1, 0x00, middleBytes);
+        row[byteEnd] &= static_cast<uint8_t>(~tailMask);
+      } else {
+        row[byteStart] |= headMask;
+        if (middleBytes) memset(row + byteStart + 1, 0xFF, middleBytes);
+        row[byteEnd] |= tailMask;
+      }
+    }
+  } else {
+    // LightGray / DarkGray. Both patterns have period 2 in logical x and y, and
+    // a byte spans 8 (even) physical pixels, so along one physical row every
+    // byte carries the same 8-bit pattern, and that pattern alternates with
+    // the parity of the physical row. Two bytes describe the whole fill.
+    //
+    // Inverse of rotateCoordinates(), as (logical at bit 0 of the byte, step
+    // per physical x):
+    uint8_t whiteMasks[2];
+    for (int parityIdx = 0; parityIdx < 2; ++parityIdx) {
+      const int samplePy = phyY0 + parityIdx;
+      int lxBase = 0, lyBase = 0, dlx = 0, dly = 0;
+      switch (orientation) {
+        case Portrait:  // phyX = y, phyY = panelHeight - 1 - x
+          lxBase = panelHeight - 1 - samplePy;
+          lyBase = byteStart * 8;
+          dly = 1;
+          break;
+        case PortraitInverted:  // phyX = panelWidth - 1 - y, phyY = x
+          lxBase = samplePy;
+          lyBase = panelWidth - 1 - byteStart * 8;
+          dly = -1;
+          break;
+        case LandscapeClockwise:  // phyX = panelWidth - 1 - x, phyY = panelHeight - 1 - y
+          lxBase = panelWidth - 1 - byteStart * 8;
+          lyBase = panelHeight - 1 - samplePy;
+          dlx = -1;
+          break;
+        case LandscapeCounterClockwise:  // identity
+          lxBase = byteStart * 8;
+          lyBase = samplePy;
+          dlx = 1;
+          break;
+      }
+      uint8_t blackMask = 0;
+      for (int b = 0; b < 8; ++b) {
+        const int lx = lxBase + b * dlx;
+        const int ly = lyBase + b * dly;
+        bool isBlack;
+        if constexpr (C == Color::LightGray) {
+          isBlack = ((lx & 1) == 0) && ((ly & 1) == 0);  // drawPixelDither<LightGray>
+        } else {
+          isBlack = (((lx + ly) & 1) == 0);  // drawPixelDither<DarkGray>
+        }
+        if (isBlack) blackMask |= static_cast<uint8_t>(0x80u >> b);
+      }
+      whiteMasks[samplePy & 1] = static_cast<uint8_t>(~blackMask);
+    }
+
+    // The per-pixel path wrote BOTH inks (drawPixel set or cleared every pixel
+    // in the rect), so inside the rect mask the byte is replaced outright.
+    for (int py = phyY0; py <= phyY1; ++py) {
+      const uint8_t whiteMask = whiteMasks[py & 1];
+      uint8_t* row = target + static_cast<size_t>(py - originY) * stride;
+      if (byteStart == byteEnd) {
+        const uint8_t rectMask = headMask & tailMask;
+        row[byteStart] = static_cast<uint8_t>((row[byteStart] & ~rectMask) | (rectMask & whiteMask));
+      } else {
+        row[byteStart] = static_cast<uint8_t>((row[byteStart] & ~headMask) | (headMask & whiteMask));
+        if (middleBytes) memset(row + byteStart + 1, whiteMask, middleBytes);
+        row[byteEnd] = static_cast<uint8_t>((row[byteEnd] & ~tailMask) | (tailMask & whiteMask));
+      }
+    }
+  }
+}
+
+// The only instantiations: keeps the template body out of every other caller.
+template void GfxRenderer::fillRectImpl<Color::Black>(int, int, int, int) const;
+template void GfxRenderer::fillRectImpl<Color::White>(int, int, int, int) const;
+template void GfxRenderer::fillRectImpl<Color::LightGray>(int, int, int, int) const;
+template void GfxRenderer::fillRectImpl<Color::DarkGray>(int, int, int, int) const;
+
 void GfxRenderer::fillRect(const int x, const int y, const int width, const int height, const bool state) const {
-  for (int fillY = y; fillY < y + height; fillY++) {
-    drawLine(x, fillY, x + width - 1, fillY, state);
+  if (state) {
+    fillRectImpl<Color::Black>(x, y, width, height);
+  } else {
+    fillRectImpl<Color::White>(x, y, width, height);
   }
 }
 
@@ -646,23 +790,21 @@ void GfxRenderer::drawPixelDither<Color::DarkGray>(const int x, const int y) con
 }
 
 void GfxRenderer::fillRectDither(const int x, const int y, const int width, const int height, Color color) const {
-  if (color == Color::Clear) {
-  } else if (color == Color::Black) {
-    fillRect(x, y, width, height, true);
-  } else if (color == Color::White) {
-    fillRect(x, y, width, height, false);
-  } else if (color == Color::LightGray) {
-    for (int fillY = y; fillY < y + height; fillY++) {
-      for (int fillX = x; fillX < x + width; fillX++) {
-        drawPixelDither<Color::LightGray>(fillX, fillY);
-      }
-    }
-  } else if (color == Color::DarkGray) {
-    for (int fillY = y; fillY < y + height; fillY++) {
-      for (int fillX = x; fillX < x + width; fillX++) {
-        drawPixelDither<Color::DarkGray>(fillX, fillY);
-      }
-    }
+  switch (color) {
+    case Color::Clear:
+      break;
+    case Color::Black:
+      fillRectImpl<Color::Black>(x, y, width, height);
+      break;
+    case Color::White:
+      fillRectImpl<Color::White>(x, y, width, height);
+      break;
+    case Color::LightGray:
+      fillRectImpl<Color::LightGray>(x, y, width, height);
+      break;
+    case Color::DarkGray:
+      fillRectImpl<Color::DarkGray>(x, y, width, height);
+      break;
   }
 }
 
