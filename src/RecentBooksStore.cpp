@@ -39,21 +39,26 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
   // Reading a shelved book puts it back in circulation.
   shelvedPaths.erase(std::remove(shelvedPaths.begin(), shelvedPaths.end(), path), shelvedPaths.end());
 
-  // Preserve existing progress percentage if the book was already in the list
-  int8_t existingProgress = -1;
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end()) {
-    existingProgress = it->progressPercent;
-    recentBooks.erase(it);
-  }
+    // Move the existing entry to the front instead of erasing it and inserting a copy. The reader calls
+    // this after its first render, so four freshly allocated string buffers would land among the reader's
+    // own allocations and outlive them, splitting the largest free block once the reader exits. rotate
+    // only swaps the entries' existing buffers around, and progressPercent travels with the entry.
+    std::rotate(recentBooks.begin(), it, it + 1);
+    RecentBook& book = recentBooks.front();
+    if (book.title != title) book.title = title;
+    if (book.author != author) book.author = author;
+    if (book.coverBmpPath != coverBmpPath) book.coverBmpPath = coverBmpPath;
+  } else {
+    // New book: progress unknown (-1) until the reader reports it.
+    recentBooks.insert(recentBooks.begin(), {path, title, author, coverBmpPath, -1});
 
-  // Add to front, carrying over the progress percentage
-  recentBooks.insert(recentBooks.begin(), {path, title, author, coverBmpPath, existingProgress});
-
-  // Trim to max size
-  if (recentBooks.size() > MAX_RECENT_BOOKS) {
-    recentBooks.resize(MAX_RECENT_BOOKS);
+    // Trim to max size
+    if (recentBooks.size() > MAX_RECENT_BOOKS) {
+      recentBooks.resize(MAX_RECENT_BOOKS);
+    }
   }
 
   saveToFile();
