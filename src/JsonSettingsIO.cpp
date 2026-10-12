@@ -18,6 +18,7 @@
 #include "SettingsList.h"
 #include "WifiCredentialStore.h"
 #include "activities/reader/ReaderMenuVisibility.h"
+#include "util/TimeZoneRegistry.h"
 
 namespace {
 // JSON keys for the custom combo slots, one pair per slot. String literals
@@ -229,6 +230,10 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["readerLongPressHome"] = s.readerLongPressHome;
   doc["readerDoubleTapHome"] = s.readerDoubleTapHome;
   doc["frontlightLastBrightness"] = s.frontlightLastBrightness;
+  // Time zone + DST — picked on dedicated screens, so persisted by hand rather
+  // than through SettingsList (that list stays resident for the whole session).
+  doc["clockTimezone"] = s.clockTimezone;
+  doc["clockDst"] = s.clockDst;
   for (uint8_t slot = 0; slot < CrossPointSettings::READER_COMBO_SLOTS; slot++) {
     doc[kComboButtonsKeys[slot]] = s.readerComboButtons[slot];
     doc[kComboActionKeys[slot]] = s.readerComboAction[slot];
@@ -406,6 +411,12 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   s.readerDoubleTapHome =
       clampAction(doc["readerDoubleTapHome"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
   s.frontlightLastBrightness = clamp(doc["frontlightLastBrightness"] | (uint8_t)0, 101, 0);
+  // Absent on a file from older firmware: stays NOT_CHOSEN, and the zone is
+  // derived from the retired clockUtcOffsetQ / timeZonePreset loaded above.
+  // An out-of-table index is handled the same way by TimeZoneRegistry::resolve().
+  s.clockTimezone = doc["clockTimezone"] | TimeZoneRegistry::NOT_CHOSEN;
+  s.clockDst = clamp(doc["clockDst"] | (uint8_t)TimeZoneRegistry::DST_AUTO, TimeZoneRegistry::DST_MODE_COUNT,
+                     TimeZoneRegistry::DST_AUTO);
   // Custom combos. Absent keys leave the slot empty; sanitizeReaderCombos()
   // then drops unknown bits, one-button masks and duplicates, so nothing below
   // has to re-check a stored mask.

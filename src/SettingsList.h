@@ -299,10 +299,10 @@ inline void appendStatsSettings(std::vector<SettingInfo>& v) {
           // Contact string shown by the "If Found" stat option (e.g. a phone number).
           SettingInfo::String(StrId::STR_RETURN_CONTACT, SETTINGS.returnContact, sizeof(SETTINGS.returnContact),
                               "returnContact", StrId::STR_CAT_STATS),
-          // Persisted time-zone preset (index into TimeZoneRegistry). Hidden from the
-          // device tab UI (no category) — selection happens via the Time Zone Action
-          // entry, which launches TimeZoneSelectActivity. Listed here so JsonSettingsIO
-          // round-trips it through settings.json.
+          // RETIRED time-zone preset (index into the old 29-zone list), superseded by
+          // clockTimezone, which JsonSettingsIO persists by hand. No category, so it
+          // is hidden everywhere; listed only so settings.json keeps round-tripping
+          // it for older firmware and for TimeZoneRegistry::resolve()'s migration.
           SettingInfo::Value(StrId::STR_TIME_ZONE, &CrossPointSettings::timeZonePreset, {0, 28, 1}, "timeZonePreset"),
       });
 }
@@ -485,10 +485,11 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                // Time next to the date on the header top line of the non-reader screens.
                SettingInfo::Toggle(StrId::STR_CLOCK_OUTSIDE_READER, &CrossPointSettings::showClockOutsideReader,
                                    "showClockOutsideReader", StrId::STR_CUSTOMISE_STATUS_BAR),
-               // Clock entries (web settings only; device UI uses ClockOffsetActivity for the offset).
-               // Range 0..104 = quarter-hour steps from UTC-12:00 to UTC+14:00, biased by 48.
+               // RETIRED clock offset (0..104 quarter-hour steps, biased by 48), superseded
+               // by clockTimezone. No category, so it is hidden from the web UI too; kept
+               // in the list only so settings.json round-trips it (see timeZonePreset).
                SettingInfo::Value(StrId::STR_CLOCK_UTC_OFFSET, &CrossPointSettings::clockUtcOffsetQ, {0, 104, 1},
-                                  "clockUtcOffsetQ", StrId::STR_CUSTOMISE_STATUS_BAR),
+                                  "clockUtcOffsetQ"),
                SettingInfo::Enum(StrId::STR_CLOCK_FORMAT, &CrossPointSettings::clockFormat,
                                  {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H}, "clockFormat",
                                  StrId::STR_CUSTOMISE_STATUS_BAR),

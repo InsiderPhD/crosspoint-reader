@@ -65,38 +65,41 @@ void HalClock::begin() {
   _available = true;
   LOG_INF("CLK", "RTC found");
 
-  // Prime the HH:MM cache with an initial read.
-  uint8_t h, m;
-  getTime(h, m);
+  // Prime the cache with an initial read.
+  struct tm local;
+  localTime(local);
 }
 
-bool HalClock::getTime(uint8_t& hour, uint8_t& minute) const {
+void HalClock::setTimezone(const char* posixTz) {
+  setenv("TZ", posixTz && posixTz[0] != '\0' ? posixTz : "UTC0", 1);
+  tzset();
+}
+
+bool HalClock::localTime(struct tm& out) const {
   if (!_available) return false;
 
   const unsigned long now = millis();
-  if (_lastPollMs != 0 && (now - _lastPollMs) < CLOCK_POLL_MS) {
-    hour = _cachedHour;
-    minute = _cachedMinute;
-    return true;
+  if (_lastPollMs == 0 || (now - _lastPollMs) >= CLOCK_POLL_MS) {
+    uint32_t epoch = 0;
+    if (getUtcEpoch(epoch)) {
+      _cachedUtc = static_cast<time_t>(epoch);
+      _hasCachedTime = true;
+    } else if (!_hasCachedTime) {
+      // I2C error or oscillator stopped, and no earlier good value to reuse.
+      return false;
+    }
+    _lastPollMs = now != 0 ? now : 1;  // 0 doubles as the "read again" sentinel
   }
+  // The cache holds UTC, so a timezone change shows on the very next call
+  // without touching the bus. The up-to-10s staleness is the same as before.
+  return localtime_r(&_cachedUtc, &out) != nullptr;
+}
 
-  freeink::Rtc::DateTime dt;
-  if (!_rtc.now(dt)) {
-    // I2C error or oscillator stopped — reuse the last good value if we have one.
-    if (!_hasCachedTime) return false;
-    _lastPollMs = now;
-    hour = _cachedHour;
-    minute = _cachedMinute;
-    return true;
-  }
-
-  _cachedHour = dt.hour;
-  _cachedMinute = dt.minute;
-  _lastPollMs = now;
-  _hasCachedTime = true;
-
-  hour = _cachedHour;
-  minute = _cachedMinute;
+bool HalClock::getTime(uint8_t& hour, uint8_t& minute) const {
+  struct tm local;
+  if (!localTime(local)) return false;
+  hour = static_cast<uint8_t>(local.tm_hour);
+  minute = static_cast<uint8_t>(local.tm_min);
   return true;
 }
 
@@ -165,37 +168,23 @@ bool HalClock::writeDateTime(int year, unsigned month, unsigned day, uint8_t hou
     return false;
   }
 
-  // Invalidate the HH:MM cache so the next status-bar read fetches fresh data.
+  // Invalidate the cache so the next status-bar read fetches the new time.
   _lastPollMs = 0;
-  _cachedHour = hour;
-  _cachedMinute = minute;
-  _hasCachedTime = true;
   return true;
 }
 
-bool HalClock::formatTime(char* buf, size_t bufSize, uint8_t utcOffsetQuarterHoursBiased, bool use12Hour) const {
+bool HalClock::formatTime(char* buf, size_t bufSize, bool use12Hour) const {
   if (bufSize < (use12Hour ? 9u : 6u)) return false;
-  uint8_t h, m;
-  if (!getTime(h, m)) return false;
+  struct tm local;
+  if (!localTime(local)) return false;
 
-  // Apply UTC offset: convert biased value to signed quarter-hours.
-  // Clamp against corrupted persisted values so display time can't drift outside [-12:00, +14:00].
-  if (utcOffsetQuarterHoursBiased > 104) utcOffsetQuarterHoursBiased = 104;
-  int offsetQuarterHours = static_cast<int>(utcOffsetQuarterHoursBiased) - 48;
-  int totalMinutes = static_cast<int>(h) * 60 + static_cast<int>(m) + offsetQuarterHours * 15;
-
-  // Wrap around 24 hours
-  totalMinutes = ((totalMinutes % 1440) + 1440) % 1440;
-
-  const int hour24 = totalMinutes / 60;
-  const int min = totalMinutes % 60;
   if (use12Hour) {
-    const bool pm = hour24 >= 12;
-    int hour12 = hour24 % 12;
+    const bool pm = local.tm_hour >= 12;
+    int hour12 = local.tm_hour % 12;
     if (hour12 == 0) hour12 = 12;
-    snprintf(buf, bufSize, "%d:%02d %s", hour12, min, pm ? "PM" : "AM");
+    snprintf(buf, bufSize, "%d:%02d %s", hour12, local.tm_min, pm ? "PM" : "AM");
   } else {
-    snprintf(buf, bufSize, "%02d:%02d", hour24, min);
+    snprintf(buf, bufSize, "%02d:%02d", local.tm_hour, local.tm_min);
   }
   return true;
 }

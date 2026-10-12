@@ -3,6 +3,8 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <cstring>
+
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
@@ -13,16 +15,17 @@
 
 void TimeZoneSelectActivity::onEnter() {
   Activity::onEnter();
-  selectedIndex = TimeZoneRegistry::clampPresetIndex(SETTINGS.timeZonePreset);
+  // A migrated quarter-hour offset with no table entry (e.g. UTC+0:15) has no
+  // row to land on, so the cursor starts at the top of the list.
+  const uint8_t current = TimeUtils::getTimeZoneIndex();
+  selectedIndex = current < TimeZoneRegistry::getPresetCount() ? current : 0;
   requestUpdate();
 }
 
 void TimeZoneSelectActivity::handleSelection() {
   {
     RenderLock lock(*this);
-    SETTINGS.timeZonePreset = TimeZoneRegistry::clampPresetIndex(static_cast<uint8_t>(selectedIndex));
-    SETTINGS.saveToFile();
-    TimeUtils::configureTimezone();
+    TimeUtils::setTimeZone(static_cast<uint8_t>(selectedIndex));
   }
   finish();
 }
@@ -100,15 +103,24 @@ void TimeZoneSelectActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
   const int totalItems = static_cast<int>(TimeZoneRegistry::getPresetCount());
-  const int currentIndex = TimeZoneRegistry::clampPresetIndex(SETTINGS.timeZonePreset);
+  const int currentIndex = TimeUtils::getTimeZoneIndex();
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_TIME_ZONE));
 
+  // Value column: the standard UTC offset for the named zones (the fixed
+  // "UTC+HH:MM" rows already say it), replaced by "Selected" on the active row.
   GUI.drawList(
       renderer, listRect(), totalItems, selectedIndex,
-      [](int index) { return std::string(TimeZoneRegistry::getPresetLabel(static_cast<uint8_t>(index))); }, nullptr,
+      [](int index) { return std::string(TimeZoneRegistry::getPreset(static_cast<uint8_t>(index)).label); }, nullptr,
       nullptr,
-      [currentIndex](int index) { return index == currentIndex ? std::string(tr(STR_SELECTED)) : std::string(""); },
+      [currentIndex](int index) {
+        if (index == currentIndex) return std::string(tr(STR_SELECTED));
+        const TimeZonePreset& zone = TimeZoneRegistry::getPreset(static_cast<uint8_t>(index));
+        if (strncmp(zone.label, "UTC", 3) == 0) return std::string();
+        char offset[TimeZoneRegistry::OFFSET_BUFFER_SIZE];
+        TimeZoneRegistry::formatOffset(zone.stdOffsetQ, offset, sizeof(offset));
+        return std::string(offset);
+      },
       true);
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));

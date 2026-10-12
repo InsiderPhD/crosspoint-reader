@@ -401,7 +401,7 @@ Statistics are organised into tabs — **Overview** (streaks, daily goal, totals
 
 - **Daily Reading Goal** — 5 / 10 / 15 / 30 / 60 min.
 - **Minimum Session Length** — the shortest activity (1 / 3 / 5 min) that counts as a session.
-- **Set Date** / **Time Zone** — keep timestamps and streaks accurate.
+- **Set Date** / **Time Zone** / **Daylight Saving** — keep timestamps and streaks accurate. Pick a city for automatic daylight saving, or a fixed `UTC±HH:MM` offset; Daylight Saving can also be forced On or Off. The same zone drives the status-bar clock, dates, daily goals and frontlight schedules.
 - **Export Statistics / Import Statistics / Export to StoryGraph** — back up or move your stats.
 - **"If Found" contact** — a contact string (e.g. a phone number) that can be shown on the sleep screen.
 
@@ -662,7 +662,7 @@ The **Customise Status Bar** screen itself holds the settings both bars share:
 - **Percentage Format** — show book progress as `10%`, `10.1%` or `10.12%`.
 - **Top Margin** — 0–20 px of extra space between the body text and each bar, in 4 px steps.
 - **XTC Status Bar** — XTC pages are pre-rendered, so the bars are overlays: Hide / Bottom / Top / Both. *Top* paints the bottom bar's layout along the top edge (as it did before the top bar existed); *Both* paints each bar where it belongs.
-- **Clock** extras — UTC offset and 12h/24h format.
+- **Clock** extras — time zone, daylight saving and 12h/24h format.
 
 Placing the first element on an empty bar (or clearing the last one) changes the text area, so the chapter is re-paginated the next time you open it (the cached layout is keyed on the viewport).
 
@@ -675,7 +675,7 @@ All of these are also editable from the web settings page.
 
 ### Statistics tab
 
-See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Length, Sleep Stat slots 1–3, "If Found" contact, Set Date, Time Zone, and Export/Import (incl. StoryGraph).
+See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Length, Sleep Stat slots 1–3, "If Found" contact, Set Date, Time Zone, Daylight Saving, and Export/Import (incl. StoryGraph).
 
 ### System tab
 
@@ -691,6 +691,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **Check for Updates** *(action)* — OTA firmware update over WiFi.
 - **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.
 - **Language** *(action)* — set the UI language.
+- **About** *(action)* — device information: firmware version, board, chip, display, battery, free memory (and the largest free block), SD card size and free space, MAC address, uptime and the reason for the last restart. Press **Confirm** (or tap the first row) to save `support-info.txt` to the SD card root for a bug report. The file holds hardware facts, memory/SD/battery readings and a short list of numeric display settings; it never contains WiFi names or passwords, account details, tokens, the MAC address, file names or book titles.
 - **Time to Sleep** — auto-sleep after 1 / 5 / 10 / 15 / 30 min of inactivity.
 - **Show Hidden Files** — show dotfiles in the browser.
 - **Developer Mode** — reveals the Developer tab.

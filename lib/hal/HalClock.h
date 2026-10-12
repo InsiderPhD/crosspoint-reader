@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <Rtc.h>
+#include <time.h>
 
 #include "HalGPIO.h"
 
@@ -11,13 +12,15 @@ extern HalClock halClock;  // Singleton
 // Thin HAL wrapper over the freeink-sdk RTC driver (freeink::Rtc). The driver
 // targets whatever RTC the active board profile describes — on the X3 that is the
 // DS3231 at 0x68. All chip/register handling lives in the SDK; this class only adds
-// the app-facing conveniences (device gating, an HH:MM cache for the status bar,
-// and NTP sync). The X3 profile must be active (main.cpp selects it right after
+// the app-facing conveniences (device gating, a cached reading for the status bar,
+// local-time conversion, and NTP sync). The X3 profile must be active (main.cpp selects it right after
 // hardware detection) before begin() is called, or the SDK reports no RTC.
 class HalClock {
   bool _available = false;
-  mutable uint8_t _cachedHour = 0;
-  mutable uint8_t _cachedMinute = 0;
+  // The RTC keeps UTC; local time comes from newlib's localtime_r under the
+  // POSIX TZ rule set via setTimezone(), so zones with DST are right all year.
+  // Cached as a UTC epoch to keep the RTC bus quiet.
+  mutable time_t _cachedUtc = 0;
   mutable bool _hasCachedTime = false;
   mutable unsigned long _lastPollMs = 0;
   // mutable so the const read path (getTime) can call the SDK's non-const now();
@@ -33,16 +36,24 @@ class HalClock {
   // True if the RTC is present on this device
   bool isAvailable() const { return _available; }
 
-  // Get current hour (0-23) and minute (0-59).
+  // Set the process-wide POSIX TZ rule (e.g. "CET-1CEST,M3.5.0,M10.5.0/3") that
+  // every local-time read here, and every localtime_r() elsewhere, applies.
+  // nullptr/empty falls back to UTC. Works on boards without an RTC too.
+  void setTimezone(const char* posixTz);
+
+  // Current wall-clock time in the configured timezone.
+  // Returns false if RTC is not available or has never produced a valid reading.
+  bool localTime(struct tm& out) const;
+
+  // Get current local hour (0-23) and minute (0-59).
   // Returns false if RTC is not available.
   bool getTime(uint8_t& hour, uint8_t& minute) const;
 
-  // Format time into a caller-provided buffer.
+  // Format the local time into a caller-provided buffer.
   // 24h mode produces "HH:MM" (needs >=6 bytes); 12h mode produces "H:MM AM"/"HH:MM PM" (needs >=9 bytes).
-  // utcOffsetQuarterHoursBiased: biased quarter-hour offset (48 = UTC+0, 0 = UTC-12, 104 = UTC+14).
-  // use12Hour: when true, format as 12-hour clock with AM/PM suffix.
+  // use12Hour is deliberately not defaulted: always pass it.
   // Returns false if RTC is not available.
-  bool formatTime(char* buf, size_t bufSize, uint8_t utcOffsetQuarterHoursBiased = 48, bool use12Hour = false) const;
+  bool formatTime(char* buf, size_t bufSize, bool use12Hour) const;
 
   // Read the RTC as a UTC epoch. False when there is no RTC, on an I2C error,
   // or when the chip reports its oscillator stopped (never set / flat backup

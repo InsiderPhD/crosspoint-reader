@@ -13,20 +13,18 @@
 namespace {
 // Kindle-style "Added on ..." line built from the NTP/manually-set system clock (see
 // util/WifiTimeSync.cpp / util/TimeUtils.h). Returns false when the clock has never been set,
-// in which case the caller omits the timestamp. Uses the biased quarter-hour UTC offset from
-// settings (48 = UTC+0) and gmtime_r so it does not depend on TZ configuration.
+// in which case the caller omits the timestamp. Local time comes from the Time Zone + DST
+// settings, the same rule every other clock on the device uses.
 bool formatKindleAddedOn(char* buf, const size_t bufSize) {
   if (!buf || bufSize == 0) return false;
 
   const uint32_t epoch = TimeUtils::getCurrentValidTimestamp();
   if (!TimeUtils::isClockValid(epoch)) return false;
 
-  const uint8_t offsetQ = std::min<uint8_t>(SETTINGS.clockUtcOffsetQ, 104);
-  const long offsetSeconds = (static_cast<long>(offsetQ) - 48) * 15L * 60L;
-
-  const time_t localEpoch = static_cast<time_t>(epoch) + offsetSeconds;
+  TimeUtils::configureTimezone();
+  const time_t utcEpoch = static_cast<time_t>(epoch);
   struct tm tmLocal;
-  if (gmtime_r(&localEpoch, &tmLocal) == nullptr) return false;
+  if (localtime_r(&utcEpoch, &tmLocal) == nullptr) return false;
 
   // e.g. "Added on Wednesday, July 8, 2026, 3:04 PM" (%e is space-padded; collapse the gap).
   char tmp[80];

@@ -22,6 +22,7 @@
 #include "components/icons/remotecontrol.h"
 #include "fontIds.h"
 #include "util/HeaderDateUtils.h"
+#include "util/TimeUtils.h"
 
 // Internal constants
 namespace {
@@ -1207,7 +1208,7 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
   // Clock (X3 only — DS3231 RTC)
   if (posOf(CPS::SB_ELEM_CLOCK) != CPS::SB_POS_HIDE && halClock.isAvailable()) {
     char timeBuf[9];
-    if (halClock.formatTime(timeBuf, sizeof(timeBuf), SETTINGS.clockUtcOffsetQ, SETTINGS.clockFormat == 1)) {
+    if (TimeUtils::formatClock(timeBuf, sizeof(timeBuf))) {
       addText(CPS::SB_ELEM_CLOCK, timeBuf);
     }
   }

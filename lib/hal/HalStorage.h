@@ -38,6 +38,12 @@ class HalStorage {
   bool writeFile(const char* path, const String& content);
   // Ensure a directory exists, creating it if necessary. Returns true on success.
   bool ensureDirectoryExists(const char* path);
+  // Card capacity in bytes, cached by the SDK at mount. 0 when no card is mounted.
+  uint64_t sdTotalBytes();
+  // Bytes in use. The SDK walks the whole FAT for this (it can take seconds on
+  // a large card over SPI) and then caches the answer for 20 s, so call it from
+  // a screen that has already drawn, never on a hot path. 0 when unmounted.
+  uint64_t sdUsedBytes();
 
   HalFile open(const char* path, const oflag_t oflag = O_RDONLY);
   bool mkdir(const char* path, const bool pFlag = true);

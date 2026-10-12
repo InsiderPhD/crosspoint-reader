@@ -22,7 +22,14 @@ bool syncedThisBoot = false;
 // syncedThisBoot, which callers also read as "the network worked this boot"
 // (ProgressAutoSync) — an offline device must not start attempting pushes.
 bool seededFromRtcThisBoot = false;
-uint8_t configuredTimeZonePreset = UINT8_MAX;
+// The (zone, DST mode) pair last pushed into the C library, so the many callers
+// of configureTimezone() cost three compares rather than a setenv each.
+constexpr uint32_t TIME_ZONE_NOT_CONFIGURED = UINT32_MAX;
+uint32_t configuredTimeZoneKey = TIME_ZONE_NOT_CONFIGURED;
+
+TimeZoneRegistry::Resolved activeTimeZone() {
+  return TimeZoneRegistry::resolve(SETTINGS.clockTimezone, SETTINGS.timeZonePreset, SETTINGS.clockUtcOffsetQ);
+}
 
 bool isLeapYear(const int year) { return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0); }
 
@@ -72,14 +79,38 @@ void civilFromDays(int z, int& year, unsigned& month, unsigned& day) {
 }  // namespace
 
 void TimeUtils::configureTimezone() {
-  const uint8_t preset = TimeZoneRegistry::clampPresetIndex(SETTINGS.timeZonePreset);
-  if (configuredTimeZonePreset == preset) {
+  const TimeZoneRegistry::Resolved zone = activeTimeZone();
+  const uint8_t dstMode =
+      SETTINGS.clockDst < TimeZoneRegistry::DST_MODE_COUNT ? SETTINGS.clockDst : uint8_t{TimeZoneRegistry::DST_AUTO};
+  // offsetQ is in the key because a bare migrated offset has no table index.
+  const uint32_t key = (static_cast<uint32_t>(dstMode) << 24) | (static_cast<uint32_t>(zone.index) << 16) |
+                       static_cast<uint16_t>(zone.offsetQ);
+  if (configuredTimeZoneKey == key) {
     return;
   }
-  setenv("TZ", TimeZoneRegistry::getPresetPosixTz(preset), 1);
-  tzset();
-  configuredTimeZonePreset = preset;
+  char posixTz[TimeZoneRegistry::POSIX_TZ_BUFFER_SIZE];
+  TimeZoneRegistry::buildPosixTz(zone, dstMode, posixTz, sizeof(posixTz));
+  // One setenv for the whole process: the RTC-backed status-bar clock and every
+  // localtime_r() below share the rule.
+  halClock.setTimezone(posixTz);
+  configuredTimeZoneKey = key;
+  LOG_DBG("TIME", "Time zone set to %s", posixTz);
 }
+
+void TimeUtils::setTimeZone(const uint8_t index) {
+  if (index >= TimeZoneRegistry::getPresetCount() || index == SETTINGS.clockTimezone) {
+    return;
+  }
+  SETTINGS.clockTimezone = index;
+  // Mirror the choice into the retired fields so older firmware reading this
+  // settings.json lands as close as its own model allows.
+  SETTINGS.timeZonePreset = TimeZoneRegistry::legacyPresetFor(index);
+  SETTINGS.clockUtcOffsetQ = TimeZoneRegistry::legacyOffsetQFor(index);
+  SETTINGS.saveToFile();
+  configureTimezone();
+}
+
+uint8_t TimeUtils::getTimeZoneIndex() { return activeTimeZone().index; }
 
 bool TimeUtils::syncTimeWithNtp(const uint32_t timeoutMs) {
   configureTimezone();
@@ -239,8 +270,13 @@ bool TimeUtils::seedClockFromRtc() {
   return true;
 }
 
-const char* TimeUtils::getCurrentTimeZoneLabel() {
-  return TimeZoneRegistry::getPresetLabel(TimeZoneRegistry::clampPresetIndex(SETTINGS.timeZonePreset));
+const char* TimeUtils::getCurrentTimeZoneLabel(char* buf, const size_t bufSize) {
+  return TimeZoneRegistry::label(activeTimeZone(), buf, bufSize);
+}
+
+bool TimeUtils::formatClock(char* buf, const size_t bufSize) {
+  configureTimezone();
+  return halClock.formatTime(buf, bufSize, SETTINGS.clockFormat == 1);
 }
 
 std::string TimeUtils::formatDate(const uint32_t epochSeconds, const bool appendBang) {
