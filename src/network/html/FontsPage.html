@@ -144,6 +144,7 @@
         <input type="file" id="fontFiles" webkitdirectory directory multiple required />
         <button type="submit" class="btn btn-primary">Upload</button>
       </form>
+      <p id="acceptedInfo" class="family-meta" style="margin: 8px 0 0;"></p>
       <p id="pickedInfo" class="family-meta" style="margin: 8px 0 0;"></p>
       <div id="status"></div>
     </div>
@@ -155,11 +156,35 @@
       return bytes + ' B';
     }
 
+    // Boards with PSRAM (X4 Pro, X4C) also accept TrueType/OpenType uploads; set from /api/fonts.
+    let allowVector = false;
+
+    function isVectorName(name) {
+      return /\.(ttf|otf)$/i.test(name);
+    }
+
+    function fontExtRe() {
+      return allowVector ? /\.(cpfont|ttf|otf)$/i : /\.cpfont$/i;
+    }
+
+    function supportedExts() {
+      return allowVector ? '.cpfont, .ttf or .otf' : '.cpfont';
+    }
+
+    // Said instead of "no files found" when this device was handed vector fonts it cannot use.
+    function vectorRefusal(fileList) {
+      if (allowVector || !Array.from(fileList).some(f => isVectorName(f.name))) return '';
+      return ' TrueType/OpenType (.ttf/.otf) fonts need an X4 Pro or X4C; convert them to .cpfont for this device.';
+    }
+
     async function loadFonts() {
       const el = document.getElementById('families');
       try {
         const res = await fetch('/api/fonts');
         const data = await res.json();
+        allowVector = !!data.vectorFonts;
+        document.getElementById('acceptedInfo').textContent = 'Accepts ' + supportedExts() + ' files' +
+          (allowVector ? ' (.ttf/.otf up to 3 MB each).' : '.');
         // Build rows with DOM APIs and textContent so on-device family names
         // (which can contain arbitrary characters) cannot break markup or
         // execute script via innerHTML / inline onclick interpolation.
@@ -182,9 +207,11 @@
           info.appendChild(h3);
           const meta = document.createElement('span');
           meta.className = 'family-meta';
-          const sizes = (f.sizes || []).join(', ');
+          // A TrueType/OpenType family reports no sizes: it renders at any size.
+          const sizes = (f.sizes || []).filter(s => s > 0);
+          const sizeText = sizes.length ? sizes.join(', ') + 'pt' : 'scalable';
           const filesSizes = (f.files || []).map(fi => formatSize(fi.size)).join(' + ');
-          meta.textContent = sizes + 'pt · ' + filesSizes;
+          meta.textContent = sizeText + ' · ' + filesSizes;
           info.appendChild(meta);
 
           const btn = document.createElement('button');
@@ -233,10 +260,11 @@
       await loadFonts();
     }
 
-    // Derive family name from a .cpfont filename: take everything before the
-    // last '-' or '_' (that separator precedes the size suffix, e.g. Bookerly_12.cpfont).
+    // Derive family name from a font filename: take everything before the
+    // last '-' or '_' (that separator precedes the size suffix of a .cpfont,
+    // e.g. Bookerly_12.cpfont, or the style of a vector font, e.g. Bookerly-Bold.ttf).
     function familyFromFilename(name) {
-      const stem = name.replace(/\.cpfont$/i, '');
+      const stem = name.replace(/\.(cpfont|ttf|otf)$/i, '');
       const cut = Math.max(stem.lastIndexOf('-'), stem.lastIndexOf('_'));
       return cut > 0 ? stem.slice(0, cut) : stem;
     }
@@ -246,15 +274,15 @@
       return raw.replace(/[^A-Za-z0-9_-]/g, '_');
     }
 
-    function cpfontFilesOnly(fileList) {
-      return Array.from(fileList).filter(f => /\.cpfont$/i.test(f.name));
+    function supportedFontFilesOnly(fileList) {
+      return Array.from(fileList).filter(f => fontExtRe().test(f.name));
     }
 
     document.getElementById('fontFiles').addEventListener('change', function() {
       const info = document.getElementById('pickedInfo');
-      const files = cpfontFilesOnly(this.files);
+      const files = supportedFontFilesOnly(this.files);
       if (files.length === 0) {
-        info.textContent = 'No .cpfont files found in the selected folder.';
+        info.textContent = 'No ' + supportedExts() + ' files found in the selected folder.' + vectorRefusal(this.files);
         return;
       }
       const family = sanitizeFamily(familyFromFilename(files[0].name));
@@ -265,11 +293,12 @@
     document.getElementById('uploadForm').addEventListener('submit', async function(e) {
       e.preventDefault();
       const status = document.getElementById('status');
-      const files = cpfontFilesOnly(document.getElementById('fontFiles').files);
+      const picked = document.getElementById('fontFiles').files;
+      const files = supportedFontFilesOnly(picked);
       if (files.length === 0) {
         status.className = 'status-err';
         status.style.display = 'block';
-        status.textContent = 'No .cpfont files selected.';
+        status.textContent = 'No ' + supportedExts() + ' files selected.' + vectorRefusal(picked);
         return;
       }
 

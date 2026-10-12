@@ -4,6 +4,8 @@
 #pragma once
 #include <cstdint>
 
+#include "VectorFontSupport.h"  // CROSSPOINT_VECTOR_FONTS adds one member to EpdFontData
+
 /// Font metrics use "fixed-point 4" (4 fractional bits, i.e. 1/16-pixel
 /// resolution).  Both the 12.4 glyph advances (uint16_t) and the 4.4 kern
 /// values (int8_t) share the same 4 fractional bits, so they can be freely
@@ -141,4 +143,17 @@ typedef struct {
   /// Context pointer for glyphMissHandler (typically SdCardFont*).  Also used by
   /// GfxRenderer::getGlyphBitmap() to retrieve overflow bitmaps via SdCardFont.
   void* glyphMissCtx;
+
+#if CROSSPOINT_VECTOR_FONTS
+  /// Runtime vector fonts (TtfEpdFont) only; nullptr for every built-in and SD
+  /// font (aggregate initialisers zero it). Non-null means two things:
+  ///  * kerning comes from this handler (4.4 fixed-point pixels for the pair, 0
+  ///    when none) instead of the class tables above, and
+  ///  * glyphMissCtx is NOT an SdCardFont: every glyph the miss handler returns
+  ///    has its bitmap at bitmap[dataOffset], so GfxRenderer::getGlyphBitmap()
+  ///    must not take the SD overflow-ring path.
+  /// Compiled out on boards without PSRAM so the flash-resident built-in font
+  /// tables do not grow there.
+  int8_t (*kernHandler)(void* ctx, uint32_t leftCp, uint32_t rightCp);
+#endif
 } EpdFontData;
