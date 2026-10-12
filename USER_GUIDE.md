@@ -78,7 +78,7 @@ The X4 Pro is a **separate firmware binary** (`pio run -e x4pro`) — it is an E
 
 - **Turn on/off:** press and hold **Power** for about half a second.
 - You can configure what a **short** Power press does while reading (page turn, sleep, sync, bookmark, and more) in **[Reader Controls](#reader-tab)**. When a short press is repurposed, turning the device *off* requires a long press.
-- **Waking from sleep:** a short Power press wakes the device — there's no hold-to-wake delay. On the X3 and X4 you can opt into one as a pocket guard: **Settings → System → Wake From Sleep → Hold Power** only wakes if Power is still held when the device has started up (a second or two), and goes back to sleep otherwise.
+- **Waking from sleep:** a short Power press wakes the device — there's no hold-to-wake delay.
 - **Reboot / recover:** press and release **Reset**, then quickly press and hold **Power** for a few seconds.
 
 ### First Launch
@@ -693,7 +693,6 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **Language** *(action)* — set the UI language.
 - **About** *(action)* — device information: firmware version, board, chip, display, battery, free memory (and the largest free block), SD card size and free space, MAC address, uptime and the reason for the last restart. Press **Confirm** (or tap the first row) to save `support-info.txt` to the SD card root for a bug report. The file holds hardware facts, memory/SD/battery readings and a short list of numeric display settings; it never contains WiFi names or passwords, account details, tokens, the MAC address, file names or book titles.
 - **Time to Sleep** — auto-sleep after 1 / 5 / 10 / 15 / 30 min of inactivity.
-- **Wake From Sleep** *(X3 / X4)* — Short Press (default) / Hold Power. See **[Power On / Off](#power-on--off)**.
 - **Show Hidden Files** — show dotfiles in the browser.
 - **Developer Mode** — reveals the Developer tab.
 

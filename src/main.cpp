@@ -200,6 +200,7 @@ EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 
 // measurement of power button press duration calibration value
 unsigned long t1 = 0;
+unsigned long t2 = 0;
 
 // Definitions for SilentRestart.h. RTC_NOINIT survives ESP.restart() but not power loss.
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
@@ -235,36 +236,48 @@ void silentRestartToReader() { silentRestartTo(SILENT_REBOOT_TARGET_READER, "rea
 
 void silentRestartToSettings() { silentRestartTo(SILENT_REBOOT_TARGET_SETTINGS, "settings"); }
 
-// Hold-to-wake gate for the opt-in "Wake From Sleep: Hold Power" setting.
-// Pre-condition: the wakeup reason is PowerButton. Returns false when the
-// button is no longer down, i.e. the device should go back to sleep.
-//
-// This is deliberately NOT a duration gate. By the time setup() gets here the
-// hardware bring-up (serial settle, panel fingerprint, SD mount, two JSON
-// loads) has already taken one to two seconds, so "still held" is the only
-// thing left to measure: the press has to last until now. That is exactly the
-// behaviour that felt broken when it was mandatory (see the PowerButton case
-// in setup()), which is why it is a setting, off by default, that says "hold".
-//
-// The gate only samples. It commits no pin, pull or sleep configuration of
-// its own; the caller re-sleeps through HalPowerManager::startDeepSleep(), the
-// same call the AfterUSBPower case below has always made from this point.
-bool powerButtonHeldForWake() {
-  // The debounced level only commits after consecutive matching samples, and
-  // HalGPIO documents up to ~500ms before isPressed() is trustworthy, so poll
-  // for that long instead of trusting one read. A held button returns as soon
-  // as its level commits (a few passes); only a released one costs the whole
-  // window, and that boot is about to be abandoned anyway.
-  static constexpr unsigned long SAMPLE_WINDOW_MS = 500;
-  const unsigned long start = millis();
-  do {
+// Verify power button press duration on wake-up from deep sleep
+// Pre-condition: isWakeupByPowerButton() == true
+void verifyPowerButtonDuration() {
+  if (SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP) {
+    // Fast path for short press
+    // Needed because inputManager.isPressed() may take up to ~500ms to return the correct state
+    return;
+  }
+
+  // Give the user up to 1000ms to start holding the power button, and must hold for SETTINGS.getPowerButtonDuration()
+  const auto start = millis();
+  bool abort = false;
+  // Subtract the current time, because inputManager only starts counting the HeldTime from the first update()
+  // This way, we remove the time we already took to reach here from the duration,
+  // assuming the button was held until now from millis()==0 (i.e. device start time).
+  const uint16_t calibration = start;
+  const uint16_t calibratedPressDuration =
+      (calibration < SETTINGS.getPowerButtonDuration()) ? SETTINGS.getPowerButtonDuration() - calibration : 1;
+
+  gpio.update();
+  // Needed because inputManager.isPressed() may take up to ~500ms to return the correct state
+  while (!gpio.isPressed(HalGPIO::BTN_POWER) && millis() - start < 1000) {
+    delay(10);  // only wait 10ms each iteration to not delay too much in case of short configured duration.
     gpio.update();
-    if (gpio.isPressed(HalGPIO::BTN_POWER)) {
-      return true;
-    }
-    delay(10);
-  } while (millis() - start < SAMPLE_WINDOW_MS);
-  return false;
+  }
+
+  t2 = millis();
+  if (gpio.isPressed(HalGPIO::BTN_POWER)) {
+    do {
+      delay(10);
+      gpio.update();
+    } while (gpio.isPressed(HalGPIO::BTN_POWER) && gpio.getHeldTime() < calibratedPressDuration);
+    abort = gpio.getHeldTime() < calibratedPressDuration;
+  } else {
+    abort = true;
+  }
+
+  if (abort) {
+    // Button released too early. Returning to sleep.
+    // IMPORTANT: Re-arm the wakeup trigger before sleeping again
+    powerManager.startDeepSleep(gpio);
+  }
 }
 void waitForPowerRelease() {
   gpio.update();
@@ -667,16 +680,6 @@ void setup() {
       // Reinstating an anti-pocket-wake guard needs a hold gate that survives
       // to the check — latch the press in HalGPIO at boot, do not re-read the
       // pin once bring-up has already burned the hold time.
-#if FREEINK_MCU_C3
-      // Opt-in pocket guard (X3 / X4 only): the press must still be down now.
-      // Not offered on the S3 boards, where the re-sleep this takes was answered
-      // by another cold POWERON on battery (see above); their setting row is
-      // hidden and a value synced over from a C3 device is ignored here.
-      if (SETTINGS.powerWakeMode == CrossPointSettings::POWER_WAKE_HOLD && !powerButtonHeldForWake()) {
-        LOG_DBG("MAIN", "Wakeup reason: power button, released before the hold gate; sleeping again");
-        powerManager.startDeepSleep(gpio);
-      }
-#endif
       LOG_DBG("MAIN", "Wakeup reason: power button; taken as intentional");
       break;
     case HalGPIO::WakeupReason::AfterUSBPower:
