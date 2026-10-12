@@ -8,6 +8,10 @@
 #include <cstdio>
 #include <cstring>
 
+namespace {
+constexpr char MOVED_BOOKS_PATH[] = "/.crosspoint/bookfusion_moved.json";
+}
+
 void BookFusionBookIdStore::buildSidecarPath(const char* epubPath, char* outPath, size_t maxLen) {
   MD5Builder md5;
   md5.begin();
@@ -252,5 +256,46 @@ bool BookFusionBookIdStore::movePath(const char* oldEpubPath, const char* newEpu
     LOG_ERR("BFS", "Failed to move sidecar %s -> %s", oldSidecar, newSidecar);
     return false;
   }
+  // The BookFusion browser looks a book up by the file name it would download
+  // it under. Record where this one went so it is still found by its id.
+  const uint32_t bookId = loadBookId(newEpubPath);
+  if (bookId != 0 && !saveMovedPath(bookId, newEpubPath)) {
+    LOG_ERR("BFS", "Failed to record moved book_id=%lu", static_cast<unsigned long>(bookId));
+  }
+  return true;
+}
+
+bool BookFusionBookIdStore::saveMovedPath(const uint32_t bookId, const char* epubPath) {
+  JsonDocument doc;
+  if (Storage.exists(MOVED_BOOKS_PATH)) {
+    String existing = Storage.readFile(MOVED_BOOKS_PATH);
+    // A corrupt list is started again rather than kept: it is only a hint.
+    if (!existing.isEmpty() && deserializeJson(doc, existing) != DeserializationError::Ok) doc.clear();
+  }
+  char key[12];
+  snprintf(key, sizeof(key), "%lu", static_cast<unsigned long>(bookId));
+  doc[key] = epubPath;
+
+  String json;
+  serializeJson(doc, json);
+  return Storage.writeFile(MOVED_BOOKS_PATH, json);
+}
+
+bool BookFusionBookIdStore::loadMovedPath(const uint32_t bookId, std::string& outPath) {
+  outPath.clear();
+  if (bookId == 0 || !Storage.exists(MOVED_BOOKS_PATH)) return false;
+  String json = Storage.readFile(MOVED_BOOKS_PATH);
+  if (json.isEmpty()) return false;
+
+  JsonDocument doc;
+  if (deserializeJson(doc, json) != DeserializationError::Ok) {
+    LOG_ERR("BFS", "Moved-book list parse error");
+    return false;
+  }
+  char key[12];
+  snprintf(key, sizeof(key), "%lu", static_cast<unsigned long>(bookId));
+  const char* path = doc[key] | "";
+  if (path[0] == '\0') return false;
+  outPath = path;
   return true;
 }
