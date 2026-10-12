@@ -387,6 +387,10 @@ inline void appendSystemSettings(std::vector<SettingInfo>& v) {
                SettingInfo::Enum(StrId::STR_FOLDER_VIEW, &CrossPointSettings::folderView,
                                  {StrId::STR_FOLDERS, StrId::STR_TAGS, StrId::STR_AUTHORS, StrId::STR_SERIES},
                                  "folderView", StrId::STR_CAT_DISPLAY),
+               // Library only: finished books (completed in the reader, or
+               // marked as read) are left out of the grid.
+               SettingInfo::Toggle(StrId::STR_HIDE_FINISHED_BOOKS, &CrossPointSettings::libraryHideFinished,
+                                   "libraryHideFinished", StrId::STR_CAT_DISPLAY),
                SettingInfo::Toggle(StrId::STR_DEV_MODE, &CrossPointSettings::devMode, "devMode", StrId::STR_CAT_SYSTEM),
                // Dev tab: opting a device into beta/rc firmware. Lives behind Dev
                // Mode because the pre-release channel can hand this device an
@@ -394,6 +398,10 @@ inline void appendSystemSettings(std::vector<SettingInfo>& v) {
                // esp_image_verify (see OtaBootSwitch.h).
                SettingInfo::Toggle(StrId::STR_ENABLE_PRERELEASES, &CrossPointSettings::allowPreReleases,
                                    "allowPreReleases", StrId::STR_CAT_DEV),
+               // Dev tab: the CLX1 Library index is on by default; this is the
+               // switch back to the in-RAM path list for comparison on hardware.
+               SettingInfo::Toggle(StrId::STR_LIBRARY_USE_INDEX, &CrossPointSettings::libraryUseIndex,
+                                   "libraryUseIndex", StrId::STR_CAT_DEV),
            });
 }
 
@@ -604,7 +612,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 94;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 96;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

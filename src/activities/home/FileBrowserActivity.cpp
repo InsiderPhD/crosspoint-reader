@@ -21,6 +21,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/BookFinished.h"
 #include "util/BookMoveUtils.h"
 #include "util/TouchListNav.h"
 
@@ -191,18 +192,26 @@ void FileBrowserActivity::rebuildFilesList() {
   files.clear();
   filesIsBookFusion.clear();
   filesProgress.clear();
+  filesFinished.clear();
   files.reserve(fileEntries.size() + folderEntries.size());
   filesIsBookFusion.reserve(fileEntries.size() + folderEntries.size());
   filesProgress.reserve(fileEntries.size() + folderEntries.size());
+  filesFinished.reserve(fileEntries.size() + folderEntries.size());
   for (uint16_t idx : sortedIndices) {
     files.push_back(fileEntries[idx]);
     filesIsBookFusion.push_back(fileEntryIsBookFusion[idx]);
     filesProgress.push_back(entries[idx].progressPercent);
+    // In-RAM lookups only (ReadingStatsStore / RecentBooksStore): no SD access.
+    const std::string_view entryName{fileEntries[idx]};
+    const bool isBook = FsHelpers::hasEpubExtension(entryName) || FsHelpers::hasXtcExtension(entryName) ||
+                        FsHelpers::hasTxtExtension(entryName);
+    filesFinished.push_back(isBook && BookFinished::isFinished(baseWithSlash + fileEntries[idx]));
   }
   for (const auto& folder : folderEntries) {
     files.push_back(folder);
     filesIsBookFusion.push_back(false);
     filesProgress.push_back(-1);
+    filesFinished.push_back(false);
   }
 }
 
@@ -924,6 +933,8 @@ void FileBrowserActivity::render(RenderLock&&) {
           // instead of the file-type icon. Sidecar existence is cached at
           // loadFiles() to avoid an SD stat per row, per redraw.
           if (filesIsBookFusion[index]) return UIIcon::BookFusion;
+          // A finished book shows a tick in place of its file-type icon.
+          if (filesFinished[index]) return UIIcon::Check;
           return UITheme::getFileIcon(files[index]);
         },
         [this, &sleepFolderEntry, &bootImageEntry](int index) -> std::string {

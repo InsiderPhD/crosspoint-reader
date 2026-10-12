@@ -661,6 +661,17 @@ class CrossPointSettings {
   // beta/rc included. Only OtaUpdater reads this; the field exists on every
   // build so settings.json round-trips.
   uint8_t allowPreReleases = 0;
+  // Library backing store (Dev tab). On = the Library and the Tags/Authors/Series
+  // browser read the CLX1 index (/.crosspoint/library.clx, lib/LibraryIndex):
+  // titles, authors, tags and sort orders come from one file by seeks, with no
+  // per-book strings held in RAM. Off = the original in-RAM path list and
+  // per-book book.bin reads. Any index failure falls back to that path anyway;
+  // the switch exists so the old behaviour can be compared on hardware.
+  uint8_t libraryUseIndex = 1;
+  // Library: leave finished books (completed in the reader, or set to 100% by
+  // "Mark as Read") out of the grid. They stay on the card and in the file
+  // browser. Off by default.
+  uint8_t libraryHideFinished = 0;
   // Full Touch (X4 Pro): taps hit-test the drawn UI directly (tap a row to
   // select and activate it) and every screen draws the tappable action bar. No
   // longer a choice -- the X4 Pro has no front buttons, so it is always on

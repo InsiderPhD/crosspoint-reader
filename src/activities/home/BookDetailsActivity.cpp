@@ -79,11 +79,19 @@ void BookDetailsActivity::freeDescBuffer() {
 }
 
 int BookDetailsActivity::siblingCount() const {
+  if (siblingResolver) return siblingResolverCount;
   if (!siblingPaths) return 0;
   return static_cast<int>(siblingOrder.empty() ? siblingPaths->size() : siblingOrder.size());
 }
 
 const std::string* BookDetailsActivity::siblingPathAt(int pos) const {
+  if (siblingResolver) {
+    if (pos < 0 || pos >= siblingResolverCount) return nullptr;
+    if (!siblingResolver(siblingResolverContext, pos, resolvedSiblingPath) || resolvedSiblingPath.empty()) {
+      return nullptr;
+    }
+    return &resolvedSiblingPath;
+  }
   if (!siblingPaths || pos < 0) return nullptr;
   size_t idx;
   if (siblingOrder.empty()) {

@@ -99,6 +99,9 @@ class GroupBrowserActivity final : public Activity {
 
   // Read every book's cached key (whole-library SD pass) then build the folders.
   void loadLibraryKeys();
+  // Fill bookPaths / bookKeys (and bookSeriesIndex) from the CLX1 Library index,
+  // rebuilding it first if it is stale. False = unavailable; use the per-book pass.
+  bool loadKeysFromIndex();
   // Build groups/groupCounts and the loose rootBookIdx from the in-memory bookKeys (no SD).
   void computeGroups();
   // Split a raw ", "-joined key string into trimmed, deduped group keys (tags or

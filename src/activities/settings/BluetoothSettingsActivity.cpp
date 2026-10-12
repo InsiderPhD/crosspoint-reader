@@ -179,15 +179,24 @@ void BluetoothSettingsActivity::handleMainMenuInput() {
   const bool fromRemote = btMgr && btMgr->hadRecentRemoteInput(400);
 
   if (!fromRemote) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
-        mappedInput.wasPressed(MappedInputManager::Button::Left)) {
-      selectedIndex = (selectedIndex > 0) ? selectedIndex - 1 : (kMainMenuItemCount - 1);
+    // A press moves one row, a hold turns a page, as in every other list.
+    const int pageItems = GUI.listGeometry(listRect(), 0, /*hasSubtitle=*/false).pageItems;
+    buttonNavigator.onNextPress([this, kMainMenuItemCount] {
+      selectedIndex = ButtonNavigator::nextIndex(selectedIndex, kMainMenuItemCount);
       requestUpdate();
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Down) ||
-               mappedInput.wasPressed(MappedInputManager::Button::Right)) {
-      selectedIndex = (selectedIndex < (kMainMenuItemCount - 1)) ? selectedIndex + 1 : 0;
+    });
+    buttonNavigator.onPreviousPress([this, kMainMenuItemCount] {
+      selectedIndex = ButtonNavigator::previousIndex(selectedIndex, kMainMenuItemCount);
       requestUpdate();
-    }
+    });
+    buttonNavigator.onNextContinuous([this, kMainMenuItemCount, pageItems] {
+      selectedIndex = ButtonNavigator::nextPageIndex(selectedIndex, kMainMenuItemCount, pageItems);
+      requestUpdate();
+    });
+    buttonNavigator.onPreviousContinuous([this, kMainMenuItemCount, pageItems] {
+      selectedIndex = ButtonNavigator::previousPageIndex(selectedIndex, kMainMenuItemCount, pageItems);
+      requestUpdate();
+    });
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
@@ -357,19 +366,30 @@ void BluetoothSettingsActivity::handleDeviceListInput() {
       break;
   }
 
-  const int maxIndex = static_cast<int>(devices.size()) - 1;
-  if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
-    selectedIndex = (selectedIndex > 0) ? selectedIndex - 1 : maxIndex;
+  // pageItems comes from the theme's own windowing of listRect(), so a page
+  // turn always moves by exactly the rows drawList drew.
+  const int pageItems = GUI.listGeometry(listRect(), 0, /*hasSubtitle=*/false).pageItems;
+  const int deviceCount = static_cast<int>(devices.size());
+
+  // A press moves one row, a hold turns a page, as in every other list.
+  buttonNavigator.onNextPress([this, deviceCount] {
+    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, deviceCount);
     requestUpdate();
-  } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
-    selectedIndex = (selectedIndex < maxIndex) ? selectedIndex + 1 : 0;
+  });
+  buttonNavigator.onPreviousPress([this, deviceCount] {
+    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, deviceCount);
     requestUpdate();
-  }
+  });
+  buttonNavigator.onNextContinuous([this, deviceCount, pageItems] {
+    selectedIndex = ButtonNavigator::nextPageIndex(selectedIndex, deviceCount, pageItems);
+    requestUpdate();
+  });
+  buttonNavigator.onPreviousContinuous([this, deviceCount, pageItems] {
+    selectedIndex = ButtonNavigator::previousPageIndex(selectedIndex, deviceCount, pageItems);
+    requestUpdate();
+  });
 
   // Full Touch: a vertical swipe turns a page, matching the held side key.
-  // pageItems comes from the theme's own windowing of listRect(), so a page
-  // swipe always moves by exactly the rows drawList drew.
-  const int pageItems = GUI.listGeometry(listRect(), 0, /*hasSubtitle=*/false).pageItems;
   if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(devices.size()), pageItems, selectedIndex)) {
     requestUpdate();
     return;

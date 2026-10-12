@@ -304,3 +304,133 @@ if (parsedSize != fileSize) {
 - `/.crosspoint/reading_stats.json` `sessionLog` entries carry an optional `endProgress`
   (0-100, book progress when the session ended). Absent on sessions logged before it was
   recorded; no format version bump, older firmware ignores the key.
+
+## Library index: `/.crosspoint/library.clx`
+
+The `CLX1` index behind the Library screen and the Tags / Authors / Series browser when
+`libraryUseIndex` is on (Dev tab, default on). A hand port of CrossInk's `lib/LibraryIndex`;
+the layout is byte-identical to CrossInk's `library.idx` **format version 7, fold version 3**
+(`lib/LibraryIndex/LibraryFormat.h`). The file has a different name here because three
+fields mean something different in this fork (below), so the two firmwares must not reuse
+each other's indexes.
+
+One sorted snapshot of up to 32,767 `.epub` / `.xtc` books. Every section starts on a
+512-byte boundary:
+
+| Section | Contents |
+|---|---|
+| header | 64-byte `ClixHeader`, padded to 512 |
+| folders | one record per folder that holds a book: `u8 pathLen` + path bytes (no trailing `/`). A folder's id is its ordinal |
+| records | `bookCount` × exactly 128-byte `ClixRecord`, **in folded-title order** — record `k` is at `recordStart + 128*k`, no offset table |
+| permutations | five `u16[bookCount]` arrays of record ordinals: surname order, first-name order, arrival (date added, oldest first), series, tags. Then `u32[bookCount]` packed FAT timestamps in title order |
+| names | per record: `u64` FNV-1a hash of the full path, the filename, then five length-prefixed strings (display author, title, source author, series, tags) and a `u32` series position |
+
+```c++
+struct ClixHeader {            // 64 bytes
+    char magic[4];              // "CLX1"
+    u8 formatVersion;           // 7
+    u8 foldVersion;             // 3: bump when the fold or a sort key changes
+    u8 flags;                   // bit0 ranks degraded, bit1 dedup degraded, bit2 arrival degraded
+    u8 metadataEnabled;         // always 1 in this fork
+    u16 bookCount;
+    u16 folderCount;
+    u16 nextFirstSeen;          // monotonic arrival counter, survives rebuilds
+    u16 padding1;
+    u32 folderStart, folderLen, recordStart, permStart, nameStart, nameLen;
+    u32 selfSize;               // expected file size: a truncated or interrupted file cannot validate
+    u8 reserved[20];
+};
+
+struct ClixRecord {             // exactly 128 bytes
+    u32 nameOff;                // into the names section
+    u32 fileSize;
+    u16 firstSeen;
+    u16 folderId;
+    u8 nameLen, foldLen, authorKeyLen;
+    u8 metadataStatus;          // 0 not attempted, 1 extracted, 2 failed (retried next scan)
+    char fold[96];              // folded title: the sort and search key
+    char authorKey[12];         // order-insensitive author identity (merges spellings of one person)
+    u32 modificationTime;       // packed FAT date/time
+};
+```
+
+Fork differences from CrossInk (same bytes, different meaning):
+
+- **tags** — the "genre" string holds every `dc:subject`, joined with `", "` exactly as
+  `Epub::getTags()` returns them and cut after the last whole tag that fits 255 bytes.
+  CrossInk stores only the first subject. The Tags browser groups on all of them.
+- **date added** — the "creation time" array carries the file's FAT *modification* time,
+  which is what this fork's Date Added sort has always used (`HalFile` exposes no creation time).
+- **XTC** — title and author are read from the XTC header; CrossInk indexes XTC by filename only.
+- only `.epub` and `.xtc` are indexed; the walk goes 8 folder levels deep and skips
+  dot-names and `System Volume Information`.
+
+The index is disposable. A bad magic, an unknown version, a size mismatch or an inconsistent
+section layout makes the reader refuse it and the Library fall back to the in-RAM path list
+(`library_index.bin`). Deleting `library.clx` only costs a rescan. Installing is
+write-then-rename (`library.clx.new`, with `library.clx.bak` as the rollback), so a build
+that is cancelled or loses power leaves the previous index in place. While a build runs,
+`library.clx.stage`, `.stage.f`, `.prior`, `.rename`, `.order`, `.authors`, `.canon` and
+`.runs` exist in `/.crosspoint`; every build removes them when it ends.
+
+### `/.crosspoint/library.clx.dirs` (version 1)
+
+Which directories the index was built from, and the FAT mtime each had. The Library
+validates this (one open per directory) instead of walking the card; any mismatch, or a
+missing file, means "rescan". `LibraryScan::invalidateIndex()` deletes it (and
+`library_index.bin`) — `library.clx` itself is kept so the rescan reuses every unchanged
+book's metadata. Written as `library.clx.dirs.new` during a build and renamed into place
+only when the build completed.
+
+```c++
+struct ClxMarkerHeader {        // 12 bytes, packed
+    u32 magic;                  // "CLXD"
+    u8 version;                 // 1
+    u8 reserved;
+    u16 dirCount;
+    u16 bookCount;              // must equal library.clx's bookCount
+    u16 reserved2;
+};
+struct ClxMarkerDir {           // dirCount of these, each followed by pathLen path bytes
+    u32 modified;               // packed FAT date/time of the directory
+    u16 pathLen;                // 1..512
+};
+```
+
+### `/.crosspoint/library.clm` and `/.crosspoint/library.cld` (version 2)
+
+Metadata parsed from each book, stored the moment it is parsed, so a scan that is cancelled
+or fails resumes without re-reading what it already read. Same layout as CrossInk's
+`library.meta` / `library.metd`.
+
+`library.clm`: a 32-byte header padded to 512 bytes, then 65,536 16-byte open-addressing
+slots (1 MiB, written once on the first scan that parses a book). `library.cld`: append-only
+payload records. A book is identified by its path hash, file size and modification time;
+any change is a miss. Every slot and payload carries a checksum, so a torn write costs a
+re-parse, never wrong metadata. Both files are discarded and recreated when the header does
+not validate, 75% of the slots are used, or the payload passes 64 MiB.
+
+```c++
+struct CacheHeader {            // 32 bytes at offset 0 of library.clm
+    char magic[4];              // "CLM1"
+    u8 version;                 // 2
+    u8 padding[3];
+    u32 slotCount;              // 65536
+    u32 usedSlots;
+    u8 reserved[16];
+};
+struct CacheSlot {              // slot i at 512 + 16*i
+    u64 pathHash;
+    u32 payloadOffset;          // into library.cld
+    u32 check;                  // FNV-1a of the two fields above, low bit set
+};
+struct PayloadHeader {          // 32 bytes, then title, author, series, tags back to back
+    u32 magic;                  // "CLMP"
+    u64 pathHash;
+    u32 fileSize;
+    u32 modificationTime;
+    u32 seriesPosition;         // sortable encoding of the float series index; 0xFFFFFFFF = none
+    u8 titleLen, authorLen, seriesLen, genreLen;
+    u32 checksum;
+};
+```

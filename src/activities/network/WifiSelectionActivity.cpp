@@ -475,14 +475,28 @@ void WifiSelectionActivity::loop() {
       return;
     }
 
-    // Handle navigation
-    buttonNavigator.onNext([this] {
-      selectedNetworkIndex = ButtonNavigator::nextIndex(selectedNetworkIndex, networks.size());
+    // Handle navigation: a press moves one row, a hold turns a page, as in
+    // every other list.
+    const int listSize = static_cast<int>(networks.size());
+    buttonNavigator.onNextPress([this, listSize] {
+      selectedNetworkIndex = ButtonNavigator::nextIndex(static_cast<int>(selectedNetworkIndex), listSize);
       requestUpdate();
     });
 
-    buttonNavigator.onPrevious([this] {
-      selectedNetworkIndex = ButtonNavigator::previousIndex(selectedNetworkIndex, networks.size());
+    buttonNavigator.onPreviousPress([this, listSize] {
+      selectedNetworkIndex = ButtonNavigator::previousIndex(static_cast<int>(selectedNetworkIndex), listSize);
+      requestUpdate();
+    });
+
+    buttonNavigator.onNextContinuous([this, listSize, pageItems] {
+      selectedNetworkIndex =
+          ButtonNavigator::nextPageIndex(static_cast<int>(selectedNetworkIndex), listSize, pageItems);
+      requestUpdate();
+    });
+
+    buttonNavigator.onPreviousContinuous([this, listSize, pageItems] {
+      selectedNetworkIndex =
+          ButtonNavigator::previousPageIndex(static_cast<int>(selectedNetworkIndex), listSize, pageItems);
       requestUpdate();
     });
   }

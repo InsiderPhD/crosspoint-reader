@@ -243,13 +243,14 @@ void StatusBarSettingsActivity::loop() {
     requestUpdate();
   });
 
-  buttonNavigator.onNextContinuous([this] {
-    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, visibleItemCount);
+  // A hold turns a page, as in every other list (it used to repeat single rows).
+  buttonNavigator.onNextContinuous([this, pageItems] {
+    selectedIndex = ButtonNavigator::nextPageIndex(selectedIndex, visibleItemCount, pageItems);
     requestUpdate();
   });
 
-  buttonNavigator.onPreviousContinuous([this] {
-    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, visibleItemCount);
+  buttonNavigator.onPreviousContinuous([this, pageItems] {
+    selectedIndex = ButtonNavigator::previousPageIndex(selectedIndex, visibleItemCount, pageItems);
     requestUpdate();
   });
 }

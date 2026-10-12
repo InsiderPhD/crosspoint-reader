@@ -7,6 +7,7 @@
 
 #include "../Activity.h"
 #include "MappedInputManager.h"
+#include "util/ButtonNavigator.h"
 
 struct Rect;
 
@@ -32,6 +33,7 @@ class BluetoothSettingsActivity : public Activity {
 
   ViewMode viewMode = ViewMode::MAIN_MENU;
   int selectedIndex = 0;
+  ButtonNavigator buttonNavigator;
   BluetoothHIDManager* btMgr = nullptr;
   std::string lastError = "";
 

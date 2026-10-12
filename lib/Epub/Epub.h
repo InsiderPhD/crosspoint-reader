@@ -58,6 +58,14 @@ class Epub {
   static bool hasCache(const std::string& filepath, const std::string& cacheDir, bool skipLoadingCss);
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
+  // Metadata-only read for the Library index scan, which visits every EPUB on
+  // the card and cannot afford a full load() per book. Parses the OPF up to
+  // </metadata> and nothing else: no book.bin, no spine/TOC, no CSS, no cache
+  // directory, no sidecars. `tags` receives every dc:subject joined with ", "
+  // (as Epub::getTags does) and `seriesIndex` the raw calibre:series_index.
+  // Any of the three optional outputs may be null.
+  bool loadMetadata(std::string& title, std::string& author, std::string* series = nullptr, std::string* tags = nullptr,
+                    std::string* seriesIndex = nullptr);
   bool clearCache() const;
   void setupCacheDir() const;
   const std::string& getCachePath() const;

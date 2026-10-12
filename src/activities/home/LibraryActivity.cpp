@@ -6,6 +6,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <LibraryBuilder.h>
 #include <Logging.h>
 #include <Xtc.h>
 #include <esp_heap_caps.h>
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "../settings/BookFusionCoverRefreshActivity.h"
@@ -25,8 +27,10 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "components/icons/bookfusion24.h"
+#include "components/icons/check24.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
+#include "util/BookFinished.h"
 #include "util/TouchListNav.h"
 #include "util/WifiTimeSync.h"
 
@@ -106,6 +110,12 @@ void LibraryActivity::onEnter() {
 void LibraryActivity::onExit() {
   Activity::onExit();
   freePageBuffer();
+  // Index handle, view, hidden set and folder offsets: nothing from the index
+  // stays resident once the Library is left (and so nothing while reading).
+  closeIndexBacking();
+  scanInProgress = false;
+  scanCancelRequested = false;
+  exitRequested = false;
   bookPaths.clear();
   bookPaths.shrink_to_fit();
   sortedIndices.clear();
@@ -144,6 +154,374 @@ void LibraryActivity::enumerateBooks() {
   rebuildSortedIndices();
 }
 
+// --- CLX1 index backing ------------------------------------------------------
+
+namespace {
+constexpr uint16_t NO_ORDINAL = 0xFFFF;
+
+// First row of an ascending order whose book has no value for the sort key.
+// The index sorts those last, so they form a tail and a binary search finds
+// its start in log2(n) record reads.
+template <typename IsMissing>
+uint16_t knownPrefix(const uint16_t* rows, const uint16_t n, IsMissing&& isMissing) {
+  uint16_t lo = 0;
+  uint16_t hi = n;
+  while (lo < hi) {
+    const uint16_t mid = static_cast<uint16_t>(lo + (hi - lo) / 2);
+    if (isMissing(rows[mid])) {
+      hi = mid;
+    } else {
+      lo = static_cast<uint16_t>(mid + 1);
+    }
+  }
+  return lo;
+}
+
+// One book from RecentBooksStore, located in the index by its path hash.
+struct RecentHit {
+  uint64_t hash;
+  uint16_t ordinal;
+  int8_t progress;
+};
+struct RecentLookup {
+  RecentHit* hits;
+  uint8_t count;
+  uint8_t unresolved;
+};
+
+bool matchRecent(void* context, const uint16_t ordinal, const uint64_t hash) {
+  auto& lookup = *static_cast<RecentLookup*>(context);
+  for (uint8_t i = 0; i < lookup.count; i++) {
+    if (lookup.hits[i].ordinal == NO_ORDINAL && lookup.hits[i].hash == hash) {
+      lookup.hits[i].ordinal = ordinal;
+      lookup.unresolved--;
+      break;
+    }
+  }
+  return lookup.unresolved > 0;  // stop the scan once every recent book is placed
+}
+
+// Finished books' path hashes (sorted), matched against the index in one pass.
+struct FinishedLookup {
+  std::vector<uint64_t> hashes;
+  uint8_t* bits = nullptr;
+
+  static void addPath(void* context, const std::string& path) {
+    static_cast<FinishedLookup*>(context)->hashes.push_back(library::clixPathHash(path.data(), path.size()));
+  }
+  static bool match(void* context, const uint16_t ordinal, const uint64_t hash) {
+    auto& lookup = *static_cast<FinishedLookup*>(context);
+    if (std::binary_search(lookup.hashes.begin(), lookup.hashes.end(), hash)) {
+      lookup.bits[ordinal / 8] |= static_cast<uint8_t>(1u << (ordinal % 8));
+    }
+    return true;
+  }
+};
+
+// Last-opened and progress orders. Only the books in RecentBooksStore carry
+// either value, so they are promoted (in store order, or by progress) and
+// everything else follows in title order, exactly where applySort() puts books
+// "missing the criterion". One pass over the index's path hashes; no paths are
+// rebuilt and nothing per-book is allocated.
+bool orderByReadingHistory(library::LibraryIndexFile& index, const SortMode mode, uint16_t* rows, const uint16_t n) {
+  constexpr uint8_t MAX_HITS = 12;  // RecentBooksStore keeps 10
+  RecentHit hits[MAX_HITS];         // 192 bytes
+  RecentLookup lookup{hits, 0, 0};
+  const bool byProgress = mode == SortMode::ProgressMost || mode == SortMode::ProgressLeast;
+  for (const RecentBook& book : RECENT_BOOKS.getBooks()) {
+    if (lookup.count == MAX_HITS) break;
+    if (byProgress && book.progressPercent < 0) continue;
+    hits[lookup.count++] = {library::clixPathHash(book.path.data(), book.path.size()), NO_ORDINAL,
+                            book.progressPercent};
+  }
+  lookup.unresolved = lookup.count;
+  if (lookup.count > 0 && !index.forEachPathHash(&matchRecent, &lookup)) return false;
+
+  // Recent books the index does not list (deleted, or added since the scan).
+  uint8_t found = 0;
+  for (uint8_t i = 0; i < lookup.count; i++) {
+    if (hits[i].ordinal != NO_ORDINAL) hits[found++] = hits[i];
+  }
+  if (mode == SortMode::LastOpenedOldest) {
+    std::reverse(hits, hits + found);
+  } else if (byProgress) {
+    const bool most = mode == SortMode::ProgressMost;
+    std::sort(hits, hits + found, [most](const RecentHit& a, const RecentHit& b) {
+      if (a.progress != b.progress) return most ? a.progress > b.progress : a.progress < b.progress;
+      return a.ordinal < b.ordinal;  // title order breaks ties
+    });
+  }
+
+  uint16_t out = 0;
+  for (uint8_t i = 0; i < found; i++) rows[out++] = hits[i].ordinal;
+  for (uint16_t ordinal = 0; ordinal < n && out < n; ordinal++) {
+    bool promoted = false;
+    for (uint8_t i = 0; i < found; i++) promoted = promoted || hits[i].ordinal == ordinal;
+    if (!promoted) rows[out++] = ordinal;
+  }
+  return out == n;
+}
+}  // namespace
+
+void LibraryActivity::loadLibrary() {
+  closeIndexBacking();
+  if (LibraryScan::indexEnabled() && openIndexBacking()) {
+    indexMode = true;
+    LOG_INF(MODULE, "Library backed by the CLX1 index: %u books", static_cast<unsigned>(viewCount));
+    return;
+  }
+  closeIndexBacking();
+  // The user cancelled a scan and there is no earlier index to show: leave the
+  // list empty rather than starting the other (uncancellable) card walk.
+  // loop() takes the activity Home.
+  if (exitRequested.load()) return;
+  enumerateBooks();
+}
+
+void LibraryActivity::closeIndexBacking() {
+  index.close();
+  view.reset();
+  viewCount = 0;
+  hiddenBits.reset();
+  folderOffsets.reset();
+  folderStride = 0;
+  indexMode = false;
+  metaPage = static_cast<size_t>(-1);
+  pendingViewRebuild = false;
+  pendingHideOrdinal = NO_ORDINAL;
+  pendingOpen = false;
+}
+
+bool LibraryActivity::openIndexBacking() {
+  bool cancelled = false;
+  if (!LibraryScan::indexIsCurrent()) {
+    scanCancelRequested = false;
+    scanInProgress = true;
+    drawScanScreen(tr(STR_LIBRARY_SCANNING));
+    library::BuildCallbacks ui;
+    ui.context = this;
+    ui.cancelRequested = &LibraryActivity::scanCancelCallback;
+    ui.progress = &LibraryActivity::scanProgressCallback;
+    const LibraryScan::IndexRefresh result = LibraryScan::refreshIndex(&ui);
+    scanInProgress = false;
+    cancelled = result == LibraryScan::IndexRefresh::Cancelled;
+    if (result != LibraryScan::IndexRefresh::Ok) {
+      LOG_ERR(MODULE, "Library scan did not finish (%d); using the previous index if there is one",
+              static_cast<int>(result));
+    }
+  }
+
+  // A failed or cancelled scan leaves the previous index installed. Showing a
+  // shelf that is one scan out of date beats showing nothing.
+  if (!index.open(LibraryScan::indexPath())) {
+    if (cancelled) exitRequested = true;
+    return false;
+  }
+
+  // 512 bytes for the life of the activity: over the stack budget, and it turns
+  // every path read from a walk over all folder records into a short one.
+  folderOffsets = makeUniqueNoThrow<uint32_t[]>(library::LibraryIndexFile::FOLDER_CHECKPOINT_COUNT);
+  if (!folderOffsets || !index.buildFolderCheckpoints(folderOffsets.get(), folderStride)) {
+    folderOffsets.reset();  // paths still resolve, just by walking from the first folder
+    folderStride = 0;
+  }
+  return rebuildView();
+}
+
+bool LibraryActivity::indexedPath(const uint16_t ordinal, std::string& out) {
+  library::ClixRecord record{};
+  if (!index.readRecord(ordinal, record)) {
+    out.clear();
+    return false;
+  }
+  return folderOffsets ? index.readPath(record, out, folderOffsets.get(), folderStride) : index.readPath(record, out);
+}
+
+bool LibraryActivity::rebuildView() {
+  const uint16_t n = index.bookCount();
+  if (n == 0) {
+    view.reset();
+    viewCount = 0;
+    return true;
+  }
+  // 2 bytes per book: the footprint sortedIndices has on the in-RAM path, and
+  // the only per-book allocation index mode makes. Fallible; the previous view
+  // stays in place if this fails. Freed in onExit().
+  auto rows = makeUniqueNoThrow<uint16_t[]>(n);
+  if (!rows) {
+    LOG_ERR(MODULE, "View alloc failed (%u books)", static_cast<unsigned>(n));
+    return false;
+  }
+
+  using library::SortOrder;
+  std::string scratch;
+  bool ok = true;
+  switch (currentSort) {
+    case SortMode::AlphabeticAsc:
+    case SortMode::AlphabeticDesc:
+    case SortMode::SeriesIndexAsc:  // never offered by this screen; title order
+      ok = index.readOrder(SortOrder::TitleAsc, rows.get());
+      if (ok && currentSort == SortMode::AlphabeticDesc) std::reverse(rows.get(), rows.get() + n);
+      break;
+    case SortMode::AuthorAsc:
+    case SortMode::AuthorDesc:
+      ok = index.readOrder(SortOrder::AuthorAsc, rows.get());
+      if (ok && currentSort == SortMode::AuthorDesc) {
+        // Books with no author stay last in both directions, as applySort() has it.
+        const uint16_t known = knownPrefix(rows.get(), n, [this, &scratch](const uint16_t ordinal) {
+          library::ClixRecord record{};
+          return !index.readRecord(ordinal, record) || !index.readAuthor(record, scratch);
+        });
+        std::reverse(rows.get(), rows.get() + known);
+      }
+      break;
+    case SortMode::TagAsc:
+    case SortMode::TagDesc:
+      ok = index.readOrder(SortOrder::GenreAsc, rows.get());
+      if (ok && currentSort == SortMode::TagDesc) {
+        const uint16_t known = knownPrefix(rows.get(), n, [this, &scratch](const uint16_t ordinal) {
+          library::ClixRecord record{};
+          return !index.readRecord(ordinal, record) || !index.readGenre(record, scratch) || scratch.empty();
+        });
+        std::reverse(rows.get(), rows.get() + known);
+      }
+      break;
+    case SortMode::DateAddedNewest:
+    case SortMode::DateAddedOldest:
+      // The arrival order runs oldest first.
+      ok = index.readOrder(SortOrder::RecentAsc, rows.get());
+      if (ok && currentSort == SortMode::DateAddedNewest) std::reverse(rows.get(), rows.get() + n);
+      break;
+    case SortMode::LastOpenedNewest:
+    case SortMode::LastOpenedOldest:
+    case SortMode::ProgressMost:
+    case SortMode::ProgressLeast:
+      ok = orderByReadingHistory(index, currentSort, rows.get(), n);
+      break;
+    case SortMode::BookFusionFirst:
+    case SortMode::BookFusionLast: {
+      // The BookFusion link is a sidecar keyed by path, so this is the one order
+      // that needs every path (as it does on the in-RAM path). One bit per book,
+      // freed at the end of this block.
+      auto linked = makeUniqueNoThrow<uint8_t[]>((static_cast<size_t>(n) + 7) / 8);
+      ok = static_cast<bool>(linked);
+      for (uint16_t ordinal = 0; ok && ordinal < n; ordinal++) {
+        ok = indexedPath(ordinal, scratch);
+        if (ok && FsHelpers::hasEpubExtension(scratch) && BookFusionBookIdStore::hasBookId(scratch.c_str())) {
+          linked[ordinal / 8] |= static_cast<uint8_t>(1u << (ordinal % 8));
+        }
+        if ((ordinal & 0x0Fu) == 0x0Fu) vTaskDelay(1);  // one SD probe per book: keep the watchdog fed
+      }
+      if (ok) {
+        const bool linkedFirst = currentSort == SortMode::BookFusionFirst;
+        uint16_t out = 0;
+        for (int pass = 0; pass < 2; pass++) {
+          const bool want = (pass == 0) == linkedFirst;
+          for (uint16_t ordinal = 0; ordinal < n; ordinal++) {
+            const bool isLinked = (linked[ordinal / 8] & (1u << (ordinal % 8))) != 0;
+            if (isLinked == want) rows[out++] = ordinal;
+          }
+        }
+      }
+      break;
+    }
+  }
+  if (!ok) {
+    LOG_ERR(MODULE, "Could not order the Library from the index");
+    return false;
+  }
+
+  // Hide Finished Books: one bit per book for this rebuild only. Finished state
+  // is keyed by path (ReadingStatsStore / RecentBooksStore, both in RAM), so the
+  // finished paths are hashed and matched against the index's path hashes in a
+  // single pass. A failure here just leaves finished books listed.
+  std::unique_ptr<uint8_t[]> finishedBits;
+  if (SETTINGS.libraryHideFinished) {
+    FinishedLookup lookup;
+    // 8 bytes per finished book, freed with this block; reserve() is exact
+    // enough that the vector never regrows.
+    lookup.hashes.reserve(BookFinished::finishedPathUpperBound());
+    BookFinished::forEachFinishedPath(&FinishedLookup::addPath, &lookup);
+    if (!lookup.hashes.empty()) {
+      std::sort(lookup.hashes.begin(), lookup.hashes.end());
+      finishedBits = makeUniqueNoThrow<uint8_t[]>((static_cast<size_t>(n) + 7) / 8);
+      lookup.bits = finishedBits.get();
+      if (!finishedBits || !index.forEachPathHash(&FinishedLookup::match, &lookup)) {
+        LOG_ERR(MODULE, "Could not locate finished books in the index; showing all books");
+        finishedBits.reset();
+      }
+    }
+  }
+
+  uint16_t count = n;
+  if (hiddenBits || finishedBits) {
+    count = 0;
+    for (uint16_t i = 0; i < n; i++) {
+      const uint16_t ordinal = rows[i];
+      const uint8_t mask = static_cast<uint8_t>(1u << (ordinal % 8));
+      const bool hidden = (hiddenBits && (hiddenBits[ordinal / 8] & mask) != 0) ||
+                          (finishedBits && (finishedBits[ordinal / 8] & mask) != 0);
+      if (!hidden) rows[count++] = ordinal;
+    }
+  }
+  view = std::move(rows);
+  viewCount = count;
+  return true;
+}
+
+bool LibraryActivity::selectedPath(std::string& out) {
+  out.clear();
+  if (!indexMode) {
+    if (selectorIndex < sortedIndices.size()) out = bookPaths[sortedIndices[selectorIndex]];
+    return !out.empty();
+  }
+  // The page meta and the index handle belong to the render task. A try-lock
+  // keeps the input loop from ever waiting behind a slow page render; the
+  // caller retries on a later loop() pass.
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock() || selectorIndex >= viewCount) return false;
+  const size_t page = currentPage();
+  if (metaPage == page) {
+    out = currentPageMeta[selectorIndex - page * pageSize()].path;
+  } else {
+    indexedPath(view[selectorIndex], out);
+  }
+  return !out.empty();
+}
+
+void LibraryActivity::drawScanScreen(const char* message) {
+  // A full repaint every time: EPUB metadata reads borrow the framebuffer as
+  // inflate scratch on the C3 boards, so nothing drawn before survives.
+  renderer.clearScreen();
+  const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // drawPopup() applies dark mode and pushes the whole buffer, hints included.
+  GUI.drawPopup(renderer, message);
+}
+
+bool LibraryActivity::scanCancelCallback(void* context) {
+  return static_cast<const LibraryActivity*>(context)->scanCancelRequested.load();
+}
+
+void LibraryActivity::scanProgressCallback(void* context, const library::BuildProgress& progress) {
+  auto* self = static_cast<LibraryActivity*>(context);
+  if (progress.phase == library::BuildPhase::Organizing) {
+    self->drawScanScreen(tr(STR_LIBRARY_ORGANIZING));
+    return;
+  }
+  char message[64];
+  snprintf(message, sizeof(message), tr(STR_LIBRARY_SCAN_COUNT), static_cast<unsigned>(progress.books));
+  self->drawScanScreen(message);
+}
+
+bool LibraryActivity::siblingPathCallback(void* context, const int pos, std::string& out) {
+  // Called by the Book Details child, while this activity sits under it on the
+  // stack and is not rendering: nothing else is using the index handle.
+  auto* self = static_cast<LibraryActivity*>(context);
+  if (!self->indexMode || pos < 0 || pos >= static_cast<int>(self->viewCount)) return false;
+  return self->indexedPath(self->view[pos], out);
+}
+
 namespace {
 // Helper: return the filename (without extension) view into `path`. Lifetime is bound
 // to the caller-owned string.
@@ -157,6 +535,11 @@ std::string_view filenameView(const std::string& path) {
 }  // namespace
 
 void LibraryActivity::rebuildSortedIndices() {
+  if (indexMode) {
+    // Every order comes from the index: no per-book metadata pass, no caches.
+    rebuildView();
+    return;
+  }
   const bool needsAuthor =
       (currentSort == SortMode::AuthorAsc || currentSort == SortMode::AuthorDesc) && !authorCacheReady;
   const bool needsTag = (currentSort == SortMode::TagAsc || currentSort == SortMode::TagDesc) && !tagCacheReady;
@@ -240,14 +623,26 @@ void LibraryActivity::rebuildSortedIndices() {
   }
 
   applySort(sortedIndices, entries, currentSort);
+
+  // Hide Finished Books. The filter lives in the display order only: bookPaths
+  // (and the caches parallel to it) keep every book, so switching the setting
+  // off needs no rescan. Finished state is two in-RAM lookups per book.
+  if (SETTINGS.libraryHideFinished) {
+    sortedIndices.erase(std::remove_if(sortedIndices.begin(), sortedIndices.end(),
+                                       [this](const uint16_t i) { return BookFinished::isFinished(bookPaths[i]); }),
+                        sortedIndices.end());
+  }
 }
 
-std::string LibraryActivity::pathAtLogicalIndex(size_t logicalIdx) const {
+std::string LibraryActivity::pathAtLogicalIndex(size_t logicalIdx) {
+  if (indexMode) {
+    std::string path;
+    if (logicalIdx < viewCount) indexedPath(view[logicalIdx], path);
+    return path;
+  }
   if (logicalIdx >= sortedIndices.size()) return {};
   return bookPaths[sortedIndices[logicalIdx]];
 }
-
-std::string LibraryActivity::currentPath() const { return pathAtLogicalIndex(selectorIndex); }
 
 LibraryActivity::SlotRect LibraryActivity::slotRect(int slotIndexInPage) const {
   const int screenW = renderer.getScreenWidth();
@@ -327,12 +722,38 @@ void LibraryActivity::render(RenderLock&&) {
     WifiTimeSync::preempt();
     {
       const uint32_t t0 = millis();
-      enumerateBooks();
-      LOG_INF("LIBTIME", "enumerate+sort %u books: %lu ms", static_cast<unsigned>(bookPaths.size()),
-              static_cast<unsigned long>(millis() - t0));
+      loadLibrary();
+      LOG_INF("LIBTIME", "load+sort %u books (%s): %lu ms", static_cast<unsigned>(bookCount()),
+              indexMode ? "index" : "path list", static_cast<unsigned long>(millis() - t0));
     }
     initialLoadPending = false;
+    // A scan repaints the panel and lends the framebuffer out as scratch.
+    frameHoldsPage = false;
+    pageBufferStored = false;
+    lastRenderedPage = static_cast<size_t>(-1);
     // Fall through.
+  }
+
+  // Index mode: list changes requested from loop() or an activity result (a
+  // deleted book, a progress change that moves a book in the order) are applied
+  // here, on the task that owns the index handle and the view.
+  if (indexMode && pendingViewRebuild) {
+    pendingViewRebuild = false;
+    if (pendingHideOrdinal != 0xFFFF && pendingHideOrdinal < index.bookCount()) {
+      // One bit per book, allocated on the first deletion of this visit.
+      if (!hiddenBits) hiddenBits = makeUniqueNoThrow<uint8_t[]>((static_cast<size_t>(index.bookCount()) + 7) / 8);
+      if (hiddenBits) {
+        hiddenBits[pendingHideOrdinal / 8] |= static_cast<uint8_t>(1u << (pendingHideOrdinal % 8));
+      } else {
+        LOG_ERR(MODULE, "Hidden-set alloc failed; the deleted book stays listed until the next scan");
+      }
+    }
+    pendingHideOrdinal = 0xFFFF;
+    rebuildView();
+    if (selectorIndex >= viewCount) selectorIndex = viewCount == 0 ? 0 : viewCount - 1;
+    lastRenderedPage = static_cast<size_t>(-1);
+    pageBufferStored = false;
+    frameHoldsPage = false;
   }
 
   // A sort mode change can require a metadata pass (book.bin parsing, SD stats)
@@ -360,11 +781,15 @@ void LibraryActivity::render(RenderLock&&) {
     // Fall through to the normal render path so the new sorted page is drawn.
   }
 
-  if (bookPaths.empty()) {
+  if (bookCount() == 0) {
     renderer.clearScreen();
     const auto& metrics = UITheme::getInstance().getMetrics();
     GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
                    tr(STR_LIBRARY), sortModeLabel(currentSort), contextMenu.isOpen() ? nullptr : tr(STR_SORT));
+    // Say so, as the file browser does: an empty card, or every book finished
+    // with Hide Finished Books on, should not look like a failed load.
+    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding,
+                      metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing + 20, tr(STR_NO_FILES_FOUND));
     drawButtonHints();
     contextMenu.render(renderer);
     sortMenu.render(renderer);
@@ -472,7 +897,11 @@ void LibraryActivity::drawButtonHints() {
 void LibraryActivity::refreshCurrentPageMeta() {
   const size_t page = currentPage();
   const size_t pageStart = page * pageSize();
-  const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookPaths.size() - pageStart));
+  const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookCount() - pageStart));
+
+  // loop() must not read the slots while they are being rewritten; it checks
+  // this (under the render lock) before trusting them.
+  metaPage = static_cast<size_t>(-1);
 
   // Reset all slots so stale data from a previous page doesn't leak.
   for (auto& m : currentPageMeta) {
@@ -481,14 +910,34 @@ void LibraryActivity::refreshCurrentPageMeta() {
     m.progressPercent = -1;
     m.hasCover = false;
     m.hasBfBadge = false;
+    m.finished = false;
     m.coverResolved = false;
     m.thumbPath.clear();
+    m.path.clear();
+    m.ordinal = 0xFFFF;
   }
 
   for (int i = 0; i < booksOnPage; ++i) {
     const uint32_t t0 = millis();
-    const std::string path = pathAtLogicalIndex(pageStart + i);
     auto& meta = currentPageMeta[i];
+    std::string path;
+    if (indexMode) {
+      // Title, author and path come out of the one open index file by seeks:
+      // no book.bin open, so no /.crosspoint path resolve for the text at all.
+      meta.ordinal = view[pageStart + i];
+      library::ClixRecord record{};
+      if (index.readRecord(meta.ordinal, record)) {
+        index.readDisplayText(record, meta.title, meta.author);
+        if (folderOffsets) {
+          index.readPath(record, path, folderOffsets.get(), folderStride);
+        } else {
+          index.readPath(record, path);
+        }
+      }
+      meta.path = path;
+    } else {
+      path = pathAtLogicalIndex(pageStart + i);
+    }
 
     if (FsHelpers::hasEpubExtension(path)) {
       Epub epub(path, "/.crosspoint");
@@ -503,7 +952,7 @@ void LibraryActivity::refreshCurrentPageMeta() {
       // Same reason: no exists() probe before the load. With buildIfMissing
       // false a missing book.bin fails on its single open instead of parsing
       // the EPUB; generateThumbForSlot() is the path that builds it.
-      if (epub.load(/*buildIfMissing=*/false, /*skipLoadingCss=*/true)) {
+      if (!indexMode && epub.load(/*buildIfMissing=*/false, /*skipLoadingCss=*/true)) {
         meta.title = epub.getTitle();
         meta.author = epub.getAuthor();
       }
@@ -520,15 +969,17 @@ void LibraryActivity::refreshCurrentPageMeta() {
     const auto& recents = RECENT_BOOKS.getBooks();
     auto it = std::find_if(recents.begin(), recents.end(), [&path](const RecentBook& b) { return b.path == path; });
     meta.progressPercent = (it != recents.end()) ? it->progressPercent : -1;
+    meta.finished = BookFinished::isFinished(path);
     LOG_DBG("LIBTIME", "  meta %d: %lu ms (cover=%d)", i, static_cast<unsigned long>(millis() - t0),
             meta.hasCover ? 1 : 0);
   }
+  metaPage = page;
 }
 
 int LibraryActivity::findMissingThumbSlot() const {
   const size_t page = currentPage();
   const size_t pageStart = page * pageSize();
-  const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookPaths.size() - pageStart));
+  const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookCount() - pageStart));
   for (int i = 0; i < booksOnPage; ++i) {
     // Skip slots we've already tried this page visit: a cover that fails to
     // generate leaves hasCover=false on disk, so without this guard the loader
@@ -575,7 +1026,8 @@ bool LibraryActivity::generateThumbForSlot(int slotIndexInPage) {
   if (meta.title.empty() || meta.title == path.substr(path.find_last_of('/') + 1)) {
     meta.title = epub.getTitle();
   }
-  meta.author = epub.getAuthor();
+  // Index mode already shows the index's (spelling-harmonised) author.
+  if (!indexMode) meta.author = epub.getAuthor();
 
   const std::string thumb = epub.getThumbBmpPath(COVER_HEIGHT);
   meta.thumbPath = thumb;
@@ -624,7 +1076,7 @@ void LibraryActivity::renderPageFromScratch() {
   if (page != lastRenderedPage) coverGenAttempted.fill(false);
 
   const size_t pageStart = page * pageSize();
-  const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookPaths.size() - pageStart));
+  const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookCount() - pageStart));
 
   // Fast render — never blocks on cover generation. Missing covers stay as
   // placeholders; render() fills them in one at a time after pushing this page.
@@ -723,6 +1175,22 @@ void LibraryActivity::drawTileCover(const int slot) {
     renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
     renderer.drawIcon(BookFusion24Icon, iconX, iconY, BF_ICON_SIZE, BF_ICON_SIZE);
   }
+
+  // Finished books: a tick in the opposite (bottom-right) corner, built the
+  // same way as the BookFusion badge so the two can sit on one cover. The
+  // outline keeps it readable over a light cover as well as a dark one.
+  if (meta.finished) {
+    constexpr int ICON_SIZE = 24;
+    constexpr int PADDING = 4;
+    constexpr int MARGIN = 4;
+    constexpr int BADGE_SIZE = ICON_SIZE + 2 * PADDING;
+    const int iconY = ((coverY + r.height - MARGIN - PADDING - ICON_SIZE) / 8) * 8;
+    const int badgeX = coverX + r.width - MARGIN - BADGE_SIZE;
+    const int badgeY = iconY - PADDING;
+    renderer.fillRect(badgeX, badgeY, BADGE_SIZE, BADGE_SIZE, false);
+    renderer.drawRect(badgeX, badgeY, BADGE_SIZE, BADGE_SIZE, true);
+    renderer.drawIcon(Check24Icon, badgeX + PADDING, iconY, ICON_SIZE, ICON_SIZE);
+  }
 }
 
 void LibraryActivity::renderSelectionOnly() {
@@ -769,7 +1237,7 @@ void LibraryActivity::drawOverlay() {
 
   const size_t page = currentPage();
   const size_t pageStart = page * pageSize();
-  const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookPaths.size() - pageStart));
+  const int booksOnPage = static_cast<int>(std::min<size_t>(pageSize(), bookCount() - pageStart));
   const int slotInPage = static_cast<int>(selectorIndex - pageStart);
 
   const int titleLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
@@ -828,7 +1296,7 @@ void LibraryActivity::drawOverlay() {
   // broken" distinction is communicated via the centered Loading popup that
   // renderPageFromScratch shows during active generation.
   const int ps = pageSize();
-  const size_t pages = (bookPaths.size() + ps - 1) / ps;
+  const size_t pages = (bookCount() + ps - 1) / ps;
   // The rect the grid was laid out in, ending where the hint bar starts —
   // drawPageIndicator takes its strip out of the bottom of that.
   const Rect gridRect{0, L.topY, screenW, screenH - metrics.buttonHintsHeight - L.topY};
@@ -839,7 +1307,7 @@ void LibraryActivity::drawOverlay() {
   // filled rect proxy for current page within total pages. Shown only when
   // there's more than one page.
   const int totalP = static_cast<int>(pages);
-  const int totalItems = static_cast<int>(bookPaths.size());
+  const int totalItems = static_cast<int>(bookCount());
   if (totalP > 1 && totalItems > 0) {
     const int barAreaTop = L.topY;
     const int barAreaBottom = screenH - metrics.buttonHintsHeight - metrics.pageIndicatorHeight;
@@ -857,6 +1325,16 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
   // Library-side reload: invalidate snapshot, refresh the sort permutation, restore
   // selector if the list shrank.
   auto reloadAfterMutation = [this] {
+    if (indexMode) {
+      // The view and the index handle belong to the render task: ask it to
+      // rebuild (it also re-clamps the selector) instead of doing it here.
+      pendingViewRebuild = true;
+      pageBufferStored = false;
+      frameHoldsPage = false;
+      lastRenderedPage = static_cast<size_t>(-1);
+      requestUpdate();
+      return;
+    }
     rebuildSortedIndices();
     pageBufferStored = false;
     frameHoldsPage = false;
@@ -868,6 +1346,24 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
   };
 
   auto removeBookFromList = [this](const std::string& p) {
+    if (indexMode) {
+      // The index on the card still lists the book until the next scan, so it
+      // is hidden by ordinal for the rest of this visit. Activity result
+      // handlers run without the render lock; the page meta is the render
+      // task's, so take the lock for the lookup.
+      RenderLock lock;
+      pendingHideOrdinal = 0xFFFF;
+      for (const auto& m : currentPageMeta) {
+        if (m.ordinal != 0xFFFF && m.path == p) {
+          pendingHideOrdinal = m.ordinal;
+          break;
+        }
+      }
+      // Not on the page the meta describes (should not happen): reload, which
+      // rescans because the deletion below invalidated the index.
+      if (pendingHideOrdinal == 0xFFFF) initialLoadPending = true;
+      return;
+    }
     auto it = std::find(bookPaths.begin(), bookPaths.end(), p);
     if (it != bookPaths.end()) {
       const size_t k = static_cast<size_t>(it - bookPaths.begin());
@@ -922,6 +1418,10 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
                                  Storage.remove(path.c_str());
                                  RECENT_BOOKS.removeBook(path);
                                  RECENT_BOOKS.saveToFile();
+                                 // The persisted indexes still list the file (SdFat does not
+                                 // touch the folder's mtime on remove), as GroupBrowser's
+                                 // delete already accounts for.
+                                 LibraryScan::invalidateIndex();
                                  removeBookFromList(path);
                                  reloadAfterMutation();
                                }
@@ -953,6 +1453,17 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
       reloadAfterMutation();
       break;
     case BookContextMenu::Action::BookInfo: {
+      if (indexMode) {
+        // Same Left/Right paging through the whole library, but there is no
+        // path vector to lend: the child asks for one path at a time, read from
+        // the index this (still stacked) activity keeps open.
+        auto details = std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title, contextMenu.author(),
+                                                             contextMenu.progressPercent());
+        details->setSiblingsResolver(this, &LibraryActivity::siblingPathCallback, static_cast<int>(viewCount),
+                                     static_cast<int>(selectorIndex));
+        startActivityForResult(std::move(details), [this](const ActivityResult&) { requestUpdate(); });
+        break;
+      }
       // Let BookDetails page Left/Right through the whole library in display order.
       // bookPaths outlives the child (parent stays on the activity stack); only the
       // uint16 order (a copy of sortedIndices) is owned by the child.
@@ -982,7 +1493,7 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
 }
 
 int LibraryActivity::slotIndexAt(const int lx, const int ly) const {
-  const int total = static_cast<int>(bookPaths.size());
+  const int total = static_cast<int>(bookCount());
   const int pageStart = static_cast<int>(currentPage()) * pageSize();
   for (int slot = 0; slot < pageSize(); slot++) {
     if (pageStart + slot >= total) break;  // empty trailing slots miss
@@ -995,9 +1506,26 @@ int LibraryActivity::slotIndexAt(const int lx, const int ly) const {
 }
 
 void LibraryActivity::loop() {
-  if (bookPaths.empty()) return;
+  // A Library scan runs on the render task; this loop keeps polling input on
+  // the main task, so Back (or its tappable hint on the X4 Pro) cancels it. The
+  // builder polls the flag every 50 ms and leaves the previous index in place.
+  if (scanInProgress.load()) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) scanCancelRequested = true;
+    return;
+  }
+  if (exitRequested.exchange(false)) {
+    onGoHome();
+    return;
+  }
+  if (initialLoadPending) return;
+  if (bookCount() == 0) {
+    // Nothing to select, but the screen must still be leavable: an empty card,
+    // or every book finished with Hide Finished Books on.
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) onGoHome();
+    return;
+  }
 
-  const int total = static_cast<int>(bookPaths.size());
+  const int total = static_cast<int>(bookCount());
   const int pageItems = pageSize();
 
   // Power short-press → sort menu. Suppressed while the book context menu is open
@@ -1062,9 +1590,20 @@ void LibraryActivity::loop() {
   // Title/author come from currentPageMeta (populated during the page render);
   // progress is looked up in RecentBooksStore — missing means "not started".
   {
-    const std::string path = currentPath();
+    // Index mode: the page meta (path included) and the index handle are the
+    // render task's. This block reads both, so it holds the render lock for its
+    // duration, taken with a try so the input loop never waits behind a page
+    // render; when the lock is busy or the meta describes another page, the
+    // long-press check simply runs on a later pass.
+    std::optional<RenderLock> metaLock;
+    if (indexMode) metaLock.emplace(RenderLock::Mode::Try);
+    const bool metaUsable =
+        !indexMode || (metaLock->ownsLock() && metaPage == currentPage() && selectorIndex < viewCount);
+    const int slotInPage = static_cast<int>(selectorIndex - currentPage() * pageSize());
+    const std::string path = !metaUsable ? std::string()
+                             : indexMode ? currentPageMeta[slotInPage].path
+                                         : pathAtLogicalIndex(selectorIndex);
     if (!path.empty()) {
-      const int slotInPage = static_cast<int>(selectorIndex - currentPage() * pageSize());
       const std::string& title = currentPageMeta[slotInPage].title;
       const std::string& author = currentPageMeta[slotInPage].author;
       int progress = -1;
@@ -1074,7 +1613,14 @@ void LibraryActivity::loop() {
       if (contextMenu.checkLongPress(mappedInput, path, title, author, progress)) {
         // Tags are short; surface them in the popup when the cached metadata has them.
         // Use the existing cache only (no rebuild) so opening the menu never blocks.
-        if (FsHelpers::hasEpubExtension(path)) {
+        if (indexMode) {
+          // The index carries the tags; no book.bin open. Render lock is held.
+          library::ClixRecord record{};
+          std::string tags;
+          if (index.readRecord(currentPageMeta[slotInPage].ordinal, record) && index.readGenre(record, tags)) {
+            contextMenu.setInfoTags(tags);
+          }
+        } else if (FsHelpers::hasEpubExtension(path)) {
           Epub epub(path, "/.crosspoint");
           if (epub.load(/*buildIfMissing=*/false, /*skipLoadingCss=*/true)) {
             contextMenu.setInfoTags(epub.getTags());
@@ -1099,12 +1645,16 @@ void LibraryActivity::loop() {
         const size_t logical = currentPage() * pageSize() + static_cast<size_t>(slot);
         const bool activate = TouchListNav::tapActivates(static_cast<int>(logical), static_cast<int>(selectorIndex));
         selectorIndex = logical;
+        pendingOpen = false;
         if (!activate) {
           requestUpdate();
         } else {
-          const std::string path = currentPath();
-          if (!path.empty()) {
+          std::string path;
+          if (selectedPath(path)) {
             onSelectBook(path);
+          } else if (indexMode) {
+            pendingOpen = true;  // render task busy with the page; retried below
+            pendingOpenIndex = selectorIndex;
           }
         }
         return;
@@ -1117,8 +1667,24 @@ void LibraryActivity::loop() {
   // Short-press Confirm = open selected book.
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     if (contextMenu.consumeLongPressFlag()) return;
-    const std::string path = currentPath();
-    if (!path.empty()) {
+    std::string path;
+    if (selectedPath(path)) {
+      pendingOpen = false;
+      onSelectBook(path);
+      return;
+    }
+    // Index mode: the render task holds the page right now. Remember the press
+    // and open the book as soon as its path can be read (next passes).
+    if (indexMode) {
+      pendingOpen = true;
+      pendingOpenIndex = selectorIndex;
+    }
+  } else if (pendingOpen) {
+    std::string path;
+    if (pendingOpenIndex != selectorIndex) {
+      pendingOpen = false;  // the selection moved on; the press no longer applies
+    } else if (selectedPath(path)) {
+      pendingOpen = false;
       onSelectBook(path);
       return;
     }
