@@ -370,14 +370,34 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 
   const size_t totalWordCount = words.size();
 
+  // Natural gap in front of each word when it is not the first on its line: the inter-word
+  // space advance, or the cross-boundary kerning for a continuation. It depends only on the
+  // word and its predecessor, never on where the line starts, so it is measured once here
+  // instead of once per (line start, word) pair inside the DP below -- that inner loop asked
+  // the font for the same kerning pairs a line's worth of times over. Ported from upstream
+  // f67907556. The 2 bytes/word this costs are paid for by narrowing the DP's answer table
+  // (see lineLen), so the layout peak is unchanged.
+  std::vector<int16_t> gapBefore(totalWordCount);
+  gapBefore[0] = 0;
+  for (size_t j = 1; j < totalWordCount; ++j) {
+    const uint32_t leftCp = lastCodepoint(words[j - 1]);
+    const uint32_t rightCp = firstCodepoint(words[j]);
+    // Continuation words (nonbreaking spaces, attached punctuation) take kerning only.
+    const int gap = continuesVec[j] ? renderer.getKerning(fontId, leftCp, rightCp, wordStyles[j - 1])
+                                    : renderer.getSpaceAdvance(fontId, leftCp, rightCp, wordStyles[j - 1]);
+    gapBefore[j] = static_cast<int16_t>(gap);
+  }
+
   // DP table to store the minimum badness (cost) of lines starting at index i
   std::vector<int> dp(totalWordCount);
-  // 'ans[i]' stores the index 'j' of the *last word* in the optimal line starting at 'i'
-  std::vector<size_t> ans(totalWordCount);
+  // 'lineLen[i]' stores how many words FOLLOW word i on the optimal line starting at 'i'
+  // (last word index = i + lineLen[i]). A count rather than an absolute index so it fits
+  // 16 bits: a line cannot hold more words than that, and the loop below stops at the cap.
+  std::vector<uint16_t> lineLen(totalWordCount);
 
   // Base Case
   dp[totalWordCount - 1] = 0;
-  ans[totalWordCount - 1] = totalWordCount - 1;
+  lineLen[totalWordCount - 1] = 0;
 
   for (int i = totalWordCount - 2; i >= 0; --i) {
     int currlen = 0;
@@ -386,16 +406,9 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     // First line has reduced width due to text-indent
     const int effectivePageWidth = i == 0 ? pageWidth - firstLineIndent : pageWidth;
 
-    for (size_t j = i; j < totalWordCount; ++j) {
-      // Add space before word j, unless it's the first word on the line or a continuation
-      int gap = 0;
-      if (j > static_cast<size_t>(i) && !continuesVec[j]) {
-        gap =
-            renderer.getSpaceAdvance(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
-      } else if (j > static_cast<size_t>(i) && continuesVec[j]) {
-        // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-        gap = renderer.getKerning(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
-      }
+    for (size_t j = i; j < totalWordCount && j - static_cast<size_t>(i) <= UINT16_MAX; ++j) {
+      // Add the gap before word j, unless it's the first word on the line
+      const int gap = j > static_cast<size_t>(i) ? gapBefore[j] : 0;
       currlen += wordWidths[j] + gap;
 
       if (currlen > effectivePageWidth) {
@@ -424,14 +437,15 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 
       if (cost < dp[i]) {
         dp[i] = cost;
-        ans[i] = j;  // j is the index of the last word in this optimal line
+        // j is the index of the last word in this optimal line
+        lineLen[i] = static_cast<uint16_t>(j - static_cast<size_t>(i));
       }
     }
 
     // Handle oversized word: if no valid configuration found, force single-word line
     // This prevents cascade failure where one oversized word breaks all preceding words
     if (dp[i] == MAX_COST) {
-      ans[i] = i;  // Just this word on its own line
+      lineLen[i] = 0;  // Just this word on its own line
       // Inherit cost from next word to allow subsequent words to find valid configurations
       if (i + 1 < static_cast<int>(totalWordCount)) {
         dp[i] = dp[i + 1];
@@ -446,7 +460,7 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   size_t currentWordIndex = 0;
 
   while (currentWordIndex < totalWordCount) {
-    size_t nextBreakIndex = ans[currentWordIndex] + 1;
+    size_t nextBreakIndex = currentWordIndex + lineLen[currentWordIndex] + 1;
 
     // Safety check: prevent infinite loop if nextBreakIndex doesn't advance
     if (nextBreakIndex <= currentWordIndex) {
