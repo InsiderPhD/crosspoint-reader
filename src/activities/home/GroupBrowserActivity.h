@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "../Activity.h"
+#include "../util/FileRenameFlow.h"
 #include "components/BookContextMenu.h"
 #include "components/SortMenu.h"
 #include "sorting/SortMode.h"
@@ -54,6 +55,12 @@ class GroupBrowserActivity final : public Activity {
 
   ButtonNavigator buttonNavigator;
   BookContextMenu contextMenu;
+  FileRenameFlow renameFlow;
+  // A book was renamed (context menu or Book Info): rows are titled by file
+  // name, so re-path it, re-sort the list on screen and follow it with the
+  // selector. The book's tags/author/series are unchanged, so no regrouping.
+  void onBookRenamed(const std::string& oldPath, const std::string& newPath);
+  static void bookRenamedCallback(void* context, const std::string& oldPath, const std::string& newPath);
   SortMenu sortMenu;
 
   // Active sort for the books inside a folder. Initialised in onEnter from

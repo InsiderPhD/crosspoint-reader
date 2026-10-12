@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../Activity.h"
+#include "../util/FileRenameFlow.h"
 #include "util/ButtonNavigator.h"
 
 // Full-page book details: Lyra-sized cover on the left, a label/value metadata table
@@ -62,6 +63,20 @@ class BookDetailsActivity final : public Activity {
   int siblingResolverCount = 0;
   mutable std::string resolvedSiblingPath;
 
+  // Book options (hold Confirm, or a touch hold): a short action list.
+  FileRenameFlow renameFlow;
+  bool optionsHoldHandled = false;  // this Confirm hold already opened the list
+  // The book was renamed: its cache directory (cover thumb, description) moved
+  // with it, so the page is reloaded from the next loop().
+  bool reloadPending = false;
+  // Tells the screen underneath that a book it lists has a new path. A plain
+  // function pointer + context, like siblingResolver.
+  void (*renameListener)(void* context, const std::string& oldPath, const std::string& newPath) = nullptr;
+  void* renameListenerContext = nullptr;
+
+  void openOptions();
+  void onRenamed(const std::string& oldPath, const std::string& newPath);
+
   void loadMetadata();
   void freeDescBuffer();
 
@@ -104,6 +119,14 @@ class BookDetailsActivity final : public Activity {
     siblingResolver = resolve;
     siblingResolverCount = count;
     siblingPos = pos;
+  }
+
+  // Called right after this screen renames a book, while the parent is still
+  // underneath on the activity stack: the parent re-paths its own list (which
+  // setSiblingsRef / setSiblingsResolver read from) and refreshes on return.
+  void setRenameListener(void* context, void (*listener)(void*, const std::string&, const std::string&)) {
+    renameListenerContext = context;
+    renameListener = listener;
   }
 
   void onEnter() override;

@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "../util/ListPickerActivity.h"
 #include "CrossPointSettings.h"
 #include "LibraryActivity.h"
 #include "RecentBooksStore.h"
@@ -24,6 +25,17 @@
 namespace {
 constexpr int COVER_TO_TEXT_GAP = 16;
 constexpr int ROW_V_PAD = 6;
+constexpr unsigned long OPTIONS_HOLD_MS = 700;  // as the book context menus
+
+// Rows of the options list, in display order.
+enum OptionRow : int { OPTION_RENAME = 0, OPTION_COUNT };
+
+std::string fileStem(const std::string& path) {
+  const size_t slash = path.find_last_of('/');
+  const size_t start = (slash == std::string::npos) ? 0 : slash + 1;
+  const size_t dot = path.rfind('.');
+  return path.substr(start, (dot == std::string::npos || dot < start) ? std::string::npos : dot - start);
+}
 
 // Draw a single "Label: value" table row; returns the y for the next row.
 int drawInfoRow(GfxRenderer& renderer, int x, int y, int width, const char* label, const std::string& value) {
@@ -227,6 +239,58 @@ void BookDetailsActivity::loadMetadata() {
   }
 }
 
+void BookDetailsActivity::openOptions() {
+  if (!Storage.exists(bookPath.c_str())) return;  // nothing to act on
+
+  auto labelFn = [](const int index) -> std::string {
+    switch (index) {
+      case OPTION_RENAME:
+        return tr(STR_RENAME);
+      default:
+        return "";
+    }
+  };
+  auto handler = [this](const ActivityResult& result) {
+    // The picker acts on a button PRESS and this screen on its RELEASE, so the
+    // key that closed the picker is still down here: without these its release
+    // would open the book (Confirm) or leave the page (Back).
+    waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+    waitForBackRelease = mappedInput.isPressed(MappedInputManager::Button::Back);
+    const auto* pick = std::get_if<ListPickResult>(&result.data);
+    if (result.isCancelled || !pick) return;
+    switch (pick->index) {
+      case OPTION_RENAME:
+        // The keyboard only acts on a Confirm it saw pressed, so the release of
+        // the one that picked this row is ignored there.
+        renameFlow.start(
+            *this, renderer, mappedInput, bookPath,
+            [this](const std::string& oldPath, const std::string& newPath) { onRenamed(oldPath, newPath); });
+        break;
+      default:
+        break;
+    }
+  };
+  startActivityForResult(
+      std::make_unique<ListPickerActivity>(renderer, mappedInput, tr(STR_BOOK_OPTIONS), static_cast<int>(OPTION_COUNT),
+                                           0, std::move(labelFn), nullptr, /*markInitial=*/false),
+      std::move(handler));
+}
+
+void BookDetailsActivity::onRenamed(const std::string& oldPath, const std::string& newPath) {
+  // A parent that lists books by file name handed over the stem as the title;
+  // one that passed the book's own title keeps it.
+  if (title == fileStem(oldPath)) title = fileStem(newPath);
+  bookPath = newPath;
+  for (auto& path : ownedSiblingPaths) {
+    if (path == oldPath) {
+      path = newPath;
+      break;
+    }
+  }
+  if (renameListener) renameListener(renameListenerContext, oldPath, newPath);
+  reloadPending = true;
+}
+
 void BookDetailsActivity::onEnter() {
   Activity::onEnter();
   scrollOffset = 0;
@@ -248,6 +312,22 @@ void BookDetailsActivity::onExit() {
 }
 
 void BookDetailsActivity::loop() {
+  if (renameFlow.poll(*this, renderer, mappedInput)) return;
+
+  if (reloadPending) {
+    // Same page, new path: only what lives in the (moved) cache directory has
+    // to be found again. Mirrors navigateToSibling().
+    reloadPending = false;
+    freeDescBuffer();
+    coverPath.clear();
+    loading = true;
+    requestUpdateAndWait();
+    loadMetadata();
+    loading = false;
+    requestUpdate();
+    return;
+  }
+
   if (waitForBackRelease) {
     if (!mappedInput.isPressed(MappedInputManager::Button::Back) &&
         !mappedInput.wasReleased(MappedInputManager::Button::Back)) {
@@ -266,6 +346,28 @@ void BookDetailsActivity::loop() {
         !mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       waitForConfirmRelease = false;
     }
+    return;
+  }
+
+  // Hold Confirm (or hold a finger on the page): book options. Fires while
+  // the key is still down, so its release is swallowed on the way back.
+  if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) optionsHoldHandled = false;
+  bool wantOptions = !optionsHoldHandled && mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
+                     mappedInput.getHeldTime() >= OPTIONS_HOLD_MS;
+#if FREEINK_DEVICE_X4PRO
+  {
+    int lx, ly;
+    if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
+      // The rest of the contact is consumed so the lift is not also a tap.
+      mappedInput.suppressTouchContact();
+      wantOptions = true;
+    }
+  }
+#endif
+  if (wantOptions) {
+    optionsHoldHandled = true;
+    waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+    openOptions();
     return;
   }
 

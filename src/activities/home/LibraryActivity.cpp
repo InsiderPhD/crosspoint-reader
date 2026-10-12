@@ -519,7 +519,87 @@ bool LibraryActivity::siblingPathCallback(void* context, const int pos, std::str
   // stack and is not rendering: nothing else is using the index handle.
   auto* self = static_cast<LibraryActivity*>(context);
   if (!self->indexMode || pos < 0 || pos >= static_cast<int>(self->viewCount)) return false;
-  return self->indexedPath(self->view[pos], out);
+  if (!self->indexedPath(self->view[pos], out)) return false;
+  // The index still lists a book renamed during this visit under its old name.
+  for (const auto& renamed : self->renamedPaths) {
+    if (renamed.first == out) {
+      out = renamed.second;
+      break;
+    }
+  }
+  return true;
+}
+
+void LibraryActivity::bookRenamedCallback(void* context, const std::string& oldPath, const std::string& newPath) {
+  static_cast<LibraryActivity*>(context)->onBookRenamed(oldPath, newPath);
+}
+
+void LibraryActivity::onBookRenamed(const std::string& oldPath, const std::string& newPath) {
+  // The render task reads all of this; it is idle under Book Info but not
+  // after the context menu's own rename.
+  RenderLock lock;
+  // Path-list mode lends bookPaths to Book Info for Left/Right paging; patch it
+  // so the entry is right until the reload below replaces the whole list.
+  for (auto& path : bookPaths) {
+    if (path == oldPath) {
+      path = newPath;
+      break;
+    }
+  }
+  // A second rename of the same book in one visit updates its entry.
+  bool known = false;
+  for (auto& renamed : renamedPaths) {
+    if (renamed.second == oldPath) {
+      renamed.second = newPath;
+      known = true;
+      break;
+    }
+  }
+  if (!known) renamedPaths.emplace_back(oldPath, newPath);
+
+  // BookMoveUtils dropped both persisted indexes, so a reload rescans; the new
+  // name can move the book in every sort order, hence the path-based re-select.
+  pendingSelectPath = newPath;
+  initialLoadPending = true;
+  pageBufferStored = false;
+  frameHoldsPage = false;
+  lastRenderedPage = static_cast<size_t>(-1);
+  requestUpdate();
+}
+
+namespace {
+struct OrdinalByHash {
+  uint64_t hash;
+  uint16_t ordinal;
+};
+bool matchOrdinalByHash(void* context, const uint16_t ordinal, const uint64_t hash) {
+  auto& find = *static_cast<OrdinalByHash*>(context);
+  if (hash != find.hash) return true;
+  find.ordinal = ordinal;
+  return false;  // found: stop the pass
+}
+}  // namespace
+
+void LibraryActivity::selectBookByPath(const std::string& path) {
+  if (indexMode) {
+    OrdinalByHash find{library::clixPathHash(path.data(), path.size()), NO_ORDINAL};
+    index.forEachPathHash(&matchOrdinalByHash, &find);
+    for (uint16_t row = 0; find.ordinal != NO_ORDINAL && row < viewCount; row++) {
+      if (view[row] == find.ordinal) {
+        selectorIndex = row;
+        return;
+      }
+    }
+  } else {
+    for (size_t row = 0; row < sortedIndices.size(); row++) {
+      if (bookPaths[sortedIndices[row]] == path) {
+        selectorIndex = row;
+        return;
+      }
+    }
+  }
+  // Not listed (hidden as finished, or the scan was cancelled): keep the row.
+  if (selectorIndex >= bookCount()) selectorIndex = bookCount() == 0 ? 0 : bookCount() - 1;
 }
 
 namespace {
@@ -727,6 +807,14 @@ void LibraryActivity::render(RenderLock&&) {
               indexMode ? "index" : "path list", static_cast<unsigned long>(millis() - t0));
     }
     initialLoadPending = false;
+    renamedPaths.clear();
+    renamedPaths.shrink_to_fit();
+    if (!pendingSelectPath.empty()) {
+      selectBookByPath(pendingSelectPath);
+      pendingSelectPath.clear();
+    } else if (selectorIndex >= bookCount()) {
+      selectorIndex = bookCount() == 0 ? 0 : bookCount() - 1;
+    }
     // A scan repaints the panel and lends the framebuffer out as scratch.
     frameHoldsPage = false;
     pageBufferStored = false;
@@ -1461,6 +1549,7 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
                                                              contextMenu.progressPercent());
         details->setSiblingsResolver(this, &LibraryActivity::siblingPathCallback, static_cast<int>(viewCount),
                                      static_cast<int>(selectorIndex));
+        details->setRenameListener(this, &LibraryActivity::bookRenamedCallback);
         startActivityForResult(std::move(details), [this](const ActivityResult&) { requestUpdate(); });
         break;
       }
@@ -1482,12 +1571,22 @@ void LibraryActivity::dispatchBookAction(BookContextMenu::Action action, const s
       auto details = std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title, contextMenu.author(),
                                                            contextMenu.progressPercent());
       details->setSiblingsRef(&bookPaths, std::move(order), pos);
+      details->setRenameListener(this, &LibraryActivity::bookRenamedCallback);
       startActivityForResult(std::move(details), [this](const ActivityResult&) { requestUpdate(); });
       break;
     }
     case BookContextMenu::Action::ViewStats:
       startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, path),
                              [this](const ActivityResult&) { requestUpdate(); });
+      break;
+    case BookContextMenu::Action::Rename:
+      renameFlow.start(
+          *this, renderer, mappedInput, path,
+          [this](const std::string& oldPath, const std::string& newPath) { onBookRenamed(oldPath, newPath); });
+      // The menu was painted over the page; a cancelled keyboard must not
+      // leave the fast paths believing the frame still holds it.
+      pageBufferStored = false;
+      frameHoldsPage = false;
       break;
   }
 }
@@ -1517,6 +1616,7 @@ void LibraryActivity::loop() {
     onGoHome();
     return;
   }
+  if (renameFlow.poll(*this, renderer, mappedInput)) return;
   if (initialLoadPending) return;
   if (bookCount() == 0) {
     // Nothing to select, but the screen must still be leavable: an empty card,
