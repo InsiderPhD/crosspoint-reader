@@ -6,6 +6,24 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ## Unreleased
 
+### Upstream and CrossInk feature port (October 2026)
+
+Hand-ported onto this fork's own UI from `upstream/develop` and `crossink/development`, plus integrations between the new features and existing ones. Built and exercised in the desktop simulator (X4 profile, and the X4 Pro profile for touch code); not yet built for or run on hardware. Section cache v48, `book.bin` v13, CSS cache v8, TXT index v4: every book re-indexes once.
+
+- **Reading layout.** Word Spacing (50-200%), Character Spacing (+/-1.5 px) and Paragraph Indent in Font & Layout, applied to EPUB body, tables, on-page footnotes, dictionary pages and TXT. Inline images flow within a line. Publisher borders, shading, page breaks and `white-space: pre`. Heading and block font sizes on PSRAM boards (built-in families only).
+- **Per-book settings.** Reader menu > Book Settings overrides layout settings for one book (sidecar in the book's cache dir, never written to `settings.json`); Use Global Settings clears them. Image Grayscale toggle, global and per book. Go to Page for books with a publisher page list.
+- **Fonts.** TrueType/OpenType reader fonts on X4 Pro and X4C (`/fonts/Name.ttf` or `/fonts/Name/`), rasterised with `stb_truetype` into PSRAM; web upload of `.ttf`/`.otf`. Compiles to nothing on X3/X4.
+- **Files.** Rename files from Browse Files and from every book menu, carrying progress, bookmarks, clippings, sync links, recents and stats (also over the web UI and WebDAV). Named bookmarks. JPEG and PNG in the image viewer. Book Info shows format, size, folder and date added.
+- **Library.** Flat-memory CLX1 index (`/.crosspoint/library.clx*`) behind the existing Library and Tags/Authors/Series views, with a cancellable, resumable scan; finished tick; Hide Finished Books; Stats > Library tab (finished this month/year, top authors and tags).
+- **Footnotes.** The Footnotes action highlights the markers on the page; step, Confirm to follow, Back to return. On-page footnotes unchanged.
+- **Status bars.** Hub with three fully customisable bars: Outside Reader (Date, Clock, Battery), Reader Top, Reader Bottom. Per-bar Battery Style; status Text Size. Replaces Hide Battery % and Clock Outside Reader (migrated on read).
+- **Clock.** One Time Zone (104 zones) with Daylight Saving Auto/On/Off replaces the UTC offset and the old zone preset (migrated on read).
+- **Sleep and boot.** Sleep image folder chosen in Browse Files; Page Overlay sleep mode (PNG alpha or BMP over the current page); custom boot image.
+- **Touch (X4 Pro).** Hold Action: Shortcut (per-zone actions, as before), Dictionary (hold a word, drag for a phrase) or Highlight (hold and drag to clip).
+- **Sync and dictionary.** KOSync Server Type (Standard/Extended) and Send Book Details; KOSync position for text outside `p`/`li`; phrase lookup in the dictionary selector; wolfSSL input buffer kept per connection. BookFusion browser recognises a renamed book by id.
+- **Other.** About screen with a privacy-safe support export; Track Reading Stats toggle; OPDS category counts and optional server file names; web file sorting; queued page turns during a render; hold Up/Down pages the WiFi, Bluetooth and status bar lists.
+- **Not ported.** Hold-to-wake (reverted), KOSync multi-account profiles (reverted), filename fallback font, edge calibration, adaptive inflate chunk, BookFusion bookmark-name sync (no endpoint), CrossInk stable page numbers.
+
 ### Upstream and CrossInk efficiency sync (October 2026)
 
 Hand-ported from `upstream/develop` (to `aad48b40d`) and `crossink/development` (to `67100e666`). No new features; fork features untouched. Built and smoke-tested in the desktop simulator only (`pio run -e simulator`); **not yet built for a device or flashed**.
