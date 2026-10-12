@@ -608,7 +608,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 ### Reader tab
 
-- **Font Family** — Bookerly / Inter / Open Dyslexic / Monospace. SD-card fonts can also be loaded (see [sd-card-fonts](./docs/sd-card-fonts.md)).
+- **Font Family** — Bookerly / Inter / Open Dyslexic / Monospace. SD-card fonts can also be loaded, and on the X4 Pro and X4C a `.ttf`/`.otf` file can be used directly (see [sd-card-fonts](./docs/sd-card-fonts.md)).
 - **Font Size** — Small / Medium / Large / X-Large (plus an X-Small size).
 - **Line Spacing** — Tight / Normal / Wide.
 - **Screen Margin** — 5–40 px in 5-px steps.
