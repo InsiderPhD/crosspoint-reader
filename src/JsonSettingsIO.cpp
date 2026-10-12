@@ -231,6 +231,7 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["readerHoldLeft"] = s.readerHoldLeft;
   doc["readerHoldMiddle"] = s.readerHoldMiddle;
   doc["readerHoldRight"] = s.readerHoldRight;
+  doc["readerHoldMode"] = s.readerHoldMode;
   doc["readerTapZoneLayout"] = s.readerTapZoneLayout;
   doc["readerShortPressHome"] = s.readerShortPressHome;
   doc["readerLongPressHome"] = s.readerLongPressHome;
@@ -408,6 +409,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
                                    S::READER_ACTION_CREATE_CLIPPING);
   s.readerHoldRight =
       clampAction(doc["readerHoldRight"] | (uint8_t)S::READER_ACTION_CREATE_CLIPPING, S::READER_ACTION_CREATE_CLIPPING);
+  s.readerHoldMode =
+      clamp(doc["readerHoldMode"] | (uint8_t)S::READER_HOLD_SHORTCUT, S::READER_HOLD_MODE_COUNT, S::READER_HOLD_SHORTCUT);
   s.readerTapZoneLayout =
       clamp(doc["readerTapZoneLayout"] | (uint8_t)S::TAP_ZONES_SIDES, S::TAP_ZONE_LAYOUT_COUNT, S::TAP_ZONES_SIDES);
   s.readerShortPressHome =

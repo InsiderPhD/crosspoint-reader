@@ -381,6 +381,9 @@ void XtcReaderActivity::loop() {
     const auto holdZone = mappedInput.wasTouchLongPressZone(holdX, holdY);
     if (holdZone != MappedInputManager::TapZone::None) {
       mappedInput.suppressTouchContact();
+      // Hold Action = Dictionary / Highlight switches the zone actions off, and
+      // an XTC page is an image with no word to pick: the hold does nothing.
+      if (SETTINGS.readerHoldMode != CrossPointSettings::READER_HOLD_SHORTCUT) return;
       uint8_t holdSetting = SETTINGS.readerHoldMiddle;
       if (holdZone == MappedInputManager::TapZone::Left) holdSetting = SETTINGS.readerHoldLeft;
       if (holdZone == MappedInputManager::TapZone::Right) holdSetting = SETTINGS.readerHoldRight;
