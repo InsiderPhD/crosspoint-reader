@@ -12,6 +12,7 @@
 #include <cstdio>
 
 #include "CrossPointSettings.h"
+#include "ReadingStatsStore.h"
 #include "util/HeapReport.h"
 #include "util/TimeUtils.h"
 
@@ -160,6 +161,16 @@ bool SupportInfo::exportToSd(const Snapshot& s) {
   ok &= writeLine(file, "clock_timezone: %u\n", static_cast<unsigned>(SETTINGS.clockTimezone));
   ok &= writeLine(file, "clock_dst: %u\n", static_cast<unsigned>(SETTINGS.clockDst));
   ok &= writeLine(file, "dev_mode: %u\n\n", static_cast<unsigned>(SETTINGS.devMode));
+
+  // Lifetime reading totals: three counters, straight from the stats already
+  // in RAM. Deliberately nothing per book - no titles, authors, paths or dates
+  // - so the section says how much the device is used and nothing about what
+  // is read on it.
+  ok &= writeLine(file, "[reading]\n");
+  ok &= writeLine(file, "books_finished: %lu\n", static_cast<unsigned long>(READING_STATS.getBooksFinishedCount()));
+  ok &= writeLine(file, "reading_time_seconds: %llu\n",
+                  static_cast<unsigned long long>(READING_STATS.getTotalReadingMs() / 1000ULL));
+  ok &= writeLine(file, "sessions: %lu\n\n", static_cast<unsigned long>(READING_STATS.getTotalSessionCount()));
 
   ok &= writeLine(file, "[accounts]\n");
   ok &= writeLine(file, "wifi_configured: %s\n", configured("/.crosspoint/wifi.json"));

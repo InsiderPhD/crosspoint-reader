@@ -22,6 +22,9 @@ struct Clipping {
   uint16_t endWordIndex = 0;
   uint16_t wordCount = 0;
   uint16_t paragraphIndex = UINT16_MAX;
+  // When the clip was saved: UTC epoch seconds, 0 if the clock was not set.
+  // Clips saved by firmware up to 1.12.0 hold seconds-since-boot here instead,
+  // so treat a value TimeUtils::isClockValid() rejects as "unknown".
   uint32_t timestamp = 0;
   // BookFusion highlight id once this clip has been pushed; 0 = not pushed yet.
   uint32_t bookFusionId = 0;

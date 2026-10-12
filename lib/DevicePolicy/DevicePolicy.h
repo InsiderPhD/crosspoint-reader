@@ -114,3 +114,16 @@
 #ifndef CROSSPOINT_SD_PLUGINS
 #define CROSSPOINT_SD_PLUGINS (!CROSSPOINT_TIGHT_HEAP)
 #endif
+
+// --- TrueType / OpenType reader fonts ----------------------------------------
+//
+// Runtime .ttf/.otf rendering (lib/EpdFont/TtfEpdFont over the vendored
+// stb_truetype rasteriser) keeps each font file resident and caches the glyphs
+// it rasterises: megabytes, every byte of it placed in PSRAM. No version of
+// that fits beside an open book on the C3, so the feature does not exist there:
+// the rasteriser is not compiled, .ttf/.otf files are invisible to the font
+// registry, and the web UI refuses them. Pre-rasterised .cpfont SD fonts stay
+// the sideloaded-font route on those boards.
+#ifndef CROSSPOINT_VECTOR_FONTS
+#define CROSSPOINT_VECTOR_FONTS (!CROSSPOINT_TIGHT_HEAP)
+#endif
