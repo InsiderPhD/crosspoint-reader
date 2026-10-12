@@ -322,7 +322,7 @@ Available actions:
 | Action | What it does |
 |--------|--------------|
 | **Select Chapter** | Table of contents — jump to any chapter. |
-| **Footnotes** | *(shown only when the page has footnotes)* View footnotes in a menu. |
+| **Footnotes** | *(shown only when the page has footnotes)* Pick a footnote on the page and jump to it (see [Footnotes](#footnotes)). |
 | **Orientation** | Cycles orientation in place (Portrait / Landscape CW / Inverted / Landscape CCW). |
 | **Show Button Hints** | Cycles the on-screen button-hint mode in place. |
 | **Dark Mode** | Toggles light-on-dark reading in place. |
@@ -361,6 +361,14 @@ Rows marked *in place* cycle their value without closing the menu. Rows marked *
 
 - **On page** — footnote text is rendered at the bottom of the referencing page, beneath a horizontal rule. Layout reserves space so it never overlaps the body text.
 - **In menu** — footnotes are collected into the reader menu instead.
+
+**Jumping to a footnote** works the same in both modes. Choose **Footnotes** in the reader menu, or bind the **Footnotes** action to a button in Reader Controls:
+
+- If the page has one footnote, the reader goes straight to it.
+- If it has several, the first reference marker on the page is highlighted. **Left/Right** (or the side buttons, or a page-turn remote) move the highlight from marker to marker, **Confirm** (or a short press of Power) opens the highlighted footnote, and **Back** puts the page back as it was. On the X4 Pro, tap a marker to open it; a tap anywhere else cancels.
+- On a page where a marker could not be matched to its footnote (for example the tail of a long note carried over from the previous page), the footnote list opens instead.
+
+While you are reading a footnote the bottom of the screen shows **Back to Page**: press **Back** to return to the page you came from. Following a link inside a footnote stacks up to three levels deep, and Back unwinds them one at a time.
 
 ---
 
