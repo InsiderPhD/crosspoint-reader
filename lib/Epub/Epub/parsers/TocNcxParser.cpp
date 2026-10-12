@@ -81,6 +81,23 @@ void XMLCALL TocNcxParser::startElement(void* userData, const XML_Char* name, co
     return;
   }
 
+  // <pageList>: the print edition's page numbers. A <pageTarget> has the same
+  // navLabel/text + content shape as a <navPoint>, so it rides the navPoint
+  // states with inPageList deciding where the entry goes. It follows </navMap>,
+  // which leaves the state at IN_NAV_MAP (nothing resets it).
+  if ((self->state == IN_NCX || self->state == IN_NAV_MAP) && strcmp(name, "pageList") == 0) {
+    self->state = IN_NAV_MAP;
+    self->inPageList = true;
+    return;
+  }
+
+  if (self->inPageList && self->state == IN_NAV_MAP && strcmp(name, "pageTarget") == 0) {
+    self->state = IN_NAV_POINT;
+    self->currentLabel.clear();
+    self->currentSrc.clear();
+    return;
+  }
+
   // Handles both top-level and nested navPoints
   if ((self->state == IN_NAV_MAP || self->state == IN_NAV_POINT) && strcmp(name, "navPoint") == 0) {
     self->state = IN_NAV_POINT;
@@ -132,6 +149,17 @@ void XMLCALL TocNcxParser::endElement(void* userData, const XML_Char* name) {
     return;
   }
 
+  if (self->inPageList && self->state == IN_NAV_POINT && strcmp(name, "pageTarget") == 0) {
+    self->state = IN_NAV_MAP;
+    return;
+  }
+
+  if (self->inPageList && strcmp(name, "pageList") == 0) {
+    self->inPageList = false;
+    self->state = IN_NCX;
+    return;
+  }
+
   if (self->state == IN_NAV_POINT && strcmp(name, "navPoint") == 0) {
     self->currentDepth--;
     if (self->currentDepth == 0) {
@@ -155,7 +183,9 @@ void XMLCALL TocNcxParser::endElement(void* userData, const XML_Char* name) {
         anchor = FsHelpers::decodeUriEscapes(rawTarget.substr(pos + 1));
       }
 
-      if (self->cache) {
+      if (self->cache && self->inPageList) {
+        self->cache->createPageListEntry(self->currentLabel, href, anchor);
+      } else if (self->cache) {
         self->cache->createTocEntry(self->currentLabel, href, anchor, self->currentDepth);
       }
 

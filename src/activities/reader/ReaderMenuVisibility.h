@@ -55,6 +55,7 @@ inline constexpr Row kRows[] = {
     {9, MenuAction::CUSTOMISE_MENU, StrId::STR_CUSTOMISE_READER_MENU, Availability::Always},
     {10, MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN, Availability::Always},
     {11, MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT, Availability::Always},
+    {27, MenuAction::GO_TO_PAGE, StrId::STR_GO_TO_PAGE, Availability::Always},
     {12, MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS, Availability::Always},
     {13, MenuAction::ADD_BOOKMARK, StrId::STR_CREATE_BOOKMARK, Availability::Always},
     {14, MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING, Availability::Always},

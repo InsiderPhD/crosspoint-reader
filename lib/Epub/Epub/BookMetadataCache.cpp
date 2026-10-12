@@ -7,6 +7,7 @@
 
 #include <cstring>
 #include <deque>
+#include <new>
 
 #include "FsHelpers.h"
 
@@ -14,7 +15,9 @@ namespace {
 // v12: multiple <dc:creator> authors are now joined with " & " (was ", ") so the Authors
 // folder view can split co-authors without breaking "Last, First" names. Bumping forces a
 // rebuild of stale book.bin so the fix applies without a manual recache.
-constexpr uint8_t BOOK_CACHE_VERSION = 12;
+// v13: the publisher page list is written to pagelist.bin during the TOC pass (PageList.h).
+// book.bin itself is unchanged; the bump only makes existing books rebuild so they gain it.
+constexpr uint8_t BOOK_CACHE_VERSION = 13;
 constexpr char bookBinFile[] = "/book.bin";
 // Cap on the in-RAM cumulative spine size table: 1024 x 4 bytes = 4KB, held for
 // the reading session. Books with more spine items keep the on-disk lookup.
@@ -67,6 +70,11 @@ bool BookMetadataCache::beginTocPass() {
     return false;
   }
 
+  // Optional: a book whose page list cannot be written simply has no Go to
+  // Page. One small transient object, freed in endTocPass().
+  pageListWriter.reset(new (std::nothrow) PageList::Writer());
+  if (pageListWriter) pageListWriter->begin(cachePath);
+
   if (spineCount >= LARGE_SPINE_THRESHOLD) {
     spineHrefIndex.clear();
     spineHrefIndex.resize(spineCount);
@@ -97,6 +105,11 @@ bool BookMetadataCache::endTocPass() {
   // Explicit close() required: member variables persist beyond function scope
   tocFile.close();
   spineFile.close();
+
+  if (pageListWriter) {
+    pageListWriter->finish();
+    pageListWriter.reset();
+  }
 
   spineHrefIndex.clear();
   spineHrefIndex.shrink_to_fit();
@@ -360,6 +373,32 @@ void BookMetadataCache::createTocEntry(const std::string& title, const std::stri
     return;
   }
 
+  const int16_t spineIndex = findSpineIndexForHref(href);
+  if (spineIndex == -1) {
+    LOG_DBG("BMC", "createTocEntry: Could not find spine item for TOC href %s", href.c_str());
+  }
+
+  const TocEntry entry(title, href, anchor, level, spineIndex);
+  writeTocEntry(tocFile, entry);
+  tocCount++;
+}
+
+void BookMetadataCache::createPageListEntry(const std::string& label, const std::string& href,
+                                            const std::string& anchor) {
+  if (!buildMode || !spineFile || !pageListWriter) return;
+  // A page list has hundreds of entries but they run in document order, so
+  // consecutive ones share a file: resolve each file once, not each page. (The
+  // small-spine lookup is a linear read of the spine temp file.)
+  if (!pageListWriter->memoValid || pageListWriter->memoHref != href) {
+    pageListWriter->memoHref = href;
+    pageListWriter->memoSpine = findSpineIndexForHref(href);
+    pageListWriter->memoValid = true;
+  }
+  // An entry pointing outside the spine has nowhere to jump to; the writer drops it.
+  pageListWriter->add(label, pageListWriter->memoSpine, anchor);
+}
+
+int16_t BookMetadataCache::findSpineIndexForHref(const std::string& href) {
   int16_t spineIndex = -1;
 
   if (useSpineHrefIndex) {
@@ -377,9 +416,6 @@ void BookMetadataCache::createTocEntry(const std::string& title, const std::stri
       break;
     }
 
-    if (spineIndex == -1) {
-      LOG_DBG("BMC", "createTocEntry: Could not find spine item for TOC href %s", href.c_str());
-    }
   } else {
     spineFile.seek(0);
     for (int i = 0; i < spineCount; i++) {
@@ -389,14 +425,8 @@ void BookMetadataCache::createTocEntry(const std::string& title, const std::stri
         break;
       }
     }
-    if (spineIndex == -1) {
-      LOG_DBG("BMC", "createTocEntry: Could not find spine item for TOC href %s", href.c_str());
-    }
   }
-
-  const TocEntry entry(title, href, anchor, level, spineIndex);
-  writeTocEntry(tocFile, entry);
-  tocCount++;
+  return spineIndex;
 }
 
 /* ============= READING / LOADING FUNCTIONS ================ */

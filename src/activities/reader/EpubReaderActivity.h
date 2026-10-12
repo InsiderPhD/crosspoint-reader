@@ -107,6 +107,9 @@ class EpubReaderActivity final : public Activity {
   // The status bar is drawn mid-render, before that move lands, so its footnote
   // indicator reads this instead of the vector.
   bool currentPageHasFootnotes = false;
+  // Entries in the book's publisher page list (PageList.h), read once in
+  // onEnter(); 0 for a book without one, which hides Go to Page.
+  uint16_t publisherPageCount = 0;
   // Choosing a footnote on the page itself (EpubReaderFootnoteSelect.cpp). This is
   // the feature's entire resident state: where each marker is drawn is re-derived
   // from the page on every render, never stored.
@@ -176,6 +179,9 @@ class EpubReaderActivity final : public Activity {
   bool runAutosyncNow();
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
+  // Open the Go to Page popup, and jump to entry `index` of the page list.
+  void openPageSelection();
+  void jumpToPublisherPage(uint16_t index);
   void toggleBluetoothFromReader();
   // Called from the idle loop: if Bluetooth is wanted but the stack is down (e.g.
   // a section build tore it out), and the page has settled, free the chapter

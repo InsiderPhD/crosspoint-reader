@@ -351,6 +351,24 @@ const char* getAttribute(const XML_Char** atts, const char* attrName) {
 // Block-level, sectioning, and structural elements are always considered navigable.
 bool isNonNavigableInlineElement(const char* name) { return strcmp(name, "span") == 0; }
 
+// "page_12", "Page-12", "pg12", "pagebreak_12": the ids converters give page-break
+// markers that carry no epub:type. Deliberately narrow -- it gates what gets
+// recorded as an anchor, and only in books that ship a page list.
+bool looksLikePageBreakId(const char* id) {
+  const char* p = id;
+  if (strncasecmp(p, "pagebreak", 9) == 0) {
+    p += 9;
+  } else if (strncasecmp(p, "page", 4) == 0) {
+    p += 4;
+  } else if (strncasecmp(p, "pg", 2) == 0) {
+    p += 2;
+  } else {
+    return false;
+  }
+  if (*p == '_' || *p == '-') ++p;
+  return *p >= '0' && *p <= '9';
+}
+
 bool isInternalEpubLink(const char* href) {
   if (!href || href[0] == '\0') return false;
   if (strncmp(href, "http://", 7) == 0 || strncmp(href, "https://", 8) == 0) return false;
@@ -609,6 +627,33 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         }
       } else if (strcmp(atts[i], "dir") == 0) {
         dirAttr = atts[i + 1];
+      }
+    }
+
+    // Publisher page-break markers (<span epub:type="pagebreak" id="page_12"/>),
+    // the targets of the book's page list. Recorded only when the book has one
+    // (recordPageBreakAnchors), under the same per-chapter cap as every other
+    // anchor. Unlike a block's id this is recorded at once, against the page
+    // being filled: a marker sits mid-paragraph, and deferring it to the next
+    // block would both land a page late and lose it to that block's own id.
+    if (self->recordPageBreakAnchors && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER) {
+      const char* idValue = nullptr;
+      bool isPageBreak = false;
+      for (int i = 0; atts[i]; i += 2) {
+        if (strcmp(atts[i], "id") == 0) {
+          idValue = atts[i + 1];
+        } else if (strcmp(atts[i], "epub:type") == 0) {
+          isPageBreak = isPageBreak || strstr(atts[i + 1], "pagebreak") != nullptr;
+        } else if (strcmp(atts[i], "role") == 0) {
+          isPageBreak = isPageBreak || strcmp(atts[i + 1], "doc-pagebreak") == 0;
+        }
+      }
+      // EPUB 2 books (NCX pageList) have no epub:type to go by; their targets
+      // are bare <a>/<span> ids named for the page.
+      isPageBreak = isPageBreak || (idValue && looksLikePageBreakId(idValue));
+      if (isPageBreak && idValue && idValue[0] != '\0') {
+        if (self->pendingAnchorId == idValue) self->pendingAnchorId.clear();
+        self->anchorData.push_back({idValue, static_cast<uint16_t>(self->completedPageCount)});
       }
     }
   }

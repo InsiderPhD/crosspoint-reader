@@ -2,7 +2,10 @@
 
 ## `book.bin`
 
-> **Current version: 12** (`BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`).
+> **Current version: 13** (`BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`).
+> v13 did not change the layout either: the metadata build now also writes the publisher page
+> list to a `pagelist.bin` sidecar (see below), and the bump makes existing books rebuild so
+> they gain it.
 > v12 did not change the layout: multiple `<dc:creator>` authors are now joined with
 > `" & "` instead of `", "`, so the Authors folder view can split co-authors without
 > breaking "Last, First" names. The bump exists to force stale `book.bin` files to rebuild.
@@ -125,7 +128,7 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-> **Current version: 46** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> **Current version: 47** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
 > The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
 > v30 inline ("on page") footnotes; v31–v33 KOReader xpath/paragraph sync data and
 > nested block styles; v34 `<pre>` blocks carry a monospace font override; v35 hanging
@@ -151,6 +154,10 @@ if (parsedSize != fileSize) {
 > other render settings; and every TextBlock's style tail gains `characterSpacing i8`
 > after `fontOverride`, so a line is drawn with the letter spacing its word positions
 > were computed for.
+> v47 no structural change: in a book that has a `pagelist.bin`, the anchor map additionally
+> carries the ids of page-break markers (`epub:type="pagebreak"`, `role="doc-pagebreak"`, or an
+> id of the form `page12` / `pg_12`), recorded against the page being filled when the marker
+> is met. Go to Page resolves its targets through that map.
 >
 > Any change to the on-disk structure **must** bump this constant — a stale cache read
 > against a new layout is how you get a hard fault, not a graceful failure.
@@ -461,3 +468,29 @@ Field order (the index is both the mask bit and the byte; append only): 0 fontFa
 A reader that knows fewer fields ignores the extra bytes and bits; one that knows more treats the
 missing fields as not overridden, so adding a field needs no version bump. An out-of-range value drops
 that one override. Values of fields whose mask bit is clear are written but never read.
+
+## Publisher page list: `pagelist.bin`
+
+Optional, in the book's cache directory. Written while `book.bin` is built, from the EPUB 3
+`<nav epub:type="page-list">` or, when the NCX is the TOC that gets parsed, its `<pageList>`.
+Absent when the book declares no page list (or none of its entries point into the spine). Read
+only by the reader menu's **Go to Page**: the count on book open, then single records by seek.
+Owned by `lib/Epub/Epub/PageList.cpp`.
+
+### Version 1
+
+```c++
+struct PageListBin {
+    u8  version;   // 1
+    u8  reserved;  // 0
+    u16 count;     // little-endian
+    struct {
+        char label[12];   // NUL padded UTF-8 page label as printed: "12", "xiv"
+        u16  spineIndex;  // little-endian
+        char anchor[50];  // NUL padded fragment id; empty = top of the spine item
+    } entries[count];     // 64 bytes each, in document order
+};
+```
+
+Entries with an empty label, a target outside the spine or an anchor of 50 bytes or more are
+skipped; a label longer than 11 bytes is cut on a UTF-8 boundary; at most 8000 entries are kept.

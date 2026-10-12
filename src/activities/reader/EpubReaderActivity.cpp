@@ -39,6 +39,7 @@
 #include "EpubReaderBookmarksActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderClippingListActivity.h"
+#include "EpubReaderPageSelectionActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderUtils.h"
 #include "FootnoteMarkers.h"
@@ -482,6 +483,7 @@ void EpubReaderActivity::onEnter() {
 
   epub->setupCacheDir();
   reloadBookmarkCache();
+  publisherPageCount = PageList::count(epub->getCachePath());
 
   FsFile f;
   if (Storage.openFileForRead("ERS", epub->getCachePath() + "/progress.bin", f)) {
@@ -982,6 +984,61 @@ void EpubReaderActivity::maybeRefreshForRemoteConnect() {
 
 // Translate an absolute percent into a spine index plus a normalized position
 // within that spine so we can jump after the section is loaded.
+void EpubReaderActivity::openPageSelection() {
+  if (!epub || publisherPageCount == 0) return;
+  const std::string& cachePath = epub->getCachePath();
+
+  // Start the picker near where the reader is. The list is in document order,
+  // so the entries of this chapter are one run: [first, next). Which of them
+  // the current screen falls on is interpolated from the position in the
+  // chapter rather than looked up -- resolving every anchor of the run would
+  // be one section-file scan each, for a number the user is about to change.
+  const auto spine = static_cast<uint16_t>(std::clamp(currentSpineIndex, 0, static_cast<int>(UINT16_MAX) - 1));
+  const uint16_t first = PageList::lowerBoundSpine(cachePath, publisherPageCount, spine);
+  const uint16_t next = PageList::lowerBoundSpine(cachePath, publisherPageCount, static_cast<uint16_t>(spine + 1));
+  uint16_t initial = first;
+  if (next > first) {
+    if (section && section->pageCount > 0) {
+      initial = static_cast<uint16_t>(first + static_cast<uint32_t>(next - first) *
+                                                  static_cast<uint32_t>(section->currentPage) /
+                                                  static_cast<uint32_t>(section->pageCount));
+    }
+  } else if (first > 0) {
+    initial = static_cast<uint16_t>(first - 1);  // no page starts in this chapter: the last one before it
+  }
+  if (initial >= publisherPageCount) initial = static_cast<uint16_t>(publisherPageCount - 1);
+
+  startActivityForResult(
+      std::make_unique<EpubReaderPageSelectionActivity>(renderer, mappedInput, cachePath, publisherPageCount, initial),
+      [this](const ActivityResult& result) {
+        if (!result.isCancelled) {
+          jumpToPublisherPage(static_cast<uint16_t>(std::get<PageResult>(result.data).page));
+        }
+      });
+}
+
+void EpubReaderActivity::jumpToPublisherPage(const uint16_t index) {
+  if (!epub) return;
+  PageList::Entry entry;
+  if (!PageList::read(epub->getCachePath(), index, entry) || entry.spineIndex >= epub->getSpineItemsCount()) {
+    LOG_ERR("ERS", "Page list entry %u unusable", index);
+    requestUpdate();
+    return;
+  }
+  LOG_DBG("ERS", "Go to page '%s': spine %u anchor '%s'", entry.label, entry.spineIndex, entry.anchor);
+  {
+    RenderLock lock(*this);
+    // Same route a footnote or TOC link takes: the render resolves the anchor
+    // to a screen once the chapter is laid out, and falls back to the
+    // chapter's first screen when the id is not in its anchor map.
+    pendingAnchor = entry.anchor;
+    currentSpineIndex = entry.spineIndex;
+    nextPageNumber = 0;
+    section.reset();
+  }
+  requestUpdate();
+}
+
 void EpubReaderActivity::jumpToPercent(int percent) {
   if (!epub) {
     return;
@@ -1244,6 +1301,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           });
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::GO_TO_PAGE:
+      openPageSelection();
+      break;
     case EpubReaderMenuActivity::MenuAction::BOOKMARKS: {
       const int currentSpinePageCount = section ? section->pageCount : 0;
       startActivityForResult(std::make_unique<EpubReaderBookmarksActivity>(renderer, mappedInput, epub, epub->getPath(),
@@ -3407,7 +3467,7 @@ void EpubReaderActivity::openReaderMenu() {
   startActivityForResult(
       std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), currentPage, totalPages,
                                                bookProgressPercent, SETTINGS.orientation, currentPageHasFootnotes,
-                                               syncProvider, timeLeftChapter, timeLeftBook),
+                                               syncProvider, timeLeftChapter, timeLeftBook, publisherPageCount > 0),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);

@@ -335,6 +335,7 @@ Available actions:
 | **Reader Controls** | Rebind per-button, per-tap-zone and home-pad reader actions. |
 | **Auto Page Turn** | Set the auto-turn interval (see **[Auto-Turn](#auto-turn)**). |
 | **Go to %** | Jump to a position by percentage. |
+| **Go to Page** | *(shown only when the book includes a page list)* Jump to a page number of the print edition, as numbered by the publisher. Lands on the screen where the paragraph containing that page break starts. |
 | **Bookmarks** | *(hideable)* View and jump to saved bookmarks. |
 | **Create Bookmark** | *(hideable)* Bookmark the current page. |
 | **Save Clipping** | *(hideable)* Save a text clipping/highlight from the current page. |

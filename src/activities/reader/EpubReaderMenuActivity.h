@@ -40,7 +40,8 @@ class EpubReaderMenuActivity final : public Activity {
     SYNC_PULL,
     NEARBY_POSITION_SYNC,
     DELETE_CACHE,
-    BOOK_SETTINGS
+    BOOK_SETTINGS,
+    GO_TO_PAGE
   };
 
   // syncProvider is the backend that would actually handle a Push/Pull for THIS
@@ -51,7 +52,8 @@ class EpubReaderMenuActivity final : public Activity {
                                   const int currentPage, const int totalPages, const int bookProgressPercent,
                                   const uint8_t currentOrientation, const bool hasFootnotes,
                                   const ProgressAutoSync::Provider syncProvider = ProgressAutoSync::Provider::None,
-                                  const uint32_t timeLeftChapterSeconds = 0, const uint32_t timeLeftBookSeconds = 0);
+                                  const uint32_t timeLeftChapterSeconds = 0, const uint32_t timeLeftBookSeconds = 0,
+                                  const bool hasPageList = false);
 
   void onEnter() override;
   void onExit() override;
@@ -66,7 +68,8 @@ class EpubReaderMenuActivity final : public Activity {
     StrId labelId;
   };
 
-  static std::vector<MenuItem> buildMenuItems(bool hasFootnotes, ProgressAutoSync::Provider syncProvider);
+  static std::vector<MenuItem> buildMenuItems(bool hasFootnotes, ProgressAutoSync::Provider syncProvider,
+                                              bool hasPageList);
 
   // Edges the button hints occupy in the current orientation, so render(),
   // menuTopY() and visibleMenuRows() all lay out against the same numbers.

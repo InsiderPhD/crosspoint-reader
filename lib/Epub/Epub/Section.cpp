@@ -27,7 +27,9 @@ namespace {
 //     and top spacing apply once per paragraph (upstream d5693c321). Layout-only change.
 // 46: user text-layout controls. Header gains characterSpacing, wordSpacingPercent and
 //     paragraphIndent (cache validation); every TextBlock's style tail gains characterSpacing.
-constexpr uint8_t SECTION_FILE_VERSION = 46;
+// 47: in a book with a publisher page list, the anchor map also carries the ids of
+//     page-break markers (epub:type="pagebreak"), so Go to Page can land on them.
+constexpr uint8_t SECTION_FILE_VERSION = 47;
 // Staging buffer for page serialization, one per section build (not per page). 2KB is four
 // SD sectors: a typical text page (~3-6KB serialized) goes out in two to four writes, and a
 // field larger than the buffer (a long line's word arena) bypasses it. Heap, not stack: 2KB
@@ -349,6 +351,9 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
       embeddedStyle, contentBase, imageBasePath, imageRendering, popupFn, cssParser, footnoteDisplay == 0,
       bionicReadingEnabled);
   visitor.setTextLayout(textLayout);
+  // Go to Page lands on the ids of the book's page-break markers; record them
+  // only for a book that actually ships a page list.
+  visitor.setRecordPageBreakAnchors(Storage.exists(PageList::filePath(epub->getCachePath()).c_str()));
   Hyphenator::setPreferredLanguage(epub->getLanguage());
   // TEMP diagnostic: fragmentation OOM suspected when cold-building a large chapter right after a
   // BookFusion download (synced progress jumps straight into a deep, big spine item). "largest" is

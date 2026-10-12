@@ -23,9 +23,9 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
                                                const int bookProgressPercent, const uint8_t currentOrientation,
                                                const bool hasFootnotes, const ProgressAutoSync::Provider syncProvider,
                                                const uint32_t timeLeftChapterSeconds,
-                                               const uint32_t timeLeftBookSeconds)
+                                               const uint32_t timeLeftBookSeconds, const bool hasPageList)
     : Activity("EpubReaderMenu", renderer, mappedInput),
-      menuItems(buildMenuItems(hasFootnotes, syncProvider)),
+      menuItems(buildMenuItems(hasFootnotes, syncProvider, hasPageList)),
       title(title),
       pendingOrientation(currentOrientation),
       pendingButtonHints(SETTINGS.showButtonHints),
@@ -39,7 +39,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
       timeLeftBookSeconds(timeLeftBookSeconds) {}
 
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(
-    bool hasFootnotes, ProgressAutoSync::Provider syncProvider) {
+    bool hasFootnotes, ProgressAutoSync::Provider syncProvider, bool hasPageList) {
   std::vector<MenuItem> items;
   items.reserve(ReaderMenuVisibility::kRowCount);
 
@@ -76,6 +76,10 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   add(MenuAction::CUSTOMISE_MENU, StrId::STR_CUSTOMISE_READER_MENU);
   add(MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN);
   add(MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT);
+  // Only for a book that ships a publisher page list (most do not).
+  if (hasPageList) {
+    add(MenuAction::GO_TO_PAGE, StrId::STR_GO_TO_PAGE);
+  }
   add(MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS);
   add(MenuAction::ADD_BOOKMARK, StrId::STR_CREATE_BOOKMARK);
   add(MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING);
