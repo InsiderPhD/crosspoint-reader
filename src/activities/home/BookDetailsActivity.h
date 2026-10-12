@@ -33,6 +33,11 @@ class BookDetailsActivity final : public Activity {
   std::string rating;
   int progressPercent;
 
+  // File facts, read from the directory entry (no EPUB parse): size in bytes
+  // and the FAT modification stamp the Library sorts "date added" by.
+  uint32_t fileSize = 0;
+  uint32_t fileModified = 0;  // packed FAT date << 16 | time; 0 = unknown
+
   std::string coverPath;
   char* descBuffer = nullptr;  // null-terminated; freed in onExit()
   size_t descLength = 0;
@@ -77,6 +82,7 @@ class BookDetailsActivity final : public Activity {
   void openOptions();
   void onRenamed(const std::string& oldPath, const std::string& newPath);
 
+  void loadFileFacts();
   void loadMetadata();
   void freeDescBuffer();
 

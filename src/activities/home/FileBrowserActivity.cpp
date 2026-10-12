@@ -22,6 +22,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookFinished.h"
+#include "util/SleepBootImages.h"
 #include "util/TouchListNav.h"
 
 namespace {
@@ -678,43 +679,15 @@ void FileBrowserActivity::openEntryActions() {
     lockNextConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
     const std::string target = inUse ? std::string() : fullPath;
     if (isDirectory) {
-      setSleepFolder(target);
+      SleepBootImages::setSleepFolder(target);
     } else {
-      setBootImage(target);
+      SleepBootImages::setBootImage(target);
     }
   };
   startActivityForResult(
       std::make_unique<ListPickerActivity>(renderer, mappedInput, entryActionsTitle.c_str(), rowCount, 0,
                                            std::move(labelFn), nullptr, /*markInitial=*/false),
       std::move(handler));
-}
-
-void FileBrowserActivity::setBootImage(const std::string& path) {
-  if (APP_STATE.bootImagePath == path) return;
-
-  APP_STATE.bootImagePath = path;
-  if (!APP_STATE.saveToFile()) {
-    LOG_ERR("FileBrowser", "Failed to save boot image: %s", path.c_str());
-  }
-  LOG_INF("FileBrowser", "Boot image: %s", path.empty() ? "<built-in>" : path.c_str());
-}
-
-void FileBrowserActivity::setSleepFolder(const std::string& path) {
-  if (APP_STATE.preferredSleepFolderPath == path) return;
-
-  APP_STATE.preferredSleepFolderPath = path;
-  if (!APP_STATE.saveToFile()) {
-    LOG_ERR("FileBrowser", "Failed to save sleep folder: %s", path.c_str());
-  }
-  LOG_INF("FileBrowser", "Sleep folder: %s", path.empty() ? "<default>" : path.c_str());
-
-  // Only the custom-image sleep screens read the folder. Choosing one is a
-  // request to see its images, so switch a mode that would ignore them.
-  if (!path.empty() && SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM &&
-      SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM) {
-    SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
-    SETTINGS.saveToFile();
-  }
 }
 
 void FileBrowserActivity::confirmDeleteSelectedEntry() {
@@ -740,12 +713,12 @@ void FileBrowserActivity::confirmDeleteSelectedEntry() {
         const std::string& sleepFolder = APP_STATE.preferredSleepFolderPath;
         if (isDirectory && !sleepFolder.empty() &&
             (sleepFolder == fullPath || sleepFolder.rfind(fullPath + "/", 0) == 0)) {
-          setSleepFolder(std::string());
+          SleepBootImages::setSleepFolder(std::string());
         }
         // Likewise the boot image, deleted itself or along with its folder.
         const std::string& bootImage = APP_STATE.bootImagePath;
         if (!bootImage.empty() && (bootImage == fullPath || (isDirectory && bootImage.rfind(fullPath + "/", 0) == 0))) {
-          setBootImage(std::string());
+          SleepBootImages::setBootImage(std::string());
         }
         loadFiles();
         if (files.empty()) {

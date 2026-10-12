@@ -16,10 +16,13 @@
 
 #include "../util/ListPickerActivity.h"
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "LibraryActivity.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/SleepBootImages.h"
+#include "util/TimeUtils.h"
 #include "util/TouchListNav.h"
 
 namespace {
@@ -28,13 +31,41 @@ constexpr int ROW_V_PAD = 6;
 constexpr unsigned long OPTIONS_HOLD_MS = 700;  // as the book context menus
 
 // Rows of the options list, in display order.
-enum OptionRow : int { OPTION_RENAME = 0, OPTION_COUNT };
+enum OptionRow : int { OPTION_RENAME = 0, OPTION_SLEEP_FOLDER, OPTION_COUNT };
 
 std::string fileStem(const std::string& path) {
   const size_t slash = path.find_last_of('/');
   const size_t start = (slash == std::string::npos) ? 0 : slash + 1;
   const size_t dot = path.rfind('.');
   return path.substr(start, (dot == std::string::npos || dot < start) ? std::string::npos : dot - start);
+}
+
+// The folder holding `path` ("/" for a book in the card's root).
+std::string folderOf(const std::string& path) {
+  const size_t slash = path.find_last_of('/');
+  return (slash == std::string::npos || slash == 0) ? std::string("/") : path.substr(0, slash);
+}
+
+// "EPUB, 1.2 MB": the extension in capitals and the size on the card.
+std::string fileSummary(const std::string& path, const uint32_t bytes) {
+  char buf[32];
+  size_t n = 0;
+  const size_t dot = path.rfind('.');
+  const size_t slash = path.find_last_of('/');
+  if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
+    for (size_t i = dot + 1; i < path.size() && n < 8; i++) {
+      buf[n++] = static_cast<char>(toupper(static_cast<unsigned char>(path[i])));
+    }
+  }
+  // Integer maths: tenths of a unit, no float formatting on the C3.
+  if (bytes >= 1024u * 1024u) {
+    const uint32_t tenths = static_cast<uint32_t>((static_cast<uint64_t>(bytes) * 10u) / (1024u * 1024u));
+    snprintf(buf + n, sizeof(buf) - n, "%s%lu.%lu MB", n ? ", " : "", static_cast<unsigned long>(tenths / 10),
+             static_cast<unsigned long>(tenths % 10));
+  } else {
+    snprintf(buf + n, sizeof(buf) - n, "%s%lu KB", n ? ", " : "", static_cast<unsigned long>((bytes + 1023u) / 1024u));
+  }
+  return buf;
 }
 
 // Draw a single "Label: value" table row; returns the y for the next row.
@@ -174,7 +205,20 @@ void BookDetailsActivity::navigateToSibling(int newPos) {
   requestUpdate();
 }
 
+void BookDetailsActivity::loadFileFacts() {
+  fileSize = 0;
+  fileModified = 0;
+  // Storage.open, not openFileForRead: Book Info can be shown for a book that
+  // is no longer on the card (a stale recents entry), which is not an error.
+  HalFile file = Storage.open(bookPath.c_str());
+  if (!file) return;
+  fileSize = static_cast<uint32_t>(file.size());
+  fileModified = file.getModifyDateTimePacked();
+  file.close();
+}
+
 void BookDetailsActivity::loadMetadata() {
+  loadFileFacts();
   // Series/tags/description live only in EPUB OPF metadata (Calibre). Other formats
   // still get a basic details page (title/author/progress/placeholder).
   if (!FsHelpers::hasEpubExtension(bookPath)) {
@@ -242,15 +286,21 @@ void BookDetailsActivity::loadMetadata() {
 void BookDetailsActivity::openOptions() {
   if (!Storage.exists(bookPath.c_str())) return;  // nothing to act on
 
-  auto labelFn = [](const int index) -> std::string {
+  // Phrased as its opposite when this folder is already the one in use, as the
+  // file browser's folder list does.
+  const std::string folder = folderOf(bookPath);
+  const bool sleepFolderInUse = APP_STATE.preferredSleepFolderPath == folder;
+  auto labelFn = [sleepFolderInUse](const int index) -> std::string {
     switch (index) {
       case OPTION_RENAME:
         return tr(STR_RENAME);
+      case OPTION_SLEEP_FOLDER:
+        return sleepFolderInUse ? tr(STR_USE_DEFAULT_SLEEP_FOLDERS) : tr(STR_USE_FOLDER_FOR_SLEEP);
       default:
         return "";
     }
   };
-  auto handler = [this](const ActivityResult& result) {
+  auto handler = [this, folder, sleepFolderInUse](const ActivityResult& result) {
     // The picker acts on a button PRESS and this screen on its RELEASE, so the
     // key that closed the picker is still down here: without these its release
     // would open the book (Confirm) or leave the page (Back).
@@ -265,6 +315,9 @@ void BookDetailsActivity::openOptions() {
         renameFlow.start(
             *this, renderer, mappedInput, bookPath,
             [this](const std::string& oldPath, const std::string& newPath) { onRenamed(oldPath, newPath); });
+        break;
+      case OPTION_SLEEP_FOLDER:
+        SleepBootImages::setSleepFolder(sleepFolderInUse ? std::string() : folder);
         break;
       default:
         break;
@@ -474,6 +527,19 @@ void BookDetailsActivity::render(RenderLock&&) {
     const std::string progress =
         progressPercent < 0 ? std::string(tr(STR_BOOK_INFO_NOT_STARTED)) : std::to_string(progressPercent) + "%";
     y = drawInfoRow(renderer, textX, y, textWidth, tr(STR_BOOK_INFO_PROGRESS), progress);
+  }
+
+  // File facts: straight from the directory entry, so they show for every
+  // format and for a book whose metadata could not be read.
+  if (fileSize > 0) {
+    y = drawInfoRow(renderer, textX, y, textWidth, tr(STR_BOOK_INFO_FILE), fileSummary(bookPath, fileSize));
+    y = drawInfoRow(renderer, textX, y, textWidth, tr(STR_BOOK_INFO_FOLDER), folderOf(bookPath));
+    const unsigned fatDate = fileModified >> 16;
+    if (fatDate != 0) {
+      y = drawInfoRow(
+          renderer, textX, y, textWidth, tr(STR_BOOK_INFO_ADDED),
+          TimeUtils::formatDateParts(1980 + static_cast<int>(fatDate >> 9), (fatDate >> 5) & 0x0F, fatDate & 0x1F));
+    }
   }
 
   // Description (full width, below cover + table).
