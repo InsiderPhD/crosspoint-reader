@@ -598,7 +598,6 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Sleep Cover Mode** — Fit / Crop (when using a cover sleep screen).
 - **Sleep Cover Filter** — None (grayscale) / Contrast / Inverted.
 - **Seamless Sleep Screen** — Never / After Timeout / Always.
-- **Hide Battery %** — Never / In Reader / Always (icon still shown).
 - **Refresh Frequency** — full-refresh every 1 / 5 / 10 / 15 / 30 pages (reduces ghosting).
 - **UI Theme** — Classic / Lyra / Lyra Extended / Lyra Carousel / Dashboard / Bookshelf (see **[Home Screen](#3-home-screen)**).
 - **Sunlight Fading Fix** — software fix for white X4 units fading in direct sunlight.
@@ -641,7 +640,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 #### Customise Status Bar
 
-There are two status bars, one along the bottom of the page and one along the top, and each is customised on its own page: **Bottom Status Bar** and **Top Status Bar**. On each page every element has its own **Hide → Left → Center → Right** picker for that bar, so the two bars are laid out independently and the same element (the clock, say) can sit on both. A bar with nothing placed on it takes no space at all, so the top bar costs nothing until you use it. Each page previews its bar live: the bottom bar near the bottom edge, the top bar directly under the header.
+There are three status bars, each customised on its own page: **Outside Reader** (the strip along the top of the Home, Library, Settings and other non-reader screens), **Reader Top** and **Reader Bottom** (along the top and bottom of the page while reading). On each page every element has its own **Hide → Left → Center → Right** picker for that bar, so the bars are laid out independently and the same element (the clock, say) can sit on more than one. A bar with nothing placed on it takes no space at all, so the top bar costs nothing until you use it. Each page previews its bar live: the bottom bar near the bottom edge, the top bar directly under the header.
 
 | Element | Bottom bar default | Top bar default |
 |---------|--------------------|-----------------|
@@ -658,7 +657,9 @@ There are two status bars, one along the bottom of the page and one along the to
 
 Each bar's page also has its own **Progress Bar** (Book / Chapter / Hide) and **Progress Bar Thickness** (Thin / Medium / Thick): the bottom bar's fill bar runs along the bottom edge, the top bar's along the top edge above its text.
 
-Each bar also has a **Battery Style** (Icon + % / Icon Only / % Only) for its Battery element, so the two bars can differ. *Icon + %* still follows the Display setting **Hide Battery %**; *% Only* always shows the number.
+Each of the three bars also has a **Battery Style** (Icon + % / Icon Only / % Only) for its Battery element. These replace the old Display setting *Hide Battery %*, whose choice is carried over the first time this firmware starts.
+
+The **Outside Reader** page places **Date**, **Clock** and **Battery** (default: date left, battery right, clock hidden). The page's own header is the live preview. Date and clock placed in the same cluster read as one `date  time`; the clock uses the device time on every board and hides while that time is not trustworthy. On the Classic theme the screen title is centred on the same line, so there the *Center* cluster is only drawn on screens without a title, and the title shortens to make room for wider side clusters.
 
 The **Customise Status Bar** screen itself holds the settings both bars share:
 
@@ -673,7 +674,7 @@ Placing the first element on an empty bar (or clearing the last one) changes the
 
 All of these are also editable from the web settings page.
 
-**Clock Outside Reader** (on this screen) shows the time after the date on the header line of the Home, Library and Settings screens. It uses the same clock as the date and hides while the device has no trustworthy time.
+The clock on the non-reader screens is the **Clock** row of the **Outside Reader** page (it replaces the old *Clock Outside Reader* toggle).
 
 > [!NOTE]
 > If you're upgrading, your old show/hide status-bar settings are migrated to the new per-element positions automatically on first boot.

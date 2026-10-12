@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 class GfxRenderer;
@@ -16,13 +18,16 @@ DisplayDateInfo getDisplayDateInfo();
 // (no NTP/manual-date sync this boot) so the user knows the clock might be wrong.
 std::string getDisplayDateText();
 
-// Draws the date in the header's top-line area on the LEFT (at contentSidePadding).
-// Battery + battery-percentage are placed on the right by the theme's drawHeader.
-// Safe to call from any theme's drawHeader — the reader uses drawStatusBar instead
-// so its UI is unaffected.
-void drawTopLine(GfxRenderer& renderer);
+// The Outside Reader bar's two time elements, formatted into caller buffers
+// (BaseTheme::drawHeaderStatusBar lays them out). formatDate writes the same
+// text getDisplayDateText() returns. formatClock writes nothing when the
+// timestamp is a stale fallback: a stale date is still right most of the day,
+// a stale time never is. Both return false (and an empty string) when there is
+// nothing to show.
+bool formatDate(const DisplayDateInfo& info, char* out, size_t outLen);
+bool formatClock(const DisplayDateInfo& info, char* out, size_t outLen);
 
-// Convenience wrapper: draws GUI.drawHeader + the date top-line in one call.
+// Thin wrapper over GUI.drawHeader, which draws the Outside Reader bar itself.
 void drawHeaderWithDate(GfxRenderer& renderer, const char* title, const char* subtitle = nullptr);
 
 }  // namespace HeaderDateUtils

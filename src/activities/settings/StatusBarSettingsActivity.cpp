@@ -21,35 +21,28 @@
 namespace {
 using CPS = CrossPointSettings;
 
-// --- Hub rows: the two bars, then everything both bars share. Clock entries
+// --- Hub rows: the three bars, then everything they share. Clock entries
 // are appended only when the DS3231 RTC is present so X4 devices don't see them.
 enum HubItem {
-  HUB_BOTTOM_BAR = 0,
+  HUB_OUTSIDE_READER = 0,  // The strip along the top of every non-reader screen
   HUB_TOP_BAR,
+  HUB_BOTTOM_BAR,
   HUB_PERCENTAGE_FORMAT,
   HUB_TEXT_SIZE,
   HUB_TOP_MARGIN,
   HUB_XTC_STATUS_BAR,
-  HUB_CLOCK_OUTSIDE_READER,  // Time after the date on the non-reader headers
-  HUB_CLOCK_FORMAT,          // RTC boards only
-  HUB_CLOCK_TIME_ZONE,       // RTC boards only, launches TimeZoneSelectActivity
-  HUB_CLOCK_DST,             // RTC boards only
-  HUB_CLOCK_SYNC,            // RTC boards only, launches ClockSyncActivity
+  HUB_CLOCK_FORMAT,     // RTC boards only
+  HUB_CLOCK_TIME_ZONE,  // RTC boards only, launches TimeZoneSelectActivity
+  HUB_CLOCK_DST,        // RTC boards only
+  HUB_CLOCK_SYNC,       // RTC boards only, launches ClockSyncActivity
   HUB_COUNT
 };
 constexpr int HUB_BASE_ITEMS = HUB_CLOCK_FORMAT;  // Rows shown on every device
 const StrId hubNames[HUB_COUNT] = {
-    StrId::STR_BOTTOM_STATUS_BAR,
-    StrId::STR_TOP_STATUS_BAR,
-    StrId::STR_PERCENTAGE_FORMAT,
-    StrId::STR_STATUS_BAR_TEXT_SIZE,
-    StrId::STR_STATUS_BAR_TOP_MARGIN,
-    StrId::STR_XTC_STATUS_BAR,
-    StrId::STR_CLOCK_OUTSIDE_READER,
-    StrId::STR_CLOCK_FORMAT,
-    StrId::STR_TIME_ZONE,
-    StrId::STR_CLOCK_DST,
-    StrId::STR_CLOCK_SYNC_NOW,
+    StrId::STR_SB_OUTSIDE_READER, StrId::STR_SB_READER_TOP,        StrId::STR_SB_READER_BOTTOM,
+    StrId::STR_PERCENTAGE_FORMAT, StrId::STR_STATUS_BAR_TEXT_SIZE, StrId::STR_STATUS_BAR_TOP_MARGIN,
+    StrId::STR_XTC_STATUS_BAR,    StrId::STR_CLOCK_FORMAT,         StrId::STR_TIME_ZONE,
+    StrId::STR_CLOCK_DST,         StrId::STR_CLOCK_SYNC_NOW,
 };
 
 // --- Bar rows: the positionable elements in display order, then the bar's own
@@ -89,6 +82,21 @@ int barRowElement(const int row) {
   return -1;
 }
 
+// --- Outside Reader rows: the elements that make sense without a book, each
+// with the same Hide / Left / Center / Right picker, then the battery style.
+// The clock here comes from the system time, so it is offered on every board.
+// No Bluetooth: the remote link is a reader-only thing.
+constexpr uint8_t headerElements[] = {CPS::SB_ELEM_DATE, CPS::SB_ELEM_CLOCK, CPS::SB_ELEM_BATTERY};
+constexpr int HEADER_ELEMENT_ROWS = sizeof(headerElements) / sizeof(headerElements[0]);
+constexpr int HEADER_BATTERY_STYLE = HEADER_ELEMENT_ROWS;
+constexpr int HEADER_ITEMS = HEADER_ELEMENT_ROWS + 1;
+const StrId headerNames[HEADER_ITEMS] = {
+    StrId::STR_DATE,
+    StrId::STR_CLOCK,
+    StrId::STR_BATTERY,
+    StrId::STR_BATTERY_STYLE,
+};
+
 uint8_t& progressBarField(const bool topBar) {
   return topBar ? SETTINGS.statusBarTopProgressBar : SETTINGS.statusBarProgressBar;
 }
@@ -97,7 +105,7 @@ uint8_t& progressBarThicknessField(const bool topBar) {
 }
 
 uint8_t& batteryStyleField(const bool topBar) {
-  return topBar ? SETTINGS.statusBarTopBatteryStyle : SETTINGS.statusBarBatteryStyle;
+  return SETTINGS.statusBarBatteryStyleRef(topBar ? CPS::SB_BAR_TOP : CPS::SB_BAR_BOTTOM);
 }
 
 constexpr int BATTERY_STYLE_ITEMS = CPS::STATUS_BAR_BATTERY_STYLE_COUNT;
@@ -151,16 +159,21 @@ void StatusBarSettingsActivity::onEnter() {
   const bool hasClock = halClock.isAvailable();
   if (page == Page::Hub) {
     visibleItemCount = hasClock ? HUB_COUNT : HUB_BASE_ITEMS;
+  } else if (page == Page::OutsideReader) {
+    visibleItemCount = HEADER_ITEMS;
   } else {
     visibleItemCount = hasClock ? BAR_FULL_ITEMS : BAR_BASE_ITEMS;
   }
 
-  // Clamp every position field on both bars in case of corrupt/migrated data.
+  // Clamp every position field on all three bars in case of corrupt/migrated data.
   for (uint8_t element = 0; element < CPS::STATUS_BAR_ELEMENT_COUNT; element++) {
-    for (const bool top : {false, true}) {
-      uint8_t& pos = SETTINGS.statusBarPosRef(element, top);
+    for (const CPS::STATUS_BAR_ID bar : {CPS::SB_BAR_BOTTOM, CPS::SB_BAR_TOP, CPS::SB_BAR_HEADER}) {
+      uint8_t& pos = SETTINGS.statusBarPosRef(element, bar);
       if (pos >= POSITION_ITEMS) pos = CPS::SB_POS_HIDE;
     }
+  }
+  if (SETTINGS.statusBarHeaderBatteryStyle >= BATTERY_STYLE_ITEMS) {
+    SETTINGS.statusBarHeaderBatteryStyle = CPS::SB_BATTERY_ICON_AND_PERCENT;
   }
   for (const bool top : {false, true}) {
     if (progressBarField(top) >= PROGRESS_BAR_ITEMS) {
@@ -258,6 +271,10 @@ void StatusBarSettingsActivity::loop() {
 void StatusBarSettingsActivity::handleSelection() {
   if (page == Page::Hub) {
     switch (selectedIndex) {
+      case HUB_OUTSIDE_READER:
+        startActivityForResult(std::make_unique<StatusBarSettingsActivity>(renderer, mappedInput, Page::OutsideReader),
+                               nullptr);
+        return;
       case HUB_BOTTOM_BAR:
         startActivityForResult(std::make_unique<StatusBarSettingsActivity>(renderer, mappedInput, Page::BottomBar),
                                nullptr);
@@ -283,9 +300,6 @@ void StatusBarSettingsActivity::handleSelection() {
       case HUB_XTC_STATUS_BAR:
         SETTINGS.xtcStatusBarMode = (SETTINGS.xtcStatusBarMode + 1) % XTC_STATUS_BAR_ITEMS;
         break;
-      case HUB_CLOCK_OUTSIDE_READER:
-        SETTINGS.showClockOutsideReader = SETTINGS.showClockOutsideReader ? 0 : 1;
-        break;
       case HUB_CLOCK_FORMAT:
         SETTINGS.clockFormat = (SETTINGS.clockFormat + 1) % CLOCK_FORMAT_ITEMS;
         break;
@@ -302,6 +316,21 @@ void StatusBarSettingsActivity::handleSelection() {
         return;
       default:
         return;
+    }
+    SETTINGS.saveToFile();
+    return;
+  }
+
+  // Outside Reader page: the same position pickers over its own element set.
+  if (page == Page::OutsideReader) {
+    if (selectedIndex >= 0 && selectedIndex < HEADER_ELEMENT_ROWS) {
+      uint8_t& pos = SETTINGS.statusBarPosRef(headerElements[selectedIndex], CPS::SB_BAR_HEADER);
+      pos = (pos + 1) % POSITION_ITEMS;
+    } else if (selectedIndex == HEADER_BATTERY_STYLE) {
+      uint8_t& style = SETTINGS.statusBarBatteryStyleRef(CPS::SB_BAR_HEADER);
+      style = (style + 1) % BATTERY_STYLE_ITEMS;
+    } else {
+      return;
     }
     SETTINGS.saveToFile();
     return;
@@ -331,6 +360,7 @@ void StatusBarSettingsActivity::handleSelection() {
 std::string StatusBarSettingsActivity::valueText(const int index) const {
   if (page == Page::Hub) {
     switch (index) {
+      case HUB_OUTSIDE_READER:
       case HUB_BOTTOM_BAR:
       case HUB_TOP_BAR:
         return std::string();  // Opens the bar's own page.
@@ -345,8 +375,6 @@ std::string StatusBarSettingsActivity::valueText(const int index) const {
       }
       case HUB_XTC_STATUS_BAR:
         return I18N.get(xtcStatusBarNames[SETTINGS.xtcStatusBarMode]);
-      case HUB_CLOCK_OUTSIDE_READER:
-        return SETTINGS.showClockOutsideReader ? tr(STR_SHOW) : tr(STR_HIDE);
       case HUB_CLOCK_FORMAT: {
         const uint8_t fmt = SETTINGS.clockFormat < CLOCK_FORMAT_ITEMS ? SETTINGS.clockFormat : 0;
         return std::string(I18N.get(clockFormatNames[fmt]));
@@ -364,6 +392,13 @@ std::string StatusBarSettingsActivity::valueText(const int index) const {
       default:
         return std::string();
     }
+  }
+
+  if (page == Page::OutsideReader) {
+    if (index >= 0 && index < HEADER_ELEMENT_ROWS) {
+      return I18N.get(positionNames[SETTINGS.statusBarPos(headerElements[index], CPS::SB_BAR_HEADER)]);
+    }
+    return I18N.get(batteryStyleNames[SETTINGS.statusBarBatteryStyleOf(CPS::SB_BAR_HEADER)]);
   }
 
   const bool top = isTopBar();
@@ -397,13 +432,13 @@ int StatusBarSettingsActivity::bottomPreviewLabelY() const {
 Rect StatusBarSettingsActivity::listRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   int contentTop = topPreviewY();
-  if (page != Page::BottomBar) {
+  if (showsTopPreview()) {
     const int topBarHeight = UITheme::getTopStatusBarHeight();
     if (topBarHeight > 0) contentTop += topBarHeight + metrics.verticalSpacing;
   }
-  const int contentBottom = page == Page::TopBar
-                                ? renderer.getScreenHeight() - metrics.buttonHintsHeight - metrics.verticalSpacing
-                                : bottomPreviewLabelY();
+  const int contentBottom = showsBottomPreview()
+                                ? bottomPreviewLabelY()
+                                : renderer.getScreenHeight() - metrics.buttonHintsHeight - metrics.verticalSpacing;
   const int contentHeight = contentBottom - contentTop - metrics.verticalSpacing;
   return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
 }
@@ -414,12 +449,28 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
   auto metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
 
-  const StrId title = page == Page::Hub         ? StrId::STR_CUSTOMISE_STATUS_BAR
-                      : page == Page::BottomBar ? StrId::STR_BOTTOM_STATUS_BAR
-                                                : StrId::STR_TOP_STATUS_BAR;
+  StrId title = StrId::STR_CUSTOMISE_STATUS_BAR;
+  const StrId* names = hubNames;
+  switch (page) {
+    case Page::Hub:
+      break;
+    case Page::BottomBar:
+      title = StrId::STR_SB_READER_BOTTOM;
+      names = barNames;
+      break;
+    case Page::TopBar:
+      title = StrId::STR_SB_READER_TOP;
+      names = barNames;
+      break;
+    case Page::OutsideReader:
+      title = StrId::STR_SB_OUTSIDE_READER;
+      names = headerNames;
+      break;
+  }
+  // On the Outside Reader page this header IS the live preview: it is the very
+  // strip being configured, drawn by the theme from the settings just changed.
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, I18N.get(title));
 
-  const StrId* names = page == Page::Hub ? hubNames : barNames;
   GUI.drawList(
       renderer, listRect(), visibleItemCount, static_cast<int>(selectedIndex),
       [names](int index) { return std::string(I18N.get(names[index])); }, nullptr, nullptr,
@@ -430,7 +481,7 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   // Live preview of the bottom bar, lifted clear of the button hints.
-  if (page != Page::TopBar) {
+  if (showsBottomPreview()) {
     GUI.drawStatusBar(renderer, PREVIEW_BOOK_PROGRESS, PREVIEW_PAGE, PREVIEW_PAGE_COUNT, tr(STR_EXAMPLE_BOOK),
                       tr(STR_EXAMPLE_CHAPTER), PREVIEW_TIME_LEFT_SECONDS, PREVIEW_TIME_LEFT_SECONDS,
                       /*isPageBookmarked=*/true, verticalPreviewPadding);
@@ -440,7 +491,7 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
   // Live preview of the top bar, just under the header, where it would sit
   // above the page text. edgePadding pushes it down from the bezel margin the
   // bar normally hangs off to the header's bottom edge.
-  if (page != Page::BottomBar && UITheme::getTopStatusBarHeight() > 0) {
+  if (showsTopPreview() && UITheme::getTopStatusBarHeight() > 0) {
     int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
     renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                      &orientedMarginLeft);

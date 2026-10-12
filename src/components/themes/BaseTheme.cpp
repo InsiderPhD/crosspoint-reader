@@ -654,25 +654,34 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   renderer.fillRect(rect.x + rect.width - maxBatteryWidth - powerHintShift, rect.y + 5,
                     maxBatteryWidth + powerHintShift, BaseMetrics::values.batteryHeight + 10, false);
 
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  // Position icon at right edge, drawBatteryRight will place text to the left
+  // Where the classic battery icon sits; the title's side padding is still
+  // derived from it so titles truncate exactly as before.
   const int batteryX = rect.x + rect.width - 12 - BaseMetrics::values.batteryWidth - powerHintShift;
-  drawBatteryRight(renderer,
-                   Rect{batteryX, rect.y + 5, BaseMetrics::values.batteryWidth, BaseMetrics::values.batteryHeight},
-                   showBatteryPercentage);
 
-  // Date on the left of the header's top line. Only fires for screens that go
-  // through drawHeader (home/library/recent/stats/settings) — the reader uses
-  // drawStatusBar and is therefore unaffected.
-  HeaderDateUtils::drawTopLine(const_cast<GfxRenderer&>(renderer));
+  // Outside Reader bar. Only screens that go through drawHeader get it
+  // (home/library/recent/stats/settings); the reader uses drawStatusBar. This
+  // theme centres its title on the same line, so the centre cluster is only
+  // drawn on a title-less header.
+  const int sideReach =
+      drawHeaderStatusBar(renderer, rect, BaseMetrics::values, powerHintShift, /*centerFree=*/title == nullptr);
 
   if (title) {
     int padding = rect.width - batteryX + BaseMetrics::values.batteryWidth;
-    auto truncatedTitle = renderer.truncatedText(UI_12_FONT_ID, title,
-                                                 rect.width - padding * 2 - BaseMetrics::values.contentSidePadding * 2,
-                                                 EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_12_FONT_ID, rect.y + 5, truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
+    int maxTitleWidth = rect.width - padding * 2 - BaseMetrics::values.contentSidePadding * 2;
+    // The classic arrangement (date left, battery right) keeps the classic
+    // title budget exactly. Any other arrangement can put a wider cluster on
+    // either side, so the centred title also gives way to whichever side
+    // reaches further in.
+    using CPS = CrossPointSettings;
+    const uint8_t clockPos = SETTINGS.statusBarPos(CPS::SB_ELEM_CLOCK, CPS::SB_BAR_HEADER);
+    const bool classicLayout = SETTINGS.statusBarPos(CPS::SB_ELEM_DATE, CPS::SB_BAR_HEADER) == CPS::SB_POS_LEFT &&
+                               SETTINGS.statusBarPos(CPS::SB_ELEM_BATTERY, CPS::SB_BAR_HEADER) == CPS::SB_POS_RIGHT &&
+                               (clockPos == CPS::SB_POS_HIDE || clockPos == CPS::SB_POS_LEFT);
+    if (!classicLayout) maxTitleWidth = std::min(maxTitleWidth, rect.width - 2 * (sideReach + 10));
+    if (maxTitleWidth > 0) {
+      auto truncatedTitle = renderer.truncatedText(UI_12_FONT_ID, title, maxTitleWidth, EpdFontFamily::BOLD);
+      renderer.drawCenteredText(UI_12_FONT_ID, rect.y + 5, truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
+    }
   }
 
   if (subtitle) {
@@ -683,6 +692,140 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
                       rect.x + rect.width - BaseMetrics::values.contentSidePadding - truncatedSubtitleWidth, subtitleY,
                       truncatedSubtitle.c_str(), true);
   }
+}
+
+int BaseTheme::drawHeaderStatusBar(const GfxRenderer& renderer, const Rect rect, const ThemeMetrics& themeMetrics,
+                                   const int rightClearance, const bool centerFree) const {
+  using CPS = CrossPointSettings;
+  constexpr int elementGap = 10;
+  constexpr int rightInset = 12;   // classic gap between the battery icon and the screen edge
+  constexpr size_t TEXT_LEN = 24;  // "?31/12/2026  12:59 PM" is 21
+  enum Kind : uint8_t { KIND_TEXT, KIND_BATTERY };
+  struct Item {
+    uint8_t pos;
+    uint8_t kind;
+    int16_t width;
+    char text[TEXT_LEN];
+  };
+  Item items[3];  // date, clock, battery
+  uint8_t count = 0;
+  const auto posOf = [](const uint8_t element) { return SETTINGS.statusBarPos(element, CPS::SB_BAR_HEADER); };
+  const auto addText = [&](const uint8_t pos, const char* text) {
+    Item& it = items[count];
+    snprintf(it.text, sizeof(it.text), "%s", text);
+    const int w = renderer.getTextWidth(SMALL_FONT_ID, it.text);
+    if (w <= 0) return;
+    it.pos = pos;
+    it.kind = KIND_TEXT;
+    it.width = static_cast<int16_t>(w);
+    count++;
+  };
+
+  // Date and clock. In the same cluster they are one run of text, "date  time",
+  // exactly as the header has always drawn them; apart they are two elements.
+  const uint8_t datePos = posOf(CPS::SB_ELEM_DATE);
+  const uint8_t clockPos = posOf(CPS::SB_ELEM_CLOCK);
+  if (datePos != CPS::SB_POS_HIDE || clockPos != CPS::SB_POS_HIDE) {
+    const auto info = HeaderDateUtils::getDisplayDateInfo();
+    char date[14] = "";
+    char clock[10] = "";
+    if (datePos != CPS::SB_POS_HIDE) HeaderDateUtils::formatDate(info, date, sizeof(date));
+    if (clockPos != CPS::SB_POS_HIDE) HeaderDateUtils::formatClock(info, clock, sizeof(clock));
+    if (datePos == clockPos && date[0] != '\0' && clock[0] != '\0') {
+      char both[TEXT_LEN];
+      snprintf(both, sizeof(both), "%s  %s", date, clock);
+      addText(datePos, both);
+    } else {
+      if (date[0] != '\0') addText(datePos, date);
+      if (clock[0] != '\0') addText(clockPos, clock);
+    }
+  }
+
+  // Battery, last so it stays outermost in the right cluster (its classic spot).
+  const uint8_t batteryStyle = SETTINGS.statusBarBatteryStyleOf(CPS::SB_BAR_HEADER);
+  const bool showBatteryPercentage = batteryStyle != CPS::SB_BATTERY_ICON_ONLY;
+  if (const uint8_t pos = posOf(CPS::SB_ELEM_BATTERY); pos != CPS::SB_POS_HIDE) {
+    char pct[8];
+    snprintf(pct, sizeof(pct), "%u%%", powerManager.getBatteryPercentage());
+    if (batteryStyle == CPS::SB_BATTERY_PERCENT_ONLY) {
+      addText(pos, pct);
+    } else {
+      Item& it = items[count++];
+      it.pos = pos;
+      it.kind = KIND_BATTERY;
+      it.text[0] = '\0';
+      int w = themeMetrics.batteryWidth;
+      if (showBatteryPercentage) w += batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, pct);
+      it.width = static_cast<int16_t>(w);
+    }
+  }
+  if (count == 0) return 0;
+
+  const auto zoneWidth = [&](const uint8_t zone) {
+    int total = 0;
+    int n = 0;
+    for (uint8_t i = 0; i < count; i++) {
+      if (items[i].pos != zone) continue;
+      total += items[i].width;
+      n++;
+    }
+    return n > 1 ? total + elementGap * (n - 1) : total;
+  };
+
+  const int leftEdge = rect.x + UITheme::getInstance().getMetrics().contentSidePadding;
+  const int rightEdge = rect.x + rect.width - rightInset - rightClearance;
+  const int leftW = zoneWidth(CPS::SB_POS_LEFT);
+  const int rightW = zoneWidth(CPS::SB_POS_RIGHT);
+  const int leftEnd = leftEdge + leftW;
+  const int rightStart = rightEdge - rightW;
+
+  // Centre cluster: centred on the header, pushed off a side cluster it would
+  // touch, and dropped outright when it cannot fit between them (or when the
+  // theme's title owns the middle of this line).
+  const int middleW = zoneWidth(CPS::SB_POS_MIDDLE);
+  bool drawMiddle = centerFree && middleW > 0;
+  int middleX = rect.x + (rect.width - middleW) / 2;
+  if (drawMiddle) {
+    const int minX = leftEnd + (leftW > 0 ? elementGap : 0);
+    const int maxX = rightStart - (rightW > 0 ? elementGap : 0) - middleW;
+    if (maxX < minX) {
+      drawMiddle = false;
+    } else {
+      middleX = std::max(minX, std::min(middleX, maxX));
+    }
+  }
+
+  const int y = rect.y + 5;
+  int cursor[4] = {0, leftEdge, middleX, rightStart};
+  for (uint8_t i = 0; i < count; i++) {
+    const Item& it = items[i];
+    if (it.pos == CPS::SB_POS_HIDE || it.pos > CPS::SB_POS_RIGHT) continue;
+    if (it.pos == CPS::SB_POS_MIDDLE && !drawMiddle) continue;
+    const int x = cursor[it.pos];
+    cursor[it.pos] += it.width + elementGap;
+    switch (it.kind) {
+      case KIND_BATTERY:
+        if (it.pos == CPS::SB_POS_RIGHT) {
+          // Percentage then icon, the icon ending the cluster (the classic header battery).
+          drawBatteryRight(
+              renderer,
+              Rect{x + it.width - themeMetrics.batteryWidth, y, themeMetrics.batteryWidth, themeMetrics.batteryHeight},
+              showBatteryPercentage);
+        } else {
+          // Icon then percentage, as on the reader bars.
+          drawBatteryLeft(renderer, Rect{x, y, themeMetrics.batteryWidth, themeMetrics.batteryHeight},
+                          showBatteryPercentage);
+        }
+        break;
+      default:
+        renderer.drawText(SMALL_FONT_ID, x, y, it.text);
+        break;
+    }
+  }
+  // How far the wider side cluster reaches in from its edge of the header.
+  const int leftReach = leftW > 0 ? leftEnd - rect.x : 0;
+  const int rightReach = rightW > 0 ? rect.x + rect.width - rightStart : 0;
+  return std::max(leftReach, rightReach);
 }
 
 void BaseTheme::drawSubHeader(const GfxRenderer& renderer, Rect rect, const char* label, const char* rightLabel) const {
@@ -1148,16 +1291,10 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     renderer.fillRect(orientedMarginLeft, progressBarY, barWidth, progressStrip, true);
   }
 
-  // Per-bar battery style. "Icon + %" keeps honouring the global Hide Battery %
-  // setting (so the default renders as it always has); "% Only" is an explicit
-  // choice and always shows the number.
-  const uint8_t batteryStyleRaw = configTop ? SETTINGS.statusBarTopBatteryStyle : SETTINGS.statusBarBatteryStyle;
-  const uint8_t batteryStyle =
-      batteryStyleRaw < CPS::STATUS_BAR_BATTERY_STYLE_COUNT ? batteryStyleRaw : CPS::SB_BATTERY_ICON_AND_PERCENT;
+  // Per-bar battery style (migrated from the retired Hide Battery % setting).
+  const uint8_t batteryStyle = SETTINGS.statusBarBatteryStyleOf(configTop ? CPS::SB_BAR_TOP : CPS::SB_BAR_BOTTOM);
   const bool showBatteryIcon = batteryStyle != CPS::SB_BATTERY_PERCENT_ONLY;
-  const bool showBatteryPercentage = batteryStyle == CPS::SB_BATTERY_PERCENT_ONLY ||
-                                     (batteryStyle == CPS::SB_BATTERY_ICON_AND_PERCENT &&
-                                      SETTINGS.hideBatteryPercentage == CPS::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER);
+  const bool showBatteryPercentage = batteryStyle != CPS::SB_BATTERY_ICON_ONLY;
   constexpr int elementGap = 10;
 
   // --- Build the ordered element list, each with its Left/Middle/Right cluster ---

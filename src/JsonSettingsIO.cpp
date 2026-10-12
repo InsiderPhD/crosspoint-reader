@@ -240,6 +240,16 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // than through SettingsList (that list stays resident for the whole session).
   doc["clockTimezone"] = s.clockTimezone;
   doc["clockDst"] = s.clockDst;
+  // Outside Reader bar, set on its own status bar page: persisted by hand for
+  // the same reason. The two retired settings it and the per-bar battery styles
+  // replace are written back mirrored, so a card moved to older firmware still
+  // shows the closest thing.
+  doc["statusBarHeaderDatePos"] = s.statusBarHeaderDatePos;
+  doc["statusBarHeaderClockPos"] = s.statusBarHeaderClockPos;
+  doc["statusBarHeaderBatteryPos"] = s.statusBarHeaderBatteryPos;
+  doc["statusBarHeaderBatteryStyle"] = s.statusBarHeaderBatteryStyle;
+  doc["hideBatteryPercentage"] = s.legacyHideBatteryPercentage();
+  doc["showClockOutsideReader"] = s.legacyShowClockOutsideReader();
   for (uint8_t slot = 0; slot < CrossPointSettings::READER_COMBO_SLOTS; slot++) {
     doc[kComboButtonsKeys[slot]] = s.readerComboButtons[slot];
     doc[kComboActionKeys[slot]] = s.readerComboAction[slot];
@@ -474,6 +484,31 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     s.statusBarClock = doc["statusBarClock"] | s.statusBarClock;
     CrossPointSettings::migrateStatusBarPositions(s);
     if (needsResave) *needsResave = true;
+  }
+
+  // Per-bar battery styles and the Outside Reader bar replace Hide Battery % and
+  // Clock Outside Reader. Those two are no longer in the settings list, so read
+  // them straight from the doc; a file without the new keys is migrated from
+  // them so nothing on screen changes, and resaved.
+  s.hideBatteryPercentage =
+      clamp(doc["hideBatteryPercentage"] | (uint8_t)S::HIDE_NEVER, S::HIDE_BATTERY_PERCENTAGE_COUNT, S::HIDE_NEVER);
+  s.showClockOutsideReader = (doc["showClockOutsideReader"] | (uint8_t)0) ? 1 : 0;
+  if (doc["statusBarBatteryStyle"].isNull()) {
+    CrossPointSettings::migrateStatusBarBatteryStyles(s);
+    if (needsResave) *needsResave = true;
+  }
+  if (doc["statusBarHeaderDatePos"].isNull()) {
+    CrossPointSettings::migrateHeaderStatusBar(s);
+    if (needsResave) *needsResave = true;
+  } else {
+    s.statusBarHeaderDatePos =
+        clamp(doc["statusBarHeaderDatePos"] | (uint8_t)S::SB_POS_LEFT, S::STATUS_BAR_POS_COUNT, S::SB_POS_HIDE);
+    s.statusBarHeaderClockPos =
+        clamp(doc["statusBarHeaderClockPos"] | (uint8_t)S::SB_POS_HIDE, S::STATUS_BAR_POS_COUNT, S::SB_POS_HIDE);
+    s.statusBarHeaderBatteryPos =
+        clamp(doc["statusBarHeaderBatteryPos"] | (uint8_t)S::SB_POS_RIGHT, S::STATUS_BAR_POS_COUNT, S::SB_POS_HIDE);
+    s.statusBarHeaderBatteryStyle = clamp(doc["statusBarHeaderBatteryStyle"] | (uint8_t)S::SB_BATTERY_ICON_AND_PERCENT,
+                                          S::STATUS_BAR_BATTERY_STYLE_COUNT, S::SB_BATTERY_ICON_AND_PERCENT);
   }
 
   // Carry-over for a settings file written by a development build (never

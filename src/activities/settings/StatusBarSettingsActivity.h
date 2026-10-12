@@ -6,15 +6,15 @@
 
 struct Rect;
 
-// Reader status bar configuration. One class serves three screens: the hub
-// (Customise Status Bar: an entry per bar plus the settings both bars share)
-// and one page per bar, where every element gets its own Hide / Left / Center
-// / Right picker and the bar's fill bar is configured, with that bar previewed
-// live. The two bars are configured independently, so the same element can
-// sit on both.
+// Status bar configuration. One class serves four screens: the hub (Customise
+// Status Bar: an entry per bar plus the settings they share) and one page per
+// bar -- Outside Reader (the strip along the top of every non-reader screen),
+// Reader Top and Reader Bottom -- where every element gets its own Hide / Left
+// / Center / Right picker, with that bar previewed live. The bars are
+// configured independently, so the same element can sit on all of them.
 class StatusBarSettingsActivity final : public Activity {
  public:
-  enum class Page : uint8_t { Hub, BottomBar, TopBar };
+  enum class Page : uint8_t { Hub, BottomBar, TopBar, OutsideReader };
 
   explicit StatusBarSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                      const Page page = Page::Hub)
@@ -35,6 +35,10 @@ class StatusBarSettingsActivity final : public Activity {
   int visibleItemCount = 0;
 
   bool isTopBar() const { return page == Page::TopBar; }
+  // The hub previews both reader bars, each reader page its own; the Outside
+  // Reader page needs neither (its own header is the preview).
+  bool showsTopPreview() const { return page == Page::Hub || page == Page::TopBar; }
+  bool showsBottomPreview() const { return page == Page::Hub || page == Page::BottomBar; }
   void handleSelection();
   std::string valueText(int index) const;
   Rect listRect() const;

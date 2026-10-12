@@ -154,9 +154,6 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
                SettingInfo::Enum(StrId::STR_SEAMLESS_SLEEP, &CrossPointSettings::seamlessSleepScreen,
                                  {StrId::STR_NEVER, StrId::STR_AFTER_TIMEOUT, StrId::STR_ALWAYS}, "seamlessSleepScreen",
                                  StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
-                                 {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
-                                 StrId::STR_CAT_DISPLAY),
                SettingInfo::Enum(StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
                                  {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15,
                                   StrId::STR_PAGES_30},
@@ -499,9 +496,6 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                    StrId::STR_STATUS_BAR_TOP_MARGIN, &CrossPointSettings::statusBarTopMargin,
                    {0, CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX, CrossPointSettings::STATUS_BAR_TOP_MARGIN_STEP},
                    "statusBarTopMargin", StrId::STR_CUSTOMISE_STATUS_BAR),
-               // Time next to the date on the header top line of the non-reader screens.
-               SettingInfo::Toggle(StrId::STR_CLOCK_OUTSIDE_READER, &CrossPointSettings::showClockOutsideReader,
-                                   "showClockOutsideReader", StrId::STR_CUSTOMISE_STATUS_BAR),
                // RETIRED clock offset (0..104 quarter-hour steps, biased by 48), superseded
                // by clockTimezone. No category, so it is hidden from the web UI too; kept
                // in the list only so settings.json round-trips it (see timeZonePreset).
@@ -612,7 +606,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 96;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 94;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

@@ -275,6 +275,18 @@ class BaseTheme {
                                bool showPercentage = true) const;  // Left aligned (reader mode)
   virtual void drawBatteryRight(const GfxRenderer& renderer, Rect rect,
                                 bool showPercentage = true) const;  // Right aligned (UI headers)
+  // The Outside Reader bar: the strip along the top line of every non-reader
+  // header. Lays out the header position set (date, clock, battery;
+  // CrossPointSettings::SB_BAR_HEADER) in Left / Center / Right clusters and
+  // draws it. Every theme's drawHeader calls this one helper, passing its own
+  // metrics (battery size), how far the right cluster must stay clear of the
+  // edge beyond the usual inset (the X3 power-hint box), and whether the centre
+  // of that line is free -- a theme that puts its title there passes false and
+  // the centre cluster is not drawn. No heap: items live on the stack.
+  // Returns how far the wider side cluster reaches in from its edge, for a
+  // theme whose centred title has to give way to it.
+  int drawHeaderStatusBar(const GfxRenderer& renderer, Rect rect, const ThemeMetrics& themeMetrics, int rightClearance,
+                          bool centerFree) const;
   // allSlots is an X4 Pro concern only. There the labels become the Full Touch
   // action bar's tap targets, and only Back/Confirm get one by default -- see
   // ActionBar.h. A screen whose Left/Right are ACTIONS rather than directions
