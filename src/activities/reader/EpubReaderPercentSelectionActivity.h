@@ -6,7 +6,10 @@
 
 class EpubReaderPercentSelectionActivity final : public Activity {
  public:
-  // Slider-style percent selector for jumping within a book.
+  // Slider-style percent selector for jumping within a book. Drawn as a popup
+  // card over whatever screen launched it (see render()); it keeps no copy of
+  // that screen, so it must only be started from a screen that has already
+  // pushed a frame and is not redrawn while this is open.
   explicit EpubReaderPercentSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                               const int initialPercent)
       : Activity("EpubReaderPercentSelection", renderer, mappedInput), percent(initialPercent) {}

@@ -3,6 +3,10 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <algorithm>
+#include <cstdio>
+
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -11,6 +15,17 @@ namespace {
 // Fine/coarse slider step sizes for percent adjustments.
 constexpr int kSmallStep = 1;
 constexpr int kLargeStep = 10;
+
+// Popup card geometry. The card is sized from the fonts and capped to the
+// screen, so it fits all four orientations on every panel.
+constexpr int kCardMaxWidth = 420;
+constexpr int kCardSideMargin = 20;  // minimum gap between card and screen edge
+constexpr int kCardPadding = 16;
+constexpr int kCardFrame = 2;  // same frame thickness as GUI.drawPopup
+constexpr int kRowGap = 12;
+constexpr int kBarHeight = 16;
+constexpr int kKnobWidth = 4;
+constexpr int kKnobOverhang = 4;
 }  // namespace
 
 void EpubReaderPercentSelectionActivity::onEnter() {
@@ -56,35 +71,69 @@ void EpubReaderPercentSelectionActivity::loop() {
 }
 
 void EpubReaderPercentSelectionActivity::render(RenderLock&&) {
-  renderer.clearScreen();
+  // A popup over the screen it was opened from (upstream #3669): no
+  // clearScreen(). The single framebuffer still holds that screen's last frame,
+  // and nothing else draws while this activity is on top, so the card is simply
+  // repainted in place on every step. There is deliberately no page snapshot
+  // here — upstream restores the clean page from a stored copy, which on this
+  // board would be a second 48KB block held while a book is open.
+  //
+  // Dark mode: every screen pushes its frame inverted and leaves the buffer
+  // that way, this one included. Flip back to logical polarity before drawing
+  // so the card and the frame under it invert together at the end, the same
+  // "invert, draw, invert" the reader's own popups use.
+  if (SETTINGS.darkMode) renderer.invertScreen();
 
-  // Title and numeric percent value.
-  renderer.drawCenteredText(UI_12_FONT_ID, 15, tr(STR_GO_TO_PERCENT), true, EpdFontFamily::BOLD);
-
-  const std::string percentText = std::to_string(percent) + "%";
-  renderer.drawCenteredText(UI_12_FONT_ID, 90, percentText.c_str(), true, EpdFontFamily::BOLD);
-
-  // Draw slider track.
+  const auto& metrics = UITheme::getInstance().getMetrics();
   const int screenWidth = renderer.getScreenWidth();
-  constexpr int barWidth = 360;
-  constexpr int barHeight = 16;
-  const int barX = (screenWidth - barWidth) / 2;
-  const int barY = 140;
+  const int screenHeight = renderer.getScreenHeight();
 
-  renderer.drawRect(barX, barY, barWidth, barHeight);
-
-  // Fill slider based on percent.
-  const int fillWidth = (barWidth - 4) * percent / 100;
-  if (fillWidth > 0) {
-    renderer.fillRect(barX + 2, barY + 2, fillWidth, barHeight - 4);
+  if (CrossPointSettings::FULL_TOUCH_UI) {
+    // The tap-target strip is laid out in this logical frame and its slots
+    // depend on how many labels a screen shows, so wipe the previous screen's
+    // strip before drawing ours. Button boards redraw the same four opaque
+    // boxes in the same places and need no wipe.
+    renderer.fillRect(0, screenHeight - metrics.buttonHintsHeight, screenWidth, metrics.buttonHintsHeight, false);
   }
 
-  // Draw a simple knob centered at the current percent.
-  const int knobX = barX + 2 + fillWidth - 2;
-  renderer.fillRect(knobX, barY - 4, 4, barHeight + 8, true);
+  const int titleLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
+  const int hintLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  const int cardWidth = std::min(kCardMaxWidth, screenWidth - kCardSideMargin * 2);
+  const int cardHeight =
+      kCardPadding * 2 + titleLineHeight * 2 + kRowGap * 3 + kBarHeight + kKnobOverhang * 2 + hintLineHeight;
+  const int cardX = (screenWidth - cardWidth) / 2;
+  // Centred in the space above the button hints; never above the screen top.
+  const int cardY = std::max(kCardFrame, (screenHeight - metrics.buttonHintsHeight - cardHeight) / 2);
+
+  renderer.fillRect(cardX - kCardFrame, cardY - kCardFrame, cardWidth + kCardFrame * 2, cardHeight + kCardFrame * 2,
+                    true);
+  renderer.fillRect(cardX, cardY, cardWidth, cardHeight, false);
+
+  // Title and numeric percent value. The card is horizontally centred, so
+  // screen-centred text is card-centred too.
+  int y = cardY + kCardPadding;
+  renderer.drawCenteredText(UI_12_FONT_ID, y, tr(STR_GO_TO_PERCENT), true, EpdFontFamily::BOLD);
+  y += titleLineHeight + kRowGap;
+
+  char percentText[8];
+  snprintf(percentText, sizeof(percentText), "%d%%", percent);
+  renderer.drawCenteredText(UI_12_FONT_ID, y, percentText, true, EpdFontFamily::BOLD);
+  y += titleLineHeight + kRowGap + kKnobOverhang;
+
+  // Slider track, fill and knob.
+  const int barWidth = cardWidth - kCardPadding * 2;
+  const int barX = cardX + kCardPadding;
+  renderer.drawRect(barX, y, barWidth, kBarHeight);
+  const int fillWidth = (barWidth - 4) * percent / 100;
+  if (fillWidth > 0) {
+    renderer.fillRect(barX + 2, y + 2, fillWidth, kBarHeight - 4);
+  }
+  const int knobX = barX + 2 + fillWidth - kKnobWidth / 2;
+  renderer.fillRect(knobX, y - kKnobOverhang, kKnobWidth, kBarHeight + kKnobOverhang * 2, true);
+  y += kBarHeight + kKnobOverhang + kRowGap;
 
   // Hint text for step sizes.
-  renderer.drawCenteredText(SMALL_FONT_ID, barY + 30, tr(STR_PERCENT_STEP_HINT), true);
+  renderer.drawCenteredText(SMALL_FONT_ID, y, tr(STR_PERCENT_STEP_HINT), true);
 
   // Button hints follow the current front button layout.
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "-", "+");
