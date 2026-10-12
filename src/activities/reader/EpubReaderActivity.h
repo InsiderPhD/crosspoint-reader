@@ -207,7 +207,7 @@ class EpubReaderActivity final : public Activity {
   // anchorX/anchorY (logical frame, -1 = unset): the Kindle-style tap-and-hold entry
   // point — the overlay opens with the word under that point selected and anchored.
   // forLookup swaps the range selection for a one-word pick feeding the
-  // dictionary (see ClipSelectionActivity's singleWordMode). The word geometry
+  // dictionary (see ClipSelectionActivity's lookupMode). The word geometry
   // build is identical, which is the whole reason this is a mode rather than a
   // second copy of it.
   void startClipSelection(int anchorX = -1, int anchorY = -1, bool forLookup = false);

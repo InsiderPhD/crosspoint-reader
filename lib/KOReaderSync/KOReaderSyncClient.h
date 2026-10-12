@@ -1,16 +1,42 @@
 #pragma once
+#include <cstdint>
+#include <optional>
 #include <string>
+
+class Epub;
+
+/**
+ * Optional document metadata sent alongside a progress upload. Mirrors the
+ * metadata object added in KOReader PR #15306 (filename/title/authors); the
+ * standard sync server ignores it, custom servers may use it. The remaining
+ * fields are only serialized for a profile whose server type is OTHER.
+ */
+struct KOReaderMetadata {
+  std::string filename;  // e.g. "my_book.epub"
+  std::string title;
+  std::string authors;
+  std::string isbn;    // ISBN-13 from the package metadata, when the book has one
+  std::string series;  // Series title, when the book has one
+  std::optional<float> seriesIndex;
+
+  // Snapshot the metadata of an open, loaded book, or nothing when the user has
+  // Send Book Details off. Reads only what the book already has cached (the
+  // loaded book.bin fields and the 13-byte ISBN sidecar), so it never re-parses
+  // the OPF. Call it while the Epub is alive; the result owns its strings.
+  static std::optional<KOReaderMetadata> fromBook(const Epub& epub);
+};
 
 /**
  * Progress data from KOReader sync server.
  */
 struct KOReaderProgress {
-  std::string document;  // Document hash
-  std::string progress;  // XPath-like progress string
-  float percentage;      // Progress percentage (0.0 to 1.0)
-  std::string device;    // Device name
-  std::string deviceId;  // Device ID
-  int64_t timestamp;     // Unix timestamp of last update
+  std::string document;                      // Document hash
+  std::string progress;                      // XPath-like progress string
+  float percentage = 0.0f;                   // Progress percentage (0.0 to 1.0)
+  std::string device;                        // Device name
+  std::string deviceId;                      // Device ID
+  int64_t timestamp = 0;                     // Unix timestamp of last update
+  std::optional<KOReaderMetadata> metadata;  // Upload only; never filled by getProgress
 };
 
 /**

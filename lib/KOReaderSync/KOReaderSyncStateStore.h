@@ -14,6 +14,13 @@ struct KOReaderStoredPosition {
  * Per-book sidecar state for KOReader quick sync conflict resolution.
  *
  * File path: /.crosspoint/koreader_sync_<md5_of_epub_path>.json
+ *
+ * The state is tied to the server profile it was exchanged with ("profile",
+ * absent = 0). After the user switches profile the loads report "never synced"
+ * and the next save replaces the old profile's state, so a timestamp from one
+ * server is never compared with another server's. Keys this class does not
+ * know are preserved on save, which is what lets a later per-book profile
+ * override live in the same file (and follow the book through movePath).
  */
 class KOReaderSyncStateStore {
  public:

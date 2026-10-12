@@ -7,6 +7,34 @@
 
 #include <cstdio>
 
+#include "KOReaderCredentialStore.h"
+
+namespace {
+// Sync state is only meaningful against the server it was exchanged with, so
+// the sidecar records the profile slot it belongs to. A sidecar written before
+// profiles existed has no key and belongs to profile 0, which is where the
+// single pre-profile account was migrated.
+constexpr char PROFILE_KEY[] = "profile";
+
+bool belongsToActiveProfile(const JsonDocument& doc) {
+  const uint8_t stored = doc[PROFILE_KEY] | static_cast<uint8_t>(0);
+  return stored == KOREADER_STORE.getActiveProfile();
+}
+
+// Called before a save merges new fields into an existing sidecar: state left
+// by another profile must not survive next to the new profile's fields.
+void claimForActiveProfile(JsonDocument& doc) {
+  if (!belongsToActiveProfile(doc)) {
+    doc.remove("last_sync_timestamp");
+    doc.remove("last_sync_percentage");
+    doc.remove("last_sync_spine_index");
+    doc.remove("last_sync_page_number");
+    doc.remove("last_sync_total_pages");
+  }
+  doc[PROFILE_KEY] = KOREADER_STORE.getActiveProfile();
+}
+}  // namespace
+
 void KOReaderSyncStateStore::buildSidecarPath(const char* epubPath, char* outPath, size_t maxLen) {
   MD5Builder md5;
   md5.begin();
@@ -36,7 +64,7 @@ bool KOReaderSyncStateStore::loadLastSyncTimestamp(const char* epubPath, int64_t
     return false;
   }
 
-  if (doc["last_sync_timestamp"].isNull()) {
+  if (!belongsToActiveProfile(doc) || doc["last_sync_timestamp"].isNull()) {
     return false;
   }
 
@@ -62,6 +90,7 @@ bool KOReaderSyncStateStore::saveLastSyncTimestamp(const char* epubPath, const i
     }
   }
 
+  claimForActiveProfile(doc);
   doc["last_sync_timestamp"] = timestamp;
 
   String json;
@@ -92,7 +121,7 @@ bool KOReaderSyncStateStore::loadLastSyncedPosition(const char* epubPath, KORead
     return false;
   }
 
-  if (doc["last_sync_spine_index"].isNull()) {
+  if (!belongsToActiveProfile(doc) || doc["last_sync_spine_index"].isNull()) {
     return false;
   }
 
@@ -117,6 +146,7 @@ bool KOReaderSyncStateStore::saveLastSyncedPosition(const char* epubPath, const 
     }
   }
 
+  claimForActiveProfile(doc);
   doc["last_sync_percentage"] = position.percentage;
   doc["last_sync_spine_index"] = position.spineIndex;
   doc["last_sync_page_number"] = position.pageNumber;

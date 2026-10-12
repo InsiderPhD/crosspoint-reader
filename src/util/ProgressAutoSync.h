@@ -1,6 +1,7 @@
 #pragma once
 
 #include <BookFusionSyncClient.h>
+#include <KOReaderSyncClient.h>
 
 #include <cstdint>
 #include <memory>
@@ -56,7 +57,8 @@ struct Payload {
   // KOReader
   std::string koDocumentHash;  // empty => resolved during the push
   std::string koXpath;
-  float koPercentage = 0.0f;  // 0.0-1.0
+  float koPercentage = 0.0f;                   // 0.0-1.0
+  std::optional<KOReaderMetadata> koMetadata;  // set only when Send Book Details is on
 
   // Shared bookkeeping for the baseline sidecars.
   int spineIndex = 0;
