@@ -6,12 +6,17 @@
 #include <HalDisplay.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <LibraryBuilder.h>
+#include <LibraryIndexFile.h>
+#include <Logging.h>
+#include <Memory.h>
 #include <Xtc.h>
 #include <esp_heap_caps.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <utility>
 
 #include "../settings/BookFusionCoverRefreshActivity.h"
@@ -198,11 +203,107 @@ void GroupBrowserActivity::onExit() {
   groupBookIdx.clear();
 }
 
+namespace {
+// Scan progress for the index rebuild below. The browser has no cancel path
+// (its original caching pass never had one either), so only progress is shown.
+void drawIndexScanProgress(void* context, const library::BuildProgress& progress) {
+  auto& renderer = *static_cast<GfxRenderer*>(context);
+  char message[64];
+  if (progress.phase == library::BuildPhase::Organizing) {
+    snprintf(message, sizeof(message), "%s", tr(STR_LIBRARY_ORGANIZING));
+  } else {
+    snprintf(message, sizeof(message), tr(STR_LIBRARY_SCAN_COUNT), static_cast<unsigned>(progress.books));
+  }
+  // Full repaint: metadata reads borrow the framebuffer as inflate scratch on
+  // the C3 boards. drawPopup() applies dark mode and pushes the frame.
+  renderer.clearScreen();
+  GUI.drawPopup(renderer, message);
+}
+}  // namespace
+
+bool GroupBrowserActivity::loadKeysFromIndex() {
+  if (!LibraryScan::indexEnabled()) return false;
+  if (!LibraryScan::indexIsCurrent()) {
+    library::BuildCallbacks ui;
+    ui.context = &renderer;
+    ui.progress = &drawIndexScanProgress;
+    if (LibraryScan::refreshIndex(&ui) != LibraryScan::IndexRefresh::Ok) return false;
+  }
+  library::LibraryIndexFile index;
+  if (!index.open(LibraryScan::indexPath())) return false;
+  const uint16_t count = index.bookCount();
+
+  // 512 bytes of sparse folder offsets, freed on return: bounds each path's
+  // walk over the variable-length folder records.
+  auto offsets = makeUniqueNoThrow<uint32_t[]>(library::LibraryIndexFile::FOLDER_CHECKPOINT_COUNT);
+  uint16_t stride = 0;
+  const bool haveOffsets = offsets && count > 0 && index.buildFolderCheckpoints(offsets.get(), stride);
+
+  bookPaths.clear();
+  bookKeys.clear();
+  bookSeriesIndex.clear();
+  bookPaths.reserve(count);
+  bookKeys.reserve(count);
+  if (mode == GroupMode::Series) bookSeriesIndex.reserve(count);
+
+  std::string path;
+  std::string key;
+  for (uint16_t ordinal = 0; ordinal < count; ordinal++) {
+    library::ClixRecord record{};
+    bool ok = index.readRecord(ordinal, record) &&
+              (haveOffsets ? index.readPath(record, path, offsets.get(), stride) : index.readPath(record, path));
+    key.clear();
+    float seriesIndex = -1.0f;
+    if (ok) {
+      switch (mode) {
+        case GroupMode::Tags:
+          ok = index.readGenre(record, key);
+          break;
+        case GroupMode::Authors:
+          // The index's one-spelling-per-person author; false only means "none".
+          if (!index.readAuthor(record, key)) key.clear();
+          break;
+        case GroupMode::Series: {
+          uint32_t position = library::CLIX_UNKNOWN_SERIES_POSITION;
+          ok = index.readSeries(record, key);
+          if (ok && !key.empty() && index.readSeriesPosition(record, position) &&
+              position != library::CLIX_UNKNOWN_SERIES_POSITION) {
+            // Undo the builder's sortable encoding (sign half flipped) of the float.
+            const uint32_t bits = (position & 0x80000000u) ? (position ^ 0x80000000u) : ~position;
+            memcpy(&seriesIndex, &bits, sizeof(seriesIndex));
+          }
+          break;
+        }
+      }
+    }
+    if (!ok || index.ioFailed()) {
+      LOG_ERR(MODULE, "Index read failed at record %u; using the per-book caches", static_cast<unsigned>(ordinal));
+      bookPaths.clear();
+      bookKeys.clear();
+      bookSeriesIndex.clear();
+      return false;
+    }
+    bookPaths.push_back(path);
+    bookKeys.push_back(key);
+    if (mode == GroupMode::Series) bookSeriesIndex.push_back(seriesIndex);
+    if ((ordinal & 0x3Fu) == 0x3Fu) vTaskDelay(1);  // keep the watchdog fed on big libraries
+  }
+  LOG_INF(MODULE, "Loaded %u group keys from the CLX1 index", static_cast<unsigned>(count));
+  return true;
+}
+
 void GroupBrowserActivity::loadLibraryKeys() {
   // Preempt the background boot-time NTP sync (if still running) so its WiFi
   // stack heap is freed before this recache's heavy per-book allocations —
   // avoids a cold-boot OOM/contention crash. No-op after the ~10s boot window.
   WifiTimeSync::preempt();
+  // With the CLX1 index the keys for the whole library come out of one file:
+  // no book.bin open (or build) per book. The in-memory grouping below is
+  // unchanged; any failure falls through to the original per-book pass.
+  if (loadKeysFromIndex()) {
+    computeGroups();
+    return;
+  }
   LibraryScan::enumerateBooks(bookPaths);
   bookKeys.assign(bookPaths.size(), std::string{});
   // Only series mode needs a per-book numeric sort key; leave it empty otherwise.
