@@ -1,5 +1,6 @@
 #include "TxtReaderActivity.h"
 
+#include <Epub/SpacedText.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -22,7 +23,8 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
 // Cache file magic and version
 constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
-constexpr uint8_t CACHE_VERSION = 3;          // Increment when cache format changes
+// 4: header gains characterSpacing + wordSpacingPercent (they move the wrap points).
+constexpr uint8_t CACHE_VERSION = 4;  // Increment when cache format changes
 }  // namespace
 
 void TxtReaderActivity::onEnter() {
@@ -141,6 +143,7 @@ void TxtReaderActivity::initializeReader() {
   cachedFontId = SETTINGS.getReaderFontId();
   cachedScreenMargin = SETTINGS.screenMargin;
   cachedParagraphAlignment = SETTINGS.paragraphAlignment;
+  cachedTextLayout = SETTINGS.readerTextLayout();
 
   // Calculate viewport dimensions
   renderer.getOrientedViewableTRBL(&cachedOrientedMarginTop, &cachedOrientedMarginRight, &cachedOrientedMarginBottom,
@@ -176,6 +179,19 @@ void TxtReaderActivity::initializeReader() {
   loadProgress();
 
   initialized = true;
+}
+
+int TxtReaderActivity::lineWidth(const char* line) const {
+  return cachedTextLayout.spacingIsNeutral() ? renderer.getTextWidth(cachedFontId, line)
+                                             : SpacedText::advance(renderer, cachedFontId, line, cachedTextLayout);
+}
+
+void TxtReaderActivity::drawLine(const int x, const int y, const char* line) const {
+  if (cachedTextLayout.spacingIsNeutral()) {
+    renderer.drawText(cachedFontId, x, y, line);
+  } else {
+    SpacedText::draw(renderer, cachedFontId, x, y, line, cachedTextLayout);
+  }
 }
 
 void TxtReaderActivity::buildPageIndex() {
@@ -278,9 +294,9 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
         break;
       }
 
-      int lineWidth = renderer.getTextWidth(cachedFontId, line.c_str());
+      const int width = lineWidth(line.c_str());
 
-      if (lineWidth <= viewportWidth) {
+      if (width <= viewportWidth) {
         outLines.push_back(line);
         lineBytePos = displayLen;  // Consumed entire display content
         line.clear();
@@ -289,7 +305,7 @@ bool TxtReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string>
 
       // Find break point
       size_t breakPos = line.length();
-      while (breakPos > 0 && renderer.getTextWidth(cachedFontId, line.substr(0, breakPos).c_str()) > viewportWidth) {
+      while (breakPos > 0 && lineWidth(line.substr(0, breakPos).c_str()) > viewportWidth) {
         // Try to break at space
         size_t spacePos = line.rfind(' ', breakPos - 1);
         if (spacePos != std::string::npos && spacePos > 0) {
@@ -402,12 +418,12 @@ void TxtReaderActivity::renderPage() {
             // x already set to left margin
             break;
           case CrossPointSettings::CENTER_ALIGN: {
-            int textWidth = renderer.getTextWidth(cachedFontId, line.c_str());
+            int textWidth = lineWidth(line.c_str());
             x = cachedOrientedMarginLeft + (contentWidth - textWidth) / 2;
             break;
           }
           case CrossPointSettings::RIGHT_ALIGN: {
-            int textWidth = renderer.getTextWidth(cachedFontId, line.c_str());
+            int textWidth = lineWidth(line.c_str());
             x = cachedOrientedMarginLeft + contentWidth - textWidth;
             break;
           }
@@ -417,7 +433,7 @@ void TxtReaderActivity::renderPage() {
             break;
         }
 
-        renderer.drawText(cachedFontId, x, y, line.c_str());
+        drawLine(x, y, line.c_str());
       }
       y += lineHeight;
     }
@@ -528,6 +544,7 @@ bool TxtReaderActivity::loadPageIndexCache() {
   // - int32_t: font ID (to invalidate cache on font change)
   // - int32_t: screen margin (to invalidate cache on margin change)
   // - uint8_t: paragraph alignment (to invalidate cache on alignment change)
+  // - int8_t: character spacing, uint8_t: word spacing percent (both move the wrap points)
   // - uint32_t: total pages count
   // - N * uint32_t: page offsets
 
@@ -595,6 +612,15 @@ bool TxtReaderActivity::loadPageIndexCache() {
     return false;
   }
 
+  TextLayoutOptions fileTextLayout;
+  serialization::readPod(f, fileTextLayout.characterSpacing);
+  serialization::readPod(f, fileTextLayout.wordSpacingPercent);
+  if (fileTextLayout.characterSpacing != cachedTextLayout.characterSpacing ||
+      fileTextLayout.wordSpacingPercent != cachedTextLayout.wordSpacingPercent) {
+    LOG_DBG("TRS", "Cache text spacing mismatch, rebuilding");
+    return false;
+  }
+
   uint32_t numPages;
   serialization::readPod(f, numPages);
 
@@ -630,6 +656,8 @@ void TxtReaderActivity::savePageIndexCache() const {
   serialization::writePod(f, static_cast<int32_t>(cachedFontId));
   serialization::writePod(f, static_cast<int32_t>(cachedScreenMargin));
   serialization::writePod(f, cachedParagraphAlignment);
+  serialization::writePod(f, cachedTextLayout.characterSpacing);
+  serialization::writePod(f, cachedTextLayout.wordSpacingPercent);
   serialization::writePod(f, static_cast<uint32_t>(pageOffsets.size()));
 
   // Write page offsets

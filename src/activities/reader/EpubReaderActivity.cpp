@@ -2811,7 +2811,8 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
     scope.emplace(fcm->createPrewarmScope());
     page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);  // scan pass
     if (ReaderUtils::footnotesOnPage())
-      page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+      page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth,
+                           SETTINGS.readerTextLayout());
     scope->endScanAndPrewarm();
 
     // Ground truth, unlike the largest-block guard above, which only predicts:
@@ -2884,7 +2885,8 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
     if (absoluteImageGrayscale || needsTextGrayscale) {
       page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
       if (ReaderUtils::footnotesOnPage())
-        page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+        page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth,
+                             SETTINGS.readerTextLayout());
     } else {
       page.renderImages(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
     }
@@ -2900,7 +2902,8 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   if (imagesNeedDecode) {
     page.renderWithImagePlaceholders(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
     if (ReaderUtils::footnotesOnPage())
-      page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+      page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth,
+                           SETTINGS.readerTextLayout());
     renderStatusBar();
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
@@ -2909,7 +2912,8 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
 
   page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
   if (ReaderUtils::footnotesOnPage())
-    page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+    page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth,
+                         SETTINGS.readerTextLayout());
   renderStatusBar();
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
@@ -2951,7 +2955,8 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
       // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
       page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
       if (ReaderUtils::footnotesOnPage())
-        page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth);
+        page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth,
+                             SETTINGS.readerTextLayout());
       renderStatusBar();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     } else {

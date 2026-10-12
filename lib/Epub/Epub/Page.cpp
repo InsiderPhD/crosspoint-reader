@@ -9,6 +9,8 @@
 #include <cstring>
 #include <new>
 
+#include "SpacedText.h"
+
 void PageLine::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
   block->render(renderer, fontId, xPos + xOffset, yPos + yOffset);
 }
@@ -270,8 +272,28 @@ void Page::renderWithImagePlaceholders(GfxRenderer& renderer, const int fontId, 
   }
 }
 
+namespace {
+// Width of one wrapped footnote line. The neutral path is the advance-table measurement the
+// footnote code has always used (see countWrappedLines); otherwise the line is measured with
+// the user's spacing, the same way footnoteLineDraw() draws it.
+int footnoteLineAdvance(const GfxRenderer& renderer, const int fontId, const char* line,
+                        const TextLayoutOptions& layout) {
+  return layout.spacingIsNeutral() ? renderer.getTextAdvanceX(fontId, line, EpdFontFamily::REGULAR)
+                                   : SpacedText::advance(renderer, fontId, line, layout);
+}
+
+void footnoteLineDraw(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* line,
+                      const TextLayoutOptions& layout) {
+  if (layout.spacingIsNeutral()) {
+    renderer.drawText(fontId, x, y, line);
+  } else {
+    SpacedText::draw(renderer, fontId, x, y, line, layout);
+  }
+}
+}  // namespace
+
 size_t Page::splitWrappedAtLine(GfxRenderer& renderer, const int fontId, const char* text, const int maxLines,
-                                const int maxWidth) {
+                                const int maxWidth, const TextLayoutOptions& layout) {
   if (!text || text[0] == '\0' || maxLines <= 0 || maxWidth <= 0) return 0;
   char lineBuf[120];
   char wordBuf[48];
@@ -302,7 +324,7 @@ size_t Page::splitWrappedAtLine(GfxRenderer& renderer, const int fontId, const c
         // Must be the same measurement countWrappedLines()/drawWrappedText() use, or the
         // split lands on a different word than the draw pass wraps at and the part kept
         // on this page renders taller than the space reserved for it.
-        if (renderer.getTextAdvanceX(fontId, lineBuf, EpdFontFamily::REGULAR) > maxWidth) {
+        if (footnoteLineAdvance(renderer, fontId, lineBuf, layout) > maxWidth) {
           if (lines >= maxLines) return static_cast<size_t>(wStart - text);
           lines++;
           memcpy(lineBuf, wordBuf, wCopy + 1);
@@ -321,7 +343,8 @@ size_t Page::splitWrappedAtLine(GfxRenderer& renderer, const int fontId, const c
   return strlen(text);
 }
 
-int Page::countWrappedLines(GfxRenderer& renderer, const int fontId, const char* text, const int maxWidth) {
+int Page::countWrappedLines(GfxRenderer& renderer, const int fontId, const char* text, const int maxWidth,
+                            const TextLayoutOptions& layout) {
   if (!text || text[0] == '\0' || maxWidth <= 0) return 0;
   char lineBuf[120];
   char wordBuf[48];
@@ -354,7 +377,7 @@ int Page::countWrappedLines(GfxRenderer& renderer, const int fontId, const char*
         // iteration: for SD-card fonts the latter loads each glyph through the 8-slot
         // on-demand overflow ring (SD I/O + log spam per glyph). The footnote glyphs are
         // prewarmed into the advance table in parseAndBuildPages().
-        if (renderer.getTextAdvanceX(fontId, lineBuf, EpdFontFamily::REGULAR) > maxWidth) {
+        if (footnoteLineAdvance(renderer, fontId, lineBuf, layout) > maxWidth) {
           // Doesn't fit: new line
           lineBuf[savedLen] = '\0';
           lines++;
@@ -376,7 +399,7 @@ int Page::countWrappedLines(GfxRenderer& renderer, const int fontId, const char*
 
 namespace {
 void drawWrappedText(GfxRenderer& renderer, const int fontId, const char* text, const int x, int& y, const int maxWidth,
-                     const int lineH) {
+                     const int lineH, const TextLayoutOptions& layout) {
   char lineBuf[120];
   char wordBuf[48];
   int lineLen = 0;
@@ -404,10 +427,10 @@ void drawWrappedText(GfxRenderer& renderer, const int fontId, const char* text, 
         memcpy(lineBuf + lineLen + 1, wordBuf, wCopy);
         lineBuf[lineLen + 1 + wCopy] = '\0';
         // Advance-table measurement (see countWrappedLines) to avoid SD-font glyph thrash.
-        if (renderer.getTextAdvanceX(fontId, lineBuf, EpdFontFamily::REGULAR) > maxWidth) {
+        if (footnoteLineAdvance(renderer, fontId, lineBuf, layout) > maxWidth) {
           // Flush line without this word
           lineBuf[savedLen] = '\0';
-          renderer.drawText(fontId, x, y, lineBuf);
+          footnoteLineDraw(renderer, fontId, x, y, lineBuf, layout);
           y += lineH;
           memcpy(lineBuf, wordBuf, wCopy + 1);
           lineLen = wCopy;
@@ -416,7 +439,7 @@ void drawWrappedText(GfxRenderer& renderer, const int fontId, const char* text, 
         }
       } else {
         // Word + existing line overflow buffer: flush and start fresh
-        renderer.drawText(fontId, x, y, lineBuf);
+        footnoteLineDraw(renderer, fontId, x, y, lineBuf, layout);
         y += lineH;
         memcpy(lineBuf, wordBuf, wCopy + 1);
         lineLen = wCopy;
@@ -424,14 +447,14 @@ void drawWrappedText(GfxRenderer& renderer, const int fontId, const char* text, 
     }
   }
   if (lineLen > 0) {
-    renderer.drawText(fontId, x, y, lineBuf);
+    footnoteLineDraw(renderer, fontId, x, y, lineBuf, layout);
     y += lineH;
   }
 }
 }  // namespace
 
 void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xOffset, const int viewportBottom,
-                           const int viewportWidth) const {
+                           const int viewportWidth, const TextLayoutOptions& layout) const {
   const int lineH = renderer.getLineHeight(fontId);
   const int effectiveBottom = viewportBottom - lineH / 2;
 
@@ -448,7 +471,7 @@ void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xO
     // from cache never went through the parser's prewarm, so it must happen here too.
     // No-op for flash-resident fonts.
     renderer.ensureSdCardFontReady(fontId, fn.text.get());
-    const int fnLines = countWrappedLines(renderer, fontId, fn.text.get(), viewportWidth);
+    const int fnLines = countWrappedLines(renderer, fontId, fn.text.get(), viewportWidth, layout);
     if (totalLines + fnLines > maxLines) break;
     totalLines += fnLines;
     includedFootnotes++;
@@ -463,7 +486,7 @@ void Page::renderFootnotes(GfxRenderer& renderer, const int fontId, const int xO
   for (const auto& fn : footnotes) {
     if (!fn.hasText()) continue;
     if (drawn >= includedFootnotes) break;
-    drawWrappedText(renderer, fontId, fn.text.get(), xOffset, y, viewportWidth, lineH);
+    drawWrappedText(renderer, fontId, fn.text.get(), xOffset, y, viewportWidth, lineH, layout);
     drawn++;
   }
 }

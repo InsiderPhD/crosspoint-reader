@@ -29,6 +29,9 @@ class TxtReaderActivity final : public Activity {
   int cachedFontId = 0;
   uint8_t cachedScreenMargin = 0;
   uint8_t cachedParagraphAlignment = CrossPointSettings::LEFT_ALIGN;
+  // Word / Character Spacing the page index was built with. Both move the wrap points, so
+  // both are part of the index cache key.
+  TextLayoutOptions cachedTextLayout;
   int cachedOrientedMarginTop = 0;
   int cachedOrientedMarginRight = 0;
   int cachedOrientedMarginBottom = 0;
@@ -38,6 +41,11 @@ class TxtReaderActivity final : public Activity {
   RenderedBookGate openGate;
   // renderLockHeld: true from onExit(), which already runs under the RenderLock.
   void rememberBookOnceRendered(bool renderLockHeld);
+
+  // Width and drawing of one display line under cachedTextLayout. With neutral spacing these
+  // are the plain getTextWidth / drawText calls this reader has always made.
+  int lineWidth(const char* line) const;
+  void drawLine(int x, int y, const char* line) const;
 
   void renderPage();
   void renderStatusBar() const;

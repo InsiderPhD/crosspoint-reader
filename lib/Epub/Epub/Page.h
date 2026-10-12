@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "FootnoteEntry.h"
+#include "TextLayoutOptions.h"
 #include "blocks/ImageBlock.h"
 #include "blocks/TextBlock.h"
 
@@ -171,13 +172,22 @@ class Page {
   // before a decode so the reader sees the page instead of the previous one
   // while a multi-second decode runs.
   void renderWithImagePlaceholders(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
-  // Renders footnote rule + text at the bottom of the viewport (no-op if no footnotes have text)
-  void renderFootnotes(GfxRenderer& renderer, int fontId, int xOffset, int viewportBottom, int viewportWidth) const;
+  // Renders footnote rule + text at the bottom of the viewport (no-op if no footnotes have text).
+  //
+  // `layout` in this and the two helpers below is the user's Word / Character Spacing, so a
+  // note is spaced like the body above it. It is passed in rather than stored: the section
+  // cache is keyed on both values, so the reader's current setting is always the one the page
+  // was paginated with, and a page carries no extra bytes for it. All three must be given the
+  // same value, or the space reserved for a note stops matching what is drawn.
+  void renderFootnotes(GfxRenderer& renderer, int fontId, int xOffset, int viewportBottom, int viewportWidth,
+                       const TextLayoutOptions& layout) const;
   // Returns the number of display lines needed to word-wrap `text` into `maxWidth` pixels
-  static int countWrappedLines(GfxRenderer& renderer, int fontId, const char* text, int maxWidth);
+  static int countWrappedLines(GfxRenderer& renderer, int fontId, const char* text, int maxWidth,
+                               const TextLayoutOptions& layout);
   // Returns the byte offset in `text` where the (maxLines+1)-th wrapped line would begin.
   // Returns strlen(text) if the text fits in maxLines.
-  static size_t splitWrappedAtLine(GfxRenderer& renderer, int fontId, const char* text, int maxLines, int maxWidth);
+  static size_t splitWrappedAtLine(GfxRenderer& renderer, int fontId, const char* text, int maxLines, int maxWidth,
+                                   const TextLayoutOptions& layout);
   // Writes through a Print so Section can stage a page's hundreds of 1-4 byte fields in RAM
   // (BufferedPrint) instead of taking the storage mutex for each. Use the Print overloads
   // in <PrintSerialization.h>; the bytes are identical to writing the file directly. Do not

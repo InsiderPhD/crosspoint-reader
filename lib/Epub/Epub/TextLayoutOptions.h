@@ -24,6 +24,9 @@ struct TextLayoutOptions {
   static constexpr uint8_t PARAGRAPH_INDENT_COUNT = 6;  // book, none, then 1..4 spaces
   uint8_t paragraphIndent = PARAGRAPH_INDENT_BOOK;
 
+  // True when neither spacing control changes anything: text then takes the renderer's
+  // plain drawText / advance path, exactly as it did before the controls existed.
+  [[nodiscard]] constexpr bool spacingIsNeutral() const { return characterSpacing == 0 && wordSpacingPercent == 100; }
   [[nodiscard]] constexpr bool overridesParagraphIndent() const { return paragraphIndent != PARAGRAPH_INDENT_BOOK; }
   // Width of the user's indent in word-space advances; 0 for "book" and "none".
   [[nodiscard]] constexpr int paragraphIndentSpaces() const {

@@ -2055,7 +2055,7 @@ int ChapterHtmlSlimParser::lookupFootnoteLineCount(const char* href, const int w
       if (!body) return 0;
       if (footnoteBodyEntries[i].cachedLineCount < 0) {
         footnoteBodyEntries[i].cachedLineCount =
-            static_cast<int16_t>(Page::countWrappedLines(renderer, fontId, body, width));
+            static_cast<int16_t>(Page::countWrappedLines(renderer, fontId, body, width, textLayout));
       }
       return footnoteBodyEntries[i].cachedLineCount;
     }
@@ -2090,11 +2090,11 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
     bool hasNewPending = false;
     for (const auto& fn : currentPage->footnotes) {
       if (!fn.hasText()) continue;
-      existingLines += Page::countWrappedLines(renderer, fontId, fn.text.get(), viewportWidth);
+      existingLines += Page::countWrappedLines(renderer, fontId, fn.text.get(), viewportWidth, textLayout);
     }
     for (const auto& fn : deferredFootnotes) {
       if (!fn.text || fn.text[0] == '\0') continue;
-      deferredLines += Page::countWrappedLines(renderer, fontId, fn.text, viewportWidth);
+      deferredLines += Page::countWrappedLines(renderer, fontId, fn.text, viewportWidth, textLayout);
     }
     for (const auto& [idx, entry] : pendingFootnotes) {
       if (idx > newWordTotal) break;
@@ -2149,7 +2149,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
     int currentFnLines = 0;
     for (const auto& fn : currentPage->footnotes) {
       if (!fn.hasText()) continue;
-      currentFnLines += Page::countWrappedLines(renderer, fontId, fn.text.get(), viewportWidth);
+      currentFnLines += Page::countWrappedLines(renderer, fontId, fn.text.get(), viewportWidth, textLayout);
     }
     const int availableLines = maxFnLines - currentFnLines;
     if (availableLines <= 0) {
@@ -2158,10 +2158,10 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
     }
 
     const size_t textLen = strlen(text);
-    const int textLines = Page::countWrappedLines(renderer, fontId, text, viewportWidth);
+    const int textLines = Page::countWrappedLines(renderer, fontId, text, viewportWidth, textLayout);
     size_t splitAt = textLen;
     if (textLines > availableLines) {
-      splitAt = Page::splitWrappedAtLine(renderer, fontId, text, availableLines, viewportWidth);
+      splitAt = Page::splitWrappedAtLine(renderer, fontId, text, availableLines, viewportWidth, textLayout);
     }
     // Guard rail only: the line cap decides the split in practice, but a pathological
     // body (no spaces, or one the pre-scan let run long) must not produce an entry
