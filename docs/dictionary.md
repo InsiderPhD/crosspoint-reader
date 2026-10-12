@@ -1,6 +1,6 @@
 # Dictionary
 
-Look up words while reading an EPUB using an offline StarDict dictionary stored on the SD card.
+Look up words and phrases while reading an EPUB using an offline StarDict dictionary stored on the SD card.
 
 ## Supported Format
 
@@ -23,7 +23,7 @@ Not supported: dictionaries with 64-bit index offsets (`idxoffsetbits=64` in the
 
 The Dictionary setting only appears when at least one usable dictionary folder exists. Folders containing more than one dictionary (multiple `.idx` stems) are skipped as ambiguous.
 
-## Looking Up a Word
+## Looking Up a Word or Phrase
 
 Two ways to start a lookup while reading:
 
@@ -44,16 +44,19 @@ One word on the page becomes highlighted:
 2. Press **Confirm** to look up the highlighted word.
 3. Press **Back** to return to the reader.
 
-On touch devices, tapping a word moves the highlight to it and tapping it again looks it up; a tap-and-hold looks it up directly. This is the same word selector the clippings feature uses, in a single-word mode.
+To look up a **phrase**, move to its first word and **hold Confirm** for half a second: the word stays marked. Move to the last word of the phrase (the words in between are highlighted as you go) and press **Confirm**. **Back** drops the mark without leaving the selector. A single word therefore still takes one press; a phrase takes one extra hold. Phrases are limited to the visible page and to eight words.
+
+On touch devices, tapping a word moves the highlight to it and tapping it again looks it up; a tap-and-hold looks it up directly. For a phrase, tap its first word and then drag from that word to the last one; lifting the finger looks it up. This is the same word selector the clippings feature uses, in a lookup mode.
 
 On the very first lookup with a dictionary (and again whenever the `.idx` or `.syn` source file changes), the reader shows *"Indexing dictionary…"* while it builds small sidecar files next to them — a `.qidx` for the word index, and a `.sidx` when a `.syn` synonym file is present. Each sidecar is rebuilt independently, only when its own source changes. This takes a few seconds for large dictionaries and makes all subsequent lookups fast. The sidecars can be deleted safely at any time — they will simply be rebuilt.
 
 ### How Lookup Works
 
-1. **Direct match** — the word is found as-is (case-insensitive) in the dictionary index. Surrounding punctuation is ignored.
+1. **Direct match** — the word or phrase is found as-is (case-insensitive) in the dictionary index. Surrounding punctuation is ignored. A phrase matches entries that contain spaces (idioms, phrasal verbs, compound terms).
 2. **Synonyms** — on a miss, if the dictionary ships a `.syn` file, alternate spellings and irregular forms recorded there are resolved to their headword (e.g. `oxen` → `ox`, `colour` → `color`). This step is skipped if the `.sidx` sidecar could not be built (e.g. transient low memory during indexing); the dictionary otherwise stays usable, and the build is retried the next time it is opened.
 3. **Stemming** — still no match: common English word forms are retried automatically: possessives and plurals (`dogs` → `dog`, `stories` → `story`) and verb endings (`walked` → `walk`, `running` → `run`, `making` → `make`).
-4. **Not found** — a short popup appears and you return to word selection.
+4. **Shorter phrase** — for a phrase with no entry of its own, steps 1–3 are repeated on its leading words, longest first (`gave up the` → `gave up` → `gave`), so a selection that runs a word too far still lands on the phrasal entry, and the worst case is the first word on its own. The definition screen's heading shows which form matched.
+5. **Not found** — a short popup appears and you return to the page.
 
 ## The Definition Screen
 

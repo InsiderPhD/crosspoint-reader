@@ -4,6 +4,9 @@
 #include <InflateReader.h>
 #include <Logging.h>
 
+#include <cstdio>
+#include <cstring>
+
 #include "CrossPointSettings.h"
 
 namespace {
@@ -56,11 +59,25 @@ DictionaryLookup::Outcome DictionaryLookup::run(GfxRenderer& renderer, const cha
     }
   }
 
+  // Working copy for the leading-words fallback; a single word takes one pass.
+  // Stack, not heap: this runs with the framebuffer lent out as inflate scratch.
+  char candidate[MAX_PHRASE_BYTES];
+  snprintf(candidate, sizeof(candidate), "%s", word ? word : "");
+
   Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
-  if (dict.lookup(word, out.definition, out.headword, &result)) {
-    out.found = true;
-    out.html = dict.definitionsAreHtml();
-    return out;
+  for (;;) {
+    result = Dictionary::LookupResult::NotFound;
+    if (dict.lookup(candidate, out.definition, out.headword, &result)) {
+      out.found = true;
+      out.html = dict.definitionsAreHtml();
+      return out;
+    }
+    // Only a genuine miss is worth retrying shorter: a read, memory or
+    // decompression failure would fail the same way and must be reported.
+    if (result != Dictionary::LookupResult::NotFound) break;
+    char* lastSpace = strrchr(candidate, ' ');
+    if (!lastSpace) break;
+    *lastSpace = '\0';
   }
 
   switch (result) {

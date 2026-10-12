@@ -200,14 +200,17 @@ To look a word up, open the reader menu and choose **Look Up**, or bind **Look U
 | **Previous / next word** | **Left** / **Right** |
 | **Previous / next line** | side **Up** / **Down** |
 | **Look up the word** | **Confirm** |
-| **Back to reading** | **Back** |
+| **Look up a phrase** | hold **Confirm** on its first word, move to its last word, **Confirm** |
+| **Back to reading** | **Back** (with a phrase started: drops the phrase first) |
 
-On the X4 Pro you can also tap a word to highlight it, tap it again to look it up, or hold on it to do both at once. In the definition screen, **Left**/**Right** (or side **Up**/**Down**) page through a long entry and **Back** returns to word selection.
+On the X4 Pro you can also tap a word to highlight it, tap it again to look it up, or hold on it to do both at once; for a phrase, tap its first word and then drag from that word to the last one. In the definition screen, **Left**/**Right** (or side **Up**/**Down**) page through a long entry and **Back** returns to word selection.
 
 Two things that look like faults but are not:
 
 - **The first lookup on a new dictionary shows "Indexing dictionary…"** for a few seconds while it builds small `.qidx`/`.sidx` sidecar files next to the dictionary. Once only. They are safe to delete at any time — they just get rebuilt.
 - **On the X3 and X4, Bluetooth must be off.** A lookup needs a large contiguous block of RAM that the BLE stack is holding, so the reader refuses with *"Turn off Bluetooth to look up words"* rather than failing halfway. Toggle the remote off from the reader menu, look the word up, and turn it back on. The X4 Pro has no such restriction.
+
+A phrase (up to eight words on the page) is looked up as written, so dictionary entries with spaces in them — idioms, phrasal verbs, compound terms — can be found. If the whole phrase is not an entry, its leading words are tried, longest first (`gave up the` → `gave up` → `gave`); the heading of the definition shows which form matched.
 
 If a word is not found as written, the lookup automatically retries the dictionary's own synonyms (`oxen` → `ox`) and then common word endings (`dogs` → `dog`, `running` → `run`) before reporting a miss.
 

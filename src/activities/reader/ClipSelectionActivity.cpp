@@ -14,11 +14,17 @@
 #include "clippings/ClipTextBuilder.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/DictionaryLookup.h"
+
+namespace {
+// Hold Confirm this long in lookup mode to anchor the first word of a phrase.
+constexpr unsigned long LOOKUP_ANCHOR_HOLD_MS = 500;
+}  // namespace
 
 ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList,
                                              const int fontId, Section& section, const int startPageInSection,
                                              const int marginTop, const int marginLeft, const int initialCursorIdx,
-                                             const bool preAnchored, const bool singleWordMode)
+                                             const bool preAnchored, const bool lookupMode)
     : Activity("ClipSelection", renderer, mappedInput),
       wordList(std::move(wordList)),
       fontId(fontId),
@@ -26,7 +32,7 @@ ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputM
       startPageInSection(startPageInSection),
       marginTop(marginTop),
       marginLeft(marginLeft),
-      singleWordMode(singleWordMode) {
+      lookupMode(lookupMode) {
   const int wordCount = static_cast<int>(this->wordList.words.size());
   if (initialCursorIdx > 0 && initialCursorIdx < wordCount) {
     cursorIdx = initialCursorIdx;
@@ -58,13 +64,45 @@ void ClipSelectionActivity::onExit() {
   Activity::onExit();
 }
 
+void ClipSelectionActivity::finishLookup() {
+  // The cursor word, or the anchored range joined with single spaces. Built in
+  // a fixed stack buffer rather than through ClipTextBuilder: that assembles the
+  // before/after context a clipping needs, which for a lookup is heap spent on
+  // text nobody reads. Whole words only, so a selection longer than the buffer
+  // (or than any plausible headword) is cut at a word boundary, never mid-word.
+  const int from = startMarkIdx == -1 ? cursorIdx : std::min(startMarkIdx, cursorIdx);
+  const int to = startMarkIdx == -1 ? cursorIdx : std::max(startMarkIdx, cursorIdx);
+
+  char phrase[DictionaryLookup::MAX_PHRASE_BYTES];
+  size_t len = 0;
+  int wordsTaken = 0;
+  bool joinToPrevious = false;  // previous word ended in a hyphen the line breaker inserted
+  for (int i = from; i <= to && wordsTaken < DictionaryLookup::MAX_PHRASE_WORDS; i++) {
+    const WordRef& word = wordList.words[i];
+    const char* text = wordList.textOf(word);
+    if (clipword::hasEmSpacePrefix(text)) text += 3;  // paragraph-indent marker
+    if (clipword::isBlank(text)) continue;
+    size_t n = strlen(text);
+    // "exam-" + "ple" across a line break is one word: drop the hyphen and the space.
+    const bool hyphenSplit = word.endsWithInsertedHyphen && text[n - 1] == '-';
+    if (hyphenSplit) n--;
+    const size_t separator = (len > 0 && !joinToPrevious) ? 1 : 0;
+    if (len + separator + n >= sizeof(phrase)) break;
+    if (separator) phrase[len++] = ' ';
+    memcpy(phrase + len, text, n);
+    len += n;
+    joinToPrevious = hyphenSplit;
+    if (!hyphenSplit) wordsTaken++;
+  }
+  phrase[len] = '\0';
+
+  setResult(WordPickResult{phrase});
+  finish();
+}
+
 void ClipSelectionActivity::finishSelection() {
-  // Single-word mode returns the cursor word and nothing else. ClipTextBuilder
-  // is skipped deliberately: it assembles the before/after context a clipping
-  // needs, which for a one-word lookup is pure heap spent on text nobody reads.
-  if (singleWordMode) {
-    setResult(WordPickResult{wordList.textOf(wordList.words[cursorIdx])});
-    finish();
+  if (lookupMode) {
+    finishLookup();
     return;
   }
 
@@ -112,9 +150,11 @@ void ClipSelectionActivity::loop() {
   buttonNavigator.onContinuous({Button::Up}, [this, &moveCursor] { moveCursor(lineBackward(cursorIdx)); });
 
 #if FREEINK_DEVICE_X4PRO
-  if (!singleWordMode) {
+  if (!lookupMode) {
     if (handleRangeTouch()) return;
   } else {
+    // Phrase: drag from the highlighted word to the last word of the phrase.
+    if (handleLookupDrag()) return;
     // Dictionary word pick: a hold picks the word under the finger; a tap moves
     // the cursor there, and a second tap on the word under the cursor picks it.
     int lx, ly;
@@ -142,9 +182,32 @@ void ClipSelectionActivity::loop() {
   }
 #endif
 
+  if (lookupMode) {
+    // Hold Confirm to anchor the first word of a phrase. Only a press that began
+    // on this screen counts: the hold that opened the lookup (a long-press
+    // binding in the reader) may still be down when this activity starts.
+    if (mappedInput.wasPressed(Button::Confirm)) {
+      confirmPressedHere = true;
+      anchorHoldTriggered = false;
+    }
+    if (confirmPressedHere && !anchorHoldTriggered && startMarkIdx == -1 && mappedInput.isPressed(Button::Confirm) &&
+        mappedInput.getHeldTime() >= LOOKUP_ANCHOR_HOLD_MS) {
+      anchorHoldTriggered = true;
+      startMarkIdx = cursorIdx;
+      requestUpdate();
+      return;
+    }
+  }
+
   if (mappedInput.wasReleased(Button::Confirm)) {
-    // One press picks the word in single-word mode; there is no range to anchor.
-    if (singleWordMode || startMarkIdx != -1) {
+    confirmPressedHere = false;
+    if (anchorHoldTriggered) {
+      // This release ends the anchoring hold; it must not also look the word up.
+      anchorHoldTriggered = false;
+      return;
+    }
+    // Lookup mode: one press looks up the cursor word, or the anchored phrase.
+    if (lookupMode || startMarkIdx != -1) {
       finishSelection();
     } else {
       startMarkIdx = cursorIdx;
@@ -171,6 +234,37 @@ void ClipSelectionActivity::loop() {
 }
 
 #if FREEINK_DEVICE_X4PRO
+bool ClipSelectionActivity::handleLookupDrag() {
+  // Deliberately narrower than handleRangeTouch(): only a contact that lands on
+  // the word already under the cursor can become a drag. Any other contact stays
+  // what it was before phrases existed (a tap, a hold, or the Back swipe), so
+  // sweeping a finger across the text to go back does not start a lookup.
+  int lx, ly;
+  const bool held = mappedInput.heldTouchPoint(lx, ly);
+  if (held) {
+    const int idx = clipword::findWordAt(wordList, wordList.words[cursorIdx].pageIdx, lx, ly);
+    if (!touchWasHeld) {
+      contactStartWord = (idx == cursorIdx) ? idx : -1;
+      dragging = false;
+    } else if (!dragging && contactStartWord >= 0 && idx >= 0 && idx != contactStartWord) {
+      dragging = true;
+      startMarkIdx = contactStartWord;
+    }
+    if (dragging && idx >= 0 && idx != cursorIdx) {
+      cursorIdx = idx;
+      requestUpdate();
+    }
+  }
+  const bool lifted = touchWasHeld && !held;
+  touchWasHeld = held;
+  if (lifted && dragging) {
+    dragging = false;
+    finishSelection();
+    return true;
+  }
+  return dragging;  // nothing else may act on a contact mid-drag
+}
+
 bool ClipSelectionActivity::handleRangeTouch() {
   const int page = wordList.words[cursorIdx].pageIdx;
   int lx, ly;
@@ -237,7 +331,7 @@ void ClipSelectionActivity::render(RenderLock&&) {
   prewarmHighlightedWords();
   drawHighlights();
 
-  const auto confirmLabel = singleWordMode ? tr(STR_LOOKUP) : (startMarkIdx == -1 ? tr(STR_SELECT) : tr(STR_DONE));
+  const auto confirmLabel = lookupMode ? tr(STR_LOOKUP) : (startMarkIdx == -1 ? tr(STR_SELECT) : tr(STR_DONE));
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 

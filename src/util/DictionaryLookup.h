@@ -2,6 +2,7 @@
 
 #include <I18n.h>
 
+#include <cstddef>
 #include <string>
 
 #include "Dictionary.h"
@@ -17,6 +18,12 @@ class GfxRenderer;
 // ("Indexing dictionary..." is a multi-second first pass, "Looking up..." is not).
 class DictionaryLookup {
  public:
+  // Bounds on a looked-up phrase, shared with the selection screen that builds
+  // it. No StarDict headword worth matching is longer; the cap keeps both the
+  // selection's join buffer and run()'s working copy on the stack.
+  static constexpr size_t MAX_PHRASE_BYTES = 160;
+  static constexpr int MAX_PHRASE_WORDS = 8;
+
   struct Outcome {
     bool found = false;
     std::string headword;
@@ -35,7 +42,11 @@ class DictionaryLookup {
   // True when run() must build the .qidx / .sidx sidecars before it can search.
   bool needsIndexing() const { return needsIndex; }
 
-  // Build the index if stale, then look the word up.
+  // Build the index if stale, then look the word (or space-separated phrase) up.
+  // A phrase that is not a headword falls back to its leading words, longest
+  // first ("gave up the" -> "gave up" -> "gave"), so a selection that runs one
+  // word past a phrasal entry still lands on it and the worst case is the plain
+  // first-word lookup. Outcome::headword says which form matched.
   //
   // Borrows the framebuffer as the inflate window for the duration (see
   // InflateScratchLease): a .dict.dz entry needs 32KB CONTIGUOUS, which is the

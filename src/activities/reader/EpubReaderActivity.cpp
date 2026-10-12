@@ -1830,7 +1830,7 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
     startActivityForResult(
         std::make_unique<ClipSelectionActivity>(renderer, mappedInput, std::move(clipWords), readerFontId, *section,
                                                 startPage, orientedMarginTop, orientedMarginLeft, initialCursorIdx,
-                                                /*preAnchored=*/false, /*singleWordMode=*/true),
+                                                /*preAnchored=*/false, /*lookupMode=*/true),
         [this](const ActivityResult& result) {
           // get_if, not get: a default ActivityResult is NOT cancelled but holds
           // monostate, and std::get on the wrong alternative aborts under -fno-exceptions.
