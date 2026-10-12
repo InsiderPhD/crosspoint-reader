@@ -1144,7 +1144,16 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     renderer.fillRect(orientedMarginLeft, progressBarY, barWidth, progressStrip, true);
   }
 
-  const bool showBatteryPercentage = SETTINGS.hideBatteryPercentage == CPS::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER;
+  // Per-bar battery style. "Icon + %" keeps honouring the global Hide Battery %
+  // setting (so the default renders as it always has); "% Only" is an explicit
+  // choice and always shows the number.
+  const uint8_t batteryStyleRaw = configTop ? SETTINGS.statusBarTopBatteryStyle : SETTINGS.statusBarBatteryStyle;
+  const uint8_t batteryStyle =
+      batteryStyleRaw < CPS::STATUS_BAR_BATTERY_STYLE_COUNT ? batteryStyleRaw : CPS::SB_BATTERY_ICON_AND_PERCENT;
+  const bool showBatteryIcon = batteryStyle != CPS::SB_BATTERY_PERCENT_ONLY;
+  const bool showBatteryPercentage = batteryStyle == CPS::SB_BATTERY_PERCENT_ONLY ||
+                                     (batteryStyle == CPS::SB_BATTERY_ICON_AND_PERCENT &&
+                                      SETTINGS.hideBatteryPercentage == CPS::HIDE_BATTERY_PERCENTAGE::HIDE_NEVER);
   constexpr int elementGap = 10;
 
   // --- Build the ordered element list, each with its Left/Middle/Right cluster ---
@@ -1167,15 +1176,19 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     items.push_back(SbItem{pos, 0, std::move(s), w});
   };
 
-  // Battery (icon + optional percentage)
+  // Battery: icon, icon + percentage, or the percentage alone as a plain text item.
   if (const uint8_t pos = posOf(CPS::SB_ELEM_BATTERY); pos != CPS::SB_POS_HIDE) {
-    int w = metrics.batteryWidth;
-    if (showBatteryPercentage) {
-      char pctBuf[8];
-      snprintf(pctBuf, sizeof(pctBuf), "%u%%", powerManager.getBatteryPercentage());
-      w += batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, pctBuf);
+    char pctBuf[8];
+    snprintf(pctBuf, sizeof(pctBuf), "%u%%", powerManager.getBatteryPercentage());
+    if (!showBatteryIcon) {
+      addText(CPS::SB_ELEM_BATTERY, pctBuf);
+    } else {
+      int w = metrics.batteryWidth;
+      if (showBatteryPercentage) {
+        w += batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, pctBuf);
+      }
+      items.push_back(SbItem{pos, 1, std::string(), w});
     }
-    items.push_back(SbItem{pos, 1, std::string(), w});
   }
   // Bookmark indicator (only on a bookmarked page)
   if (const uint8_t pos = posOf(CPS::SB_ELEM_BOOKMARK); isPageBookmarked && pos != CPS::SB_POS_HIDE) {

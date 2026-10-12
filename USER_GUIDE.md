@@ -656,6 +656,8 @@ There are two status bars, one along the bottom of the page and one along the to
 
 Each bar's page also has its own **Progress Bar** (Book / Chapter / Hide) and **Progress Bar Thickness** (Thin / Medium / Thick): the bottom bar's fill bar runs along the bottom edge, the top bar's along the top edge above its text.
 
+Each bar also has a **Battery Style** (Icon + % / Icon Only / % Only) for its Battery element, so the two bars can differ. *Icon + %* still follows the Display setting **Hide Battery %**; *% Only* always shows the number.
+
 The **Customise Status Bar** screen itself holds the settings both bars share:
 
 - **Hide status bar** — master toggle for both bars. The layout still reserves their strips so your cached pages stay valid; the reader just skips drawing them and re-centres the page in the freed space. Also available as a bindable **Hide Status Bar** reader action.

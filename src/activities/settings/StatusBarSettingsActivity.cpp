@@ -54,7 +54,8 @@ constexpr uint8_t barElements[] = {
 constexpr int BAR_ELEMENT_ROWS = sizeof(barElements) / sizeof(barElements[0]);
 constexpr int BAR_PROGRESS_BAR = BAR_ELEMENT_ROWS;
 constexpr int BAR_PROGRESS_BAR_THICKNESS = BAR_ELEMENT_ROWS + 1;
-constexpr int BAR_CLOCK = BAR_ELEMENT_ROWS + 2;  // X3 only
+constexpr int BAR_BATTERY_STYLE = BAR_ELEMENT_ROWS + 2;  // How this bar's Battery element renders
+constexpr int BAR_CLOCK = BAR_ELEMENT_ROWS + 3;          // X3 only
 constexpr int BAR_BASE_ITEMS = BAR_CLOCK;
 constexpr int BAR_FULL_ITEMS = BAR_CLOCK + 1;
 const StrId barNames[BAR_FULL_ITEMS] = {
@@ -69,6 +70,7 @@ const StrId barNames[BAR_FULL_ITEMS] = {
     StrId::STR_BLUETOOTH,
     StrId::STR_PROGRESS_BAR,
     StrId::STR_PROGRESS_BAR_THICKNESS,
+    StrId::STR_BATTERY_STYLE,
     StrId::STR_CLOCK,
 };
 
@@ -85,6 +87,14 @@ uint8_t& progressBarField(const bool topBar) {
 uint8_t& progressBarThicknessField(const bool topBar) {
   return topBar ? SETTINGS.statusBarTopProgressBarThickness : SETTINGS.statusBarProgressBarThickness;
 }
+
+uint8_t& batteryStyleField(const bool topBar) {
+  return topBar ? SETTINGS.statusBarTopBatteryStyle : SETTINGS.statusBarBatteryStyle;
+}
+
+constexpr int BATTERY_STYLE_ITEMS = CPS::STATUS_BAR_BATTERY_STYLE_COUNT;
+const StrId batteryStyleNames[BATTERY_STYLE_ITEMS] = {StrId::STR_BATTERY_ICON_AND_PERCENT, StrId::STR_BATTERY_ICON_ONLY,
+                                                      StrId::STR_BATTERY_PERCENT_ONLY};
 
 constexpr int CLOCK_FORMAT_ITEMS = 2;
 const StrId clockFormatNames[CLOCK_FORMAT_ITEMS] = {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H};
@@ -147,6 +157,9 @@ void StatusBarSettingsActivity::onEnter() {
     }
     if (progressBarThicknessField(top) >= PROGRESS_BAR_THICKNESS_ITEMS) {
       progressBarThicknessField(top) = CPS::STATUS_BAR_PROGRESS_BAR_THICKNESS::PROGRESS_BAR_NORMAL;
+    }
+    if (batteryStyleField(top) >= BATTERY_STYLE_ITEMS) {
+      batteryStyleField(top) = CPS::SB_BATTERY_ICON_AND_PERCENT;
     }
   }
   if (SETTINGS.statusBarPercentageFormat >= PERCENTAGE_FORMAT_ITEMS) {
@@ -288,6 +301,9 @@ void StatusBarSettingsActivity::handleSelection() {
   } else if (selectedIndex == BAR_PROGRESS_BAR_THICKNESS) {
     uint8_t& thickness = progressBarThicknessField(top);
     thickness = (thickness + 1) % PROGRESS_BAR_THICKNESS_ITEMS;
+  } else if (selectedIndex == BAR_BATTERY_STYLE) {
+    uint8_t& style = batteryStyleField(top);
+    style = (style + 1) % BATTERY_STYLE_ITEMS;
   } else {
     return;
   }
@@ -336,6 +352,7 @@ std::string StatusBarSettingsActivity::valueText(const int index) const {
   }
   if (index == BAR_PROGRESS_BAR) return I18N.get(progressBarNames[progressBarField(top)]);
   if (index == BAR_PROGRESS_BAR_THICKNESS) return I18N.get(progressBarThicknessNames[progressBarThicknessField(top)]);
+  if (index == BAR_BATTERY_STYLE) return I18N.get(batteryStyleNames[batteryStyleField(top)]);
   return tr(STR_HIDE);
 }
 

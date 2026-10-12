@@ -503,6 +503,10 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                SettingInfo::Enum(StrId::STR_BATTERY, &CrossPointSettings::statusBarBatteryPos,
                                  {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                  "statusBarBatteryPos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(
+                   StrId::STR_BATTERY_STYLE, &CrossPointSettings::statusBarBatteryStyle,
+                   {StrId::STR_BATTERY_ICON_AND_PERCENT, StrId::STR_BATTERY_ICON_ONLY, StrId::STR_BATTERY_PERCENT_ONLY},
+                   "statusBarBatteryStyle", StrId::STR_BOTTOM_STATUS_BAR),
                SettingInfo::Enum(StrId::STR_BOOK_TITLE, &CrossPointSettings::statusBarBookTitlePos,
                                  {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                  "statusBarBookTitlePos", StrId::STR_BOTTOM_STATUS_BAR),
@@ -542,6 +546,10 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                SettingInfo::Enum(StrId::STR_BATTERY, &CrossPointSettings::statusBarTopBatteryPos,
                                  {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                  "statusBarTopBatteryPos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(
+                   StrId::STR_BATTERY_STYLE, &CrossPointSettings::statusBarTopBatteryStyle,
+                   {StrId::STR_BATTERY_ICON_AND_PERCENT, StrId::STR_BATTERY_ICON_ONLY, StrId::STR_BATTERY_PERCENT_ONLY},
+                   "statusBarTopBatteryStyle", StrId::STR_TOP_STATUS_BAR),
                SettingInfo::Enum(StrId::STR_BOOK_TITLE, &CrossPointSettings::statusBarTopBookTitlePos,
                                  {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                  "statusBarTopBookTitlePos", StrId::STR_TOP_STATUS_BAR),
@@ -587,7 +595,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 89;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 91;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

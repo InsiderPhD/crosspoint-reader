@@ -112,6 +112,14 @@ class CrossPointSettings {
     STATUS_BAR_PERCENTAGE_FORMAT_COUNT
   };
 
+  // How a bar's Battery element renders. One choice per bar. Persisted: append only.
+  enum STATUS_BAR_BATTERY_STYLE : uint8_t {
+    SB_BATTERY_ICON_AND_PERCENT = 0,
+    SB_BATTERY_ICON_ONLY = 1,
+    SB_BATTERY_PERCENT_ONLY = 2,
+    STATUS_BAR_BATTERY_STYLE_COUNT
+  };
+
   enum ORIENTATION {
     PORTRAIT = 0,       // 480x800 logical coordinates (current default)
     LANDSCAPE_CW = 1,   // 800x480 logical coordinates, rotated 180° (swap top/bottom)
@@ -481,6 +489,11 @@ class CrossPointSettings {
   uint8_t statusBarTopClockPos = SB_POS_HIDE;
   uint8_t statusBarTopBookmarkPos = SB_POS_HIDE;
   uint8_t statusBarTopBluetoothPos = SB_POS_HIDE;
+  // Battery element style per bar (STATUS_BAR_BATTERY_STYLE). "Icon + %" still
+  // honours the global Hide Battery % setting, so the default keeps every
+  // existing configuration rendering exactly as before.
+  uint8_t statusBarBatteryStyle = SB_BATTERY_ICON_AND_PERCENT;
+  uint8_t statusBarTopBatteryStyle = SB_BATTERY_ICON_AND_PERCENT;
   // Master hide toggled by READER_ACTION_HIDE_STATUS_BAR. Layout still reserves
   // the bar's strip so the section cache stays valid; readers skip drawing the
   // bar and the EPUB reader re-centres the page in the freed space at draw time.
