@@ -848,7 +848,10 @@ void ReadingStatsStore::beginSession(const std::string& path, const std::string&
     endSession();
   }
 
-  if (shouldIgnorePath(path)) {
+  // Tracking switched off is handled exactly like an ignored path: no active
+  // session, so noteActivity / updateProgress / endSession all fall through
+  // their "no session" guards and nothing is recorded, saved or pushed.
+  if (!SETTINGS.trackReadingStats || shouldIgnorePath(path)) {
     activeSession = {};
     lastSessionSnapshot = {};
     return;

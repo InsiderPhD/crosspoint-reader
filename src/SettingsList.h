@@ -267,6 +267,8 @@ inline void appendStatsSettings(std::vector<SettingInfo>& v) {
   v.insert(
       v.end(),
       {
+          SettingInfo::Toggle(StrId::STR_TRACK_READING_STATS, &CrossPointSettings::trackReadingStats,
+                              "trackReadingStats", StrId::STR_CAT_STATS),
           SettingInfo::Enum(
               StrId::STR_DAILY_GOAL, &CrossPointSettings::dailyReadingGoal,
               {StrId::STR_MIN_5, StrId::STR_MIN_10, StrId::STR_MIN_15, StrId::STR_MIN_30, StrId::STR_MIN_60},
@@ -599,7 +601,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 92;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 93;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

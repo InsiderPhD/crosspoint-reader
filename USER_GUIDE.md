@@ -409,6 +409,8 @@ Statistics are organised into tabs — **Overview** (streaks, daily goal, totals
 
 ### Sleep-screen stats
 
+**Settings → Statistics → Track Reading Stats** (on by default) is the master switch. Off, no reading session is recorded, nothing is pushed to Hardcover, and the sleep-screen stat lines, the Dashboard theme's stats and the reader menu's daily-goal line are hidden (the "If Found" contact and Book Time Left lines stay). Existing history is kept and still viewable under Statistics. Note that a book finished while tracking is off is not marked as finished.
+
 You can surface up to **three** reading stats on the sleep screen. **Settings → Statistics → Sleep Screen Statistics 1 / 2 / 3** each pick one of: Today, Daily Goal, This Week, Streak, This Month, Total, Books Finished, "If Found" contact, Book Progress, Daily Average, Days This Month, Week Streak, Goal Remaining, or Book Time Left (or **None**).
 
 ---

@@ -444,6 +444,11 @@ class CrossPointSettings {
   // Sleep screen orientation
   uint8_t sleepScreenOrientation = PORTRAIT;
   // Reading stats shown on the sleep screen (one SLEEP_STAT per slot; NONE = hidden).
+  // Master switch for reading statistics. Off: no session is opened, so nothing
+  // is recorded, saved or pushed (ReadingStatsStore::beginSession), and the
+  // surfaces that would show a frozen "today" hide their stats. History is
+  // kept. The reading-speed pace behind Time Left is independent of this.
+  uint8_t trackReadingStats = 1;
   uint8_t sleepStatSlot1 = SLEEP_STAT_NONE;
   uint8_t sleepStatSlot2 = SLEEP_STAT_NONE;
   uint8_t sleepStatSlot3 = SLEEP_STAT_NONE;

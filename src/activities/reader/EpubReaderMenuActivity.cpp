@@ -374,8 +374,13 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
     statusLine += tr(STR_AUTOSYNC_OFF_NOTICE);
     statusLine += " | ";
   }
-  statusLine += ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTodayReadingMs()) + " / " +
-                ReadingStatsAnalytics::formatDurationHm(SETTINGS.getDailyGoalMs());
+  if (SETTINGS.trackReadingStats) {
+    statusLine += ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTodayReadingMs()) + " / " +
+                  ReadingStatsAnalytics::formatDurationHm(SETTINGS.getDailyGoalMs());
+  } else if (statusLine.size() >= 3) {
+    // Nothing follows the clock / autosync notice: drop its trailing " | ".
+    statusLine.erase(statusLine.size() - 3);
+  }
 
   const int summaryLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const int statusY = summaryY + summaryLineHeight + 2;
