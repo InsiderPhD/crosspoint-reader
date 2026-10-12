@@ -7,6 +7,7 @@
 #include <esp_task_wdt.h>
 
 #include "activities/home/LibraryActivity.h"
+#include "util/BookMoveUtils.h"
 
 namespace {
 const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
@@ -576,10 +577,29 @@ void WebDAVHandler::handleMove(WebServer& s) {
     }
   }
 
-  const bool success = replaceFile(srcPath, dstPath);
+  // A plain move to a free name carries the book's reading state with it
+  // (BookMoveUtils). Replacing an existing file, moving a folder, or changing
+  // the book format keeps the old behaviour: bare rename, source cache dropped.
+  bool success = false;
+  bool stateCarried = false;
+  if (!dstExists) {
+    esp_task_wdt_reset();
+    const auto result = BookMoveUtils::renameFile(srcPath.c_str(), dstPath.c_str());
+    esp_task_wdt_reset();
+    if (result == BookMoveUtils::RenameResult::Ok) {
+      success = true;
+      stateCarried = true;
+    } else if (result == BookMoveUtils::RenameResult::InvalidName) {
+      success = replaceFile(srcPath, dstPath);
+    }
+  } else {
+    success = replaceFile(srcPath, dstPath);
+  }
 
   if (success) {
-    clearEpubCacheIfNeeded(srcPath);
+    if (!stateCarried) {
+      clearEpubCacheIfNeeded(srcPath);
+    }
     s.send(dstExists ? 204 : 201);
   } else {
     s.send(500, "text/plain", "Move failed");

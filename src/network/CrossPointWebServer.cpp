@@ -24,6 +24,7 @@
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
+#include "util/BookMoveUtils.h"
 #if CROSSPOINT_SD_PLUGINS
 #include "html/PluginsPageHtml.generated.h"
 #include "html/RunnerPageHtml.generated.h"
@@ -105,6 +106,27 @@ void clearEpubCacheIfNeeded(const String& filePath) {
   if (FsHelpers::hasEpubExtension(filePath) || FsHelpers::hasXtcExtension(filePath)) {
     LibraryActivity::invalidateIndexCache();
   }
+}
+
+// Rename or move a file so a book keeps its progress, bookmarks, clippings,
+// sync links and recents entry (see BookMoveUtils). A rename that changes the
+// book format (book.epub -> book.zip) has no state worth carrying, so it falls
+// back to dropping the old cache and renaming the bare file.
+bool renameCarryingBookState(const String& oldPath, const String& newPath) {
+  esp_task_wdt_reset();
+  const auto result = BookMoveUtils::renameFile(oldPath.c_str(), newPath.c_str());
+  esp_task_wdt_reset();
+  if (result == BookMoveUtils::RenameResult::Ok) {
+    return true;
+  }
+  if (result != BookMoveUtils::RenameResult::InvalidName) {
+    return false;
+  }
+  const bool renamed = Storage.rename(oldPath.c_str(), newPath.c_str());
+  if (renamed) {
+    clearEpubCacheIfNeeded(oldPath);
+  }
+  return renamed;
 }
 
 String normalizeWebPath(const String& inputPath) {
@@ -1073,9 +1095,8 @@ void CrossPointWebServer::handleRename() const {
     return;
   }
 
-  clearEpubCacheIfNeeded(itemPath);
-  const bool success = file.rename(newPath.c_str());
   file.close();
+  const bool success = renameCarryingBookState(itemPath, newPath);
 
   if (success) {
     LOG_DBG("WEB", "Renamed file: %s -> %s", itemPath.c_str(), newPath.c_str());
@@ -1166,9 +1187,8 @@ void CrossPointWebServer::handleMove() const {
     return;
   }
 
-  clearEpubCacheIfNeeded(itemPath);
-  const bool success = file.rename(newPath.c_str());
   file.close();
+  const bool success = renameCarryingBookState(itemPath, newPath);
 
   if (success) {
     LOG_DBG("WEB", "Moved file: %s -> %s", itemPath.c_str(), newPath.c_str());
