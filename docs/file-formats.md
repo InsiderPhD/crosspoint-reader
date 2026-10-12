@@ -446,7 +446,7 @@ book follows the global settings. Owned by `src/BookSettings.cpp`.
 ```c++
 struct BookSettingsBin {
     u8  version;              // 1
-    u8  fieldCount;           // value bytes that follow the mask (13 when written by this firmware)
+    u8  fieldCount;           // value bytes that follow the mask (14 when written by this firmware)
     u32 overrideMask;         // little-endian; bit i set = values[i] overrides the global setting
     u8  values[fieldCount];   // BookSettings::kFields order, see below
     char sdFontFamilyName[32]; // NUL padded; goes with bit 0, empty = built-in family
@@ -456,7 +456,7 @@ struct BookSettingsBin {
 Field order (the index is both the mask bit and the byte; append only): 0 fontFamily, 1 fontSize,
 2 lineSpacing, 3 wordSpacing, 4 characterSpacing, 5 paragraphAlignment, 6 screenMargin,
 7 extraParagraphSpacing, 8 paragraphIndent, 9 bionicReading, 10 textAntiAliasing,
-11 hyphenationEnabled, 12 imageRendering.
+11 hyphenationEnabled, 12 imageRendering, 13 imageGrayscale.
 
 A reader that knows fewer fields ignores the extra bytes and bits; one that knows more treats the
 missing fields as not overridden, so adding a field needs no version bump. An out-of-range value drops

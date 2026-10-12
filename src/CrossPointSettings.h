@@ -656,6 +656,11 @@ class CrossPointSettings {
   uint8_t yoloSelection = 0;
   // Image rendering mode in EPUB reader
   uint8_t imageRendering = IMAGES_DISPLAY;
+  // Book images in four gray levels (1, the default) or dithered to pure black and
+  // white (0). Off skips the grayscale passes and their extra panel refresh on
+  // every image page. Drawing only: the image and section caches are the same
+  // either way. Per-book overridable (BookSettings).
+  uint8_t imageGrayscale = 1;
   // Footnote display mode (0 = render at bottom of page, 1 = show in popup menu)
   uint8_t footnoteDisplay = FOOTNOTE_ON_PAGE;
   // Bionic Reading: bold the first ~43% of each word's letters to guide the eye (0 = off, 1 = on)

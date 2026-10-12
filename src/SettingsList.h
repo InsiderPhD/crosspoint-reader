@@ -243,6 +243,8 @@ inline void appendReaderBehaviourSettings(std::vector<SettingInfo>& v) {
                SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                                  {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
                                  "imageRendering", StrId::STR_CAT_READER),
+               SettingInfo::Toggle(StrId::STR_IMAGE_GRAYSCALE, &CrossPointSettings::imageGrayscale, "imageGrayscale",
+                                   StrId::STR_CAT_READER),
                SettingInfo::Enum(StrId::STR_FOOTNOTES, &CrossPointSettings::footnoteDisplay,
                                  {StrId::STR_FOOTNOTE_ON_PAGE, StrId::STR_FOOTNOTE_IN_MENU}, "footnoteDisplay",
                                  StrId::STR_CAT_READER),
@@ -615,7 +617,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 93;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 94;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

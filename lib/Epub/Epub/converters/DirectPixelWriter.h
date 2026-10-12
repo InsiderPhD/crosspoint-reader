@@ -7,6 +7,8 @@
 
 #include <cassert>
 
+#include "DitherUtils.h"
+
 // Direct framebuffer writer that eliminates per-pixel overhead from the image
 // rendering hot path.  Pre-computes orientation transform as linear coefficients
 // and caches render-mode state so the inner loop is: one multiply, one add,
@@ -38,6 +40,8 @@ struct DirectPixelWriter {
 
   // Row-precomputed: the Y-dependent portion of the physical coords
   int rowPhyXBase, rowPhyYBase;
+  int logicalRow = 0;  // current row, for the B/W dither phase
+  bool bwDither = false;
 
   void init(GfxRenderer& renderer) {
     fb = renderer.getWriteTarget();
@@ -45,6 +49,7 @@ struct DirectPixelWriter {
     clipRows = renderer.getWriteRows();
     mode = renderer.getRenderMode();
     absolute = renderer.grayPlanesAreAbsolute();
+    bwDither = renderer.areImagesBwDithered();
     displayWidthBytes = renderer.getDisplayWidthBytes();
 
     const int phyW = renderer.getDisplayWidth();
@@ -102,6 +107,7 @@ struct DirectPixelWriter {
   // Call once per row before the column loop.
   // Pre-computes the Y-dependent portion so writePixel() only needs the X part.
   inline void beginRow(int logicalY) {
+    logicalRow = logicalY;
     rowPhyXBase = phyXBase + logicalY * phyXStepY;
     rowPhyYBase = phyYBase + logicalY * phyYStepY;
   }
@@ -158,8 +164,15 @@ struct DirectPixelWriter {
     bool state;
     switch (mode) {
       case GfxRenderer::BW:
-        draw = writeWhiteInBw || pixelValue < 3;
-        state = pixelValue < 3;
+        // Followed by grayscale planes, the B/W pass is only their dark base:
+        // everything but white. When it is the final image (Image Grayscale
+        // off), ordered-dither the same four cached levels instead. The phase
+        // shifts every 4 px so it cannot beat against the Bayer pattern the
+        // four-level cache was itself quantised with.
+        state = bwDither ? pixelValue * 85 <
+                               bayer4x4[(logicalRow + (logicalX >> 2)) & 3][(logicalX + (logicalRow >> 2)) & 3] * 16 + 8
+                         : pixelValue < 3;
+        draw = writeWhiteInBw || state;
         break;
       case GfxRenderer::GRAYSCALE_MSB:
       case GfxRenderer::GRAYSCALE_LSB: {

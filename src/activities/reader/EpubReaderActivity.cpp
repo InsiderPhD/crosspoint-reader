@@ -617,6 +617,7 @@ void EpubReaderActivity::onExit() {
   // Nothing of this book can be laid out any more: put the global reader
   // settings back in place of any per-book overrides.
   BookSettings::end();
+  renderer.setImagesBwDither(false);  // reader-only; the image viewer shares the writer
 
   if (exitPayload) {
     if (auto* fcm = renderer.getFontCacheManager()) {
@@ -2887,7 +2888,13 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   // stream from SD as before; by the next visit everything is cached and the
   // slot is free to take.
   ImageBlock::setRenderCacheAllowed(!imagesNeedDecode);
-  const bool needsImageGrayscale = pageHasImages && !SETTINGS.darkMode && !renderer.areImagesSuppressed();
+  // Image Grayscale off (globally or for this book): no planes for images, and
+  // the B/W pass dithers them instead of drawing the planes' dark base (in
+  // dark mode too, where no planes are drawn either way).
+  const bool imageGrayscaleWanted = SETTINGS.imageGrayscale != 0;
+  renderer.setImagesBwDither(!imageGrayscaleWanted);
+  const bool needsImageGrayscale =
+      pageHasImages && imageGrayscaleWanted && !SETTINGS.darkMode && !renderer.areImagesSuppressed();
   const bool needsTextGrayscale = SETTINGS.textAntiAliasing && !SETTINGS.darkMode;
   const bool needsAnyGrayscale = needsTextGrayscale || needsImageGrayscale;
 

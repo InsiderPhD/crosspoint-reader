@@ -49,6 +49,7 @@ inline constexpr Field kFields[] = {
     {&CrossPointSettings::textAntiAliasing, 0, 1},
     {&CrossPointSettings::hyphenationEnabled, 0, 1},
     {&CrossPointSettings::imageRendering, 0, CrossPointSettings::IMAGE_RENDERING_COUNT - 1},
+    {&CrossPointSettings::imageGrayscale, 0, 1},
 };
 inline constexpr size_t kFieldCount = std::size(kFields);
 

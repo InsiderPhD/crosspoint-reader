@@ -223,6 +223,8 @@ const FontLayoutPreviewActivity::Row FontLayoutPreviewActivity::kRows[] = {
      false},
     {StrId::STR_IMAGES, RowKind::Enum, &CrossPointSettings::imageRendering, kImageLabels,
      CrossPointSettings::IMAGE_RENDERING_COUNT, 0, 0, 0, false, false},
+    {StrId::STR_IMAGE_GRAYSCALE, RowKind::Toggle, &CrossPointSettings::imageGrayscale, nullptr, 0, 0, 0, 0, false,
+     false},
     // Last, so the cursor never starts on it.
     {StrId::STR_USE_GLOBAL_SETTINGS, RowKind::Action, nullptr, nullptr, 0, 0, 0, 0, false, false},
 };
@@ -233,7 +235,8 @@ bool FontLayoutPreviewActivity::rowInMode(const Row& row, const Mode mode) {
   // actions, and a per-book copy would fight those.
   const bool globalOnly = row.field == &CrossPointSettings::darkMode || row.field == &CrossPointSettings::orientation;
   const bool bookOnly = row.kind == RowKind::Action || row.field == &CrossPointSettings::hyphenationEnabled ||
-                        row.field == &CrossPointSettings::imageRendering;
+                        row.field == &CrossPointSettings::imageRendering ||
+                        row.field == &CrossPointSettings::imageGrayscale;
   return mode == Mode::Book ? !globalOnly : !bookOnly;
 }
 

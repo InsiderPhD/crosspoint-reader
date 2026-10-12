@@ -49,6 +49,7 @@ class GfxRenderer {
   Orientation orientation;
   bool fadingFix;
   bool imagesSuppressed = false;
+  bool imagesBwDither = false;
   bool darkModeActive = false;
   uint8_t* frameBuffer = nullptr;
   uint16_t panelWidth = HalDisplay::DISPLAY_WIDTH;
@@ -159,6 +160,11 @@ class GfxRenderer {
   // passes, that is roughly ten guaranteed failures per page.
   void setImagesSuppressed(const bool suppressed) { imagesSuppressed = suppressed; }
   bool areImagesSuppressed() const { return imagesSuppressed; }
+  // Book images drawn in the B/W pass are ordered-dithered from their four cached
+  // levels instead of thresholded to a silhouette. Set by the reader when it will
+  // NOT follow up with grayscale planes; read by DirectPixelWriter.
+  void setImagesBwDither(const bool dither) { imagesBwDither = dither; }
+  bool areImagesBwDithered() const { return imagesBwDither; }
 
   // Dark mode is applied by inverting the whole framebuffer just before display,
   // so the renderer itself has to know it is coming in order to exempt content
