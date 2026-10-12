@@ -38,9 +38,9 @@
 #include "EpubReaderBookmarksActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderClippingListActivity.h"
-#include "EpubReaderFootnotesActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderUtils.h"
+#include "FootnoteMarkers.h"
 #include "JsonSettingsIO.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
@@ -651,6 +651,12 @@ void EpubReaderActivity::loop() {
     READING_STATS.updateProgress(100, true);
   }
 
+  // ── Footnote selection on the page ───────────────────────────────────────
+  // A mode the reader enters only from its Footnotes action or menu row. While
+  // it is up it owns every control (and pauses the automatic page turn), so
+  // none of the bindings below can turn the page out from under the highlight.
+  if (handleFootnoteSelectInput()) return;
+
   // ── Automatic page turn ──────────────────────────────────────────────────
   if (automaticPageTurnActive) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
@@ -1208,14 +1214,11 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       break;
     }
     case EpubReaderMenuActivity::MenuAction::FOOTNOTES: {
-      startActivityForResult(std::make_unique<EpubReaderFootnotesActivity>(renderer, mappedInput, currentPageFootnotes),
-                             [this](const ActivityResult& result) {
-                               if (!result.isCancelled) {
-                                 const auto& footnoteResult = std::get<FootnoteResult>(result.data);
-                                 navigateToHref(footnoteResult.href, true);
-                               }
-                               requestUpdate();
-                             });
+      if (currentPageFootnotes.empty()) {
+        openFootnoteList();  // its "no footnotes on this page" screen
+      } else {
+        openFootnoteSelect();
+      }
       break;
     }
     case EpubReaderMenuActivity::MenuAction::GO_TO_PERCENT: {
@@ -2291,6 +2294,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     // keeps the capacity), and let the status bar read the cheap bool instead.
     std::vector<FootnoteEntry>().swap(currentPageFootnotes);
     currentPageHasFootnotes = !p->footnotes.empty();
+    // Which of them have a marker the reader can highlight. A pass over the
+    // page's word styles, no allocation; nothing at all on a page without notes.
+    footnoteMarkerMask = FootnoteMarkers::scan(*p);
+    if (footnoteSelectIndex >= 0 && ((footnoteMarkerMask >> footnoteSelectIndex) & 1U) == 0) {
+      footnoteSelectIndex = -1;  // not this page's selection: render it as plain reading
+    }
 
     // renderContents logs its own "Page render: ...total=" breakdown, which
     // covers exactly this span — no second timer needed.
@@ -2905,6 +2914,16 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
 
+  if (footnoteSelectIndex >= 0) {
+    // Footnote selection: the B/W page with one marker inverted, on a fast
+    // refresh. No grayscale pass — the highlight moves on every press, and the
+    // page gets its normal render back the moment the selection closes.
+    drawFootnoteSelection(page, orientedMarginLeft, orientedMarginTop);
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    return;
+  }
+
   if (absoluteImageGrayscale) {
     // No blanking dance: the panel takes the B/W frame as an explicit base and
     // then receives every pixel again in the planes, so there is nothing to
@@ -3185,7 +3204,20 @@ void EpubReaderActivity::renderStatusBar() const {
 // Footnote-return hint / button hints strip below the bar; drawn whether or
 // not the status bar itself is shown.
 void EpubReaderActivity::renderStatusBarTail(const bool hintsActive) const {
-  if (footnoteDepth > 0) {
+  if (footnoteSelectIndex >= 0) {
+    // The footnote-return hint's band (below), saying what the controls do while
+    // a marker is highlighted. Sized from the font so the line is not clipped.
+    int ot, or_, ob, ol;
+    renderer.getOrientedViewableTRBL(&ot, &or_, &ob, &ol);
+    const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
+    const int hintH = std::max(
+        {static_cast<int>(UITheme::getInstance().getStatusBarHeight()), ReaderUtils::FOOTNOTE_HINT_HEIGHT, lineH + 4});
+    const int y = renderer.getScreenHeight() - ob - hintH;
+    renderer.fillRect(0, y, renderer.getScreenWidth(), hintH, true);
+    renderer.drawCenteredText(
+        UI_10_FONT_ID, y + (hintH - lineH) / 2,
+        mappedInput.hasTouch() ? tr(STR_FOOTNOTE_SELECT_HINT_TOUCH) : tr(STR_FOOTNOTE_SELECT_HINT), false);
+  } else if (footnoteDepth > 0) {
     int ot, or_, ob, ol;
     renderer.getOrientedViewableTRBL(&ot, &or_, &ob, &ol);
     const int statusH = UITheme::getInstance().getStatusBarHeight();
@@ -3253,9 +3285,11 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
   if (!epub) return;
 
   // Push current position onto saved stack
+  bool pushed = false;
   if (savePosition && section && footnoteDepth < MAX_FOOTNOTE_DEPTH) {
     savedPositions[footnoteDepth] = {currentSpineIndex, section->currentPage};
     footnoteDepth++;
+    pushed = true;
     LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d", footnoteDepth, currentSpineIndex, section->currentPage);
   }
 
@@ -3278,7 +3312,9 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
 
   if (targetSpineIndex < 0) {
     LOG_DBG("ERS", "Could not resolve href: %s", hrefStr.c_str());
-    if (savePosition && footnoteDepth > 0) footnoteDepth--;  // undo push
+    // Only what this call pushed: with the stack already full nothing was, and
+    // popping anyway would throw away the reader's way back.
+    if (pushed) footnoteDepth--;
     return;
   }
 
@@ -3484,16 +3520,7 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
     }
 
     case A::READER_ACTION_FOOTNOTES:
-      if (!currentPageFootnotes.empty()) {
-        startActivityForResult(
-            std::make_unique<EpubReaderFootnotesActivity>(renderer, mappedInput, currentPageFootnotes),
-            [this](const ActivityResult& fnResult) {
-              if (!fnResult.isCancelled) {
-                navigateToHref(std::get<FootnoteResult>(fnResult.data).href, true);
-              }
-              requestUpdate();
-            });
-      }
+      openFootnoteSelect();
       return false;
 
     case A::READER_ACTION_AUTO_PAGE_TURN:

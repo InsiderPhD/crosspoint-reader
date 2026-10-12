@@ -13,6 +13,10 @@
 void EpubReaderFootnotesActivity::onEnter() {
   Activity::onEnter();
   selectedIndex = 0;
+  // Opened from a hold-bound reader action (long-press Confirm or Back), the
+  // button is still down: its release belongs to that press, not to this list.
+  ignoreConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+  ignoreBackRelease = mappedInput.isPressed(MappedInputManager::Button::Back);
   requestUpdate();
 }
 
@@ -43,6 +47,24 @@ void EpubReaderFootnotesActivity::activateSelectedFootnote() {
 }
 
 void EpubReaderFootnotesActivity::loop() {
+  // Swallow the release of the press that opened the list (see onEnter). Without
+  // this a long-press Confirm binding followed the first footnote the moment the
+  // finger came up, and a long-press Back binding closed the list again.
+  if (ignoreConfirmRelease) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      ignoreConfirmRelease = false;
+      return;
+    }
+    if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) ignoreConfirmRelease = false;
+  }
+  if (ignoreBackRelease) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      ignoreBackRelease = false;
+      return;
+    }
+    if (!mappedInput.isPressed(MappedInputManager::Button::Back)) ignoreBackRelease = false;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     ActivityResult result;
     result.isCancelled = true;

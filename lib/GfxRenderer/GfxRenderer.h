@@ -172,6 +172,11 @@ class GfxRenderer {
   // while the page around it turns light-on-dark. No-op unless dark mode is on
   // and we are drawing the B/W frame. Coordinates are LOGICAL screen space.
   void preserveImagePolarity(int x, int y, int width, int height) const;
+  // Flip every pixel of a LOGICAL-space rectangle in the B/W frame, clipped to
+  // the panel and pixel-exact. In place and allocation-free, so a highlight can
+  // be drawn over text that is already rendered (and removed by flipping again).
+  // No-op outside the B/W frame (grayscale planes, strip passes).
+  void invertRect(int x, int y, int width, int height) const;
 
   // Screen ops
   int getScreenWidth() const;
