@@ -2,6 +2,14 @@
 
 #include <cstdint>
 
+// CROSSPOINT_EPUB_BLOCK_FONT_SIZES: font-size is parsed and stored on PSRAM boards only.
+#if __has_include(<DevicePolicy.h>)
+#include <DevicePolicy.h>
+#endif
+#ifndef CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+#define CROSSPOINT_EPUB_BLOCK_FONT_SIZES 0
+#endif
+
 // Matches order of PARAGRAPH_ALIGNMENT in CrossPointSettings
 enum class CssTextAlign : uint8_t { Justify = 0, Left = 1, Center = 2, Right = 3, None = 4 };
 enum class CssUnit : uint8_t { Pixels = 0, Em = 1, Rem = 2, Points = 3, Percent = 4 };
@@ -125,6 +133,9 @@ struct CssPropertyFlags {
   // edges had their line style / their width set.
   uint32_t borderStyle : 4;
   uint32_t borderWidth : 4;
+  // Only ever set where CROSSPOINT_EPUB_BLOCK_FONT_SIZES is on (the value lives in a field
+  // that exists only there); always part of the flags so the bit layout is the same everywhere.
+  uint32_t fontSize : 1;
 
   CssPropertyFlags()
       : textAlign(0),
@@ -150,13 +161,14 @@ struct CssPropertyFlags {
         whiteSpacePre(0),
         shaded(0),
         borderStyle(0),
-        borderWidth(0) {}
+        borderWidth(0),
+        fontSize(0) {}
 
   [[nodiscard]] bool anySet() const {
     return textAlign || fontStyle || fontWeight || textDecoration || textIndent || marginTop || marginBottom ||
            marginLeft || marginRight || paddingTop || paddingBottom || paddingLeft || paddingRight || imageHeight ||
            imageWidth || display || direction || verticalAlign || pageBreakBefore || pageBreakAfter || whiteSpacePre ||
-           shaded || borderStyle || borderWidth;
+           shaded || borderStyle || borderWidth || fontSize;
   }
 
   void clearAll() {
@@ -164,14 +176,14 @@ struct CssPropertyFlags {
     marginTop = marginBottom = marginLeft = marginRight = 0;
     paddingTop = paddingBottom = paddingLeft = paddingRight = 0;
     imageHeight = imageWidth = display = direction = verticalAlign = 0;
-    pageBreakBefore = pageBreakAfter = whiteSpacePre = shaded = borderStyle = borderWidth = 0;
+    pageBreakBefore = pageBreakAfter = whiteSpacePre = shaded = borderStyle = borderWidth = fontSize = 0;
   }
 };
 
 // Represents a collection of CSS style properties
 // Only stores properties relevant to e-ink text rendering
 // Length values are stored as CssLength (value + unit) for deferred resolution
-// Cache serializes defined flags as uint32_t with bit indices 0..29.
+// Cache serializes defined flags as uint32_t with bit indices 0..30.
 static_assert(sizeof(CssPropertyFlags) <= sizeof(uint32_t),
               "CssPropertyFlags exceeds 32 bits; update cache read/write in CssParser.cpp");
 
@@ -198,6 +210,11 @@ struct CssStyle {
   CssLength imageHeight;     // Height for img (e.g. 2em) – width derived from aspect ratio when only height set
   CssLength imageWidth;      // Width for img when both or only width set
   CssBorderSide borders[4];  // top, right, bottom, left; see defined.borderStyle / borderWidth
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+  // font-size on a block. Em and Percent are relative to the parent block, Rem to the reader's
+  // body size; Pixels and Points are read as "16px / 12pt is body size". PSRAM boards only.
+  CssLength fontSize;
+#endif
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
@@ -291,6 +308,12 @@ struct CssStyle {
     }
     defined.borderStyle |= base.defined.borderStyle;
     defined.borderWidth |= base.defined.borderWidth;
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+    if (base.defined.fontSize) {
+      fontSize = base.fontSize;
+      defined.fontSize = 1;
+    }
+#endif
   }
 
   [[nodiscard]] bool hasTextAlign() const { return defined.textAlign; }
@@ -325,10 +348,17 @@ struct CssStyle {
     display = CssDisplay::Block;
     verticalAlign = CssVerticalAlign::Baseline;
     for (auto& side : borders) side = CssBorderSide{};
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+    fontSize = CssLength{};
+#endif
     defined.clearAll();
   }
 };
 
 // A rule is held in RAM (one per selector) for the length of a section build, which is the
 // tightest heap state the reader has. New properties must be packed into what is here.
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+static_assert(sizeof(CssStyle) <= 112, "CssStyle grew beyond the font-size field");
+#else
 static_assert(sizeof(CssStyle) <= 104, "CssStyle grew: every stored CSS rule pays for it during section builds");
+#endif

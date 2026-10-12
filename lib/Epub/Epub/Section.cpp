@@ -32,17 +32,23 @@ namespace {
 // 48: inline images (a small image that shares a paragraph with text is laid out in the
 //     line; still a PageImage) and publisher decorations (new page element
 //     TAG_PageBorderBox = 5; forced page breaks and white-space:pre change layout only).
+//     Header gains layoutFeatures (see LAYOUT_FEATURES below).
 constexpr uint8_t SECTION_FILE_VERSION = 48;
 // Staging buffer for page serialization, one per section build (not per page). 2KB is four
 // SD sectors: a typical text page (~3-6KB serialized) goes out in two to four writes, and a
 // field larger than the buffer (a long line's word arena) bypasses it. Heap, not stack: 2KB
 // is far past the 256-byte limit for locals, on a task stack this build already runs deep in.
 constexpr size_t PAGE_WRITE_BUFFER_SIZE = 2048;
+// Layout features compiled into this build that change where text lands without changing any
+// setting. Stored in the header and compared on load, so a card moved between boards with the
+// same panel (X4 and X4C) rebuilds instead of showing the other board's layout.
+constexpr uint8_t LAYOUT_FEATURE_BLOCK_FONT_SIZES = 0x01;
+constexpr uint8_t LAYOUT_FEATURES = CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? LAYOUT_FEATURE_BLOCK_FONT_SIZES : 0;
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
                                  sizeof(uint8_t) + sizeof(uint8_t) + sizeof(bool) + sizeof(int8_t) + sizeof(uint8_t) +
-                                 sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                 sizeof(uint32_t);
+                                 sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t) +
+                                 sizeof(uint32_t) + sizeof(uint32_t);
 
 struct PageLutEntry {
   uint32_t fileOffset;
@@ -95,7 +101,8 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
                                    sizeof(embeddedStyle) + sizeof(imageRendering) + sizeof(footnoteDisplay) +
                                    sizeof(bionicReadingEnabled) + sizeof(textLayout.characterSpacing) +
                                    sizeof(textLayout.wordSpacingPercent) + sizeof(textLayout.paragraphIndent) +
-                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
+                                   sizeof(LAYOUT_FEATURES) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
+                                   sizeof(uint32_t),
                 "Header size mismatch");
   serialization::writePod(file, SECTION_FILE_VERSION);
   serialization::writePod(file, fontId);
@@ -112,6 +119,7 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
   serialization::writePod(file, textLayout.characterSpacing);
   serialization::writePod(file, textLayout.wordSpacingPercent);
   serialization::writePod(file, textLayout.paragraphIndent);
+  serialization::writePod(file, LAYOUT_FEATURES);
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
@@ -165,6 +173,8 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
     serialization::readPod(file, fileTextLayout.characterSpacing);
     serialization::readPod(file, fileTextLayout.wordSpacingPercent);
     serialization::readPod(file, fileTextLayout.paragraphIndent);
+    uint8_t fileLayoutFeatures;
+    serialization::readPod(file, fileLayoutFeatures);
 
     if (fontId != fileFontId || lineCompression != fileLineCompression ||
         extraParagraphSpacing != fileExtraParagraphSpacing || paragraphAlignment != fileParagraphAlignment ||
@@ -174,7 +184,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
         bionicReadingEnabled != fileBionicReadingEnabled ||
         textLayout.characterSpacing != fileTextLayout.characterSpacing ||
         textLayout.wordSpacingPercent != fileTextLayout.wordSpacingPercent ||
-        textLayout.paragraphIndent != fileTextLayout.paragraphIndent) {
+        textLayout.paragraphIndent != fileTextLayout.paragraphIndent || fileLayoutFeatures != LAYOUT_FEATURES) {
       // Explicit close() required: member variable persists beyond function scope
       file.close();
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");

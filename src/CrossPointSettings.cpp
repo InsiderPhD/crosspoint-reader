@@ -576,6 +576,20 @@ TextLayoutOptions CrossPointSettings::readerTextLayout() const {
   if (paragraphIndent < TextLayoutOptions::PARAGRAPH_INDENT_COUNT) {
     options.paragraphIndent = paragraphIndent;
   }
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+  // Only the built-in families ship every size. An SD-card or TrueType family is loaded at
+  // one size, so the ladder stays empty and headings keep the reader font.
+  const int readerFontId = getReaderFontId();
+  static_assert(TextLayoutOptions::FONT_SIZE_STEPS == FONT_SIZE_COUNT, "one ladder step per font size setting");
+  bool builtIn = false;
+  for (uint8_t size = 0; size < FONT_SIZE_COUNT; ++size) {
+    options.fontSizeLadder[size] = builtInReaderFontId(fontFamily, size);
+    builtIn = builtIn || options.fontSizeLadder[size] == readerFontId;
+  }
+  if (!builtIn) {
+    for (int& id : options.fontSizeLadder) id = 0;
+  }
+#endif
   return options;
 }
 
@@ -675,6 +689,19 @@ int CrossPointSettings::getCodeFontId() const {
   }
 }
 
+int CrossPointSettings::builtInReaderFontId(const uint8_t family, const uint8_t size) {
+  // All families normalised to the same point sizes (6/8/10/12) so switching family
+  // or size keeps text at a consistent scale. Rows: FONT_FAMILY, columns: FONT_SIZE.
+  static constexpr int FONT_IDS[FONT_FAMILY_COUNT][FONT_SIZE_COUNT] = {
+      {BOOKERLY_6_FONT_ID, BOOKERLY_8_FONT_ID, BOOKERLY_10_FONT_ID, BOOKERLY_12_FONT_ID},
+      {INTER_6_FONT_ID, INTER_8_FONT_ID, INTER_10_FONT_ID, INTER_12_FONT_ID},
+      {OPENDYSLEXIC_6_FONT_ID, OPENDYSLEXIC_8_FONT_ID, OPENDYSLEXIC_10_FONT_ID, OPENDYSLEXIC_12_FONT_ID},
+      {MONO_6_FONT_ID, MONO_8_FONT_ID, MONO_10_FONT_ID, MONO_12_FONT_ID},
+  };
+  // Out-of-range values fall back as the old switch did: Bookerly, Medium.
+  return FONT_IDS[family < FONT_FAMILY_COUNT ? family : BOOKERLY][size < FONT_SIZE_COUNT ? size : MEDIUM];
+}
+
 int CrossPointSettings::getReaderFontId() const {
   // SD card font selection overrides the built-in fontFamily enum.
   if (sdFontFamilyName[0] != '\0' && sdFontIdResolver) {
@@ -682,57 +709,5 @@ int CrossPointSettings::getReaderFontId() const {
     if (id != 0) return id;
     // SD font failed to load — fall through to built-in below.
   }
-  // All families normalised to the same point sizes (6/8/10/12) so switching family
-  // or size keeps text at a consistent scale.
-  switch (fontFamily) {
-    case BOOKERLY:
-    default:
-      switch (fontSize) {
-        case SMALL:
-          return BOOKERLY_6_FONT_ID;
-        case MEDIUM:
-        default:
-          return BOOKERLY_8_FONT_ID;
-        case LARGE:
-          return BOOKERLY_10_FONT_ID;
-        case EXTRA_LARGE:
-          return BOOKERLY_12_FONT_ID;
-      }
-    case INTER:
-      switch (fontSize) {
-        case SMALL:
-          return INTER_6_FONT_ID;
-        case MEDIUM:
-        default:
-          return INTER_8_FONT_ID;
-        case LARGE:
-          return INTER_10_FONT_ID;
-        case EXTRA_LARGE:
-          return INTER_12_FONT_ID;
-      }
-    case OPENDYSLEXIC:
-      switch (fontSize) {
-        case SMALL:
-          return OPENDYSLEXIC_6_FONT_ID;
-        case MEDIUM:
-        default:
-          return OPENDYSLEXIC_8_FONT_ID;
-        case LARGE:
-          return OPENDYSLEXIC_10_FONT_ID;
-        case EXTRA_LARGE:
-          return OPENDYSLEXIC_12_FONT_ID;
-      }
-    case MONOSPACE:
-      switch (fontSize) {
-        case SMALL:
-          return MONO_6_FONT_ID;
-        case MEDIUM:
-        default:
-          return MONO_8_FONT_ID;
-        case LARGE:
-          return MONO_10_FONT_ID;
-        case EXTRA_LARGE:
-          return MONO_12_FONT_ID;
-      }
-  }
+  return builtInReaderFontId(fontFamily, fontSize);
 }

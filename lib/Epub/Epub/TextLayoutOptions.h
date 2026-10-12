@@ -2,6 +2,15 @@
 
 #include <cstdint>
 
+// CROSSPOINT_EPUB_BLOCK_FONT_SIZES. Host unit tests may compile this header without
+// lib/DevicePolicy on the include path; they get the feature off.
+#if __has_include(<DevicePolicy.h>)
+#include <DevicePolicy.h>
+#endif
+#ifndef CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+#define CROSSPOINT_EPUB_BLOCK_FONT_SIZES 0
+#endif
+
 // User text-layout controls that reach the EPUB layout engine as one value, so adding a
 // control does not grow every Section / parser signature again. Every field changes where
 // words land, so all of them are written into the section cache header and compared on load
@@ -23,6 +32,16 @@ struct TextLayoutOptions {
   static constexpr uint8_t PARAGRAPH_INDENT_NONE = 1;
   static constexpr uint8_t PARAGRAPH_INDENT_COUNT = 6;  // book, none, then 1..4 spaces
   uint8_t paragraphIndent = PARAGRAPH_INDENT_BOOK;
+
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+  // The reader font family at each of its sizes, smallest first, for headings and CSS
+  // font-size on blocks (PSRAM boards only). All zero when the family exists in one size
+  // only (an SD-card or TrueType family): sizing is then off and every block uses the
+  // reader font. Not part of the cache key: the ladder is a function of the reader font id,
+  // which already is.
+  static constexpr uint8_t FONT_SIZE_STEPS = 4;
+  int fontSizeLadder[FONT_SIZE_STEPS] = {};
+#endif
 
   // True when neither spacing control changes anything: text then takes the renderer's
   // plain drawText / advance path, exactly as it did before the controls existed.

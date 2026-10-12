@@ -389,6 +389,48 @@ bool tryBorderWidth(std::string_view token, uint8_t& out) {
   return true;
 }
 
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+// font-size value -> CssLength. Keywords become pixels on the CSS scale where `medium` is
+// 16px, which the layout reads as the reader's body size. Unitless numbers and units the
+// engine cannot place (vw, ex, ...) are rejected rather than silently read as pixels.
+bool tryInterpretFontSize(std::string_view value, CssLength& out) {
+  value = trimCssWhitespace(stripTrailingImportant(value));
+  if (iequalsAscii(value, "larger")) {
+    out = CssLength{1.2f, CssUnit::Em};
+    return true;
+  }
+  if (iequalsAscii(value, "smaller")) {
+    out = CssLength{1.0f / 1.2f, CssUnit::Em};
+    return true;
+  }
+  static constexpr std::string_view keywords[] = {"xx-small", "x-small", "small",   "medium",
+                                                  "large",    "x-large", "xx-large"};
+  static constexpr float keywordPixels[] = {9.6f, 12.0f, 14.2f, 16.0f, 19.2f, 24.0f, 32.0f};
+  for (size_t i = 0; i < std::size(keywords); ++i) {
+    if (iequalsAscii(value, keywords[i])) {
+      out = CssLength{keywordPixels[i], CssUnit::Pixels};
+      return true;
+    }
+  }
+  static constexpr std::string_view units[] = {"rem", "em", "px", "pt", "%"};
+  static constexpr CssUnit unitKinds[] = {CssUnit::Rem, CssUnit::Em, CssUnit::Pixels, CssUnit::Points,
+                                          CssUnit::Percent};
+  for (size_t i = 0; i < std::size(units); ++i) {
+    const std::string_view unit = units[i];
+    if (value.size() > unit.size() && iequalsAscii(value.substr(value.size() - unit.size()), unit)) {
+      float number = 0;
+      if (!tryParseNumber(value.substr(0, value.size() - unit.size()), number) || !(number > 0.0f) ||
+          number > 1000.0f) {
+        return false;
+      }
+      out = CssLength{number, unitKinds[i]};
+      return true;
+    }
+  }
+  return false;
+}
+#endif
+
 // Handles border, border-<edge>, border[-<edge>]-style and border[-<edge>]-width. Returns
 // true when `name` is a border property (even one that is ignored, such as border-color).
 bool parseBorderDeclaration(std::string_view name, std::string_view value, CssStyle& style) {
@@ -594,6 +636,13 @@ void CssParser::parseDeclarationIntoStyle(std::string_view decl, CssStyle& style
     }
   } else if (iequalsAscii(name, "background") || iequalsAscii(name, "background-color")) {
     if (isShadedBackground(value)) style.defined.shaded = 1;
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+  } else if (iequalsAscii(name, "font-size")) {
+    if (CssLength size; tryInterpretFontSize(value, size)) {
+      style.fontSize = size;
+      style.defined.fontSize = 1;
+    }
+#endif
   } else {
     parseBorderDeclaration(name, value, style);
   }
@@ -945,6 +994,9 @@ bool CssParser::saveToCache() const {
     file.write(static_cast<uint8_t>(style.verticalAlign));
     file.write(static_cast<uint8_t>(style.direction));
     for (const CssBorderSide& side : style.borders) file.write(side.packed());
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+    writeLength(style.fontSize);
+#endif
 
     // Write defined flags as uint32_t
     uint32_t definedBits = 0;
@@ -972,6 +1024,7 @@ bool CssParser::saveToCache() const {
     if (style.defined.shaded) definedBits |= 1 << 21;
     definedBits |= static_cast<uint32_t>(style.defined.borderStyle) << 22;
     definedBits |= static_cast<uint32_t>(style.defined.borderWidth) << 26;
+    if (style.defined.fontSize) definedBits |= 1U << 30;
     file.write(reinterpret_cast<const uint8_t*>(&definedBits), sizeof(definedBits));
   }
 
@@ -1028,7 +1081,8 @@ bool CssParser::loadFromCache() {
   constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
   // 4 enums + display, the lengths, verticalAlign + direction, 4 border edges, defined bits.
   constexpr size_t CSS_FIXED_STYLE_BYTES = 5 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
-                                           2 * sizeof(uint8_t) + 4 * sizeof(uint8_t) + sizeof(uint32_t);
+                                           2 * sizeof(uint8_t) + 4 * sizeof(uint8_t) + sizeof(uint32_t) +
+                                           (CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? CSS_LENGTH_BYTES : 0);
 
   // Read each rule
   for (uint16_t i = 0; i < ruleCount; ++i) {
@@ -1143,6 +1197,14 @@ bool CssParser::loadFromCache() {
       }
     }
 
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+    if (!readLength(style.fontSize) ||
+        static_cast<uint8_t>(style.fontSize.unit) > static_cast<uint8_t>(CssUnit::Percent)) {
+      rulesBySelector_.clear();
+      return false;
+    }
+#endif
+
     // Read defined flags
     uint32_t definedBits = 0;
     if (file.read(&definedBits, sizeof(definedBits)) != sizeof(definedBits)) {
@@ -1173,6 +1235,9 @@ bool CssParser::loadFromCache() {
     style.defined.shaded = (definedBits & 1 << 21) != 0;
     style.defined.borderStyle = (definedBits >> 22) & 0x0F;
     style.defined.borderWidth = (definedBits >> 26) & 0x0F;
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+    style.defined.fontSize = (definedBits & (1U << 30)) != 0;
+#endif
 
     rulesBySelector_[selector] = style;
   }

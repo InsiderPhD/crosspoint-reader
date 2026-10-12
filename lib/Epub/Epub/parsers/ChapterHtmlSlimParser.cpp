@@ -668,6 +668,82 @@ void ChapterHtmlSlimParser::preLeadingSpace(const int count) {
   nextWordContinues = true;
 }
 
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+namespace {
+// Nominal point sizes of the four reader sizes (CrossPointSettings::getReaderFontId).
+constexpr int FONT_STEP_POINTS[TextLayoutOptions::FONT_SIZE_STEPS] = {6, 8, 10, 12};
+}  // namespace
+
+int ChapterHtmlSlimParser::fontLadderIndex(const int id) const {
+  if (id == 0) return -1;
+  for (int i = 0; i < TextLayoutOptions::FONT_SIZE_STEPS; ++i) {
+    if (textLayout.fontSizeLadder[i] == id) return i;
+  }
+  return -1;
+}
+
+int ChapterHtmlSlimParser::blockFontFor(const char* tag, const CssStyle& cssStyle, const int parentFontOverride) const {
+  const int base = fontLadderIndex(fontId);
+  if (base < 0) return 0;  // family with a single size: nothing to choose from
+  const int parentIndex = fontLadderIndex(parentFontOverride);
+  // Sizes in hundredths of the body size. Once per block element, never per glyph.
+  const int parentScale = FONT_STEP_POINTS[parentIndex >= 0 ? parentIndex : base] * 100 / FONT_STEP_POINTS[base];
+  int scale = parentScale;
+  if (cssStyle.defined.fontSize) {
+    const CssLength& size = cssStyle.fontSize;
+    float resolved = static_cast<float>(parentScale);
+    switch (size.unit) {
+      case CssUnit::Em:
+        resolved = parentScale * size.value;
+        break;
+      case CssUnit::Percent:
+        resolved = parentScale * size.value / 100.0f;
+        break;
+      case CssUnit::Rem:
+        resolved = 100.0f * size.value;
+        break;
+      // CSS `medium` (16px / 12pt) is the size the reader chose for body text.
+      case CssUnit::Points:
+        resolved = size.value * 100.0f / 12.0f;
+        break;
+      case CssUnit::Pixels:
+        resolved = size.value * 100.0f / 16.0f;
+        break;
+    }
+    scale = static_cast<int>(std::clamp(resolved, 25.0f, 400.0f));
+  } else if (tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '3' && tag[2] == '\0') {
+    // Browser defaults for h1..h3. h4 is body size; h5 and h6 would be smaller than the
+    // text they head, which reads badly on a small page, so they stay at body size too.
+    static constexpr int HEADING_SCALE[3] = {200, 150, 117};
+    scale = parentScale * HEADING_SCALE[tag[1] - '1'] / 100;
+  }
+
+  // Nearest available size; a tie goes to the step closer to the body size.
+  const int target = FONT_STEP_POINTS[base] * scale;  // hundredths of a point
+  int best = base;
+  int bestError = std::abs(FONT_STEP_POINTS[base] * 100 - target);
+  for (int i = 0; i < TextLayoutOptions::FONT_SIZE_STEPS; ++i) {
+    const int error = std::abs(FONT_STEP_POINTS[i] * 100 - target);
+    if (error < bestError || (error == bestError && std::abs(i - base) < std::abs(best - base))) {
+      best = i;
+      bestError = error;
+    }
+  }
+  return best == base ? 0 : textLayout.fontSizeLadder[best];
+}
+#endif
+
+int ChapterHtmlSlimParser::lineMetricsFontId(const BlockStyle& blockStyle) const {
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+  // Only for a size override: a <pre> block's monospace font keeps the reader font's line
+  // metrics, as it always has.
+  if (fontLadderIndex(blockStyle.fontOverride) >= 0) return blockStyle.fontOverride;
+#else
+  (void)blockStyle;
+#endif
+  return fontId;
+}
+
 // Places an image as a block of its own: the paragraph before it is laid out, the image is
 // centred in the column and takes the vertical margins of its container.
 void ChapterHtmlSlimParser::placeBlockImage(std::unique_ptr<ImageBlock> imageBlock) {
@@ -1510,7 +1586,16 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     }
   }
 
-  const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
+  // 0 = the reader font. Boards with block font sizes pick the size of a heading or of a
+  // block the book's CSS sizes; em lengths on the element then resolve against that size.
+  int blockFontOverride = 0;
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+  if (isHeaderOrBlock(name) && strcmp(name, "br") != 0 && !self->currentTable) {
+    blockFontOverride = self->blockFontFor(name, cssStyle, self->blockStyleStack.back().fontOverride);
+  }
+#endif
+  const float emSize =
+      static_cast<float>(self->renderer.getFontAscenderSize(blockFontOverride != 0 ? blockFontOverride : self->fontId));
   const auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
       cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth, self->viewportHeight);
 
@@ -1549,6 +1634,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     if (self->embeddedStyle && cssStyle.hasTextAlign()) {
       headerBlockStyle.alignment = cssStyle.textAlign;
     }
+    headerBlockStyle.fontOverride = blockFontOverride;
     if (decoratedBlock) self->openBoxScope(headerBlockStyle, cssStyle);
     const auto accumulated =
         self->blockStyleStack.back().getCombinedBlockStyle(headerBlockStyle, BlockStyle::CombineAxis::Horizontal);
@@ -1566,6 +1652,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     } else {
       self->currentCssStyle = cssStyle;
       BlockStyle ownBlockStyle = userAlignmentBlockStyle;
+      ownBlockStyle.fontOverride = blockFontOverride;
       if (decoratedBlock) self->openBoxScope(ownBlockStyle, cssStyle);
       const bool preformatted = decoratedBlock && cssStyle.defined.whiteSpacePre;
       if (preformatted) {
@@ -2458,7 +2545,8 @@ int ChapterHtmlSlimParser::lookupFootnoteLineCount(const char* href, const int w
 }
 
 void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
-  const int textLineHeight = renderer.getLineHeight(fontId) * lineCompression;
+  const int metricsFontId = lineMetricsFontId(line->getBlockStyle());
+  const int textLineHeight = renderer.getLineHeight(metricsFontId) * lineCompression;
   // Inline images on this line. They sit on the text baseline, as CSS places an inline image
   // by default; one taller than the font's ascent pushes the line's text down by the excess,
   // so the line grows upwards-in-effect and nothing overlaps the line above.
@@ -2467,7 +2555,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
       (currentTextBlock && !pendingInlineImages.empty()) ? currentTextBlock->currentLineImages() : kNoLineImages;
   int imageRise = 0;
   if (!lineImages.empty()) {
-    const int ascender = renderer.getFontAscenderSize(fontId);
+    const int ascender = renderer.getFontAscenderSize(metricsFontId);
     for (const auto& image : lineImages) imageRise = std::max(imageRise, static_cast<int>(image.height) - ascender);
   }
   const int lineHeight = textLineHeight + imageRise;
@@ -2601,7 +2689,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
   // Apply horizontal left inset (margin + padding) as x position offset
   const int16_t xOffset = line->getBlockStyle().leftInset();
   if (!lineImages.empty()) {
-    const int baselineY = currentPageNextY + imageRise + renderer.getFontAscenderSize(fontId);
+    const int baselineY = currentPageNextY + imageRise + renderer.getFontAscenderSize(metricsFontId);
     for (const auto& image : lineImages) {
       const auto it = std::find_if(pendingInlineImages.begin(), pendingInlineImages.end(),
                                    [&image](const PendingInlineImage& pending) { return pending.id == image.id; });

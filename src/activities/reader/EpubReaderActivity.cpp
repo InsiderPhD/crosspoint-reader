@@ -1923,6 +1923,11 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
 
         const auto& block = *line.getBlock();
         const uint16_t count = block.wordCount();
+        // The font the line was laid out in: a block may override the reader font (a sized
+        // heading on PSRAM boards), and the selection box has to cover the word as drawn.
+        const int blockFontOverride = block.getBlockStyle().fontOverride;
+        const int wordFontId = blockFontOverride != 0 ? blockFontOverride : readerFontId;
+        const int wordLineHeight = blockFontOverride != 0 ? renderer.getLineHeight(wordFontId) : lineHeight;
         if (renderer.isSdCardFont(readerFontId) && count > 0) {
           uint8_t styleMask = 0;
           std::string joined;
@@ -1939,7 +1944,7 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
           const auto textStyle = static_cast<EpdFontFamily::Style>(block.wordStyle(i) & ~EpdFontFamily::UNDERLINE);
           // With the line's own letter spacing, so the selection box covers the word as drawn.
           int wordWidth =
-              renderer.getTextAdvanceX(readerFontId, wordText, textStyle, block.getBlockStyle().characterSpacing);
+              renderer.getTextAdvanceX(wordFontId, wordText, textStyle, block.getBlockStyle().characterSpacing);
           if (wordWidth <= 0) continue;
 
           WordRef word;
@@ -1950,7 +1955,7 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
             wordWidth = std::min(wordWidth, static_cast<int>(block.wordXpos(i + 1) - block.wordXpos(i)));
           }
           word.w = static_cast<int16_t>(wordWidth);
-          word.h = static_cast<int16_t>(lineHeight);
+          word.h = static_cast<int16_t>(wordLineHeight);
           word.pageIdx = static_cast<uint8_t>(pageIdx);
           word.style = textStyle;
           clipWords.textPool.append(wordText, block.wordTextLen(i));

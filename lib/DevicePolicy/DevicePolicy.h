@@ -127,3 +127,15 @@
 #ifndef CROSSPOINT_VECTOR_FONTS
 #define CROSSPOINT_VECTOR_FONTS (!CROSSPOINT_TIGHT_HEAP)
 #endif
+
+// --- EPUB heading and block font sizes ----------------------------------------
+//
+// Lets a book's headings, and blocks its CSS sizes with font-size, be laid out in another
+// of the reader font's built-in sizes. A page then draws from two or three fonts instead of
+// one, and each font brings its own glyph cache and prewarm work; the chapter also gets
+// longer in pages. On the C3 boards that is paid out of the heap a section build and the
+// Bluetooth stack are already competing for, so there the feature is not compiled at all:
+// no CSS font-size parsing, no extra rule bytes, and layout is exactly what it was.
+#ifndef CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+#define CROSSPOINT_EPUB_BLOCK_FONT_SIZES (!CROSSPOINT_TIGHT_HEAP)
+#endif

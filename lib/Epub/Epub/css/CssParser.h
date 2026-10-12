@@ -36,7 +36,10 @@ class CssParser {
   // 7: `display: inline` is stored as CssDisplay::Inline (was folded into Block).
   // 8: rules carry direction (parsed before, but dropped by the cache), four packed border
   //    edges, and defined bits 17..29 (direction, page breaks, white-space, shade, borders).
-  static constexpr uint8_t CSS_CACHE_VERSION = 8;
+  // Bit 7 marks a cache written by a build with CROSSPOINT_EPUB_BLOCK_FONT_SIZES, whose
+  // rules carry one more length (font-size). The two layouts never match each other's
+  // version byte, so an SD card moved between a C3 and a PSRAM board rebuilds the cache.
+  static constexpr uint8_t CSS_CACHE_VERSION = 8 | (CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? 0x80 : 0);
 
   explicit CssParser(std::string cachePath) : cachePath(std::move(cachePath)) {}
   ~CssParser() = default;

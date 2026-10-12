@@ -225,6 +225,20 @@ class ChapterHtmlSlimParser {
   void preLeadingSpace(int count);
   void beginPreLine();
 
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+  // ── Heading and block font sizes (PSRAM boards) ────────────────────────────
+  // A block is laid out in one of the reader family's built-in sizes
+  // (textLayout.fontSizeLadder), carried in BlockStyle::fontOverride like the <pre> font.
+  // Position of `id` on the ladder, or -1 (also when the ladder is empty or id is 0).
+  int fontLadderIndex(int id) const;
+  // fontOverride for a block element: its heading level or CSS font-size applied to the
+  // size it inherits from `parentFontOverride`. 0 means the reader font.
+  int blockFontFor(const char* tag, const CssStyle& cssStyle, int parentFontOverride) const;
+#endif
+  // The font a laid-out line's metrics come from: the reader font, or on boards with block
+  // font sizes the size the line was laid out in.
+  int lineMetricsFontId(const BlockStyle& blockStyle) const;
+
   // Style tracking (replaces depth-based approach)
   struct StyleStackEntry {
     int depth = 0;

@@ -174,6 +174,13 @@ if (parsedSize != fileSize) {
 > edge bytes (same packing as above) follow `verticalAlign`, and the defined-flags word
 > gains bits 17 direction, 18 page-break-before, 19 page-break-after, 20 white-space pre,
 > 21 shaded background, 22-25 border style set per edge, 26-29 border width set per edge.
+> The v48 header also gains `layoutFeatures u8` after `paragraphIndent` and before
+> `pageCount` (bit 0: the build lays out headings and CSS-sized blocks in other sizes of
+> the reader font, PSRAM boards only), compared on load like the render settings, so a
+> card moved between an X4 and an X4C rebuilds. Sized lines use the existing
+> `fontOverride` in each TextBlock; nothing else in the payload changes. On those builds
+> the CSS cache version byte has bit 7 set (`0x88`): each rule carries one more length,
+> `fontSize` (float + unit), after the border bytes, flagged by defined bit 30.
 >
 > Any change to the on-disk structure **must** bump this constant — a stale cache read
 > against a new layout is how you get a hard fault, not a graceful failure.

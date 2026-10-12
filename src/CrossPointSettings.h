@@ -887,6 +887,8 @@ class CrossPointSettings {
     }
   }
   int getReaderFontId() const;
+  // Font id of a built-in family (FONT_FAMILY) at a size (FONT_SIZE).
+  static int builtInReaderFontId(uint8_t family, uint8_t size);
   int getCodeFontId() const;
 
   // If count_only is true, returns the number of settings items that would be written.
