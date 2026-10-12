@@ -164,6 +164,27 @@ std::string bookFusionExpectedFilename(const BookFusionBook& book) {
   return "/" + StringUtils::sanitizeFilename(baseName) + "." + ext;
 }
 
+// Where this book is on the card, or where a download will put it. A book that
+// was renamed or moved on the device is not at the expected name any more, so
+// it is found by its BookFusion id instead (BookFusionBookIdStore's moved-book
+// list); without that it would show as not downloaded and a second copy would
+// land beside the first. `present` reports whether the file exists.
+std::string bookFusionLocalFilename(const BookFusionBook& book, bool& present) {
+  std::string path = bookFusionExpectedFilename(book);
+  present = Storage.exists(path.c_str());
+  if (present) return path;
+
+  std::string moved;
+  // The id check guards against a stale entry: the moved copy deleted and some
+  // other file since given its name.
+  if (BookFusionBookIdStore::loadMovedPath(book.id, moved) && Storage.exists(moved.c_str()) &&
+      BookFusionBookIdStore::loadBookId(moved.c_str()) == book.id) {
+    present = true;
+    return moved;
+  }
+  return path;
+}
+
 }  // namespace
 
 void BookFusionBrowserActivity::onEnter() {
@@ -361,7 +382,7 @@ void BookFusionBrowserActivity::loadPage(int page) {
   }
 
   for (int i = 0; i < searchResult.count; ++i) {
-    downloadedFlags[i] = Storage.exists(bookFusionExpectedFilename(searchResult.books[i]).c_str());
+    bookFusionLocalFilename(searchResult.books[i], downloadedFlags[i]);
   }
 
   {
@@ -404,24 +425,12 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   // serialise a full ~1 s e-ink refresh in front of every other step.
   requestUpdate(true);
 
-  // Build destination path: "/Title - Author.ext" (sanitized). All inputs come
-  // from the search result — no network call needed here.
-  std::string baseName = book.title;
-  if (book.authors[0] != '\0') {
-    baseName += " - ";
-    baseName += book.authors;
-  }
-
-  char ext[8] = "epub";
-  if (book.format[0] != '\0') {
-    size_t i = 0;
-    for (; i < sizeof(ext) - 1 && book.format[i] != '\0'; i++) {
-      ext[i] = static_cast<char>(tolower(static_cast<unsigned char>(book.format[i])));
-    }
-    ext[i] = '\0';
-  }
-
-  const std::string filename = "/" + StringUtils::sanitizeFilename(baseName) + "." + ext;
+  // Destination: "/Title - Author.ext" (sanitized), built from the search result
+  // with no network call. Downloading a book again replaces the copy already on
+  // the card wherever it has been renamed or moved to, rather than adding a
+  // second one under the original name.
+  bool alreadyOnCard = false;
+  const std::string filename = bookFusionLocalFilename(book, alreadyOnCard);
   // The transfer lands in a .part scratch file and is renamed on success. The
   // library browsers filter by extension, so a half-downloaded book never
   // shows up as an openable (and broken) EPUB, and a later attempt — this
@@ -429,8 +438,8 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   // it with an HTTP Range request instead of starting over.
   const std::string partPath = filename + ".part";
   const bool resumingPartial = Storage.exists(partPath.c_str());
-  LOG_DBG("BFB", "Downloading book_id=%lu -> %s%s", static_cast<unsigned long>(book.id), filename.c_str(),
-          resumingPartial ? " (resuming partial)" : "");
+  LOG_DBG("BFB", "Downloading book_id=%lu -> %s%s%s", static_cast<unsigned long>(book.id), filename.c_str(),
+          alreadyOnCard ? " (replacing)" : "", resumingPartial ? " (resuming partial)" : "");
   // Every download opens a section in the SD failure log; a success leaves
   // only these few lines behind, a failure gets the transport report from
   // HttpDownloader appended under it.

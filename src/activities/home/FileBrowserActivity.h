@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "../Activity.h"
+#include "../util/FileRenameFlow.h"
 #include "RecentBooksStore.h"
 #include "components/SortMenu.h"
 #include "sorting/SortMode.h"
@@ -57,10 +58,7 @@ class FileBrowserActivity final : public Activity {
   int bookOptionsProgress = -1;
   bool bookOptionsHasClippings = false;
 
-  // Why the last rename was refused (a tr() string). Set from the keyboard's
-  // result handler and shown as a dialog from the next loop(), where starting
-  // an activity is safe.
-  const char* pendingRenameError = nullptr;
+  FileRenameFlow renameFlow;
 
   // Files state
   std::string basepath = "/";
@@ -116,21 +114,14 @@ class FileBrowserActivity final : public Activity {
   // Hold-Confirm delete flow for files[selectorIndex] (confirmation dialog +
   // removal), also fired by a Full Touch long tap on a folder row.
   void confirmDeleteSelectedEntry();
-  // Rename: keyboard pre-filled with the name minus its extension, then
-  // BookMoveUtils::renameFile so a book keeps its reading state.
+  // Rename (FileRenameFlow), then reload the folder with the cursor on the file.
   void startRename(const std::string& path);
-  void renameFile(const std::string& oldPath, const std::string& newStem, const std::string& extension);
   // Hold-Confirm / long tap on a row that is not a book. Folders and BMP
   // images get a short action list (sleep folder or boot screen, then delete);
   // anything else goes straight to delete.
   void openEntryActions();
   // Full path of files[selectorIndex], without a folder's trailing '/'.
   std::string selectedEntryPath() const;
-  // Makes `path` the folder the Custom sleep screen picks from; empty restores
-  // the default /.sleep, /sleep lookup.
-  void setSleepFolder(const std::string& path);
-  // Makes `path` the image shown at boot; empty restores the built-in logo.
-  void setBootImage(const std::string& path);
   // Header of the open entry action list. ListPickerActivity keeps only the
   // pointer, so the text has to outlive it.
   std::string entryActionsTitle;

@@ -117,8 +117,10 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
                                                              ProgressCallback progress, bool allowConfiguredAuth,
                                                              size_t expectedSize, const volatile bool* cancelFlag,
                                                              const std::string& username, const std::string& password,
-                                                             const std::vector<Header>& headers, bool resumePartial) {
+                                                             const std::vector<Header>& headers, bool resumePartial,
+                                                             std::string* outContentDisposition) {
   gLastHttpStatus = 0;
+  if (outContentDisposition) outContentDisposition->clear();
   // Modem sleep off for the whole transfer (BookFusion, OPDS, plugins, fonts,
   // dictionaries, firmware); declared first so it outlives `http`.
   WifiPowerSaveGuard wifiPowerSaveGuard;
@@ -340,6 +342,11 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
 #endif
 
   gLastHttpStatus = httpCode > 0 ? httpCode : 0;
+  if (outContentDisposition && (httpCode == 200 || httpCode == 206)) {
+    // Bounded: a hostile server must not be able to hand the caller a huge string.
+    std::string value = http.getHeader("content-disposition");
+    if (value.size() <= 1024) *outContentDisposition = std::move(value);
+  }
 
   // What is on disk after a resumable failure. With resumePartial the bytes
   // written so far are a valid prefix of the file (appended after a 206, or a

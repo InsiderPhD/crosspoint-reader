@@ -904,6 +904,20 @@ void EpubReaderActivity::loop() {
     int holdX, holdY;
     const auto holdZone = mappedInput.wasTouchLongPressZone(holdX, holdY);
     if (holdZone != MappedInputManager::TapZone::None) {
+      if (SETTINGS.readerHoldMode != CrossPointSettings::READER_HOLD_SHORTCUT) {
+        // Hold Action = Dictionary / Highlight: the hold is a word gesture and
+        // the zones do not apply. The contact is deliberately left live when
+        // the word selector opens, which adopts it so the same finger can go on
+        // to drag out a phrase or a range (a suppressed contact reports no
+        // position, see InputManager::isTouchHeldAt). The selector suppresses
+        // it when it ends. No word under the finger: nothing happens, and the
+        // contact is dropped here so its lift cannot turn the page.
+        const bool forLookup = SETTINGS.readerHoldMode == CrossPointSettings::READER_HOLD_DICTIONARY;
+        if (!startClipSelection(holdX, holdY, forLookup, /*liveContact=*/true)) {
+          mappedInput.suppressTouchContact();
+        }
+        return;
+      }
       mappedInput.suppressTouchContact();
       uint8_t holdSetting = SETTINGS.readerHoldMiddle;
       if (holdZone == MappedInputManager::TapZone::Left) holdSetting = SETTINGS.readerHoldLeft;
@@ -1762,10 +1776,11 @@ namespace {
 const char* clipVisibleText(const char* text) { return clipword::hasEmSpacePrefix(text) ? text + 3 : text; }
 }  // namespace
 
-void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY, const bool forLookup) {
+bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY, const bool forLookup,
+                                            const bool liveContact) {
   if (!section || !epub) {
     requestUpdate();
-    return;
+    return false;
   }
 
   int orientedMarginTop = 0, orientedMarginRight = 0, orientedMarginBottom = 0, orientedMarginLeft = 0;
@@ -1780,7 +1795,7 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
     RenderLock lock(*this);
     if (!section || !epub) {
       requestUpdate();
-      return;
+      return false;
     }
 
     computeOrientedMargins(orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
@@ -1901,9 +1916,12 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
   }
 
   if (clipWords.words.empty()) {
+    // A hold on an all-image page is "no word under the finger", not an error:
+    // leave the page exactly as it is.
+    if (liveContact) return false;
     LOG_ERR(forLookup ? "DICT" : "CLIP", "No selectable words on current EPUB page");
     requestUpdate();
-    return;
+    return false;
   }
 
   // Tap-and-hold entry: resolve the touched point to a word on the visible page
@@ -1918,11 +1936,20 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
     }
   }
 
+  // A live contact is only handed over on a word: a hold on a margin, an image
+  // or the gap between paragraphs does nothing at all (no repaint either).
+  // The lookup preconditions are checked after that, so they are only ever
+  // reported for a hold that would otherwise have looked something up.
+  if (liveContact) {
+    if (!preAnchored) return false;
+    if (forLookup && !dictionaryLookupAllowed()) return false;
+  }
+
   if (forLookup) {
     startActivityForResult(
         std::make_unique<ClipSelectionActivity>(renderer, mappedInput, std::move(clipWords), readerFontId, *section,
                                                 startPage, orientedMarginTop, orientedMarginLeft, initialCursorIdx,
-                                                /*preAnchored=*/false, /*lookupMode=*/true),
+                                                /*preAnchored=*/false, /*lookupMode=*/true, liveContact),
         [this](const ActivityResult& result) {
           // get_if, not get: a default ActivityResult is NOT cancelled but holds
           // monostate, and std::get on the wrong alternative aborts under -fno-exceptions.
@@ -1933,13 +1960,13 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
           }
           performDictionaryLookup(pick->word);
         });
-    return;
+    return true;
   }
 
   startActivityForResult(
       std::make_unique<ClipSelectionActivity>(renderer, mappedInput, std::move(clipWords), readerFontId, *section,
                                               startPage, orientedMarginTop, orientedMarginLeft, initialCursorIdx,
-                                              preAnchored),
+                                              preAnchored, /*lookupMode=*/false, liveContact),
       [this, bookTitle = std::move(bookTitle), author = std::move(author),
        chapterTitle = std::move(chapterTitle)](const ActivityResult& result) {
         // get_if, not get: a default ActivityResult is NOT cancelled but holds monostate, and
@@ -1970,9 +1997,10 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
         }
         requestUpdate();
       });
+  return true;
 }
 
-void EpubReaderActivity::openDictionaryLookup() {
+bool EpubReaderActivity::dictionaryLookupAllowed() {
   const auto refuse = [this](const StrId message) {
     dictionaryMessage = message;
     showDictionaryMessage = true;
@@ -1982,7 +2010,7 @@ void EpubReaderActivity::openDictionaryLookup() {
 
   if (SETTINGS.dictionaryName[0] == '\0') {
     refuse(StrId::STR_DICT_NO_DICT_SET);
-    return;
+    return false;
   }
 
 #if CROSSPOINT_BLE_EXCLUSIVE
@@ -2001,10 +2029,15 @@ void EpubReaderActivity::openDictionaryLookup() {
   // features never contend.
   if (BluetoothHIDManager::getInstance().isEnabled()) {
     refuse(StrId::STR_DICT_BT_ON);
-    return;
+    return false;
   }
 #endif
 
+  return true;
+}
+
+void EpubReaderActivity::openDictionaryLookup() {
+  if (!dictionaryLookupAllowed()) return;
   startClipSelection(-1, -1, /*forLookup=*/true);
 }
 
@@ -2072,8 +2105,7 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
   if (automaticPageTurnActive &&
       (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight())) {
     orientedMarginBottom +=
-        std::max(SETTINGS.screenMargin,
-                 static_cast<uint8_t>(statusBarHeight + UITheme::getInstance().getMetrics().statusBarVerticalMargin));
+        std::max(SETTINGS.screenMargin, static_cast<uint8_t>(statusBarHeight + UITheme::getStatusBarTextLaneHeight()));
   } else {
     orientedMarginBottom += std::max(SETTINGS.screenMargin, statusBarHeight);
   }
@@ -3226,7 +3258,7 @@ void EpubReaderActivity::renderStatusBar() const {
     // Offset the banner text when there is no status/progress-bar strip below it.
     const uint8_t statusBarHeight = UITheme::getInstance().getStatusBarHeight();
     if (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight()) {
-      textYOffset += UITheme::getInstance().getMetrics().statusBarVerticalMargin;
+      textYOffset += UITheme::getStatusBarTextLaneHeight();
     }
   }
 

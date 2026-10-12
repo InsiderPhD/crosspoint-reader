@@ -71,11 +71,15 @@ class HttpDownloader {
    *        next call can continue; the caller must therefore download to a
    *        scratch name and rename on OK, or a half file is left where a
    *        reader could open it. Without this flag any failure deletes the file.
+   * @param outContentDisposition When non-null, receives the response's raw
+   *        Content-Disposition header value (empty if absent or over 1KB). Opt-in
+   *        so no other download pays for the copy; the caller parses it.
    * @return DownloadError indicating success or failure type
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, bool allowConfiguredAuth = true,
                                       size_t expectedSize = 0, const volatile bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "",
-                                      const std::vector<Header>& headers = {}, bool resumePartial = false);
+                                      const std::vector<Header>& headers = {}, bool resumePartial = false,
+                                      std::string* outContentDisposition = nullptr);
 };

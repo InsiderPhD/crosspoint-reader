@@ -598,6 +598,7 @@ void GroupBrowserActivity::dispatchBookAction(BookContextMenu::Action action, co
       auto details = std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title, contextMenu.author(),
                                                            contextMenu.progressPercent());
       details->setSiblingsRef(&bookPaths, std::move(order), pos);
+      details->setRenameListener(this, &GroupBrowserActivity::bookRenamedCallback);
       startActivityForResult(std::move(details), [this](const ActivityResult&) { requestUpdate(); });
       break;
     }
@@ -605,7 +606,41 @@ void GroupBrowserActivity::dispatchBookAction(BookContextMenu::Action action, co
       startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, path),
                              [this](const ActivityResult&) { requestUpdate(); });
       break;
+    case BookContextMenu::Action::Rename:
+      renameFlow.start(
+          *this, renderer, mappedInput, path,
+          [this](const std::string& oldPath, const std::string& newPath) { onBookRenamed(oldPath, newPath); });
+      break;
   }
+}
+
+void GroupBrowserActivity::bookRenamedCallback(void* context, const std::string& oldPath, const std::string& newPath) {
+  static_cast<GroupBrowserActivity*>(context)->onBookRenamed(oldPath, newPath);
+}
+
+void GroupBrowserActivity::onBookRenamed(const std::string& oldPath, const std::string& newPath) {
+  RenderLock lock;  // the render task reads these lists
+  size_t bookIndex = bookPaths.size();
+  for (size_t i = 0; i < bookPaths.size(); ++i) {
+    if (bookPaths[i] == oldPath) {
+      bookPaths[i] = newPath;
+      bookIndex = i;
+      break;
+    }
+  }
+  if (bookIndex == bookPaths.size()) return;
+
+  // Same index, new name: only the order of the list on screen can change.
+  std::vector<uint16_t>& list = atGroupList() ? rootBookIdx : groupBookIdx;
+  sortBookIndices(list);
+  const size_t firstBookRow = atGroupList() ? groups.size() : 0;
+  for (size_t row = 0; row < list.size(); ++row) {
+    if (list[row] == bookIndex) {
+      selectorIndex = firstBookRow + row;
+      break;
+    }
+  }
+  requestUpdate(true);
 }
 
 Rect GroupBrowserActivity::listRect() const {
@@ -635,6 +670,7 @@ void GroupBrowserActivity::activateSelectedRow() {
 
 void GroupBrowserActivity::loop() {
   if (initialLoadPending) return;  // First render performs the load.
+  if (renameFlow.poll(*this, renderer, mappedInput)) return;
 
   // Power short-press → book-order sort menu. Suppressed while the book context menu is open.
   // The chosen order applies to every folder's book list; picking it at the folder level just

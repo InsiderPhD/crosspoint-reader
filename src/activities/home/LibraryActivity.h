@@ -7,9 +7,11 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../Activity.h"
+#include "../util/FileRenameFlow.h"
 #include "components/BookContextMenu.h"
 #include "components/SortMenu.h"
 #include "sorting/SortMode.h"
@@ -57,6 +59,19 @@ class LibraryActivity final : public Activity {
  private:
   ButtonNavigator buttonNavigator;
   BookContextMenu contextMenu;
+  FileRenameFlow renameFlow;
+
+  // A book was renamed from the context menu or from Book Info. The list is
+  // reloaded on the next render (the rename invalidated the indexes) and the
+  // selector is put back on the book. `renamedPaths` (old -> new, this visit's
+  // renames only, emptied by that reload) lets Book Info keep paging through
+  // an index that still lists the old name.
+  void onBookRenamed(const std::string& oldPath, const std::string& newPath);
+  static void bookRenamedCallback(void* context, const std::string& oldPath, const std::string& newPath);
+  // Render task: selector onto `path` in the freshly loaded list, if listed.
+  void selectBookByPath(const std::string& path);
+  std::string pendingSelectPath;
+  std::vector<std::pair<std::string, std::string>> renamedPaths;
 
   // Bare-minimum per-book state. Paths only — title/author/thumb are derived
   // lazily during page render via the per-book .crosspoint cache.

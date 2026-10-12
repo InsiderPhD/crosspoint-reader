@@ -154,9 +154,6 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
                SettingInfo::Enum(StrId::STR_SEAMLESS_SLEEP, &CrossPointSettings::seamlessSleepScreen,
                                  {StrId::STR_NEVER, StrId::STR_AFTER_TIMEOUT, StrId::STR_ALWAYS}, "seamlessSleepScreen",
                                  StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_HIDE_BATTERY, &CrossPointSettings::hideBatteryPercentage,
-                                 {StrId::STR_NEVER, StrId::STR_IN_READER, StrId::STR_ALWAYS}, "hideBatteryPercentage",
-                                 StrId::STR_CAT_DISPLAY),
                SettingInfo::Enum(StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
                                  {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15,
                                   StrId::STR_PAGES_30},
@@ -269,6 +266,8 @@ inline void appendStatsSettings(std::vector<SettingInfo>& v) {
   v.insert(
       v.end(),
       {
+          SettingInfo::Toggle(StrId::STR_TRACK_READING_STATS, &CrossPointSettings::trackReadingStats,
+                              "trackReadingStats", StrId::STR_CAT_STATS),
           SettingInfo::Enum(
               StrId::STR_DAILY_GOAL, &CrossPointSettings::dailyReadingGoal,
               {StrId::STR_MIN_5, StrId::STR_MIN_10, StrId::STR_MIN_15, StrId::STR_MIN_30, StrId::STR_MIN_60},
@@ -479,15 +478,18 @@ inline void appendHardcoverSettings(std::vector<SettingInfo>& v) {
 
 // --- OPDS Browser (web-only, uses CrossPointSettings char arrays) ---
 inline void appendOpdsSettings(std::vector<SettingInfo>& v) {
-  v.insert(v.end(), {
-                        SettingInfo::String(StrId::STR_OPDS_SERVER_URL, SETTINGS.opdsServerUrl,
-                                            sizeof(SETTINGS.opdsServerUrl), "opdsServerUrl", StrId::STR_OPDS_BROWSER),
-                        SettingInfo::String(StrId::STR_USERNAME, SETTINGS.opdsUsername, sizeof(SETTINGS.opdsUsername),
-                                            "opdsUsername", StrId::STR_OPDS_BROWSER),
-                        SettingInfo::String(StrId::STR_PASSWORD, SETTINGS.opdsPassword, sizeof(SETTINGS.opdsPassword),
-                                            "opdsPassword", StrId::STR_OPDS_BROWSER)
-                            .withObfuscated(),
-                    });
+  v.insert(v.end(),
+           {
+               SettingInfo::String(StrId::STR_OPDS_SERVER_URL, SETTINGS.opdsServerUrl, sizeof(SETTINGS.opdsServerUrl),
+                                   "opdsServerUrl", StrId::STR_OPDS_BROWSER),
+               SettingInfo::String(StrId::STR_USERNAME, SETTINGS.opdsUsername, sizeof(SETTINGS.opdsUsername),
+                                   "opdsUsername", StrId::STR_OPDS_BROWSER),
+               SettingInfo::String(StrId::STR_PASSWORD, SETTINGS.opdsPassword, sizeof(SETTINGS.opdsPassword),
+                                   "opdsPassword", StrId::STR_OPDS_BROWSER)
+                   .withObfuscated(),
+               SettingInfo::Toggle(StrId::STR_OPDS_SERVER_FILENAMES, &CrossPointSettings::opdsUseServerFilename,
+                                   "opdsUseServerFilename", StrId::STR_OPDS_BROWSER),
+           });
 }
 
 // --- Status Bar Settings (web-only, uses StatusBarSettingsActivity) ---
@@ -503,6 +505,10 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                                  {StrId::STR_PERCENTAGE_FORMAT_WHOLE, StrId::STR_PERCENTAGE_FORMAT_ONE_DECIMAL,
                                   StrId::STR_PERCENTAGE_FORMAT_TWO_DECIMALS},
                                  "statusBarPercentageFormat", StrId::STR_CUSTOMISE_STATUS_BAR),
+               // Font of both reader bars; taller text reserves a taller lane (reflows the book).
+               SettingInfo::Enum(StrId::STR_STATUS_BAR_TEXT_SIZE, &CrossPointSettings::statusBarTextSize,
+                                 {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE}, "statusBarTextSize",
+                                 StrId::STR_CUSTOMISE_STATUS_BAR),
                // XTC pages are pre-rendered, so the bars are overlays: which edges get one.
                SettingInfo::Enum(StrId::STR_XTC_STATUS_BAR, &CrossPointSettings::xtcStatusBarMode,
                                  {StrId::STR_HIDE, StrId::STR_BOTTOM, StrId::STR_TOP, StrId::STR_BOTH},
@@ -512,9 +518,6 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                    StrId::STR_STATUS_BAR_TOP_MARGIN, &CrossPointSettings::statusBarTopMargin,
                    {0, CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX, CrossPointSettings::STATUS_BAR_TOP_MARGIN_STEP},
                    "statusBarTopMargin", StrId::STR_CUSTOMISE_STATUS_BAR),
-               // Time next to the date on the header top line of the non-reader screens.
-               SettingInfo::Toggle(StrId::STR_CLOCK_OUTSIDE_READER, &CrossPointSettings::showClockOutsideReader,
-                                   "showClockOutsideReader", StrId::STR_CUSTOMISE_STATUS_BAR),
                // RETIRED clock offset (0..104 quarter-hour steps, biased by 48), superseded
                // by clockTimezone. No category, so it is hidden from the web UI too; kept
                // in the list only so settings.json round-trips it (see timeZonePreset).
@@ -533,6 +536,10 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                SettingInfo::Enum(StrId::STR_BATTERY, &CrossPointSettings::statusBarBatteryPos,
                                  {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                  "statusBarBatteryPos", StrId::STR_BOTTOM_STATUS_BAR),
+               SettingInfo::Enum(
+                   StrId::STR_BATTERY_STYLE, &CrossPointSettings::statusBarBatteryStyle,
+                   {StrId::STR_BATTERY_ICON_AND_PERCENT, StrId::STR_BATTERY_ICON_ONLY, StrId::STR_BATTERY_PERCENT_ONLY},
+                   "statusBarBatteryStyle", StrId::STR_BOTTOM_STATUS_BAR),
                SettingInfo::Enum(StrId::STR_BOOK_TITLE, &CrossPointSettings::statusBarBookTitlePos,
                                  {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                  "statusBarBookTitlePos", StrId::STR_BOTTOM_STATUS_BAR),
@@ -572,6 +579,10 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
                SettingInfo::Enum(StrId::STR_BATTERY, &CrossPointSettings::statusBarTopBatteryPos,
                                  {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                  "statusBarTopBatteryPos", StrId::STR_TOP_STATUS_BAR),
+               SettingInfo::Enum(
+                   StrId::STR_BATTERY_STYLE, &CrossPointSettings::statusBarTopBatteryStyle,
+                   {StrId::STR_BATTERY_ICON_AND_PERCENT, StrId::STR_BATTERY_ICON_ONLY, StrId::STR_BATTERY_PERCENT_ONLY},
+                   "statusBarTopBatteryStyle", StrId::STR_TOP_STATUS_BAR),
                SettingInfo::Enum(StrId::STR_BOOK_TITLE, &CrossPointSettings::statusBarTopBookTitlePos,
                                  {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                  "statusBarTopBookTitlePos", StrId::STR_TOP_STATUS_BAR),
@@ -617,7 +628,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 94;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 97;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

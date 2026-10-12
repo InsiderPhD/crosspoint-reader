@@ -172,6 +172,16 @@ Defaults:
 | **Home pad, double tap** | Open reader menu |
 | **Home pad, hold** | Open reader menu *(fixed — see [Hardware Overview](#controls-on-the-x4-pro-experimental))* |
 
+**Hold Action** (in **Reader Controls**, under **Tap zones**) chooses what a touch-and-hold on the page does:
+
+| Hold Action | A hold does |
+| ----------- | ----------- |
+| **Shortcut** *(default)* | The **hold** action bound to that third of the screen. The three hold rows are only listed in this mode. |
+| **Dictionary** | Looks up the word under your finger when you lift it. Keep the finger down and slide to another word to look up the whole phrase instead. |
+| **Highlight** | Starts a clipping at the word under your finger. Keep the finger down and slide to the last word, then lift, to save that passage; lift without sliding and the word stays marked, ready for a tap on the last word (see [Bookmarks & Clippings](#8-bookmarks--clippings)). |
+
+In **Dictionary** and **Highlight** a hold on a margin, a picture or the gap between paragraphs does nothing, and the per-zone hold actions are switched off (your choices are kept and come back when you return to **Shortcut**). Dictionary still needs a dictionary to be chosen first. XTC books have no selectable words, so a hold does nothing there in these two modes.
+
 While a double-tap action is bound, a single tap waits about a third of a second to rule out a second tap; bind the double tap to **None** to make the single tap instant. A **leftward swipe does nothing** on the reading page — it used to open the menu and was too easy to trigger by accident; use the action bar's **Confirm** button (bindable as the Confirm row) or the middle tap zone instead.
 
 ### On-screen button hints
@@ -403,7 +413,9 @@ Neither action touches `My Clippings.txt`, so copy it off the SD card whenever y
 
 Open from **Home → Statistics**. Tracks sessions across `.epub`, `.txt`, and `.xtc`. Metrics include **Reading Time, Pages Read, Books Finished, Sessions, Average Session, Reading Speed,** and **In Progress**. Books at **≥90%** count as finished.
 
-Statistics are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), and **Sessions**:
+Statistics are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), **Sessions**, **Year**, and **Library**:
+
+The **Library** tab shows how many books you finished this month and this year, and your five most-read authors and tags by reading time (with the number of books behind each). Authors and tags come from the Library, so open the Library once after adding books; a book you have read but since deleted from the card is not listed there.
 
 <p>
 <img src="docs/images/user-guide/stats-overview.png" alt="Statistics Overview tab with streak, daily goal, totals, and reading profile scores" width="300">
@@ -421,6 +433,8 @@ Statistics are organised into tabs — **Overview** (streaks, daily goal, totals
 <img src="docs/images/user-guide/settings-stats.png" alt="Settings Statistics tab with daily goal, session length, sleep-screen stat slots, and export options" width="300">
 
 ### Sleep-screen stats
+
+**Settings → Statistics → Track Reading Stats** (on by default) is the master switch. Off, no reading session is recorded, nothing is pushed to Hardcover, and the sleep-screen stat lines, the Dashboard theme's stats and the reader menu's daily-goal line are hidden (the "If Found" contact and Book Time Left lines stay). Existing history is kept and still viewable under Statistics. Note that a book finished while tracking is off is not marked as finished.
 
 You can surface up to **three** reading stats on the sleep screen. **Settings → Statistics → Sleep Screen Statistics 1 / 2 / 3** each pick one of: Today, Daily Goal, This Week, Streak, This Month, Total, Books Finished, "If Found" contact, Book Progress, Daily Average, Days This Month, Week Streak, Goal Remaining, or Book Time Left (or **None**).
 
@@ -611,7 +625,6 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Sleep Cover Mode** — Fit / Crop (when using a cover sleep screen).
 - **Sleep Cover Filter** — None (grayscale) / Contrast / Inverted.
 - **Seamless Sleep Screen** — Never / After Timeout / Always.
-- **Hide Battery %** — Never / In Reader / Always (icon still shown).
 - **Refresh Frequency** — full-refresh every 1 / 5 / 10 / 15 / 30 pages (reduces ghosting).
 - **UI Theme** — Classic / Lyra / Lyra Extended / Lyra Carousel / Dashboard / Bookshelf (see **[Home Screen](#3-home-screen)**).
 - **Sunlight Fading Fix** — software fix for white X4 units fading in direct sunlight.
@@ -623,7 +636,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 ### Reader tab
 
-- **Font Family** — Bookerly / Inter / Open Dyslexic / Monospace. SD-card fonts can also be loaded (see [sd-card-fonts](./docs/sd-card-fonts.md)).
+- **Font Family** — Bookerly / Inter / Open Dyslexic / Monospace. SD-card fonts can also be loaded, and on the X4 Pro and X4C a `.ttf`/`.otf` file can be used directly (see [sd-card-fonts](./docs/sd-card-fonts.md)).
 - **Font Size** — Small / Medium / Large / X-Large (plus an X-Small size).
 - **Line Spacing** — Tight / Normal / Wide.
 - **Screen Margin** — 5–40 px in 5-px steps.
@@ -655,7 +668,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 #### Customise Status Bar
 
-There are two status bars, one along the bottom of the page and one along the top, and each is customised on its own page: **Bottom Status Bar** and **Top Status Bar**. On each page every element has its own **Hide → Left → Center → Right** picker for that bar, so the two bars are laid out independently and the same element (the clock, say) can sit on both. A bar with nothing placed on it takes no space at all, so the top bar costs nothing until you use it. Each page previews its bar live: the bottom bar near the bottom edge, the top bar directly under the header.
+There are three status bars, each customised on its own page: **Outside Reader** (the strip along the top of the Home, Library, Settings and other non-reader screens), **Reader Top** and **Reader Bottom** (along the top and bottom of the page while reading). On each page every element has its own **Hide → Left → Center → Right** picker for that bar, so the bars are laid out independently and the same element (the clock, say) can sit on more than one. A bar with nothing placed on it takes no space at all, so the top bar costs nothing until you use it. Each page previews its bar live: the bottom bar near the bottom edge, the top bar directly under the header.
 
 | Element | Bottom bar default | Top bar default |
 |---------|--------------------|-----------------|
@@ -672,10 +685,15 @@ There are two status bars, one along the bottom of the page and one along the to
 
 Each bar's page also has its own **Progress Bar** (Book / Chapter / Hide) and **Progress Bar Thickness** (Thin / Medium / Thick): the bottom bar's fill bar runs along the bottom edge, the top bar's along the top edge above its text.
 
+Each of the three bars also has a **Battery Style** (Icon + % / Icon Only / % Only) for its Battery element. These replace the old Display setting *Hide Battery %*, whose choice is carried over the first time this firmware starts.
+
+The **Outside Reader** page places **Date**, **Clock** and **Battery** (default: date left, battery right, clock hidden). The page's own header is the live preview. Date and clock placed in the same cluster read as one `date  time`; the clock uses the device time on every board and hides while that time is not trustworthy. On the Classic theme the screen title is centred on the same line, so there the *Center* cluster is only drawn on screens without a title, and the title shortens to make room for wider side clusters.
+
 The **Customise Status Bar** screen itself holds the settings both bars share:
 
 - **Hide status bar** — master toggle for both bars. The layout still reserves their strips so your cached pages stay valid; the reader just skips drawing them and re-centres the page in the freed space. Also available as a bindable **Hide Status Bar** reader action.
 - **Percentage Format** — show book progress as `10%`, `10.1%` or `10.12%`.
+- **Text Size** — Small / Medium / Large text for both bars. A larger size reserves a slightly taller bar, so the book re-paginates the next time a chapter is opened.
 - **Top Margin** — 0–20 px of extra space between the body text and each bar, in 4 px steps.
 - **XTC Status Bar** — XTC pages are pre-rendered, so the bars are overlays: Hide / Bottom / Top / Both. *Top* paints the bottom bar's layout along the top edge (as it did before the top bar existed); *Both* paints each bar where it belongs.
 - **Clock** extras — time zone, daylight saving and 12h/24h format.
@@ -684,7 +702,7 @@ Placing the first element on an empty bar (or clearing the last one) changes the
 
 All of these are also editable from the web settings page.
 
-**Clock Outside Reader** (on this screen) shows the time after the date on the header line of the Home, Library and Settings screens. It uses the same clock as the date and hides while the device has no trustworthy time.
+The clock on the non-reader screens is the **Clock** row of the **Outside Reader** page (it replaces the old *Clock Outside Reader* toggle).
 
 > [!NOTE]
 > If you're upgrading, your old show/hide status-bar settings are migrated to the new per-element positions automatically on first boot.
@@ -707,7 +725,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **Check for Updates** *(action)* — OTA firmware update over WiFi.
 - **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.
 - **Language** *(action)* — set the UI language.
-- **About** *(action)* — device information: firmware version, board, chip, display, battery, free memory (and the largest free block), SD card size and free space, MAC address, uptime and the reason for the last restart. Press **Confirm** (or tap the first row) to save `support-info.txt` to the SD card root for a bug report. The file holds hardware facts, memory/SD/battery readings and a short list of numeric display settings; it never contains WiFi names or passwords, account details, tokens, the MAC address, file names or book titles.
+- **About** *(action)* — device information: firmware version, board, chip, display, battery, free memory (and the largest free block), SD card size and free space, MAC address, uptime and the reason for the last restart. Press **Confirm** (or tap the first row) to save `support-info.txt` to the SD card root for a bug report. The file holds hardware facts, memory/SD/battery readings, a short list of numeric display settings and three lifetime reading totals (books finished, total reading time, number of sessions); it never contains WiFi names or passwords, account details, tokens, the MAC address, file names or book titles.
 - **Time to Sleep** — auto-sleep after 1 / 5 / 10 / 15 / 30 min of inactivity.
 - **Show Hidden Files** — show dotfiles in the browser.
 - **Developer Mode** — reveals the Developer tab.

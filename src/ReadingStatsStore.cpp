@@ -14,6 +14,7 @@
 #include "CrossPointState.h"
 #include "util/BookIdentity.h"
 #include "util/HardcoverSync.h"
+#include "util/ReadingStreaks.h"
 #include "util/TimeUtils.h"
 
 uint64_t getDailyReadingGoalMs() { return SETTINGS.getDailyGoalMs(); }
@@ -804,33 +805,10 @@ void ReadingStatsStore::rebuildSummaryCache() const {
       }
     }
 
-    if (!eligibleDays.empty()) {
-      cache.maxStreakDays = 1;
-      uint32_t currentMaxStreak = 1;
-      for (size_t index = 1; index < eligibleDays.size(); ++index) {
-        if (eligibleDays[index] == eligibleDays[index - 1] + 1) {
-          currentMaxStreak++;
-        } else {
-          currentMaxStreak = 1;
-        }
-        cache.maxStreakDays = std::max(cache.maxStreakDays, currentMaxStreak);
-      }
-
-      const uint32_t latestEligibleDay = eligibleDays.back();
-      const bool streakIsStillAlive =
-          latestEligibleDay == cache.referenceDayOrdinal ||
-          (cache.referenceDayOrdinal > 0 && latestEligibleDay + 1 == cache.referenceDayOrdinal);
-      if (streakIsStillAlive) {
-        cache.currentStreakDays = 1;
-        for (size_t index = eligibleDays.size() - 1; index > 0; --index) {
-          if (eligibleDays[index] == eligibleDays[index - 1] + 1) {
-            cache.currentStreakDays++;
-            continue;
-          }
-          break;
-        }
-      }
-    }
+    const ReadingStreaks::Result streaks =
+        ReadingStreaks::compute(eligibleDays.data(), eligibleDays.size(), cache.referenceDayOrdinal);
+    cache.maxStreakDays = streaks.maxDays;
+    cache.currentStreakDays = streaks.currentDays;
   }
 
   cache.valid = true;
@@ -848,7 +826,10 @@ void ReadingStatsStore::beginSession(const std::string& path, const std::string&
     endSession();
   }
 
-  if (shouldIgnorePath(path)) {
+  // Tracking switched off is handled exactly like an ignored path: no active
+  // session, so noteActivity / updateProgress / endSession all fall through
+  // their "no session" guards and nothing is recorded, saved or pushed.
+  if (!SETTINGS.trackReadingStats || shouldIgnorePath(path)) {
     activeSession = {};
     lastSessionSnapshot = {};
     return;

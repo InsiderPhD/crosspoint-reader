@@ -27,6 +27,7 @@ int collectActions(Action* out) {
   if (dev) out[n++] = Action::ResetProgress;
   if (UITheme::getInstance().getMetrics().homePinnedBooks) out[n++] = Action::Pin;
   out[n++] = Action::Shelve;
+  out[n++] = Action::Rename;
   out[n++] = Action::Delete;
   if (dev) out[n++] = Action::Reindex;
   if (dev) out[n++] = Action::RegenerateCover;
@@ -53,6 +54,8 @@ const char* labelForAction(Action action, const std::string& path) {
       return tr(STR_BOOK_INFO);
     case Action::ViewStats:
       return tr(STR_VIEW_STATS);
+    case Action::Rename:
+      return tr(STR_RENAME);
   }
   return "";
 }

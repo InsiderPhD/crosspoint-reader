@@ -143,6 +143,36 @@ bool UITheme::statusBarHasElements(const StatusBarSide side) {
   return false;
 }
 
+int UITheme::getStatusBarFontId() {
+  switch (SETTINGS.statusBarTextSize) {
+    case CrossPointSettings::SB_TEXT_MEDIUM:
+      return UI_10_FONT_ID;
+    case CrossPointSettings::SB_TEXT_LARGE:
+      return UI_12_FONT_ID;
+    default:
+      return SMALL_FONT_ID;
+  }
+}
+
+int UITheme::getStatusBarTextExtraHeight() {
+  // Ascender growth over the Small font the lane was sized for: Noto Sans 8 is
+  // 18px, Ubuntu 10 is 20px, Ubuntu 12 is 24px (lib/EpdFont/builtinFonts).
+  // Constants rather than a renderer lookup because the reader asks for the bar
+  // height while computing margins, and they must agree with the draw exactly.
+  switch (SETTINGS.statusBarTextSize) {
+    case CrossPointSettings::SB_TEXT_MEDIUM:
+      return 2;
+    case CrossPointSettings::SB_TEXT_LARGE:
+      return 6;
+    default:
+      return 0;
+  }
+}
+
+int UITheme::getStatusBarTextLaneHeight() {
+  return UITheme::getInstance().getMetrics().statusBarVerticalMargin + getStatusBarTextExtraHeight();
+}
+
 int UITheme::getStatusBarHeight(const StatusBarSide side) {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
 
@@ -157,7 +187,7 @@ int UITheme::getStatusBarHeight(const StatusBarSide side) {
                                        ? CrossPointSettings::STATUS_BAR_TOP_MARGIN_MAX
                                        : SETTINGS.statusBarTopMargin;
   const int topMargin = (showStatusBar || progressBarHeight > 0) ? topMarginSetting : 0;
-  return topMargin + (showStatusBar ? (metrics.statusBarVerticalMargin + metrics.statusBarContentGap) : 0) +
+  return topMargin + (showStatusBar ? (getStatusBarTextLaneHeight() + metrics.statusBarContentGap) : 0) +
          progressBarHeight;
 }
 

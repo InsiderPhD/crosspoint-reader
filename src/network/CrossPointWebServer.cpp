@@ -9,6 +9,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <TtfEpdFont.h>
 #include <WiFi.h>
 #include <esp_task_wdt.h>
 
@@ -125,6 +126,10 @@ bool renameCarryingBookState(const String& oldPath, const String& newPath) {
   const bool renamed = Storage.rename(oldPath.c_str(), newPath.c_str());
   if (renamed) {
     clearEpubCacheIfNeeded(oldPath);
+    // The new name can be a book where the old one was not (book.zip ->
+    // book.epub): build its cache and drop the Library indexes, which the call
+    // above only does for a name that was a book. No-op for a folder.
+    clearEpubCacheIfNeeded(newPath);
   }
   return renamed;
 }
@@ -1760,14 +1765,18 @@ void CrossPointWebServer::handleFontList() const {
   JsonDocument doc;
   JsonArray arr = doc["families"].to<JsonArray>();
   doc["maxFamilies"] = SdCardFontRegistry::MAX_SD_FAMILIES;
+  // Whether this build renders .ttf/.otf files (PSRAM boards); the page uses it
+  // to decide which files the upload form accepts.
+  doc["vectorFonts"] = CROSSPOINT_VECTOR_FONTS != 0;
 
   for (const auto& family : families) {
     JsonObject fObj = arr.add<JsonObject>();
     fObj["name"] = family.name;
 
+    // A vector family has no fixed sizes: its file entries carry pointSize 0.
     JsonArray sizes = fObj["sizes"].to<JsonArray>();
     for (uint8_t s : family.availableSizes()) {
-      sizes.add(s);
+      if (s != 0) sizes.add(s);
     }
 
     JsonArray files = fObj["files"].to<JsonArray>();
@@ -1803,19 +1812,44 @@ void CrossPointWebServer::handleFontUploadData() {
       fontUpload.filePath.clear();
       fontUpload.valid = false;
       fontUpload.magicChecked = false;
+      fontUpload.isVector = false;
+      fontUpload.error = nullptr;
       fontUpload.bytesWritten = 0;
       fontUpload.bufferPos = 0;
 
       if (!FontInstaller::isValidFamilyName(family.c_str())) {
         LOG_ERR("WEB", "Invalid font family name: %s", family.c_str());
+        fontUpload.error = "Invalid font family name";
         break;
       }
 
       // Sanitise the uploaded filename (spaces, %, etc. -> '_') rather than rejecting it,
       // so fonts like "lexend 700 12 15_12.cpfont" install as "lexend_700_12_15_12.cpfont".
       char sanitizedName[128];
-      if (!FontInstaller::sanitizeCpfontFilename(upload.filename.c_str(), sanitizedName, sizeof(sanitizedName))) {
+      if (FontInstaller::hasVectorFontExtension(upload.filename.c_str())) {
+#if CROSSPOINT_VECTOR_FONTS
+        // The family name is what gets stored as the selected font (31 characters).
+        if (family.length() > 31) {
+          fontUpload.error = "Font family name is longer than 31 characters";
+          break;
+        }
+        if (!FontInstaller::sanitizeVectorFontFilename(upload.filename.c_str(), sanitizedName, sizeof(sanitizedName))) {
+          LOG_ERR("WEB", "Invalid font filename: %s", upload.filename.c_str());
+          fontUpload.error = "Invalid font filename";
+          break;
+        }
+        fontUpload.isVector = true;
+#else
+        // No PSRAM on this board: a TrueType/OpenType file has nowhere to live.
+        LOG_ERR("WEB", "Vector font upload refused (no PSRAM): %s", upload.filename.c_str());
+        fontUpload.error =
+            "TrueType/OpenType fonts need an X4 Pro or X4C. Convert the font to .cpfont for this device.";
+        break;
+#endif
+      } else if (!FontInstaller::sanitizeCpfontFilename(upload.filename.c_str(), sanitizedName,
+                                                        sizeof(sanitizedName))) {
         LOG_ERR("WEB", "Invalid font filename: %s", upload.filename.c_str());
+        fontUpload.error = "Not a .cpfont file";
         break;
       }
       if (strcmp(sanitizedName, upload.filename.c_str()) != 0) {
@@ -1827,6 +1861,7 @@ void CrossPointWebServer::handleFontUploadData() {
       FontInstaller installer(sdFontSystem.registry());
       if (!installer.ensureFamilyDir(family.c_str())) {
         LOG_ERR("WEB", "Failed to create font family dir");
+        fontUpload.error = "Could not create the font folder on the SD card";
         break;
       }
 
@@ -1836,6 +1871,7 @@ void CrossPointWebServer::handleFontUploadData() {
 
       if (!Storage.openFileForWrite("WEB", path, fontUpload.file)) {
         LOG_ERR("WEB", "Failed to open font file for write: %s", path);
+        fontUpload.error = "Could not write to the SD card";
         break;
       }
 
@@ -1849,13 +1885,34 @@ void CrossPointWebServer::handleFontUploadData() {
       esp_task_wdt_reset();
 
       if (!fontUpload.magicChecked && upload.currentSize >= 8) {
-        if (memcmp(upload.buf, "CPFONT\0\0", 8) != 0) {
-          LOG_ERR("WEB", "Invalid .cpfont magic bytes");
+        bool magicOk;
+        if (fontUpload.isVector) {
+          // sfnt versions: 0x00010000 (TrueType), "OTTO" (CFF), "true" (Apple).
+          static constexpr uint8_t kTrueTypeMagic[4] = {0x00, 0x01, 0x00, 0x00};
+          magicOk = memcmp(upload.buf, kTrueTypeMagic, 4) == 0 || memcmp(upload.buf, "OTTO", 4) == 0 ||
+                    memcmp(upload.buf, "true", 4) == 0;
+        } else {
+          magicOk = memcmp(upload.buf, "CPFONT\0\0", 8) == 0;
+        }
+        if (!magicOk) {
+          LOG_ERR("WEB", "Invalid font magic bytes");
           fontUpload.valid = false;
+          fontUpload.error = fontUpload.isVector ? "Not a TrueType/OpenType font file" : "Invalid .cpfont file";
           break;
         }
         fontUpload.magicChecked = true;
       }
+#if CROSSPOINT_VECTOR_FONTS
+      // A vector font is held whole in PSRAM; one over the cap would upload
+      // fine and then never appear in the font list.
+      if (fontUpload.isVector &&
+          fontUpload.bytesWritten + fontUpload.bufferPos + upload.currentSize > TtfEpdFont::MAX_FILE_BYTES) {
+        LOG_ERR("WEB", "Vector font upload over %u bytes", static_cast<unsigned>(TtfEpdFont::MAX_FILE_BYTES));
+        fontUpload.valid = false;
+        fontUpload.error = "Font file is larger than 3 MB. Convert it to .cpfont instead.";
+        break;
+      }
+#endif
 
       size_t remaining = upload.currentSize;
       const uint8_t* src = upload.buf;
@@ -1913,7 +1970,11 @@ void CrossPointWebServer::handleFontUpload() {
     server->send(200, "application/json", "{\"ok\":true}");
     LOG_DBG("WEB", "Font upload complete: %s", fontUpload.filePath.c_str());
   } else {
-    server->send(400, "application/json", "{\"error\":\"Invalid .cpfont file\"}");
+    // Every message is a string literal with no characters that need JSON escaping.
+    String body = "{\"error\":\"";
+    body += fontUpload.error ? fontUpload.error : "Invalid font file";
+    body += "\"}";
+    server->send(400, "application/json", body);
   }
 }
 

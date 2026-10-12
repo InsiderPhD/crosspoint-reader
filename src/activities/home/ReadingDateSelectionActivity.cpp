@@ -65,15 +65,17 @@ void ReadingDateSelectionActivity::onEnter() {
   if (!initialized) {
     bool usedFallback = false;
     const uint32_t referenceTimestamp = READING_STATS.getDisplayTimestamp(&usedFallback);
-    if (TimeUtils::isClockValid(referenceTimestamp)) {
-      time_t currentTime = static_cast<time_t>(referenceTimestamp);
-      tm localTime = {};
-      if (localtime_r(&currentTime, &localTime) != nullptr) {
-        year = std::clamp(localTime.tm_year + 1900, MIN_YEAR, MAX_YEAR);
-        month = static_cast<unsigned>(std::clamp(localTime.tm_mon + 1, MIN_MONTH, MAX_MONTH));
-        day = static_cast<unsigned>(
-            std::clamp(localTime.tm_mday, MIN_DAY, static_cast<int>(getDaysInMonth(year, month))));
-      }
+    // Local date via TimeUtils, which applies the Time Zone + DST rule first
+    // (a bare localtime_r() can run before TZ was configured this boot).
+    int localYear = 0;
+    unsigned localMonth = 0;
+    unsigned localDay = 0;
+    const uint32_t referenceDay = TimeUtils::getLocalDayOrdinal(referenceTimestamp);
+    if (referenceDay != 0 && TimeUtils::getDateFromDayOrdinal(referenceDay, localYear, localMonth, localDay)) {
+      year = std::clamp(localYear, MIN_YEAR, MAX_YEAR);
+      month = static_cast<unsigned>(std::clamp(static_cast<int>(localMonth), MIN_MONTH, MAX_MONTH));
+      day = static_cast<unsigned>(
+          std::clamp(static_cast<int>(localDay), MIN_DAY, static_cast<int>(getDaysInMonth(year, month))));
     }
   }
 

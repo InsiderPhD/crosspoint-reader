@@ -1,11 +1,15 @@
 #include "OpdsBookBrowserActivity.h"
 
 #include <Epub.h>
+#include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <OpdsStream.h>
 #include <WiFi.h>
+
+#include <cstdio>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -16,6 +20,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/HttpDownloadFilename.h"
 #include "network/HttpDownloader.h"
 #include "util/StringUtils.h"
 #include "util/TouchListNav.h"
@@ -241,11 +246,21 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
 
     for (size_t i = pageStartIndex; i < entries.size() && i < static_cast<size_t>(pageStartIndex + PAGE_ITEMS); i++) {
       const auto& entry = entries[i];
+      const int rowY = listTop + 2 + (i % PAGE_ITEMS) * ROW_H;
+      const bool black = i != static_cast<size_t>(selectorIndex);
+      // A category's advertised size, right-aligned; the title gives up the room.
+      int titleWidth = pageWidth - 40;
+      if (entry.type == OpdsEntryType::NAVIGATION && entry.count >= 0) {
+        char countLabel[16];
+        snprintf(countLabel, sizeof(countLabel), "(%ld)", static_cast<long>(entry.count));
+        const int countWidth = renderer.getTextWidth(UI_10_FONT_ID, countLabel);
+        renderer.drawText(UI_10_FONT_ID, pageWidth - 20 - countWidth, rowY, countLabel, black);
+        titleWidth -= countWidth + 10;
+      }
       std::string displayText = (entry.type == OpdsEntryType::NAVIGATION) ? "> " + entry.title : entry.title;
       if (entry.type == OpdsEntryType::BOOK && !entry.author.empty()) displayText += " - " + entry.author;
-      auto item = renderer.truncatedText(UI_10_FONT_ID, displayText.c_str(), pageWidth - 40);
-      renderer.drawText(UI_10_FONT_ID, 20, listTop + 2 + (i % PAGE_ITEMS) * ROW_H, item.c_str(),
-                        i != static_cast<size_t>(selectorIndex));
+      auto item = renderer.truncatedText(UI_10_FONT_ID, displayText.c_str(), titleWidth);
+      renderer.drawText(UI_10_FONT_ID, 20, rowY, item.c_str(), black);
     }
   }
   renderer.displayBuffer();
@@ -328,6 +343,37 @@ void OpdsBookBrowserActivity::navigateBack() {
   }
 }
 
+namespace {
+// Renames a finished download to the name the server sent, when that name is
+// usable. Returns the path the book ends up at. Anything doubtful keeps the
+// generated "Author - Title.epub": no filename on the header, a name FAT or
+// this firmware cannot take (FsHelpers::isValidFileName), a hidden file, a
+// non-EPUB extension, or a name that already exists (never overwrite a
+// different book because a server reused a name).
+std::string applyServerFilename(const std::string& downloadedPath, const std::string& contentDisposition) {
+  std::string serverName;
+  if (!HttpDownloadFilename::parse(contentDisposition, serverName)) return downloadedPath;
+  if (!FsHelpers::isValidFileName(serverName) || serverName.front() == '.' || serverName.front() == ' ' ||
+      !FsHelpers::hasEpubExtension(serverName)) {
+    LOG_INF("OPDS", "Server file name rejected, keeping %s", downloadedPath.c_str());
+    return downloadedPath;
+  }
+  // Same 100-byte budget as the generated names; the stem is cut on a UTF-8
+  // codepoint boundary and the extension kept.
+  std::string target = "/" + StringUtils::sanitizeFilenamePreservingExtension(serverName);
+  if (target == downloadedPath || !FsHelpers::hasEpubExtension(target)) return downloadedPath;
+  if (Storage.exists(target.c_str())) {
+    LOG_INF("OPDS", "%s already exists, keeping %s", target.c_str(), downloadedPath.c_str());
+    return downloadedPath;
+  }
+  if (!Storage.rename(downloadedPath.c_str(), target.c_str())) {
+    LOG_ERR("OPDS", "Rename to server file name failed, keeping %s", downloadedPath.c_str());
+    return downloadedPath;
+  }
+  return target;
+}
+}  // namespace
+
 void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   state = BrowserState::DOWNLOADING;
   statusMessage = book.title;
@@ -344,11 +390,14 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   LOG_DBG("OPDS", "Downloading: %s -> %s", downloadUrl.c_str(), filename.c_str());
 
   auto result = HttpDownloader::HTTP_ERROR;
+  // Only filled when the option is on; one short-lived string per download.
+  std::string contentDisposition;
   {
     TlsFramebufferBorrow borrow(renderer);
     size_t lastLoggedMB = 0;
     result = HttpDownloader::downloadToFile(
-        downloadUrl, filename, [&lastLoggedMB](const size_t downloaded, const size_t total) {
+        downloadUrl, filename,
+        [&lastLoggedMB](const size_t downloaded, const size_t total) {
           const size_t mb = downloaded >> 20;
           if (mb > lastLoggedMB) {
             lastLoggedMB = mb;
@@ -358,7 +407,13 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
               LOG_DBG("OPDS", "Download progress: %u MB", (unsigned)mb);
             }
           }
-        });
+        },
+        /*allowConfiguredAuth=*/true, /*expectedSize=*/0, /*cancelFlag=*/nullptr, /*username=*/"", /*password=*/"",
+        /*headers=*/{}, /*resumePartial=*/false, SETTINGS.opdsUseServerFilename ? &contentDisposition : nullptr);
+  }
+
+  if (result == HttpDownloader::OK && !contentDisposition.empty()) {
+    filename = applyServerFilename(filename, contentDisposition);
   }
 
   if (result == HttpDownloader::OK) {

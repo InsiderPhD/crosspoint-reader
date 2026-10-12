@@ -598,6 +598,12 @@ void DashboardTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const
                              kCoverCornerRadius + 2, true);
   }
 
+  // Tracking off: the stats column and footer would show a frozen history as
+  // if it were current, so the card falls back to cover, title and author.
+  if (!SETTINGS.trackReadingStats) {
+    drawBookText(renderer, layout, book, nullptr);
+    return;
+  }
   const ReadingBookStats* stats = READING_STATS.findMatchingBookForPath(book.path, book.title, book.author);
   drawStatsColumn(renderer, layout, stats, book.progressPercent);
   drawBookText(renderer, layout, book, stats);

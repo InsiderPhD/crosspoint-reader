@@ -599,6 +599,10 @@ void WebDAVHandler::handleMove(WebServer& s) {
   if (success) {
     if (!stateCarried) {
       clearEpubCacheIfNeeded(srcPath);
+      // The destination holds different content now (a replaced book, or an
+      // upload moved into place from a temporary name): its old cache is stale
+      // and the Library indexes do not list it yet.
+      clearEpubCacheIfNeeded(dstPath);
     }
     s.send(dstExists ? 204 : 201);
   } else {
@@ -694,6 +698,8 @@ void WebDAVHandler::handleCopy(WebServer& s) {
   dstFile.close();
 
   if (copyOk) {
+    // A copy is a new (or replaced) book file: fresh cache, stale indexes.
+    clearEpubCacheIfNeeded(dstPath);
     s.send(dstExists ? 204 : 201);
   } else {
     Storage.remove(dstPath.c_str());
