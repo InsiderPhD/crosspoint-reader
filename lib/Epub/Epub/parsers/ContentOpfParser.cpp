@@ -152,6 +152,11 @@ bool ContentOpfParser::setup() {
 
 ContentOpfParser::~ContentOpfParser() {
   destroyXmlParser(parser);
+  // A metadata-only read stops before <manifest> ever opens the item cache
+  // file, so there is nothing to close or remove (and no path probe to pay for).
+  if (metadataOnly) {
+    return;
+  }
   if (tempItemStore) {
     tempItemStore.close();
   }
@@ -164,6 +169,10 @@ ContentOpfParser::~ContentOpfParser() {
 size_t ContentOpfParser::write(const uint8_t data) { return write(&data, 1); }
 
 size_t ContentOpfParser::write(const uint8_t* buffer, const size_t size) {
+  // Metadata-only read: everything after </metadata> is swallowed unparsed.
+  // The caller still streams the rest of the (small) OPF, but no XML work, no
+  // manifest allocations and no item cache file happen for it.
+  if (metadataComplete) return size;
   if (!parser) return 0;
 
   const uint8_t* currentBufferPos = buffer;
@@ -191,6 +200,7 @@ size_t ContentOpfParser::write(const uint8_t* buffer, const size_t size) {
     currentBufferPos += toRead;
     remainingInBuffer -= toRead;
     remainingSize -= toRead;
+    if (metadataComplete) break;
   }
 
   return size;
@@ -199,6 +209,17 @@ size_t ContentOpfParser::write(const uint8_t* buffer, const size_t size) {
 void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
   auto* self = static_cast<ContentOpfParser*>(userData);
   (void)atts;
+
+  if (self->metadataComplete) return;
+  // A metadata-only read is done once </metadata> closes (endElement). A
+  // malformed package that jumps straight to the manifest must stop here too,
+  // before the IN_MANIFEST branch opens the item cache file.
+  if (self->metadataOnly &&
+      (strcmp(name, "manifest") == 0 || strcmp(name, "opf:manifest") == 0 || strcmp(name, "spine") == 0 ||
+       strcmp(name, "opf:spine") == 0 || strcmp(name, "guide") == 0 || strcmp(name, "opf:guide") == 0)) {
+    self->metadataComplete = true;
+    return;
+  }
 
   if (self->state == START && (strcmp(name, "package") == 0 || strcmp(name, "opf:package") == 0)) {
     self->state = IN_PACKAGE;
@@ -229,6 +250,9 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
   }
 
   if (self->state == IN_METADATA && strcmp(name, "dc:description") == 0) {
+    // The Library index has no use for the description; not collecting it
+    // saves up to MAX_DESCRIPTION_BYTES of string growth per scanned book.
+    if (self->metadataOnly) return;
     self->descInTag = false;
     self->state = IN_BOOK_DESCRIPTION;
     return;
@@ -637,6 +661,7 @@ void XMLCALL ContentOpfParser::endElement(void* userData, const XML_Char* name) 
 
   if (self->state == IN_METADATA && (strcmp(name, "metadata") == 0 || strcmp(name, "opf:metadata") == 0)) {
     self->state = IN_PACKAGE;
+    if (self->metadataOnly) self->metadataComplete = true;
     return;
   }
 

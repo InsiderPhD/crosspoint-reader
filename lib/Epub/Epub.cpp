@@ -530,6 +530,46 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss) {
   return true;
 }
 
+bool Epub::loadMetadata(std::string& title, std::string& author, std::string* series, std::string* tags,
+                        std::string* seriesIndex) {
+  title.clear();
+  author.clear();
+  if (series) series->clear();
+  if (tags) tags->clear();
+  if (seriesIndex) seriesIndex->clear();
+
+  std::string contentOpfFilePath;
+  if (!findContentOpfFile(&contentOpfFilePath)) {
+    LOG_ERR("EBP", "Could not find content.opf in zip");
+    return false;
+  }
+  size_t contentOpfSize;
+  if (!getItemSize(contentOpfFilePath, &contentOpfSize)) {
+    LOG_ERR("EBP", "Could not get size of content.opf");
+    return false;
+  }
+
+  // No BookMetadataCache and metadataOnly: the parser never opens the item
+  // cache file, so cachePath is only held as a reference and no cache directory
+  // is created for a book that has never been opened.
+  ContentOpfParser opfParser(getCachePath(), getBasePath(), contentOpfSize, nullptr, /*metadataOnly=*/true);
+  if (!opfParser.setup()) {
+    LOG_ERR("EBP", "Could not setup content.opf parser");
+    return false;
+  }
+  if (!readItemContentsToStream(contentOpfFilePath, opfParser, 1024)) {
+    LOG_ERR("EBP", "Could not read content.opf");
+    return false;
+  }
+
+  title = std::move(opfParser.title);
+  author = std::move(opfParser.author);
+  if (series) *series = std::move(opfParser.seriesName);
+  if (tags) *tags = std::move(opfParser.tags);
+  if (seriesIndex) *seriesIndex = std::move(opfParser.seriesIndex);
+  return true;
+}
+
 bool Epub::clearCache() const {
   if (!Storage.exists(cachePath.c_str())) {
     LOG_DBG("EPB", "Cache does not exist, no action needed");
