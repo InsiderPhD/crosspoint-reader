@@ -78,7 +78,7 @@ The X4 Pro is a **separate firmware binary** (`pio run -e x4pro`) — it is an E
 
 - **Turn on/off:** press and hold **Power** for about half a second.
 - You can configure what a **short** Power press does while reading (page turn, sleep, sync, bookmark, and more) in **[Reader Controls](#reader-tab)**. When a short press is repurposed, turning the device *off* requires a long press.
-- **Waking from sleep:** a short Power press always wakes the device — there's no hold-to-wake delay.
+- **Waking from sleep:** a short Power press wakes the device — there's no hold-to-wake delay. On the X3 and X4 you can opt into one as a pocket guard: **Settings → System → Wake From Sleep → Hold Power** only wakes if Power is still held when the device has started up (a second or two), and goes back to sleep otherwise.
 - **Reboot / recover:** press and release **Reset**, then quickly press and hold **Power** for a few seconds.
 
 ### First Launch
@@ -592,7 +592,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 ### Display tab
 
-- **Sleep Screen** — Dark / Light / Custom / Cover / None / Cover + Custom (see **[Sleep Screen](#13-sleep-screen)**).
+- **Sleep Screen** — Dark / Light / Custom / Cover / None / Cover + Custom / Page Overlay (see **[Sleep Screen](#13-sleep-screen)**).
 - **Sleep Cover Mode** — Fit / Crop (when using a cover sleep screen).
 - **Sleep Cover Filter** — None (grayscale) / Contrast / Inverted.
 - **Seamless Sleep Screen** — Never / After Timeout / Always.
@@ -692,6 +692,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.
 - **Language** *(action)* — set the UI language.
 - **Time to Sleep** — auto-sleep after 1 / 5 / 10 / 15 / 30 min of inactivity.
+- **Wake From Sleep** *(X3 / X4)* — Short Press (default) / Hold Power. See **[Power On / Off](#power-on--off)**.
 - **Show Hidden Files** — show dotfiles in the browser.
 - **Developer Mode** — reveals the Developer tab.
 
@@ -733,6 +734,7 @@ The **Sleep Screen** setting controls what shows when the device sleeps:
 | **Cover** | Cover of the currently open book; falls back to Dark if no book is open. |
 | **Cover + Custom** | Book cover, falling back to Custom behaviour. |
 | **None** | Blank screen. |
+| **Page Overlay** | Keeps the screen you were on (usually the page you were reading) and draws a transparent image from the SD card over it (see below). With no overlay image, the page is shown on its own. |
 
 **Cover settings** (for Cover / Cover + Custom): **Cover Mode** — Fit (scale to fit, white borders) or Crop (scale & fill); **Cover Filter** — None (grayscale), Contrast (B&W), or Inverted.
 
@@ -740,9 +742,25 @@ The **Sleep Screen** setting controls what shows when the device sleeps:
 
 - **Multiple (recommended):** create a `.sleep` directory at the SD-card root and drop in any number of `.bmp` files — one is chosen at random each sleep. (A `sleep` directory is also accepted.)
 - **Single:** place `sleep.bmp` at the SD-card root as a fallback.
+- **Any folder:** in **Browse Files**, hold **Confirm** on a folder (long-tap on the X4 Pro) and choose **Set as Sleep Folder**. That folder is then used instead of the two above and is marked *Sleep* in the list; **Use Default Sleep Folder** on the same menu undoes it. Choosing a single image with **Set Cover** in the image viewer also undoes it.
+
+**Page Overlay images** are kept separately, because an ordinary sleep image has no transparent area and would just hide the page:
+
+- **Multiple:** a `.sleep-overlay` (or `sleep-overlay`) directory at the SD-card root holding `.png` and/or `.bmp` files — one is chosen at random each sleep.
+- **Single:** `sleep-overlay.png` or `sleep-overlay.bmp` at the SD-card root, which takes priority over the directory.
+- **PNG:** transparent pixels (under 50% alpha) leave the page showing; everything else is drawn in black and white, with greys dithered. PNGs must not be interlaced. A PNG needs a large block of memory to decode; if the device cannot find one, the overlay is skipped for that sleep (or a BMP from the same folder is used instead).
+- **BMP:** white is transparent, anything darker is drawn black.
+- In Dark Mode the overlay is inverted along with the page. *Page as Sleep Screen* (seamless sleep) still takes priority when it applies.
 
 > [!TIP]
 > Use uncompressed 24-bit BMPs. Match your screen: **X4 = 480×800**, **X3 = 528×792**.
+
+### Custom boot screen
+
+To replace the logo shown while the device starts: in **Browse Files**, hold **Confirm** on a `.bmp` (long-tap on the X4 Pro) and choose **Set as Boot Screen**. The file is marked *Boot* in the list; **Use Default Boot Screen** on the same menu restores the logo. If the file is later moved, deleted or unreadable, the logo comes back by itself.
+
+> [!TIP]
+> The image is read from the SD card on every start, so a small file starts faster: a 1-bit (black-and-white) BMP is about 48KB where a 24-bit one is over 1MB. Restarts the device makes on its own (after WiFi use, sync) and wakes with *Page as Sleep Screen* show no boot screen at all, as before.
 
 You can also overlay up to three reading stats on the sleep screen — see **[Sleep-screen stats](#sleep-screen-stats)**. Here's a Custom (dark) sleep screen with the weekly streak, daily goal, and book-time-left stats shown at the bottom:
 
