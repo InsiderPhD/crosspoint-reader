@@ -310,7 +310,9 @@ BlockStyle gridCellBlockStyle() {
 constexpr const char* HEADER_TAGS[] = {"h1", "h2", "h3", "h4", "h5", "h6"};
 constexpr int NUM_HEADER_TAGS = sizeof(HEADER_TAGS) / sizeof(HEADER_TAGS[0]);
 // "caption" is a block so it lays out as its own paragraph above the grid (see endElement).
-constexpr const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "caption"};
+// "pre" was dropped from this list by an upstream merge (5bfdeca42), which left the <pre>
+// handling below unreachable; restored.
+constexpr const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "caption", "pre"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
 constexpr const char* BOLD_TAGS[] = {"b", "strong"};
 constexpr int NUM_BOLD_TAGS = sizeof(BOLD_TAGS) / sizeof(BOLD_TAGS[0]);
@@ -1654,7 +1656,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       BlockStyle ownBlockStyle = userAlignmentBlockStyle;
       ownBlockStyle.fontOverride = blockFontOverride;
       if (decoratedBlock) self->openBoxScope(ownBlockStyle, cssStyle);
-      const bool preformatted = decoratedBlock && cssStyle.defined.whiteSpacePre;
+      const bool preformatted = decoratedBlock && (cssStyle.defined.whiteSpacePre || strcmp(name, "pre") == 0);
       if (preformatted) {
         // Preformatted text has no first-line indent: its lines start where the source put them.
         ownBlockStyle.textIndent = 0;
@@ -1682,8 +1684,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         // Track depth so characterData() can treat newlines as hard line breaks inside <pre>.
         self->preUntilDepth = std::min(self->preUntilDepth, self->depth);
       }
-      if (preformatted && self->preUntilDepth > self->depth) {
-        // CSS white-space: pre* on a block. Same depth tracking as <pre>.
+      if (preformatted && self->preUntilDepth >= self->depth) {
+        // <pre>, or CSS white-space: pre* on a block: start of a preformatted run.
         self->preUntilDepth = self->depth;
         self->preAtLineStart = true;
         self->preLinesEmitted = false;
