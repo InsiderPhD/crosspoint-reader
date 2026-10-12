@@ -451,15 +451,18 @@ inline void appendHardcoverSettings(std::vector<SettingInfo>& v) {
 
 // --- OPDS Browser (web-only, uses CrossPointSettings char arrays) ---
 inline void appendOpdsSettings(std::vector<SettingInfo>& v) {
-  v.insert(v.end(), {
-                        SettingInfo::String(StrId::STR_OPDS_SERVER_URL, SETTINGS.opdsServerUrl,
-                                            sizeof(SETTINGS.opdsServerUrl), "opdsServerUrl", StrId::STR_OPDS_BROWSER),
-                        SettingInfo::String(StrId::STR_USERNAME, SETTINGS.opdsUsername, sizeof(SETTINGS.opdsUsername),
-                                            "opdsUsername", StrId::STR_OPDS_BROWSER),
-                        SettingInfo::String(StrId::STR_PASSWORD, SETTINGS.opdsPassword, sizeof(SETTINGS.opdsPassword),
-                                            "opdsPassword", StrId::STR_OPDS_BROWSER)
-                            .withObfuscated(),
-                    });
+  v.insert(v.end(),
+           {
+               SettingInfo::String(StrId::STR_OPDS_SERVER_URL, SETTINGS.opdsServerUrl, sizeof(SETTINGS.opdsServerUrl),
+                                   "opdsServerUrl", StrId::STR_OPDS_BROWSER),
+               SettingInfo::String(StrId::STR_USERNAME, SETTINGS.opdsUsername, sizeof(SETTINGS.opdsUsername),
+                                   "opdsUsername", StrId::STR_OPDS_BROWSER),
+               SettingInfo::String(StrId::STR_PASSWORD, SETTINGS.opdsPassword, sizeof(SETTINGS.opdsPassword),
+                                   "opdsPassword", StrId::STR_OPDS_BROWSER)
+                   .withObfuscated(),
+               SettingInfo::Toggle(StrId::STR_OPDS_SERVER_FILENAMES, &CrossPointSettings::opdsUseServerFilename,
+                                   "opdsUseServerFilename", StrId::STR_OPDS_BROWSER),
+           });
 }
 
 // --- Status Bar Settings (web-only, uses StatusBarSettingsActivity) ---
@@ -601,7 +604,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 93;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 94;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

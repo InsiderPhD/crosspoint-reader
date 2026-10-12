@@ -1,7 +1,9 @@
 #include "OpdsBookBrowserActivity.h"
 
 #include <Epub.h>
+#include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <OpdsStream.h>
@@ -18,6 +20,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/HttpDownloadFilename.h"
 #include "network/HttpDownloader.h"
 #include "util/StringUtils.h"
 #include "util/TouchListNav.h"
@@ -340,6 +343,37 @@ void OpdsBookBrowserActivity::navigateBack() {
   }
 }
 
+namespace {
+// Renames a finished download to the name the server sent, when that name is
+// usable. Returns the path the book ends up at. Anything doubtful keeps the
+// generated "Author - Title.epub": no filename on the header, a name FAT or
+// this firmware cannot take (FsHelpers::isValidFileName), a hidden file, a
+// non-EPUB extension, or a name that already exists (never overwrite a
+// different book because a server reused a name).
+std::string applyServerFilename(const std::string& downloadedPath, const std::string& contentDisposition) {
+  std::string serverName;
+  if (!HttpDownloadFilename::parse(contentDisposition, serverName)) return downloadedPath;
+  if (!FsHelpers::isValidFileName(serverName) || serverName.front() == '.' || serverName.front() == ' ' ||
+      !FsHelpers::hasEpubExtension(serverName)) {
+    LOG_INF("OPDS", "Server file name rejected, keeping %s", downloadedPath.c_str());
+    return downloadedPath;
+  }
+  // Same 100-byte budget as the generated names; the stem is cut on a UTF-8
+  // codepoint boundary and the extension kept.
+  std::string target = "/" + StringUtils::sanitizeFilenamePreservingExtension(serverName);
+  if (target == downloadedPath || !FsHelpers::hasEpubExtension(target)) return downloadedPath;
+  if (Storage.exists(target.c_str())) {
+    LOG_INF("OPDS", "%s already exists, keeping %s", target.c_str(), downloadedPath.c_str());
+    return downloadedPath;
+  }
+  if (!Storage.rename(downloadedPath.c_str(), target.c_str())) {
+    LOG_ERR("OPDS", "Rename to server file name failed, keeping %s", downloadedPath.c_str());
+    return downloadedPath;
+  }
+  return target;
+}
+}  // namespace
+
 void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   state = BrowserState::DOWNLOADING;
   statusMessage = book.title;
@@ -356,11 +390,14 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   LOG_DBG("OPDS", "Downloading: %s -> %s", downloadUrl.c_str(), filename.c_str());
 
   auto result = HttpDownloader::HTTP_ERROR;
+  // Only filled when the option is on; one short-lived string per download.
+  std::string contentDisposition;
   {
     TlsFramebufferBorrow borrow(renderer);
     size_t lastLoggedMB = 0;
     result = HttpDownloader::downloadToFile(
-        downloadUrl, filename, [&lastLoggedMB](const size_t downloaded, const size_t total) {
+        downloadUrl, filename,
+        [&lastLoggedMB](const size_t downloaded, const size_t total) {
           const size_t mb = downloaded >> 20;
           if (mb > lastLoggedMB) {
             lastLoggedMB = mb;
@@ -370,7 +407,13 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
               LOG_DBG("OPDS", "Download progress: %u MB", (unsigned)mb);
             }
           }
-        });
+        },
+        /*allowConfiguredAuth=*/true, /*expectedSize=*/0, /*cancelFlag=*/nullptr, /*username=*/"", /*password=*/"",
+        /*headers=*/{}, /*resumePartial=*/false, SETTINGS.opdsUseServerFilename ? &contentDisposition : nullptr);
+  }
+
+  if (result == HttpDownloader::OK && !contentDisposition.empty()) {
+    filename = applyServerFilename(filename, contentDisposition);
   }
 
   if (result == HttpDownloader::OK) {

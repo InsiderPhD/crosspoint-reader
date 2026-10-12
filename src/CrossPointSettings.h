@@ -618,6 +618,10 @@ class CrossPointSettings {
   char opdsServerUrl[128] = "";
   char opdsUsername[64] = "";
   char opdsPassword[64] = "";
+  // Save an OPDS download under the name the server sends (Content-Disposition)
+  // instead of "Author - Title.epub". Falls back to the generated name when the
+  // server sends none or the name is not safe on FAT.
+  uint8_t opdsUseServerFilename = 0;
   // Hide battery percentage
   uint8_t hideBatteryPercentage = HIDE_NEVER;
   // Long-press chapter skip on side buttons
