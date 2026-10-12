@@ -22,12 +22,15 @@ class ListPickerActivity final : public Activity {
   using LabelFn = std::function<std::string(int index)>;
   using CursorFn = std::function<void(int index)>;
 
+  // markInitial: flag the row the picker opened on as the current value. Pass
+  // false when the rows are actions rather than values of a setting.
   ListPickerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const char* title, int itemCount,
-                     int initialIndex, LabelFn labelFn, CursorFn onCursor = nullptr)
+                     int initialIndex, LabelFn labelFn, CursorFn onCursor = nullptr, bool markInitial = true)
       : Activity("ListPicker", renderer, mappedInput),
         title(title),
         itemCount(itemCount),
         selectedIndex(initialIndex),
+        markInitial(markInitial),
         labelFn(std::move(labelFn)),
         onCursor(std::move(onCursor)) {}
 
@@ -46,6 +49,7 @@ class ListPickerActivity final : public Activity {
   const int itemCount;
   int selectedIndex;
   int startIndex = 0;  // the row the picker opened on, marked in the list
+  const bool markInitial;
   LabelFn labelFn;
   CursorFn onCursor;
   ButtonNavigator buttonNavigator;

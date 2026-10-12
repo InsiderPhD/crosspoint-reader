@@ -20,7 +20,11 @@ class EpubReaderBookmarksActivity final : public Activity {
   int selectorIndex = 0;
   std::vector<BookmarkEntry> bookmarks;
   int confirmingDelete = 0;  // 0 = hide dialog, 1 = show dialog, 2 = allow confirmation to delete
-  bool deleteHoldTriggered = false;
+  bool actionsHoldTriggered = false;
+  // The action list and the keyboard can finish on a button *press*; that
+  // button's release then lands here and would open a bookmark or leave the
+  // list. Set when one of them returns with Confirm/Back still down.
+  bool swallowStaleRelease = false;
 
  public:
   explicit EpubReaderBookmarksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -43,7 +47,11 @@ class EpubReaderBookmarksActivity final : public Activity {
   int getListHeight(const GfxRenderer& renderer) const;
   Rect listRect() const;
   void openSelectedBookmark();
-  // The hold-Confirm delete, also fired by a Full Touch long tap on a row.
+  // Rename / Delete for the selected bookmark: hold Confirm, or a Full Touch
+  // long tap on a row.
+  void showBookmarkActions();
+  void startRename();
+  void armStaleReleaseGuard();
   // Returns true when a bookmark was actually removed.
   bool deleteSelectedBookmark();
 };

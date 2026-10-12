@@ -4,18 +4,25 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <JsonSettingsIO.h>
+#include <Memory.h>
 
 #include <algorithm>
 
 #include "MappedInputManager.h"
 #include "ProgressMapper.h"
+#include "activities/util/KeyboardEntryActivity.h"
+#include "activities/util/ListPickerActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
 #include "util/TouchListNav.h"
 
 namespace {
-constexpr int ENTER_DELETE_MODE_MS = 700;
+constexpr int ENTER_ACTIONS_MODE_MS = 700;
+// Rows of the hold-Confirm action list.
+constexpr int ACTION_RENAME = 0;
+constexpr int ACTION_DELETE = 1;
+constexpr int ACTION_COUNT = 2;
 constexpr int DELETE_MODE_OFF = 0;
 constexpr int DELETE_MODE_DISPLAY = 1;
 constexpr int DELETE_MODE_CONFIRM = 2;
@@ -114,23 +121,105 @@ bool EpubReaderBookmarksActivity::deleteSelectedBookmark() {
   return true;
 }
 
-void EpubReaderBookmarksActivity::loop() {
-  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() > ENTER_DELETE_MODE_MS &&
-      !deleteHoldTriggered && !bookmarks.empty()) {
-    if (deleteSelectedBookmark()) {
-      deleteHoldTriggered = true;
+void EpubReaderBookmarksActivity::armStaleReleaseGuard() {
+  swallowStaleRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
+                        mappedInput.isPressed(MappedInputManager::Button::Back);
+}
+
+void EpubReaderBookmarksActivity::showBookmarkActions() {
+  if (bookmarks.empty()) {
+    return;
+  }
+  // Heap: one small activity object, freed when the list closes.
+  auto picker = makeUniqueNoThrow<ListPickerActivity>(
+      renderer, mappedInput, tr(STR_BOOKMARK), ACTION_COUNT, 0,
+      [](int index) { return std::string(index == ACTION_RENAME ? tr(STR_RENAME) : tr(STR_DELETE)); }, nullptr,
+      /*markInitial=*/false);
+  if (!picker) {
+    LOG_ERR("EPB", "OOM: bookmark action list");
+    return;
+  }
+  startActivityForResult(std::move(picker), [this](const ActivityResult& result) {
+    armStaleReleaseGuard();
+    if (result.isCancelled) {
+      return;
     }
+    const int action = std::get<ListPickResult>(result.data).index;
+    if (action == ACTION_RENAME) {
+      startRename();
+    } else if (action == ACTION_DELETE) {
+      deleteSelectedBookmark();
+    }
+  });
+}
+
+void EpubReaderBookmarksActivity::startRename() {
+  if (bookmarks.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(bookmarks.size())) {
+    return;
+  }
+  const int renameIndex = selectorIndex;
+  // Heap: the keyboard activity and its text, both gone before the list is
+  // back on screen. Nothing outlives the rename.
+  auto keyboard =
+      makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_RENAME), bookmarks[renameIndex].name,
+                                               BookmarkEntry::MAX_NAME_LENGTH, InputType::Text);
+  if (!keyboard) {
+    LOG_ERR("EPB", "OOM: bookmark rename keyboard");
+    return;
+  }
+  startActivityForResult(std::move(keyboard), [this, renameIndex](const ActivityResult& result) {
+    armStaleReleaseGuard();
+    if (result.isCancelled || renameIndex >= static_cast<int>(bookmarks.size())) {
+      return;
+    }
+    std::string name = std::get<KeyboardResult>(result.data).text;
+    if (name.size() > BookmarkEntry::MAX_NAME_LENGTH) {
+      name.resize(BookmarkEntry::MAX_NAME_LENGTH);
+    }
+    if (name == bookmarks[renameIndex].name) {
+      return;
+    }
+
+    RenderLock lock(*this);
+    // An empty name is allowed: it puts the page summary back as the label.
+    std::swap(bookmarks[renameIndex].name, name);
+    const std::string path = BookmarkUtil::getBookmarkPath(epubPath);
+    Storage.mkdir(BookmarkUtil::getBookmarksDir().c_str());
+    if (!JsonSettingsIO::saveBookmarks(bookmarks, path.c_str())) {
+      LOG_ERR("EPB", "Failed to save bookmarks after rename");
+      std::swap(bookmarks[renameIndex].name, name);
+    }
+  });
+}
+
+void EpubReaderBookmarksActivity::loop() {
+  if (swallowStaleRelease) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
+        mappedInput.isPressed(MappedInputManager::Button::Back)) {
+      return;
+    }
+    swallowStaleRelease = false;
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      return;
+    }
+  }
+
+  if (mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() > ENTER_ACTIONS_MODE_MS &&
+      !actionsHoldTriggered && !bookmarks.empty()) {
+    actionsHoldTriggered = true;
+    showBookmarkActions();
     return;
   }
 
   if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
-    deleteHoldTriggered = false;
+    actionsHoldTriggered = false;
   }
 
 #if FREEINK_DEVICE_X4PRO
-  // Full Touch: a long tap on a bookmark row is the hold-Confirm delete for
-  // that row. Suppress the contact only when the delete actually ran, so a
-  // no-op hold still falls through to the tap.
+  // Full Touch: a long tap on a bookmark row opens that row's action list,
+  // like the hold-Confirm above. The contact is suppressed so the lift does not
+  // also count as a tap.
   if (CrossPointSettings::FULL_TOUCH_UI && !bookmarks.empty()) {
     int lx, ly;
     if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
@@ -138,10 +227,9 @@ void EpubReaderBookmarksActivity::loop() {
           GUI.hitTestList(listRect(), static_cast<int>(bookmarks.size()), selectorIndex, /*hasSubtitle=*/true, lx, ly);
       if (index >= 0) {
         selectorIndex = index;
-        if (deleteSelectedBookmark()) {
-          mappedInput.suppressTouchContact();
-          return;
-        }
+        mappedInput.suppressTouchContact();
+        showBookmarkActions();
+        return;
       }
     }
   }
@@ -239,7 +327,10 @@ void EpubReaderBookmarksActivity::render(RenderLock&&) {
       contentX + (contentWidth - renderer.getTextWidth(UI_12_FONT_ID, tr(STR_BOOKMARKS), EpdFontFamily::BOLD)) / 2;
   renderer.drawText(UI_12_FONT_ID, titleX, 15 + contentY, tr(STR_BOOKMARKS), true, EpdFontFamily::BOLD);
 
-  const auto getBookmarkTitle = [this](int index) { return bookmarks.at(index).summary; };
+  const auto getBookmarkTitle = [this](int index) {
+    const auto& bookmark = bookmarks.at(index);
+    return bookmark.name.empty() ? bookmark.summary : bookmark.name;
+  };
 
   const auto getBookmarkSubtitle = [this](int index) {
     auto bookmark = bookmarks.at(confirmingDelete >= DELETE_MODE_DISPLAY ? selectorIndex : index);
@@ -257,7 +348,7 @@ void EpubReaderBookmarksActivity::render(RenderLock&&) {
                  getBookmarkSubtitle, getBookmarkIcon);
 
     GUI.drawHelpText(renderer, Rect{contentX, pageHeight - hintGutterBottom, contentWidth, LINE_HEIGHT},
-                     tr(STR_HOLD_CONFIRM_TO_DELETE));
+                     tr(STR_HOLD_CONFIRM_FOR_ACTIONS));
   } else {
     GUI.drawHelpText(renderer, Rect{contentX, LINE_HEIGHT * 2, contentWidth, LINE_HEIGHT},
                      tr(STR_BOOKMARK_INSTRUCTIONS));

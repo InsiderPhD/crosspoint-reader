@@ -941,6 +941,11 @@ bool JsonSettingsIO::saveBookmarks(const std::vector<BookmarkEntry>& bookmarks, 
     obj["xpath"] = bookmark.xpath;
     obj["percentage"] = bookmark.percentage;
     obj["summary"] = bookmark.summary;
+    // Only written when set: files stay byte-identical for unnamed bookmarks, and
+    // firmware that predates names reads the rest of the entry unchanged.
+    if (!bookmark.name.empty()) {
+      obj["name"] = bookmark.name;
+    }
   }
 
   String json;
@@ -965,6 +970,10 @@ bool JsonSettingsIO::loadBookmarks(std::vector<BookmarkEntry>& bookmarks, const 
     bookmark.xpath = obj["xpath"] | std::string("");
     bookmark.percentage = obj["percentage"] | static_cast<float>(0);
     bookmark.summary = obj["summary"] | std::string("");
+    bookmark.name = obj["name"] | std::string("");
+    if (bookmark.name.size() > BookmarkEntry::MAX_NAME_LENGTH) {
+      bookmark.name.resize(BookmarkEntry::MAX_NAME_LENGTH);
+    }
   }
 
   LOG_DBG("BKM", "Loaded %zu bookmarks from file", bookmarks.size());

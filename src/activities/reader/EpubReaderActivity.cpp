@@ -2431,6 +2431,15 @@ void EpubReaderActivity::flushProgress() {
   lastProgressFlushMs = millis();
 }
 
+// cachedBookmarks stays resident for the whole reading session but only feeds
+// the "this page is bookmarked" check. User-given names are list-screen data:
+// release them here so a named bookmark costs the reader no heap.
+static void dropBookmarkNames(std::vector<BookmarkEntry>& bookmarks) {
+  for (auto& bookmark : bookmarks) {
+    std::string().swap(bookmark.name);
+  }
+}
+
 EpubReaderActivity::BookmarkToggleResult EpubReaderActivity::addBookmark() {
   // Bookmark toggle reads/writes SD files and page data; serialize with render()
   // to avoid storage mutex races between main and render tasks.
@@ -2514,6 +2523,7 @@ EpubReaderActivity::BookmarkToggleResult EpubReaderActivity::addBookmark() {
       return BookmarkToggleResult::None;
     }
     cachedBookmarks = std::move(bookmarks);
+    dropBookmarkNames(cachedBookmarks);
     return BookmarkToggleResult::Removed;
   } else {
     bookmarks.insert(bookmarks.begin(), entry);
@@ -2522,6 +2532,7 @@ EpubReaderActivity::BookmarkToggleResult EpubReaderActivity::addBookmark() {
       return BookmarkToggleResult::None;
     }
     cachedBookmarks = std::move(bookmarks);
+    dropBookmarkNames(cachedBookmarks);
     return BookmarkToggleResult::Added;
   }
 }
@@ -2536,6 +2547,7 @@ void EpubReaderActivity::reloadBookmarkCache() {
     String json = Storage.readFile(path.c_str());
     if (!json.isEmpty()) {
       JsonSettingsIO::loadBookmarks(cachedBookmarks, json.c_str());
+      dropBookmarkNames(cachedBookmarks);
     }
   }
 }
