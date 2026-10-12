@@ -9,6 +9,8 @@
 #include <cstring>
 #include <functional>
 
+#include "util/TimeUtils.h"
+
 namespace {
 // v2 appended bookFusionId after each record's timestamp; v3 follows it with
 // the BookFusion start/end offsets and flags. Older files still load (missing
@@ -126,7 +128,9 @@ ClippingStore::AddResult ClippingStore::addClipping(const uint16_t spineIndex, c
   clipping.endWordIndex = endWordIndex;
   clipping.wordCount = wordCount;
   clipping.paragraphIndex = paragraphIndex;
-  clipping.timestamp = static_cast<uint32_t>(millis() / 1000UL);
+  // UTC epoch seconds, or 0 while the clock has never been set. (This used to
+  // store seconds since boot, which meant nothing after the next restart.)
+  clipping.timestamp = TimeUtils::getCurrentValidTimestamp();
   copyBounded(clipping.chapterTitle, sizeof(clipping.chapterTitle), chapterTitle);
   // Keep the in-app store bounded. The full Kindle-style export is still written separately.
   clipping.text.assign(text.data(), std::min(text.size(), CLIPPING_TEXT_MAX));

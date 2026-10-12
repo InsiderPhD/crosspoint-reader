@@ -428,18 +428,24 @@ and the files backing each one.
   "families": [
     { "name": "Literata", "sizes": [12, 14, 16], "files": [{ "name": "Literata-12.cpfont", "size": 40960 }] }
   ],
-  "maxFamilies": 4
+  "maxFamilies": 4,
+  "vectorFonts": false
 }
 ```
+
+`vectorFonts` is `true` on boards that render TrueType/OpenType files (X4 Pro, X4C). Such
+a family reports an empty `sizes` array: it has no fixed sizes.
 
 ---
 
 ### POST `/api/fonts/upload` - Upload a Font
 
-Multipart upload of a `.cpfont` file. The `family` form field names the family the file
-belongs to.
+Multipart upload of a `.cpfont` file, or of a `.ttf`/`.otf` file (up to 3 MB) on boards
+where `vectorFonts` is `true`. The `family` form field names the family the file belongs
+to.
 
-**Response:** `{"ok":true}` (200 OK), or `{"error":"Invalid .cpfont file"}` (400).
+**Response:** `{"ok":true}` (200 OK), or `{"error":"<reason>"}` (400). A `.ttf`/`.otf`
+upload to an X3 or X4 is refused with a message saying the font needs an X4 Pro or X4C.
 
 ---
 

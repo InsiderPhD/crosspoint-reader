@@ -2,10 +2,12 @@
 
 #include <GfxRenderer.h>
 
+#include <memory>
 #include <vector>
 
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
+#include "util/LibraryReadingStats.h"
 
 struct ReadingBookStats;
 struct Rect;
@@ -32,6 +34,11 @@ class ReadingStatsActivity final : public Activity {
   bool fullRefreshNext = false;
   int viewedYear = 0;
   unsigned viewedMonth = 1;
+  // Library tab (finished this month/year, top authors and tags). Computed the
+  // first time the tab is drawn - it reads the Library index from the card -
+  // and freed in onExit(), so nothing of it outlives the screen (~520 bytes
+  // while it is open).
+  std::unique_ptr<LibraryReadingStats::Summary> librarySummary;
   bool waitForConfirmRelease = false;
   bool waitForBackRelease = false;
   // Number of selectable rows on the current page (excluding the ribbon).

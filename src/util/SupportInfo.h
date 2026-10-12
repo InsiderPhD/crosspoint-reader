@@ -58,8 +58,9 @@ Snapshot capture(bool hasTouch);
 void captureSdUsage(Snapshot& snapshot);
 
 // Write a plain-text support report to EXPORT_PATH. Privacy-safe by
-// construction: it contains hardware facts, heap/SD/battery readings and an
-// allow-list of numeric display/reader settings. It never contains WiFi names
+// construction: it contains hardware facts, heap/SD/battery readings, an
+// allow-list of numeric display/reader settings and three lifetime reading
+// totals (books finished, reading time, sessions). It never contains WiFi names
 // or passwords, account names, tokens, server URLs, the MAC address, file
 // names or book titles — accounts appear only as "configured: yes/no".
 // Returns false (after logging) when the file cannot be written.
