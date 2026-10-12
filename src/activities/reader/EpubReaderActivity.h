@@ -3,6 +3,7 @@
 #include <Epub/FootnoteEntry.h>
 #include <Epub/Section.h>
 
+#include <atomic>
 #include <optional>
 #include <vector>
 
@@ -41,6 +42,16 @@ class EpubReaderActivity final : public Activity {
   uint8_t positionsSinceProgressFlush = 0;
   unsigned long lastProgressFlushMs = 0UL;
   unsigned long lastPageTurnTime = 0UL;
+  // Page turns asked for while a page was still rendering, as a signed net count: positive
+  // is forward, negative is back, one unit per press. A counter rather than a list of
+  // requests because a net count applied in one direction lands on exactly the page the
+  // presses would have reached one by one, and cannot be replayed out of order. Bounded by
+  // MAX_QUEUED_PAGE_TURNS. Main task only. See requestPageTurn().
+  int8_t queuedPageTurns = 0;
+  // True while render() is building a section file (the "Indexing" popup). Written by the
+  // render task, read by the main task: presses made while it is set are dropped, since the
+  // reader has not yet been shown the page they would turn from.
+  std::atomic<bool> sectionBuildActive{false};
   // Whether the last drawn status bar showed the remote as connected. Written by
   // the (const) renderStatusBar(), hence mutable.
   mutable bool statusBarShowsRemote = false;
@@ -199,6 +210,13 @@ class EpubReaderActivity final : public Activity {
   void reflowCurrentChapter();
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void pageTurn(bool isForwardTurn);
+  // A page-turn press from any source (buttons, tap zones, tilt, the Bluetooth remote).
+  // Turns at once on a settled page; while a render is in flight the press is counted in
+  // queuedPageTurns and applied by drainQueuedPageTurns() once the page is up.
+  void requestPageTurn(bool isForwardTurn);
+  // Applies queued turns from loop(). Returns true when it turned a page.
+  bool drainQueuedPageTurns();
+  void clearQueuedPageTurns() { queuedPageTurns = 0; }
 
   // Footnote navigation
   void navigateToHref(const std::string& href, bool savePosition = false);

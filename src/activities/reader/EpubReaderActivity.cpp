@@ -563,6 +563,7 @@ void EpubReaderActivity::rememberBookOnceRendered(const bool renderLockHeld) {
 
 void EpubReaderActivity::onExit() {
   Activity::onExit();
+  clearQueuedPageTurns();
 
   // A page rendered but loop() has not run since (sleep or Home in that gap):
   // remember the book now, ahead of the APP_STATE save below.
@@ -655,7 +656,15 @@ void EpubReaderActivity::loop() {
   // A mode the reader enters only from its Footnotes action or menu row. While
   // it is up it owns every control (and pauses the automatic page turn), so
   // none of the bindings below can turn the page out from under the highlight.
-  if (handleFootnoteSelectInput()) return;
+  if (handleFootnoteSelectInput()) {
+    clearQueuedPageTurns();
+    return;
+  }
+
+  // ── Page turns queued while the last page was rendering ──────────────────
+  // Ahead of the automatic turn and of this frame's input, so turns are applied
+  // in the order they were asked for.
+  if (drainQueuedPageTurns()) return;
 
   // ── Automatic page turn ──────────────────────────────────────────────────
   if (automaticPageTurnActive) {
@@ -993,6 +1002,7 @@ void EpubReaderActivity::jumpToPercent(int percent) {
   if (!epub) {
     return;
   }
+  clearQueuedPageTurns();
 
   const size_t bookSize = epub->getBookSize();
   if (bookSize == 0) {
@@ -1532,6 +1542,7 @@ void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
   if (SETTINGS.orientation == orientation) {
     return;
   }
+  clearQueuedPageTurns();
 
   // Preserve current reading position so we can restore after reflow.
   {
@@ -1555,6 +1566,7 @@ void EpubReaderActivity::applyOrientation(const uint8_t orientation) {
 }
 
 void EpubReaderActivity::reflowCurrentChapter() {
+  clearQueuedPageTurns();
   RenderLock lock(*this);
   if (section) {
     // Preserve the current reading position across the reflow.
@@ -1604,6 +1616,72 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
     }
     section.reset();
   }
+}
+
+namespace {
+// Most turns held while a page renders. Enough to skip ahead on purpose; small enough that
+// leaning on a button through a slow render cannot run away through the chapter.
+constexpr int8_t MAX_QUEUED_PAGE_TURNS = 5;
+// requestUpdate() only raises a flag: the render task takes the RenderLock a moment later, so
+// right after a turn RenderLock::peek() still reads "idle". Presses inside this window are
+// treated as arriving mid-render, which keeps pageTurn() from moving section->currentPage
+// under a render that is just starting.
+constexpr unsigned long PAGE_TURN_SETTLE_MS = 200UL;
+}  // namespace
+
+void EpubReaderActivity::requestPageTurn(const bool isForwardTurn) {
+  // The chapter is still being indexed: the page this press would turn from has never been
+  // on screen. Dropped, not queued -- queued, it would flip past the chapter's first page
+  // (and before the queue existed it fell into pageTurn()'s end-of-chapter branch against a
+  // half-built section and skipped the whole chapter).
+  if (sectionBuildActive.load(std::memory_order_relaxed)) {
+    clearQueuedPageTurns();
+    return;
+  }
+
+  const bool renderBusy = RenderLock::peek() || (millis() - lastPageTurnTime) < PAGE_TURN_SETTLE_MS;
+  if (!renderBusy && queuedPageTurns == 0) {
+    pageTurn(isForwardTurn);
+    return;
+  }
+
+  // Net count: a press against the queued direction takes one queued turn back, exactly as
+  // it would if both had been applied in turn.
+  const int next = queuedPageTurns + (isForwardTurn ? 1 : -1);
+  queuedPageTurns = static_cast<int8_t>(std::clamp<int>(next, -MAX_QUEUED_PAGE_TURNS, MAX_QUEUED_PAGE_TURNS));
+}
+
+bool EpubReaderActivity::drainQueuedPageTurns() {
+  if (queuedPageTurns == 0) return false;
+  if (sectionBuildActive.load(std::memory_order_relaxed)) {
+    // The turn that crossed into this chapter started a build: see requestPageTurn().
+    clearQueuedPageTurns();
+    return false;
+  }
+  if (RenderLock::peek() || (millis() - lastPageTurnTime) < PAGE_TURN_SETTLE_MS) return false;
+
+  // Nothing to turn in: no chapter loaded and no render coming to load one (a failed build),
+  // or the end-of-book screen, where a forward press means "go home" and must be a real one.
+  if (!epub || !section || currentSpineIndex >= epub->getSpineItemsCount()) {
+    clearQueuedPageTurns();
+    return false;
+  }
+
+  // All queued turns in one go, so the panel refreshes once for the page the reader asked
+  // for instead of once per page skipped. A turn that crosses a chapter boundary drops the
+  // section; the rest stay queued and are applied once the new chapter has rendered.
+  bool turned = false;
+  while (queuedPageTurns != 0 && section) {
+    const bool forward = queuedPageTurns > 0;
+    if (!forward && currentSpineIndex == 0 && section->currentPage == 0) {
+      clearQueuedPageTurns();  // already on the first page of the book
+      break;
+    }
+    queuedPageTurns = static_cast<int8_t>(queuedPageTurns + (forward ? -1 : 1));
+    pageTurn(forward);
+    turned = true;
+  }
+  return turned;
 }
 
 void EpubReaderActivity::pageTurn(bool isForwardTurn) {
@@ -1989,6 +2067,7 @@ void EpubReaderActivity::performDictionaryLookup(const std::string& word) {
 }
 
 void EpubReaderActivity::handleClippingJump(const ClippingJumpResult& jump) {
+  clearQueuedPageTurns();
   RenderLock lock(*this);
   currentSpineIndex = jump.spineIndex;
   nextPageNumber = jump.page;
@@ -2191,11 +2270,16 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
       const auto popupFn = [this]() { GUI.drawPopup(renderer, tr(STR_INDEXING)); };
 
-      if (!section->createSectionFile(
-              SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(), SETTINGS.getReaderLineCompression(),
-              SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
-              SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
-              ReaderUtils::effectiveFootnoteDisplay(), SETTINGS.bionicReading, SETTINGS.readerTextLayout(), popupFn)) {
+      // Page-turn presses made from here until the chapter is on screen are dropped
+      // (requestPageTurn). Cleared on every way out of this block.
+      sectionBuildActive.store(true, std::memory_order_relaxed);
+      const bool built = section->createSectionFile(
+          SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(), SETTINGS.getReaderLineCompression(),
+          SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
+          SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
+          ReaderUtils::effectiveFootnoteDisplay(), SETTINGS.bionicReading, SETTINGS.readerTextLayout(), popupFn);
+      sectionBuildActive.store(false, std::memory_order_relaxed);
+      if (!built) {
         LOG_ERR("ERS", "Failed to persist page data to SD");
         section.reset();
         // Say so, with a way out: this used to leave the "Indexing" popup on the
@@ -3321,6 +3405,7 @@ void EpubReaderActivity::renderButtonHints() const {
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {
   if (!epub) return;
+  clearQueuedPageTurns();
 
   // Push current position onto saved stack
   bool pushed = false;
@@ -3369,6 +3454,7 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
 
 void EpubReaderActivity::restoreSavedPosition() {
   if (footnoteDepth <= 0) return;
+  clearQueuedPageTurns();
   footnoteDepth--;
   const auto& pos = savedPositions[footnoteDepth];
   LOG_DBG("ERS", "Restoring position [%d]: spine %d, page %d", footnoteDepth, pos.spineIndex, pos.pageNumber);
@@ -3442,6 +3528,12 @@ void EpubReaderActivity::openReaderMenu() {
 
 bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION action) {
   using A = CrossPointSettings;
+  // Anything but a page turn moves the reader somewhere else (a menu, a chapter skip, a
+  // sync): turns still queued from the page before must not land on what comes next.
+  if (action != A::READER_ACTION_PAGE_FORWARD && action != A::READER_ACTION_PAGE_BACK &&
+      action != A::READER_ACTION_NONE) {
+    clearQueuedPageTurns();
+  }
   switch (action) {
     case A::READER_ACTION_NONE:
       return false;
@@ -3459,7 +3551,7 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
         requestUpdate();
         return false;
       }
-      pageTurn(true);
+      requestPageTurn(true);
       return false;
 
     case A::READER_ACTION_PAGE_BACK:
@@ -3476,7 +3568,7 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
         requestUpdate();
         return false;
       }
-      pageTurn(false);
+      requestPageTurn(false);
       return false;
 
     case A::READER_ACTION_SKIP_CHAPTER_FORWARD: {
