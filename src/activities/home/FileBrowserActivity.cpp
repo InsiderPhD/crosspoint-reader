@@ -16,6 +16,7 @@
 #include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "LibraryScan.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
@@ -417,6 +418,9 @@ void FileBrowserActivity::loop() {
                                  if (!res.isCancelled) {
                                    if (FsHelpers::hasEpubExtension(path)) Epub(path, "/.crosspoint").clearCache();
                                    Storage.remove(path.c_str());
+                                   // The folder's mtime does not change on remove, so the
+                                   // Library indexes would keep listing the book.
+                                   if (isBookEntry(path)) LibraryScan::invalidateIndex();
                                    RECENT_BOOKS.removeBook(path);
                                    RECENT_BOOKS.saveToFile();
                                    reload();
@@ -728,6 +732,10 @@ void FileBrowserActivity::confirmDeleteSelectedEntry() {
       if (!isDirectory) clearFileMetadata(fullPath);
       if (deleted) {
         LOG_DBG("FileBrowser", "Deleted successfully");
+        // A removed folder is noticed by the Library indexes (it is one of the
+        // directories they check); a removed book is not, as its folder's
+        // mtime stays put.
+        if (!isDirectory && isBookEntry(fullPath)) LibraryScan::invalidateIndex();
         // The chosen sleep folder (or a parent of it) is gone: back to the default lookup.
         const std::string& sleepFolder = APP_STATE.preferredSleepFolderPath;
         if (isDirectory && !sleepFolder.empty() &&

@@ -125,6 +125,10 @@ bool renameCarryingBookState(const String& oldPath, const String& newPath) {
   const bool renamed = Storage.rename(oldPath.c_str(), newPath.c_str());
   if (renamed) {
     clearEpubCacheIfNeeded(oldPath);
+    // The new name can be a book where the old one was not (book.zip ->
+    // book.epub): build its cache and drop the Library indexes, which the call
+    // above only does for a name that was a book. No-op for a folder.
+    clearEpubCacheIfNeeded(newPath);
   }
   return renamed;
 }

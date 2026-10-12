@@ -433,6 +433,9 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
                                  Storage.remove(path.c_str());
                                  RECENT_BOOKS.removeBook(path);
                                  RECENT_BOOKS.saveToFile();
+                                 // SdFat does not touch the folder's mtime on remove, so
+                                 // neither Library index would notice the book is gone.
+                                 LibraryScan::invalidateIndex();
                                  reloadRecents();
                                }
                              });
