@@ -518,6 +518,8 @@ curl -i "http://<server-ip>:17200/users/create" \
 
 **Document Matching** (KOReader Sync settings) chooses how books are matched across devices: **Filename** or **Binary** (content hash).
 
+**Server Profile** keeps up to three separate servers/accounts (say the public server, a self-hosted one, and a Calibre-Web instance). Press **Select** on the row to step to the next profile; **Username**, **Password** and **Sync Server URL** below it belong to the profile shown, and that profile is the one every sync uses. An existing setup becomes profile 1 automatically. Sync history is kept per profile, so after switching, the first sync of a book against the new server starts fresh instead of trusting the old server's timestamps.
+
 ---
 
 ## 11. Bluetooth Page Turner

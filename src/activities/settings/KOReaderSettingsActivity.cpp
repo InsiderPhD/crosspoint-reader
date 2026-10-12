@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <cstdio>
 #include <cstring>
 
 #include "KOReaderAuthActivity.h"
@@ -14,9 +15,30 @@
 #include "util/TouchListNav.h"
 
 namespace {
-constexpr int MENU_ITEMS = 5;
-const StrId menuNames[MENU_ITEMS] = {StrId::STR_USERNAME, StrId::STR_PASSWORD, StrId::STR_SYNC_SERVER_URL,
-                                     StrId::STR_DOCUMENT_MATCHING, StrId::STR_AUTHENTICATE};
+// Row order on screen. Username, password and server URL belong to the profile
+// shown in the first row, which is also the profile every sync uses.
+enum Row : int {
+  ROW_PROFILE = 0,
+  ROW_USERNAME,
+  ROW_PASSWORD,
+  ROW_SERVER_URL,
+  ROW_DOCUMENT_MATCHING,
+  ROW_AUTHENTICATE,
+  MENU_ITEMS
+};
+constexpr StrId menuNames[MENU_ITEMS] = {StrId::STR_KOSYNC_PROFILE,    StrId::STR_USERNAME,
+                                         StrId::STR_PASSWORD,          StrId::STR_SYNC_SERVER_URL,
+                                         StrId::STR_DOCUMENT_MATCHING, StrId::STR_AUTHENTICATE};
+
+// "2/3: alice" or "2/3: Not Set". Built per render; the profile count is tiny.
+std::string profileLabel() {
+  const uint8_t index = KOREADER_STORE.getActiveProfile();
+  const std::string& user = KOREADER_STORE.getProfileUsername(index);
+  char prefix[12];
+  snprintf(prefix, sizeof(prefix), "%u/%u: ", static_cast<unsigned>(index) + 1,
+           static_cast<unsigned>(KOReaderCredentialStore::PROFILE_COUNT));
+  return std::string(prefix) + (user.empty() ? tr(STR_NOT_SET) : user.c_str());
+}
 }  // namespace
 
 void KOReaderSettingsActivity::onEnter() {
@@ -67,7 +89,15 @@ void KOReaderSettingsActivity::loop() {
 }
 
 void KOReaderSettingsActivity::handleSelection() {
-  if (selectedIndex == 0) {
+  if (selectedIndex == ROW_PROFILE) {
+    // Step to the next profile slot. The slot shown is the one in use, so there
+    // is no separate "edit" and "activate" to get out of step.
+    const uint8_t next = (KOREADER_STORE.getActiveProfile() + 1) % KOReaderCredentialStore::PROFILE_COUNT;
+    if (KOREADER_STORE.setActiveProfile(next)) {
+      KOREADER_STORE.saveToFile();
+    }
+    requestUpdate();
+  } else if (selectedIndex == ROW_USERNAME) {
     // Username
     startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_USERNAME),
                                                                    KOREADER_STORE.getUsername(), 64, InputType::Text),
@@ -78,7 +108,7 @@ void KOReaderSettingsActivity::handleSelection() {
                                KOREADER_STORE.saveToFile();
                              }
                            });
-  } else if (selectedIndex == 1) {
+  } else if (selectedIndex == ROW_PASSWORD) {
     // Password
     startActivityForResult(
         std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_PASSWORD),
@@ -90,7 +120,7 @@ void KOReaderSettingsActivity::handleSelection() {
             KOREADER_STORE.saveToFile();
           }
         });
-  } else if (selectedIndex == 2) {
+  } else if (selectedIndex == ROW_SERVER_URL) {
     // Sync Server URL - prefill with https:// if empty to save typing
     const std::string currentUrl = KOREADER_STORE.getServerUrl();
     const std::string prefillUrl = currentUrl.empty() ? "https://" : currentUrl;
@@ -105,7 +135,7 @@ void KOReaderSettingsActivity::handleSelection() {
                                KOREADER_STORE.saveToFile();
                              }
                            });
-  } else if (selectedIndex == 3) {
+  } else if (selectedIndex == ROW_DOCUMENT_MATCHING) {
     // Document Matching - toggle between Filename and Binary
     const auto current = KOREADER_STORE.getMatchMethod();
     const auto newMethod =
@@ -113,7 +143,7 @@ void KOReaderSettingsActivity::handleSelection() {
     KOREADER_STORE.setMatchMethod(newMethod);
     KOREADER_STORE.saveToFile();
     requestUpdate();
-  } else if (selectedIndex == 4) {
+  } else if (selectedIndex == ROW_AUTHENTICATE) {
     // Authenticate
     if (!KOREADER_STORE.hasCredentials()) {
       // Can't authenticate without credentials - just show message briefly
@@ -146,21 +176,27 @@ void KOReaderSettingsActivity::render(RenderLock&&) {
       [](int index) { return std::string(I18N.get(menuNames[index])); }, nullptr, nullptr,
       [this](int index) {
         // Draw status for each setting
-        if (index == 0) {
-          auto username = KOREADER_STORE.getUsername();
-          return username.empty() ? std::string(tr(STR_NOT_SET)) : username;
-        } else if (index == 1) {
-          return KOREADER_STORE.getPassword().empty() ? std::string(tr(STR_NOT_SET)) : std::string("******");
-        } else if (index == 2) {
-          auto serverUrl = KOREADER_STORE.getServerUrl();
-          return serverUrl.empty() ? std::string(tr(STR_DEFAULT_VALUE)) : serverUrl;
-        } else if (index == 3) {
-          return KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME ? std::string(tr(STR_FILENAME))
-                                                                                  : std::string(tr(STR_BINARY));
-        } else if (index == 4) {
-          return KOREADER_STORE.hasCredentials() ? "" : std::string("[") + tr(STR_SET_CREDENTIALS_FIRST) + "]";
+        switch (index) {
+          case ROW_PROFILE:
+            return profileLabel();
+          case ROW_USERNAME: {
+            auto username = KOREADER_STORE.getUsername();
+            return username.empty() ? std::string(tr(STR_NOT_SET)) : username;
+          }
+          case ROW_PASSWORD:
+            return KOREADER_STORE.getPassword().empty() ? std::string(tr(STR_NOT_SET)) : std::string("******");
+          case ROW_SERVER_URL: {
+            auto serverUrl = KOREADER_STORE.getServerUrl();
+            return serverUrl.empty() ? std::string(tr(STR_DEFAULT_VALUE)) : serverUrl;
+          }
+          case ROW_DOCUMENT_MATCHING:
+            return KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME ? std::string(tr(STR_FILENAME))
+                                                                                    : std::string(tr(STR_BINARY));
+          case ROW_AUTHENTICATE:
+            return KOREADER_STORE.hasCredentials() ? "" : std::string("[") + tr(STR_SET_CREDENTIALS_FIRST) + "]";
+          default:
+            return std::string(tr(STR_NOT_SET));
         }
-        return std::string(tr(STR_NOT_SET));
       },
       true);
 
