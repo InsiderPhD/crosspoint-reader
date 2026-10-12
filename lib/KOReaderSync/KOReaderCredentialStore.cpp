@@ -195,6 +195,15 @@ std::string KOReaderCredentialStore::getBaseUrl() const {
   return url;
 }
 
+void KOReaderCredentialStore::setServerType(KOReaderServerType type) {
+  // Only the two types this firmware implements are storable.
+  if (type != KOReaderServerType::OTHER) {
+    type = KOReaderServerType::KOSYNC;
+  }
+  current().serverType = type;
+  LOG_DBG("KRS", "Set server type: %u", static_cast<unsigned>(type));
+}
+
 void KOReaderCredentialStore::setMatchMethod(DocumentMatchMethod method) {
   matchMethod = method;
   LOG_DBG("KRS", "Set match method: %s", method == DocumentMatchMethod::FILENAME ? "Filename" : "Binary");

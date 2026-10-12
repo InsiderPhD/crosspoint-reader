@@ -1,11 +1,14 @@
 #include "KOReaderSyncClient.h"
 
 #include <ArduinoJson.h>
+#include <Epub.h>
+#include <HalStorage.h>
 #include <Logging.h>
 #include <base64.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
 
+#include <cstdlib>
 #include <ctime>
 
 #include "KOReaderCredentialStore.h"
@@ -93,6 +96,45 @@ esp_http_client_handle_t createClient(const char* url, ResponseBuffer* buf,
   return client;
 }
 }  // namespace
+
+std::optional<KOReaderMetadata> KOReaderMetadata::fromBook(const Epub& epub) {
+  if (!KOREADER_STORE.getSendMetadata()) {
+    return std::nullopt;
+  }
+
+  KOReaderMetadata meta;
+  const std::string& path = epub.getPath();
+  const auto lastSlash = path.rfind('/');
+  meta.filename = (lastSlash != std::string::npos) ? path.substr(lastSlash + 1) : path;
+  meta.title = epub.getTitle();
+  meta.authors = epub.getAuthor();
+
+  if (KOREADER_STORE.supportsExtendedMetadata()) {
+    meta.series = epub.getSeriesName();
+    const std::string index = epub.getSeriesIndex();
+    if (!index.empty()) {
+      char* end = nullptr;
+      const float value = strtof(index.c_str(), &end);
+      if (end != index.c_str()) {
+        meta.seriesIndex = value;
+      }
+    }
+    // ISBN-13 sidecar written when the book's metadata was cached; absent for a
+    // book with no valid ISBN. Anything that is not 13 digits is not sent.
+    const std::string isbnPath = epub.getIsbnPath();
+    if (Storage.exists(isbnPath.c_str())) {
+      const String isbn = Storage.readFile(isbnPath.c_str());
+      bool valid = isbn.length() == 13;
+      for (unsigned int i = 0; valid && i < isbn.length(); i++) {
+        valid = isbn[i] >= '0' && isbn[i] <= '9';
+      }
+      if (valid) {
+        meta.isbn = isbn.c_str();
+      }
+    }
+  }
+  return meta;
+}
 
 KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
   lastHttpCode = 0;
@@ -186,6 +228,20 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   // Build JSON body
   JsonDocument doc;
   doc["document"] = progress.document;
+  // The store is checked again here so no caller can leak metadata past the
+  // user's switch, or the extended fields to a strict KOSync server.
+  if (progress.metadata.has_value() && KOREADER_STORE.getSendMetadata()) {
+    const KOReaderMetadata& m = *progress.metadata;
+    auto meta = doc["metadata"].to<JsonObject>();
+    meta["filename"] = m.filename;
+    meta["title"] = m.title;
+    meta["authors"] = m.authors;
+    if (KOREADER_STORE.supportsExtendedMetadata()) {
+      if (!m.isbn.empty()) meta["isbn"] = m.isbn;
+      if (!m.series.empty()) meta["series"] = m.series;
+      if (m.seriesIndex.has_value()) meta["series_index"] = *m.seriesIndex;
+    }
+  }
   doc["progress"] = progress.progress;
   doc["percentage"] = progress.percentage;
   doc["device"] = DEVICE_NAME;

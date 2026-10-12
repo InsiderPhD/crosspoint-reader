@@ -520,6 +520,8 @@ curl -i "http://<server-ip>:17200/users/create" \
 
 **Server Profile** keeps up to three separate servers/accounts (say the public server, a self-hosted one, and a Calibre-Web instance). Press **Select** on the row to step to the next profile; **Username**, **Password** and **Sync Server URL** below it belong to the profile shown, and that profile is the one every sync uses. An existing setup becomes profile 1 automatically. Sync history is kept per profile, so after switching, the first sync of a book against the new server starts fresh instead of trusting the old server's timestamps.
 
+**Send Book Details** (off by default) is the privacy switch for what a progress upload says about the book. Off, the server only ever sees the document hash and your position. On, the upload also carries the file name, title and author, which some self-hosted servers use to show a readable library. **Server Type** is set per profile: **Standard** for `sync.koreader.rocks`, `koreader/kosync` and anything else that speaks plain KOSync; **Extended** for a custom server that also wants the ISBN and the series name and number, which are then added when **Send Book Details** is on.
+
 ---
 
 ## 11. Bluetooth Page Turner

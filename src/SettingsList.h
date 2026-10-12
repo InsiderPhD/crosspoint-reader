@@ -397,37 +397,57 @@ inline void appendSystemSettings(std::vector<SettingInfo>& v) {
 
 // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
 inline void appendKoReaderSettings(std::vector<SettingInfo>& v) {
-  v.insert(v.end(), {
-                        SettingInfo::DynamicString(
-                            StrId::STR_KOREADER_USERNAME, [] { return KOREADER_STORE.getUsername(); },
-                            [](const std::string& val) {
-                              KOREADER_STORE.setCredentials(val, KOREADER_STORE.getPassword());
-                              KOREADER_STORE.saveToFile();
-                            },
-                            "koUsername", StrId::STR_KOREADER_SYNC),
-                        SettingInfo::DynamicString(
-                            StrId::STR_KOREADER_PASSWORD, [] { return KOREADER_STORE.getPassword(); },
-                            [](const std::string& val) {
-                              KOREADER_STORE.setCredentials(KOREADER_STORE.getUsername(), val);
-                              KOREADER_STORE.saveToFile();
-                            },
-                            "koPassword", StrId::STR_KOREADER_SYNC),
-                        SettingInfo::DynamicString(
-                            StrId::STR_SYNC_SERVER_URL, [] { return KOREADER_STORE.getServerUrl(); },
-                            [](const std::string& val) {
-                              KOREADER_STORE.setServerUrl(val);
-                              KOREADER_STORE.saveToFile();
-                            },
-                            "koServerUrl", StrId::STR_KOREADER_SYNC),
-                        SettingInfo::DynamicEnum(
-                            StrId::STR_DOCUMENT_MATCHING, {StrId::STR_FILENAME, StrId::STR_BINARY},
-                            [] { return static_cast<uint8_t>(KOREADER_STORE.getMatchMethod()); },
-                            [](uint8_t val) {
-                              KOREADER_STORE.setMatchMethod(static_cast<DocumentMatchMethod>(val));
-                              KOREADER_STORE.saveToFile();
-                            },
-                            "koMatchMethod", StrId::STR_KOREADER_SYNC),
-                    });
+  v.insert(v.end(),
+           {
+               SettingInfo::DynamicString(
+                   StrId::STR_KOREADER_USERNAME, [] { return KOREADER_STORE.getUsername(); },
+                   [](const std::string& val) {
+                     KOREADER_STORE.setCredentials(val, KOREADER_STORE.getPassword());
+                     KOREADER_STORE.saveToFile();
+                   },
+                   "koUsername", StrId::STR_KOREADER_SYNC),
+               SettingInfo::DynamicString(
+                   StrId::STR_KOREADER_PASSWORD, [] { return KOREADER_STORE.getPassword(); },
+                   [](const std::string& val) {
+                     KOREADER_STORE.setCredentials(KOREADER_STORE.getUsername(), val);
+                     KOREADER_STORE.saveToFile();
+                   },
+                   "koPassword", StrId::STR_KOREADER_SYNC),
+               SettingInfo::DynamicString(
+                   StrId::STR_SYNC_SERVER_URL, [] { return KOREADER_STORE.getServerUrl(); },
+                   [](const std::string& val) {
+                     KOREADER_STORE.setServerUrl(val);
+                     KOREADER_STORE.saveToFile();
+                   },
+                   "koServerUrl", StrId::STR_KOREADER_SYNC),
+               SettingInfo::DynamicEnum(
+                   StrId::STR_DOCUMENT_MATCHING, {StrId::STR_FILENAME, StrId::STR_BINARY},
+                   [] { return static_cast<uint8_t>(KOREADER_STORE.getMatchMethod()); },
+                   [](uint8_t val) {
+                     KOREADER_STORE.setMatchMethod(static_cast<DocumentMatchMethod>(val));
+                     KOREADER_STORE.saveToFile();
+                   },
+                   "koMatchMethod", StrId::STR_KOREADER_SYNC),
+               SettingInfo::DynamicEnum(
+                   StrId::STR_KOSYNC_SERVER_TYPE, {StrId::STR_KOSYNC_TYPE_STANDARD, StrId::STR_KOSYNC_TYPE_EXTENDED},
+                   [] { return static_cast<uint8_t>(KOREADER_STORE.supportsExtendedMetadata() ? 1 : 0); },
+                   [](uint8_t val) {
+                     const auto type = val == 1 ? KOReaderServerType::OTHER : KOReaderServerType::KOSYNC;
+                     if (type == KOREADER_STORE.getServerType()) return;
+                     KOREADER_STORE.setServerType(type);
+                     KOREADER_STORE.saveToFile();
+                   },
+                   "koServerType", StrId::STR_KOREADER_SYNC),
+               SettingInfo::DynamicEnum(
+                   StrId::STR_KOSYNC_SEND_METADATA, {StrId::STR_STATE_OFF, StrId::STR_STATE_ON},
+                   [] { return static_cast<uint8_t>(KOREADER_STORE.getSendMetadata() ? 1 : 0); },
+                   [](uint8_t val) {
+                     if ((val != 0) == KOREADER_STORE.getSendMetadata()) return;
+                     KOREADER_STORE.setSendMetadata(val != 0);
+                     KOREADER_STORE.saveToFile();
+                   },
+                   "koSendMetadata", StrId::STR_KOREADER_SYNC),
+           });
 }
 
 // --- Hardcover (web-only, uses HardcoverTokenStore) ---
@@ -587,7 +607,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 89;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 91;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

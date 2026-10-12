@@ -526,6 +526,7 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
   doc["cfgVersion"] = KOREADER_CONFIG_VERSION;
   doc["activeProfile"] = store.activeProfile;
   doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
+  doc["sendMetadata"] = store.getSendMetadata();
   // Every slot is written, filled or not: the array index is the profile's identity.
   JsonArray profiles = doc["profiles"].to<JsonArray>();
   for (const auto& profile : store.profiles) {
@@ -533,6 +534,7 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
     obj["username"] = profile.username;
     obj["password_obf"] = obfuscation::obfuscateToBase64(profile.password);
     obj["serverUrl"] = profile.serverUrl;
+    obj["serverType"] = static_cast<uint8_t>(profile.serverType);
   }
   // Pre-profile layout, mirrored from the active profile so a firmware downgrade
   // keeps syncing to the server in use. Ignored on load when "profiles" exists.
@@ -564,6 +566,10 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
       if (!profile.password.empty() && needsResave) *needsResave = true;
     }
     profile.serverUrl = src["serverUrl"] | std::string("");
+    // Absent (older file) or a type this firmware does not implement: standard KOSync.
+    const uint8_t type = src["serverType"] | static_cast<uint8_t>(KOReaderServerType::KOSYNC);
+    profile.serverType = type == static_cast<uint8_t>(KOReaderServerType::OTHER) ? KOReaderServerType::OTHER
+                                                                                 : KOReaderServerType::KOSYNC;
   };
 
   for (auto& profile : store.profiles) profile = {};
@@ -587,6 +593,7 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
 
   uint8_t method = doc["matchMethod"] | (uint8_t)0;
   store.matchMethod = static_cast<DocumentMatchMethod>(method);
+  store.sendMetadata = doc["sendMetadata"] | false;
 
   LOG_DBG("KRS", "Loaded KOReader credentials: profile %u, user: %s", static_cast<unsigned>(store.activeProfile) + 1,
           store.getUsername().c_str());

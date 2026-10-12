@@ -2640,6 +2640,10 @@ std::unique_ptr<ProgressAutoSync::Payload> EpubReaderActivity::buildAutosyncPayl
   payload->koXpath = koPos.xpath;
   payload->koPercentage = koPos.percentage;
   payload->bookPercent = koPos.percentage * 100.0f;
+  // Empty unless the user turned Send Book Details on, so the default costs the
+  // push nothing; the strings have to be copied here because the push releases
+  // the Epub before it opens TLS.
+  payload->koMetadata = KOReaderMetadata::fromBook(*epub);
   // The filename hash is trivial; the binary one reads the EPUB off SD, so the
   // sync task computes (and caches) that instead of stalling the page turn.
   if (KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME) {
@@ -3757,6 +3761,7 @@ void EpubReaderActivity::performKOReaderQuickSync() {
     uploadProgress.document = documentHash;
     uploadProgress.progress = localKoPos.xpath;
     uploadProgress.percentage = localKoPos.percentage;
+    uploadProgress.metadata = KOReaderMetadata::fromBook(*epub);
     uploadResult = KOReaderSyncClient::updateProgress(uploadProgress);
     if (uploadResult == KOReaderSyncClient::OK) {
       if (internetTimeSynced) {

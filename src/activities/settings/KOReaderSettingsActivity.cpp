@@ -22,13 +22,16 @@ enum Row : int {
   ROW_USERNAME,
   ROW_PASSWORD,
   ROW_SERVER_URL,
+  ROW_SERVER_TYPE,
   ROW_DOCUMENT_MATCHING,
+  ROW_SEND_METADATA,
   ROW_AUTHENTICATE,
   MENU_ITEMS
 };
-constexpr StrId menuNames[MENU_ITEMS] = {StrId::STR_KOSYNC_PROFILE,    StrId::STR_USERNAME,
-                                         StrId::STR_PASSWORD,          StrId::STR_SYNC_SERVER_URL,
-                                         StrId::STR_DOCUMENT_MATCHING, StrId::STR_AUTHENTICATE};
+constexpr StrId menuNames[MENU_ITEMS] = {
+    StrId::STR_KOSYNC_PROFILE,       StrId::STR_USERNAME,           StrId::STR_PASSWORD,
+    StrId::STR_SYNC_SERVER_URL,      StrId::STR_KOSYNC_SERVER_TYPE, StrId::STR_DOCUMENT_MATCHING,
+    StrId::STR_KOSYNC_SEND_METADATA, StrId::STR_AUTHENTICATE};
 
 // "2/3: alice" or "2/3: Not Set". Built per render; the profile count is tiny.
 std::string profileLabel() {
@@ -135,6 +138,16 @@ void KOReaderSettingsActivity::handleSelection() {
                                KOREADER_STORE.saveToFile();
                              }
                            });
+  } else if (selectedIndex == ROW_SERVER_TYPE) {
+    // Server Type - what the profile's server accepts beyond standard KOSync
+    KOREADER_STORE.setServerType(KOREADER_STORE.supportsExtendedMetadata() ? KOReaderServerType::KOSYNC
+                                                                           : KOReaderServerType::OTHER);
+    KOREADER_STORE.saveToFile();
+    requestUpdate();
+  } else if (selectedIndex == ROW_SEND_METADATA) {
+    KOREADER_STORE.setSendMetadata(!KOREADER_STORE.getSendMetadata());
+    KOREADER_STORE.saveToFile();
+    requestUpdate();
   } else if (selectedIndex == ROW_DOCUMENT_MATCHING) {
     // Document Matching - toggle between Filename and Binary
     const auto current = KOREADER_STORE.getMatchMethod();
@@ -189,6 +202,11 @@ void KOReaderSettingsActivity::render(RenderLock&&) {
             auto serverUrl = KOREADER_STORE.getServerUrl();
             return serverUrl.empty() ? std::string(tr(STR_DEFAULT_VALUE)) : serverUrl;
           }
+          case ROW_SERVER_TYPE:
+            return std::string(KOREADER_STORE.supportsExtendedMetadata() ? tr(STR_KOSYNC_TYPE_EXTENDED)
+                                                                         : tr(STR_KOSYNC_TYPE_STANDARD));
+          case ROW_SEND_METADATA:
+            return std::string(KOREADER_STORE.getSendMetadata() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
           case ROW_DOCUMENT_MATCHING:
             return KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME ? std::string(tr(STR_FILENAME))
                                                                                     : std::string(tr(STR_BINARY));
