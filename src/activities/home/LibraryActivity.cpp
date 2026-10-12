@@ -27,8 +27,10 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "components/icons/bookfusion24.h"
+#include "components/icons/check24.h"
 #include "components/icons/cover.h"
 #include "fontIds.h"
+#include "util/BookFinished.h"
 #include "util/TouchListNav.h"
 #include "util/WifiTimeSync.h"
 
@@ -198,6 +200,23 @@ bool matchRecent(void* context, const uint16_t ordinal, const uint64_t hash) {
   }
   return lookup.unresolved > 0;  // stop the scan once every recent book is placed
 }
+
+// Finished books' path hashes (sorted), matched against the index in one pass.
+struct FinishedLookup {
+  std::vector<uint64_t> hashes;
+  uint8_t* bits = nullptr;
+
+  static void addPath(void* context, const std::string& path) {
+    static_cast<FinishedLookup*>(context)->hashes.push_back(library::clixPathHash(path.data(), path.size()));
+  }
+  static bool match(void* context, const uint16_t ordinal, const uint64_t hash) {
+    auto& lookup = *static_cast<FinishedLookup*>(context);
+    if (std::binary_search(lookup.hashes.begin(), lookup.hashes.end(), hash)) {
+      lookup.bits[ordinal / 8] |= static_cast<uint8_t>(1u << (ordinal % 8));
+    }
+    return true;
+  }
+};
 
 // Last-opened and progress orders. Only the books in RecentBooksStore carry
 // either value, so they are promoted (in store order, or by progress) and
@@ -412,12 +431,37 @@ bool LibraryActivity::rebuildView() {
     return false;
   }
 
+  // Hide Finished Books: one bit per book for this rebuild only. Finished state
+  // is keyed by path (ReadingStatsStore / RecentBooksStore, both in RAM), so the
+  // finished paths are hashed and matched against the index's path hashes in a
+  // single pass. A failure here just leaves finished books listed.
+  std::unique_ptr<uint8_t[]> finishedBits;
+  if (SETTINGS.libraryHideFinished) {
+    FinishedLookup lookup;
+    // 8 bytes per finished book, freed with this block; reserve() is exact
+    // enough that the vector never regrows.
+    lookup.hashes.reserve(BookFinished::finishedPathUpperBound());
+    BookFinished::forEachFinishedPath(&FinishedLookup::addPath, &lookup);
+    if (!lookup.hashes.empty()) {
+      std::sort(lookup.hashes.begin(), lookup.hashes.end());
+      finishedBits = makeUniqueNoThrow<uint8_t[]>((static_cast<size_t>(n) + 7) / 8);
+      lookup.bits = finishedBits.get();
+      if (!finishedBits || !index.forEachPathHash(&FinishedLookup::match, &lookup)) {
+        LOG_ERR(MODULE, "Could not locate finished books in the index; showing all books");
+        finishedBits.reset();
+      }
+    }
+  }
+
   uint16_t count = n;
-  if (hiddenBits) {
+  if (hiddenBits || finishedBits) {
     count = 0;
     for (uint16_t i = 0; i < n; i++) {
       const uint16_t ordinal = rows[i];
-      if ((hiddenBits[ordinal / 8] & (1u << (ordinal % 8))) == 0) rows[count++] = ordinal;
+      const uint8_t mask = static_cast<uint8_t>(1u << (ordinal % 8));
+      const bool hidden = (hiddenBits && (hiddenBits[ordinal / 8] & mask) != 0) ||
+                          (finishedBits && (finishedBits[ordinal / 8] & mask) != 0);
+      if (!hidden) rows[count++] = ordinal;
     }
   }
   view = std::move(rows);
@@ -579,6 +623,15 @@ void LibraryActivity::rebuildSortedIndices() {
   }
 
   applySort(sortedIndices, entries, currentSort);
+
+  // Hide Finished Books. The filter lives in the display order only: bookPaths
+  // (and the caches parallel to it) keep every book, so switching the setting
+  // off needs no rescan. Finished state is two in-RAM lookups per book.
+  if (SETTINGS.libraryHideFinished) {
+    sortedIndices.erase(std::remove_if(sortedIndices.begin(), sortedIndices.end(),
+                                       [this](const uint16_t i) { return BookFinished::isFinished(bookPaths[i]); }),
+                        sortedIndices.end());
+  }
 }
 
 std::string LibraryActivity::pathAtLogicalIndex(size_t logicalIdx) {
@@ -733,6 +786,10 @@ void LibraryActivity::render(RenderLock&&) {
     const auto& metrics = UITheme::getInstance().getMetrics();
     GUI.drawHeader(renderer, Rect{0, metrics.topPadding, renderer.getScreenWidth(), metrics.headerHeight},
                    tr(STR_LIBRARY), sortModeLabel(currentSort), contextMenu.isOpen() ? nullptr : tr(STR_SORT));
+    // Say so, as the file browser does: an empty card, or every book finished
+    // with Hide Finished Books on, should not look like a failed load.
+    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding,
+                      metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing + 20, tr(STR_NO_FILES_FOUND));
     drawButtonHints();
     contextMenu.render(renderer);
     sortMenu.render(renderer);
@@ -853,6 +910,7 @@ void LibraryActivity::refreshCurrentPageMeta() {
     m.progressPercent = -1;
     m.hasCover = false;
     m.hasBfBadge = false;
+    m.finished = false;
     m.coverResolved = false;
     m.thumbPath.clear();
     m.path.clear();
@@ -911,6 +969,7 @@ void LibraryActivity::refreshCurrentPageMeta() {
     const auto& recents = RECENT_BOOKS.getBooks();
     auto it = std::find_if(recents.begin(), recents.end(), [&path](const RecentBook& b) { return b.path == path; });
     meta.progressPercent = (it != recents.end()) ? it->progressPercent : -1;
+    meta.finished = BookFinished::isFinished(path);
     LOG_DBG("LIBTIME", "  meta %d: %lu ms (cover=%d)", i, static_cast<unsigned long>(millis() - t0),
             meta.hasCover ? 1 : 0);
   }
@@ -1115,6 +1174,22 @@ void LibraryActivity::drawTileCover(const int slot) {
     const int iconX = badgeX + BF_PADDING;
     renderer.fillRect(badgeX, badgeY, BF_BADGE_SIZE, BF_BADGE_SIZE, false);
     renderer.drawIcon(BookFusion24Icon, iconX, iconY, BF_ICON_SIZE, BF_ICON_SIZE);
+  }
+
+  // Finished books: a tick in the opposite (bottom-right) corner, built the
+  // same way as the BookFusion badge so the two can sit on one cover. The
+  // outline keeps it readable over a light cover as well as a dark one.
+  if (meta.finished) {
+    constexpr int ICON_SIZE = 24;
+    constexpr int PADDING = 4;
+    constexpr int MARGIN = 4;
+    constexpr int BADGE_SIZE = ICON_SIZE + 2 * PADDING;
+    const int iconY = ((coverY + r.height - MARGIN - PADDING - ICON_SIZE) / 8) * 8;
+    const int badgeX = coverX + r.width - MARGIN - BADGE_SIZE;
+    const int badgeY = iconY - PADDING;
+    renderer.fillRect(badgeX, badgeY, BADGE_SIZE, BADGE_SIZE, false);
+    renderer.drawRect(badgeX, badgeY, BADGE_SIZE, BADGE_SIZE, true);
+    renderer.drawIcon(Check24Icon, badgeX + PADDING, iconY, ICON_SIZE, ICON_SIZE);
   }
 }
 
@@ -1442,7 +1517,13 @@ void LibraryActivity::loop() {
     onGoHome();
     return;
   }
-  if (initialLoadPending || bookCount() == 0) return;
+  if (initialLoadPending) return;
+  if (bookCount() == 0) {
+    // Nothing to select, but the screen must still be leavable: an empty card,
+    // or every book finished with Hide Finished Books on.
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) onGoHome();
+    return;
+  }
 
   const int total = static_cast<int>(bookCount());
   const int pageItems = pageSize();

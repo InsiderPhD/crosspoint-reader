@@ -79,6 +79,9 @@ class FileBrowserActivity final : public Activity {
   // Parallel to `files` (the display list): reading progress percent (-1 = none/unknown),
   // looked up from RECENT_BOOKS during rebuildFilesList(). Folders are always -1.
   std::vector<int8_t> filesProgress;
+  // Parallel to `files`: the book is finished (BookFinished::isFinished), so its row
+  // shows a tick. One bit per row; rebuilt by rebuildFilesList() from in-RAM stores.
+  std::vector<bool> filesFinished;
 
   // Sort state
   SortMenu sortMenu;

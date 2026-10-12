@@ -72,6 +72,7 @@ class LibraryActivity final : public Activity {
     int progressPercent = -1;  // -1 when the book has no RecentBooksStore entry.
     bool hasCover = false;
     bool hasBfBadge = false;
+    bool finished = false;  // BookFinished::isFinished(); draws the tick badge
     // drawTileCover has tried to open thumbPath (and the BookFusion cover.bmp
     // fallback) and fixed up hasCover/thumbPath from the result. Cleared by
     // refreshCurrentPageMeta, which no longer probes the SD for covers itself.
@@ -148,7 +149,7 @@ class LibraryActivity final : public Activity {
   std::string pathAtLogicalIndex(size_t logicalIdx);
 
   // Books in the displayed list, whichever backing store holds them.
-  size_t bookCount() const { return indexMode ? viewCount : bookPaths.size(); }
+  size_t bookCount() const { return indexMode ? viewCount : sortedIndices.size(); }
   size_t currentPage() const { return bookCount() == 0 ? 0 : selectorIndex / pageSize(); }
   size_t totalPages() const {
     const int p = pageSize();
