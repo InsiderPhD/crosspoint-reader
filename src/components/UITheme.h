@@ -39,6 +39,13 @@ class UITheme {
   // untouched until a user puts something up there.
   static int getTopStatusBarHeight();
   static int getStatusBarHeight(StatusBarSide side);
+  // Reader status bar text size (SETTINGS.statusBarTextSize): the font both
+  // bars draw with, how much taller than the classic Small lane that font is,
+  // and the resulting text-lane height. Small returns the theme's own lane, so
+  // the default layout is unchanged.
+  static int getStatusBarFontId();
+  static int getStatusBarTextExtraHeight();
+  static int getStatusBarTextLaneHeight();
   // Height of the fill bar strip alone (0 when hidden), per bar.
   static int getProgressBarHeight();
   static int getProgressBarHeight(StatusBarSide side);

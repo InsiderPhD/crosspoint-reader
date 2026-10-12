@@ -7,6 +7,8 @@
 #include <memory>
 #include <string>
 
+#include "PageList.h"
+
 class BookMetadataCache {
  public:
   struct BookMetadata {
@@ -82,6 +84,10 @@ class BookMetadataCache {
   // Temp file handles during build
   FsFile spineFile;
   FsFile tocFile;
+  // Streams the publisher page list to its own sidecar during the TOC pass. Held
+  // by pointer so the cache that stays resident while reading carries 4 bytes of
+  // it, not a file handle; null outside beginTocPass()..endTocPass().
+  std::unique_ptr<PageList::Writer> pageListWriter;
 
   // Index for fast href→spineIndex lookup (used only for large EPUBs)
   struct SpineHrefIndexEntry {
@@ -109,6 +115,8 @@ class BookMetadataCache {
   SpineEntry readSpineEntry(FsFile& file) const;
   TocEntry readTocEntry(FsFile& file) const;
   void cacheSpineCumulativeSizes();
+  // Spine index of a normalised href, -1 when it is not a spine item. TOC pass only.
+  int16_t findSpineIndexForHref(const std::string& href);
 
  public:
   BookMetadata coreMetadata;
@@ -124,6 +132,8 @@ class BookMetadataCache {
   bool endContentOpfPass();
   bool beginTocPass();
   void createTocEntry(const std::string& title, const std::string& href, const std::string& anchor, uint8_t level);
+  // One page of the publisher page list (TOC pass only); see PageList.h.
+  void createPageListEntry(const std::string& label, const std::string& href, const std::string& anchor);
   bool endTocPass();
   bool endWrite();
   bool cleanupTmpFiles() const;

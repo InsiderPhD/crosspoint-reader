@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <memory>
 
+#include "BookSettings.h"
 #include "MappedInputManager.h"
 #include "SdCardFontGlobals.h"
 #include "activities/reader/ReaderUtils.h"
@@ -33,6 +34,7 @@ constexpr StrId kAlignLabels[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, Str
 // Same order as the persisted index (TextLayoutOptions::PARAGRAPH_INDENT_*).
 constexpr StrId kIndentLabels[] = {StrId::STR_BOOK_S_STYLE, StrId::STR_NONE_OPT, StrId::STR_SMALL,
                                    StrId::STR_MEDIUM,       StrId::STR_LARGE,    StrId::STR_X_LARGE};
+constexpr StrId kImageLabels[] = {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS};
 constexpr StrId kOrientLabels[] = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
                                    StrId::STR_LANDSCAPE_CCW};
 
@@ -214,11 +216,38 @@ const FontLayoutPreviewActivity::Row FontLayoutPreviewActivity::kRows[] = {
     // activity keeps the whole live preview (prewarmed sample glyphs, preview
     // state) resident under the download's TLS session — observed on-device
     // eating the transfer's heap. It lives in the main Settings list instead.
+
+    // Book Settings only (see rowInMode): reader options that live in the flat
+    // Settings list globally, offered here so one book can differ.
+    {StrId::STR_HYPHENATION, RowKind::Toggle, &CrossPointSettings::hyphenationEnabled, nullptr, 0, 0, 0, 0, false,
+     false},
+    {StrId::STR_IMAGES, RowKind::Enum, &CrossPointSettings::imageRendering, kImageLabels,
+     CrossPointSettings::IMAGE_RENDERING_COUNT, 0, 0, 0, false, false},
+    {StrId::STR_IMAGE_GRAYSCALE, RowKind::Toggle, &CrossPointSettings::imageGrayscale, nullptr, 0, 0, 0, 0, false,
+     false},
+    // Last, so the cursor never starts on it.
+    {StrId::STR_USE_GLOBAL_SETTINGS, RowKind::Action, nullptr, nullptr, 0, 0, 0, 0, false, false},
 };
 const int FontLayoutPreviewActivity::kRowCount = sizeof(kRows) / sizeof(kRows[0]);
 
-FontLayoutPreviewActivity::FontLayoutPreviewActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-    : Activity("FontLayoutPreview", renderer, mappedInput) {}
+bool FontLayoutPreviewActivity::rowInMode(const Row& row, const Mode mode) {
+  // Device-wide by design: both are flipped from the reader menu and by reader
+  // actions, and a per-book copy would fight those.
+  const bool globalOnly = row.field == &CrossPointSettings::darkMode || row.field == &CrossPointSettings::orientation;
+  const bool bookOnly = row.kind == RowKind::Action || row.field == &CrossPointSettings::hyphenationEnabled ||
+                        row.field == &CrossPointSettings::imageRendering ||
+                        row.field == &CrossPointSettings::imageGrayscale;
+  return mode == Mode::Book ? !globalOnly : !bookOnly;
+}
+
+FontLayoutPreviewActivity::FontLayoutPreviewActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                                     const Mode mode)
+    : Activity("FontLayoutPreview", renderer, mappedInput), mode(mode) {
+  static_assert(sizeof(kRows) / sizeof(kRows[0]) <= kMaxRows, "grow kMaxRows");
+  for (int i = 0; i < kRowCount; ++i) {
+    if (rowInMode(kRows[i], mode)) rowMap[rowCount++] = static_cast<uint8_t>(i);
+  }
+}
 
 void FontLayoutPreviewActivity::onEnter() {
   Activity::onEnter();
@@ -237,7 +266,12 @@ void FontLayoutPreviewActivity::onEnter() {
 void FontLayoutPreviewActivity::onExit() {
   Activity::onExit();
   if (changed) {
-    SETTINGS.saveToFile();
+    // A book's settings go to its sidecar; settings.json is not touched.
+    if (mode == Mode::Book) {
+      BookSettings::save();
+    } else {
+      SETTINGS.saveToFile();
+    }
   }
   free(previewSnap);
   previewSnap = nullptr;
@@ -257,7 +291,7 @@ void FontLayoutPreviewActivity::loop() {
   // Full Touch (X4 Pro): tap a row to select it, tap it again to change it.
   // Taps in the preview half fall on dead space and are dropped.
   int tappedIndex;
-  switch (TouchListNav::tapRow(mappedInput, listRect(), kRowCount, selectedIndex,
+  switch (TouchListNav::tapRow(mappedInput, listRect(), rowCount, selectedIndex,
                                /*hasSubtitle=*/false, tappedIndex)) {
     case TouchListNav::TapResult::SelectionMoved:
       selectedIndex = tappedIndex;
@@ -280,18 +314,18 @@ void FontLayoutPreviewActivity::loop() {
   // side key. Inert while every row fits on one page.
   const int pageItems = GUI.listGeometry(listRect(), selectedIndex, /*hasSubtitle=*/false).pageItems;
   int swipeIndex = selectedIndex;
-  if (TouchListNav::pageSwipe(mappedInput, kRowCount, pageItems, swipeIndex)) {
+  if (TouchListNav::pageSwipe(mappedInput, rowCount, pageItems, swipeIndex)) {
     selectedIndex = swipeIndex;
     requestUpdate();
     return;
   }
 
   buttonNavigator.onNext([this] {
-    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, kRowCount);
+    selectedIndex = ButtonNavigator::nextIndex(selectedIndex, rowCount);
     requestUpdate();
   });
   buttonNavigator.onPrevious([this] {
-    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, kRowCount);
+    selectedIndex = ButtonNavigator::previousIndex(selectedIndex, rowCount);
     requestUpdate();
   });
 }
@@ -299,7 +333,7 @@ void FontLayoutPreviewActivity::loop() {
 // Shared by the Confirm button and the Full Touch second tap: Action rows open
 // their sub-activity, everything else cycles its value in place.
 void FontLayoutPreviewActivity::activateSelectedRow() {
-  const Row& row = kRows[selectedIndex];
+  const Row& row = rowAt(selectedIndex);
   if (row.kind == RowKind::Action) {
     activateRow(row);
     return;
@@ -311,6 +345,10 @@ void FontLayoutPreviewActivity::activateSelectedRow() {
 void FontLayoutPreviewActivity::changeRow(const Row& row) {
   changed = true;
   previewDirty = true;  // any setting change re-renders the sample region
+
+  // Book Settings: the row becomes this book's override. Must come before the
+  // value moves, while SETTINGS still holds the global one to remember.
+  if (mode == Mode::Book) BookSettings::beginOverride(row.field);
 
   // Font family has its own cycle (built-ins + installed SD fonts).
   if (row.field == &CrossPointSettings::fontFamily) {
@@ -416,9 +454,22 @@ void FontLayoutPreviewActivity::prewarmSampleGlyphs() {
 }
 
 void FontLayoutPreviewActivity::activateRow(const Row& row) {
-  // No action rows remain (Font Download moved to the main Settings list —
-  // see the kRows comment).
-  (void)row;
+  // The only action row is Book Settings' "Use Global Settings" (Font Download
+  // moved to the main Settings list — see the kRows comment).
+  if (mode != Mode::Book || row.label != StrId::STR_USE_GLOBAL_SETTINGS) return;
+  // Puts every global value back in SETTINGS and removes the book's sidecar,
+  // so there is nothing left for onExit() to save.
+  BookSettings::reset();
+  changed = false;
+  if (SETTINGS.sdFontFamilyName[0] != '\0') {
+    GUI.drawPopup(renderer, tr(STR_LOADING_FONT));
+  }
+  ensureSdFontLoaded();  // the global font may not be the one that was loaded
+  prewarmSampleGlyphs();
+  previewDirty = true;
+  fullRefreshNext = true;  // the whole sample re-lays-out; avoid ghosting
+  if (SETTINGS.textAntiAliasing) aaPreviewNext = true;
+  requestUpdate();
 }
 
 std::string FontLayoutPreviewActivity::rowValueText(const Row& row) const {
@@ -563,7 +614,9 @@ void FontLayoutPreviewActivity::render(RenderLock&&) {
     restored = renderer.copyBufferToRegion(0, 0, pageWidth, topH, previewSnap, previewSnapCap);
   }
   if (!restored) {
-    renderer.drawCenteredText(UI_12_FONT_ID, contentTop, tr(STR_FONT_LAYOUT_PREVIEW), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, contentTop,
+                              mode == Mode::Book ? tr(STR_BOOK_SETTINGS) : tr(STR_FONT_LAYOUT_PREVIEW), true,
+                              EpdFontFamily::BOLD);
     renderPreview(contentX, previewTop, contentW, previewH);
     renderer.drawLine(contentX + 4, sepY, contentX + contentW - 4, sepY, true);
 
@@ -580,10 +633,19 @@ void FontLayoutPreviewActivity::render(RenderLock&&) {
   }
 
   GUI.drawList(
-      renderer, listRect(), kRowCount, selectedIndex, [](int i) { return std::string(I18N.get(kRows[i].label)); },
-      nullptr, nullptr, [this](int i) { return rowValueText(kRows[i]); }, true);
+      renderer, listRect(), rowCount, selectedIndex, [this](int i) { return std::string(I18N.get(rowAt(i).label)); },
+      nullptr, nullptr,
+      [this](int i) {
+        const Row& row = rowAt(i);
+        std::string text = rowValueText(row);
+        // Book Settings: star the rows this book sets itself; the rest follow
+        // the global settings.
+        if (mode == Mode::Book && row.field && BookSettings::isOverridden(row.field)) text += " *";
+        return text;
+      },
+      true);
 
-  const bool actionSelected = kRows[selectedIndex].kind == RowKind::Action;
+  const bool actionSelected = rowAt(selectedIndex).kind == RowKind::Action;
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), actionSelected ? tr(STR_SELECT) : tr(STR_CHANGE),
                                             tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

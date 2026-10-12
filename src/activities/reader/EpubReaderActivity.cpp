@@ -28,6 +28,7 @@
 #include "BookFusionSyncActivity.h"
 #include "BookFusionSyncClient.h"
 #include "BookFusionTokenStore.h"
+#include "BookSettings.h"
 #include "BookmarkEntry.h"
 #include "ClipSelectionActivity.h"
 #include "ClippingStore.h"
@@ -38,6 +39,7 @@
 #include "EpubReaderBookmarksActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderClippingListActivity.h"
+#include "EpubReaderPageSelectionActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderUtils.h"
 #include "FootnoteMarkers.h"
@@ -54,6 +56,7 @@
 #include "ReaderUtils.h"
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontGlobals.h"
 #include "WifiCredentialStore.h"
 #include "activities/home/ReadingStatsDetailActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -480,6 +483,7 @@ void EpubReaderActivity::onEnter() {
 
   epub->setupCacheDir();
   reloadBookmarkCache();
+  publisherPageCount = PageList::count(epub->getCachePath());
 
   FsFile f;
   if (Storage.openFileForRead("ERS", epub->getCachePath() + "/progress.bin", f)) {
@@ -612,6 +616,11 @@ void EpubReaderActivity::onExit() {
   ImageBlock::releaseRenderCache();
   section.reset();
   epub.reset();
+
+  // Nothing of this book can be laid out any more: put the global reader
+  // settings back in place of any per-book overrides.
+  BookSettings::end();
+  renderer.setImagesBwDither(false);  // reader-only; the image viewer shares the writer
 
   if (exitPayload) {
     if (auto* fcm = renderer.getFontCacheManager()) {
@@ -998,6 +1007,61 @@ void EpubReaderActivity::maybeRefreshForRemoteConnect() {
 
 // Translate an absolute percent into a spine index plus a normalized position
 // within that spine so we can jump after the section is loaded.
+void EpubReaderActivity::openPageSelection() {
+  if (!epub || publisherPageCount == 0) return;
+  const std::string& cachePath = epub->getCachePath();
+
+  // Start the picker near where the reader is. The list is in document order,
+  // so the entries of this chapter are one run: [first, next). Which of them
+  // the current screen falls on is interpolated from the position in the
+  // chapter rather than looked up -- resolving every anchor of the run would
+  // be one section-file scan each, for a number the user is about to change.
+  const auto spine = static_cast<uint16_t>(std::clamp(currentSpineIndex, 0, static_cast<int>(UINT16_MAX) - 1));
+  const uint16_t first = PageList::lowerBoundSpine(cachePath, publisherPageCount, spine);
+  const uint16_t next = PageList::lowerBoundSpine(cachePath, publisherPageCount, static_cast<uint16_t>(spine + 1));
+  uint16_t initial = first;
+  if (next > first) {
+    if (section && section->pageCount > 0) {
+      initial = static_cast<uint16_t>(first + static_cast<uint32_t>(next - first) *
+                                                  static_cast<uint32_t>(section->currentPage) /
+                                                  static_cast<uint32_t>(section->pageCount));
+    }
+  } else if (first > 0) {
+    initial = static_cast<uint16_t>(first - 1);  // no page starts in this chapter: the last one before it
+  }
+  if (initial >= publisherPageCount) initial = static_cast<uint16_t>(publisherPageCount - 1);
+
+  startActivityForResult(
+      std::make_unique<EpubReaderPageSelectionActivity>(renderer, mappedInput, cachePath, publisherPageCount, initial),
+      [this](const ActivityResult& result) {
+        if (!result.isCancelled) {
+          jumpToPublisherPage(static_cast<uint16_t>(std::get<PageResult>(result.data).page));
+        }
+      });
+}
+
+void EpubReaderActivity::jumpToPublisherPage(const uint16_t index) {
+  if (!epub) return;
+  PageList::Entry entry;
+  if (!PageList::read(epub->getCachePath(), index, entry) || entry.spineIndex >= epub->getSpineItemsCount()) {
+    LOG_ERR("ERS", "Page list entry %u unusable", index);
+    requestUpdate();
+    return;
+  }
+  LOG_DBG("ERS", "Go to page '%s': spine %u anchor '%s'", entry.label, entry.spineIndex, entry.anchor);
+  {
+    RenderLock lock(*this);
+    // Same route a footnote or TOC link takes: the render resolves the anchor
+    // to a screen once the chapter is laid out, and falls back to the
+    // chapter's first screen when the id is not in its anchor map.
+    pendingAnchor = entry.anchor;
+    currentSpineIndex = entry.spineIndex;
+    nextPageNumber = 0;
+    section.reset();
+  }
+  requestUpdate();
+}
+
 void EpubReaderActivity::jumpToPercent(int percent) {
   if (!epub) {
     return;
@@ -1261,6 +1325,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           });
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::GO_TO_PAGE:
+      openPageSelection();
+      break;
     case EpubReaderMenuActivity::MenuAction::BOOKMARKS: {
       const int currentSpinePageCount = section ? section->pageCount : 0;
       startActivityForResult(std::make_unique<EpubReaderBookmarksActivity>(renderer, mappedInput, epub, epub->getPath(),
@@ -1433,16 +1500,38 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                              [this](const ActivityResult&) { requestUpdate(); });
       break;
     }
-    case EpubReaderMenuActivity::MenuAction::FONT_LAYOUT: {
-      startActivityForResult(std::make_unique<FontLayoutPreviewActivity>(renderer, mappedInput),
-                             [this](const ActivityResult&) {
-                               // The preview restores the renderer to its entry orientation on exit;
-                               // re-apply the (possibly changed) reader orientation, then repaginate
-                               // for whatever font/layout settings the user adjusted.
-                               ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
-                               reflowCurrentChapter();
-                               requestUpdate();
-                             });
+    case EpubReaderMenuActivity::MenuAction::FONT_LAYOUT:
+    case EpubReaderMenuActivity::MenuAction::BOOK_SETTINGS: {
+      // Font & Layout edits the GLOBAL settings, Book Settings this book's own.
+      // Same editor either way; it lays out a sample text, never the book, so
+      // the only copy of the book in memory stays the reader's.
+      const bool perBook = (action == EpubReaderMenuActivity::MenuAction::BOOK_SETTINGS);
+      // Drop the laid-out chapter BEFORE the editor opens rather than after it
+      // closes: the reader repaginates on return regardless, and the editor
+      // (preview snapshot, SD-font sample glyphs) then has that heap to itself.
+      reflowCurrentChapter();
+      if (!perBook) {
+        // Show the editor the global values, not this book's overrides.
+        BookSettings::suspend();
+      }
+      startActivityForResult(
+          std::make_unique<FontLayoutPreviewActivity>(
+              renderer, mappedInput,
+              perBook ? FontLayoutPreviewActivity::Mode::Book : FontLayoutPreviewActivity::Mode::Global),
+          [this](const ActivityResult&) {
+            // No-op unless suspended above: the book's overrides go back on top
+            // of whatever the global editor left.
+            BookSettings::resume();
+            // Either editor may leave a different font active than the one the
+            // book is read in (the global one after a global edit, the book's
+            // after "Use Global Settings").
+            ensureSdFontLoaded();
+            // The preview restores the renderer to its entry orientation on exit;
+            // re-apply the (possibly changed) reader orientation. The chapter is
+            // already marked for repagination with the new settings.
+            ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+            requestUpdate();
+          });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::SYNC_PUSH:
@@ -2095,8 +2184,7 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
   if (automaticPageTurnActive &&
       (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight())) {
     orientedMarginBottom +=
-        std::max(SETTINGS.screenMargin,
-                 static_cast<uint8_t>(statusBarHeight + UITheme::getInstance().getMetrics().statusBarVerticalMargin));
+        std::max(SETTINGS.screenMargin, static_cast<uint8_t>(statusBarHeight + UITheme::getStatusBarTextLaneHeight()));
   } else {
     orientedMarginBottom += std::max(SETTINGS.screenMargin, statusBarHeight);
   }
@@ -2977,7 +3065,13 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   // stream from SD as before; by the next visit everything is cached and the
   // slot is free to take.
   ImageBlock::setRenderCacheAllowed(!imagesNeedDecode);
-  const bool needsImageGrayscale = pageHasImages && !SETTINGS.darkMode && !renderer.areImagesSuppressed();
+  // Image Grayscale off (globally or for this book): no planes for images, and
+  // the B/W pass dithers them instead of drawing the planes' dark base (in
+  // dark mode too, where no planes are drawn either way).
+  const bool imageGrayscaleWanted = SETTINGS.imageGrayscale != 0;
+  renderer.setImagesBwDither(!imageGrayscaleWanted);
+  const bool needsImageGrayscale =
+      pageHasImages && imageGrayscaleWanted && !SETTINGS.darkMode && !renderer.areImagesSuppressed();
   const bool needsTextGrayscale = SETTINGS.textAntiAliasing && !SETTINGS.darkMode;
   const bool needsAnyGrayscale = needsTextGrayscale || needsImageGrayscale;
 
@@ -3253,7 +3347,7 @@ void EpubReaderActivity::renderStatusBar() const {
     // Offset the banner text when there is no status/progress-bar strip below it.
     const uint8_t statusBarHeight = UITheme::getInstance().getStatusBarHeight();
     if (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight()) {
-      textYOffset += UITheme::getInstance().getMetrics().statusBarVerticalMargin;
+      textYOffset += UITheme::getStatusBarTextLaneHeight();
     }
   }
 
@@ -3496,7 +3590,7 @@ void EpubReaderActivity::openReaderMenu() {
   startActivityForResult(
       std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), currentPage, totalPages,
                                                bookProgressPercent, SETTINGS.orientation, currentPageHasFootnotes,
-                                               syncProvider, timeLeftChapter, timeLeftBook),
+                                               syncProvider, timeLeftChapter, timeLeftBook, publisherPageCount > 0),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
@@ -3677,7 +3771,10 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
 
     case A::READER_ACTION_BIONIC_READING:
       SETTINGS.bionicReading = !SETTINGS.bionicReading;
-      SETTINGS.saveToFile();
+      // A book that sets Bionic Reading itself keeps the toggle to itself.
+      if (!BookSettings::saveIfOverridden(&CrossPointSettings::bionicReading)) {
+        SETTINGS.saveToFile();
+      }
       reflowCurrentChapter();  // bionic affects layout — repaginate
       requestUpdate();
       return false;

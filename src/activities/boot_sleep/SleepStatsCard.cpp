@@ -29,6 +29,14 @@ uint8_t buildLines(StatLine lines[MAX_STAT_LINES], bool previewMode) {
   uint8_t count = 0;
   for (uint8_t i = 0; i < 3; i++) {
     if (count >= MAX_STAT_LINES) break;  // no room for more lines
+    // Tracking off: the store is frozen, so "today", the goal, streaks and the
+    // stored book progress would all be stale. Keep only the lines that do not
+    // come from it (the contact line, and the reader's own time-left estimate).
+    // The settings preview still shows every slot with its sample.
+    if (!previewMode && !SETTINGS.trackReadingStats && slots[i] != CrossPointSettings::SLEEP_STAT_RETURN &&
+        slots[i] != CrossPointSettings::SLEEP_STAT_BOOK_TIME_LEFT) {
+      continue;
+    }
     lines[count].weekDots = false;
     char* buf = lines[count].text;
     switch (slots[i]) {

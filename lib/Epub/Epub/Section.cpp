@@ -27,9 +27,12 @@ namespace {
 //     and top spacing apply once per paragraph (upstream d5693c321). Layout-only change.
 // 46: user text-layout controls. Header gains characterSpacing, wordSpacingPercent and
 //     paragraphIndent (cache validation); every TextBlock's style tail gains characterSpacing.
-// 47: small images that share a paragraph with text are laid out in the line (inline
-//     images). Layout-only: the page payload is unchanged, an inline image is a PageImage.
-constexpr uint8_t SECTION_FILE_VERSION = 47;
+// 47: in a book with a publisher page list, the anchor map also carries the ids of
+//     page-break markers (epub:type="pagebreak"), so Go to Page can land on them.
+// 48: inline images (a small image that shares a paragraph with text is laid out in the
+//     line; still a PageImage) and publisher decorations (new page element
+//     TAG_PageBorderBox = 5; forced page breaks and white-space:pre change layout only).
+constexpr uint8_t SECTION_FILE_VERSION = 48;
 // Staging buffer for page serialization, one per section build (not per page). 2KB is four
 // SD sectors: a typical text page (~3-6KB serialized) goes out in two to four writes, and a
 // field larger than the buffer (a long line's word arena) bypasses it. Heap, not stack: 2KB
@@ -351,6 +354,9 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
       embeddedStyle, contentBase, imageBasePath, imageRendering, popupFn, cssParser, footnoteDisplay == 0,
       bionicReadingEnabled);
   visitor.setTextLayout(textLayout);
+  // Go to Page lands on the ids of the book's page-break markers; record them
+  // only for a book that actually ships a page list.
+  visitor.setRecordPageBreakAnchors(Storage.exists(PageList::filePath(epub->getCachePath()).c_str()));
   Hyphenator::setPreferredLanguage(epub->getLanguage());
   // TEMP diagnostic: fragmentation OOM suspected when cold-building a large chapter right after a
   // BookFusion download (synced progress jumps straight into a deep, big spine item). "largest" is

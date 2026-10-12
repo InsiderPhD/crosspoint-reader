@@ -6,6 +6,7 @@
 #include <HalFrontlight.h>
 #include <I18n.h>
 
+#include "BookSettings.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReaderMenuVisibility.h"
@@ -22,9 +23,9 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
                                                const int bookProgressPercent, const uint8_t currentOrientation,
                                                const bool hasFootnotes, const ProgressAutoSync::Provider syncProvider,
                                                const uint32_t timeLeftChapterSeconds,
-                                               const uint32_t timeLeftBookSeconds)
+                                               const uint32_t timeLeftBookSeconds, const bool hasPageList)
     : Activity("EpubReaderMenu", renderer, mappedInput),
-      menuItems(buildMenuItems(hasFootnotes, syncProvider)),
+      menuItems(buildMenuItems(hasFootnotes, syncProvider, hasPageList)),
       title(title),
       pendingOrientation(currentOrientation),
       pendingButtonHints(SETTINGS.showButtonHints),
@@ -38,7 +39,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
       timeLeftBookSeconds(timeLeftBookSeconds) {}
 
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(
-    bool hasFootnotes, ProgressAutoSync::Provider syncProvider) {
+    bool hasFootnotes, ProgressAutoSync::Provider syncProvider, bool hasPageList) {
   std::vector<MenuItem> items;
   items.reserve(ReaderMenuVisibility::kRowCount);
 
@@ -67,12 +68,18 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   }
 #endif
   add(MenuAction::FONT_LAYOUT, StrId::STR_FONT_LAYOUT_PREVIEW);
+  // The same editor, but for this book only (BookSettings).
+  add(MenuAction::BOOK_SETTINGS, StrId::STR_BOOK_SETTINGS);
   add(MenuAction::READER_CONTROLS, StrId::STR_READER_CONTROLS);
   // The row that trims this menu. Hideable like the rest once the user is done
   // with it -- the same screen is always reachable from Settings > Reader.
   add(MenuAction::CUSTOMISE_MENU, StrId::STR_CUSTOMISE_READER_MENU);
   add(MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN);
   add(MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT);
+  // Only for a book that ships a publisher page list (most do not).
+  if (hasPageList) {
+    add(MenuAction::GO_TO_PAGE, StrId::STR_GO_TO_PAGE);
+  }
   add(MenuAction::BOOKMARKS, StrId::STR_BOOKMARKS);
   add(MenuAction::ADD_BOOKMARK, StrId::STR_CREATE_BOOKMARK);
   add(MenuAction::SAVE_CLIPPING, StrId::STR_SAVE_CLIPPING);
@@ -374,8 +381,13 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
     statusLine += tr(STR_AUTOSYNC_OFF_NOTICE);
     statusLine += " | ";
   }
-  statusLine += ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTodayReadingMs()) + " / " +
-                ReadingStatsAnalytics::formatDurationHm(SETTINGS.getDailyGoalMs());
+  if (SETTINGS.trackReadingStats) {
+    statusLine += ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTodayReadingMs()) + " / " +
+                  ReadingStatsAnalytics::formatDurationHm(SETTINGS.getDailyGoalMs());
+  } else if (statusLine.size() >= 3) {
+    // Nothing follows the clock / autosync notice: drop its trailing " | ".
+    statusLine.erase(statusLine.size() - 3);
+  }
 
   const int summaryLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const int statusY = summaryY + summaryLineHeight + 2;
@@ -426,6 +438,13 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
 
     if (menuItems[i].action == MenuAction::DARK_MODE) {
       const char* value = SETTINGS.darkMode ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      const auto width = renderer.getTextWidth(UI_10_FONT_ID, value);
+      renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, value, !isSelected);
+    }
+
+    if (menuItems[i].action == MenuAction::BOOK_SETTINGS && BookSettings::hasOverrides()) {
+      // Says at a glance that this book is not following the global settings.
+      const char* value = tr(STR_CUSTOM);
       const auto width = renderer.getTextWidth(UI_10_FONT_ID, value);
       renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, value, !isSelected);
     }

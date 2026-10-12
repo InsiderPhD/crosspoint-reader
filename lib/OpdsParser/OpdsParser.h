@@ -2,6 +2,7 @@
 #include <Print.h>
 #include <expat.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,10 @@ struct OpdsEntry {
   std::string author;  // Only for books
   std::string href;    // Navigation URL or epub download URL
   std::string id;
+  // Item count a feed advertises for a navigation entry (thr:count on its
+  // link, or a "<N> books" summary); -1 when the feed does not say. Last
+  // member so the positional initialisers used for the paging rows still work.
+  int32_t count = -1;
 };
 
 // Legacy alias for backward compatibility
@@ -105,6 +110,7 @@ class OpdsParser final : public Print {
   bool inAuthor = false;
   bool inAuthorName = false;
   bool inId = false;
+  bool inSummary = false;
 
   bool errorOccured = false;
 };

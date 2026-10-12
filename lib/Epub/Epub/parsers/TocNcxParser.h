@@ -18,6 +18,8 @@ class TocNcxParser final : public Print {
   std::string currentLabel;
   std::string currentSrc;
   uint8_t currentDepth = 0;
+  // Inside <pageList> (publisher page numbers) rather than <navMap>.
+  bool inPageList = false;
 
   static void startElement(void* userData, const XML_Char* name, const XML_Char** atts);
   static void characterData(void* userData, const XML_Char* s, int len);

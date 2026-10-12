@@ -2,7 +2,10 @@
 
 ## `book.bin`
 
-> **Current version: 12** (`BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`).
+> **Current version: 13** (`BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`).
+> v13 did not change the layout either: the metadata build now also writes the publisher page
+> list to a `pagelist.bin` sidecar (see below), and the bump makes existing books rebuild so
+> they gain it.
 > v12 did not change the layout: multiple `<dc:creator>` authors are now joined with
 > `" & "` instead of `", "`, so the Authors folder view can split co-authors without
 > breaking "Last, First" names. The bump exists to force stale `book.bin` files to rebuild.
@@ -125,7 +128,7 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-> **Current version: 47** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> **Current version: 48** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
 > The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
 > v30 inline ("on page") footnotes; v31–v33 KOReader xpath/paragraph sync data and
 > nested block styles; v34 `<pre>` blocks carry a monospace font override; v35 hanging
@@ -151,8 +154,12 @@ if (parsedSize != fileSize) {
 > other render settings; and every TextBlock's style tail gains `characterSpacing i8`
 > after `fontOverride`, so a line is drawn with the letter spacing its word positions
 > were computed for.
-> v47 changes layout only (the page payload is unchanged): a small image that shares its
-> paragraph with text is laid out in the line instead of as a centred block. It is still
+> v47 no structural change: in a book that has a `pagelist.bin`, the anchor map additionally
+> carries the ids of page-break markers (`epub:type="pagebreak"`, `role="doc-pagebreak"`, or an
+> id of the form `page12` / `pg_12`), recorded against the page being filled when the marker
+> is met. Go to Page resolves its targets through that map.
+> v48 inline images and publisher decorations. A small image that shares its
+> paragraph with text is laid out in the line instead of as a centred block (layout only). It is still
 > stored as an ordinary `PageImage` (tag 2), positioned so its bottom edge sits on the
 > line's baseline; a line made taller by an image has its `PageLine` moved down by the
 > same amount. Publisher decorations add page element tag 5, `PageBorderBox` (a CSS
@@ -450,3 +457,56 @@ struct PayloadHeader {          // 32 bytes, then title, author, series, tags ba
     u32 checksum;
 };
 ```
+
+## Per-book reader settings: `book_settings.bin`
+
+Optional, in the book's cache directory (`/.crosspoint/epub_<hash>/`), so it follows a rename and is
+removed with the cache. Written by the reader menu's **Book Settings** editor; a missing file means the
+book follows the global settings. Owned by `src/BookSettings.cpp`.
+
+### Version 1
+
+```c++
+struct BookSettingsBin {
+    u8  version;              // 1
+    u8  fieldCount;           // value bytes that follow the mask (14 when written by this firmware)
+    u32 overrideMask;         // little-endian; bit i set = values[i] overrides the global setting
+    u8  values[fieldCount];   // BookSettings::kFields order, see below
+    char sdFontFamilyName[32]; // NUL padded; goes with bit 0, empty = built-in family
+};
+```
+
+Field order (the index is both the mask bit and the byte; append only): 0 fontFamily, 1 fontSize,
+2 lineSpacing, 3 wordSpacing, 4 characterSpacing, 5 paragraphAlignment, 6 screenMargin,
+7 extraParagraphSpacing, 8 paragraphIndent, 9 bionicReading, 10 textAntiAliasing,
+11 hyphenationEnabled, 12 imageRendering, 13 imageGrayscale.
+
+A reader that knows fewer fields ignores the extra bytes and bits; one that knows more treats the
+missing fields as not overridden, so adding a field needs no version bump. An out-of-range value drops
+that one override. Values of fields whose mask bit is clear are written but never read.
+
+## Publisher page list: `pagelist.bin`
+
+Optional, in the book's cache directory. Written while `book.bin` is built, from the EPUB 3
+`<nav epub:type="page-list">` or, when the NCX is the TOC that gets parsed, its `<pageList>`.
+Absent when the book declares no page list (or none of its entries point into the spine). Read
+only by the reader menu's **Go to Page**: the count on book open, then single records by seek.
+Owned by `lib/Epub/Epub/PageList.cpp`.
+
+### Version 1
+
+```c++
+struct PageListBin {
+    u8  version;   // 1
+    u8  reserved;  // 0
+    u16 count;     // little-endian
+    struct {
+        char label[12];   // NUL padded UTF-8 page label as printed: "12", "xiv"
+        u16  spineIndex;  // little-endian
+        char anchor[50];  // NUL padded fragment id; empty = top of the spine item
+    } entries[count];     // 64 bytes each, in document order
+};
+```
+
+Entries with an empty label, a target outside the spine or an anchor of 50 bytes or more are
+skipped; a label longer than 11 bytes is cut on a UTF-8 boundary; at most 8000 entries are kept.

@@ -152,41 +152,99 @@ void CrossPointSettings::migrateStatusBarPositions(CrossPointSettings& settings)
   settings.statusBarBookmarkPos = SB_POS_LEFT;
 }
 
-uint8_t& CrossPointSettings::statusBarPosRef(const uint8_t element, const bool topBar) {
-  switch (element) {
-    case SB_ELEM_BATTERY:
-      return topBar ? statusBarTopBatteryPos : statusBarBatteryPos;
-    case SB_ELEM_BOOK_TITLE:
-      return topBar ? statusBarTopBookTitlePos : statusBarBookTitlePos;
-    case SB_ELEM_CHAPTER_TITLE:
-      return topBar ? statusBarTopChapterTitlePos : statusBarChapterTitlePos;
-    case SB_ELEM_BOOK_PERCENT:
-      return topBar ? statusBarTopBookPercentPos : statusBarBookPercentPos;
-    case SB_ELEM_CHAPTER_PAGE:
-      return topBar ? statusBarTopChapterPagePos : statusBarChapterPagePos;
-    case SB_ELEM_BOOK_TIME_LEFT:
-      return topBar ? statusBarTopBookTimeLeftPos : statusBarBookTimeLeftPos;
-    case SB_ELEM_CHAPTER_TIME_LEFT:
-      return topBar ? statusBarTopChapterTimeLeftPos : statusBarChapterTimeLeftPos;
-    case SB_ELEM_CLOCK:
-      return topBar ? statusBarTopClockPos : statusBarClockPos;
-    case SB_ELEM_BOOKMARK:
-      return topBar ? statusBarTopBookmarkPos : statusBarBookmarkPos;
-    case SB_ELEM_BLUETOOTH:
-      return topBar ? statusBarTopBluetoothPos : statusBarBluetoothPos;
-    default:
-      break;
+uint8_t& CrossPointSettings::statusBarPosRef(const uint8_t element, const STATUS_BAR_ID bar) {
+  if (bar == SB_BAR_HEADER) {
+    switch (element) {
+      case SB_ELEM_DATE:
+        return statusBarHeaderDatePos;
+      case SB_ELEM_CLOCK:
+        return statusBarHeaderClockPos;
+      case SB_ELEM_BATTERY:
+        return statusBarHeaderBatteryPos;
+      default:
+        break;
+    }
+  } else if (bar == SB_BAR_BOTTOM || bar == SB_BAR_TOP) {
+    const bool topBar = bar == SB_BAR_TOP;
+    switch (element) {
+      case SB_ELEM_BATTERY:
+        return topBar ? statusBarTopBatteryPos : statusBarBatteryPos;
+      case SB_ELEM_BOOK_TITLE:
+        return topBar ? statusBarTopBookTitlePos : statusBarBookTitlePos;
+      case SB_ELEM_CHAPTER_TITLE:
+        return topBar ? statusBarTopChapterTitlePos : statusBarChapterTitlePos;
+      case SB_ELEM_BOOK_PERCENT:
+        return topBar ? statusBarTopBookPercentPos : statusBarBookPercentPos;
+      case SB_ELEM_CHAPTER_PAGE:
+        return topBar ? statusBarTopChapterPagePos : statusBarChapterPagePos;
+      case SB_ELEM_BOOK_TIME_LEFT:
+        return topBar ? statusBarTopBookTimeLeftPos : statusBarBookTimeLeftPos;
+      case SB_ELEM_CHAPTER_TIME_LEFT:
+        return topBar ? statusBarTopChapterTimeLeftPos : statusBarChapterTimeLeftPos;
+      case SB_ELEM_CLOCK:
+        return topBar ? statusBarTopClockPos : statusBarClockPos;
+      case SB_ELEM_BOOKMARK:
+        return topBar ? statusBarTopBookmarkPos : statusBarBookmarkPos;
+      case SB_ELEM_BLUETOOTH:
+        return topBar ? statusBarTopBluetoothPos : statusBarBluetoothPos;
+      default:
+        break;
+    }
   }
-  // Unknown element: a throwaway slot that always reads as hidden, so a stale
-  // index can neither land on a bar nor scribble over a real field.
+  // Unknown element or bar, or an element this bar has no slot for: a throwaway
+  // slot that always reads as hidden, so a stale index can neither land on a
+  // bar nor scribble over a real field.
   static uint8_t unknownElement = SB_POS_HIDE;
   unknownElement = SB_POS_HIDE;
   return unknownElement;
 }
 
-uint8_t CrossPointSettings::statusBarPos(const uint8_t element, const bool topBar) const {
-  const uint8_t pos = const_cast<CrossPointSettings*>(this)->statusBarPosRef(element, topBar);
+uint8_t CrossPointSettings::statusBarPos(const uint8_t element, const STATUS_BAR_ID bar) const {
+  const uint8_t pos = const_cast<CrossPointSettings*>(this)->statusBarPosRef(element, bar);
   return pos < STATUS_BAR_POS_COUNT ? pos : static_cast<uint8_t>(SB_POS_HIDE);
+}
+
+uint8_t& CrossPointSettings::statusBarBatteryStyleRef(const STATUS_BAR_ID bar) {
+  switch (bar) {
+    case SB_BAR_TOP:
+      return statusBarTopBatteryStyle;
+    case SB_BAR_HEADER:
+      return statusBarHeaderBatteryStyle;
+    default:
+      return statusBarBatteryStyle;
+  }
+}
+
+uint8_t CrossPointSettings::statusBarBatteryStyleOf(const STATUS_BAR_ID bar) const {
+  const uint8_t style = const_cast<CrossPointSettings*>(this)->statusBarBatteryStyleRef(bar);
+  return style < STATUS_BAR_BATTERY_STYLE_COUNT ? style : static_cast<uint8_t>(SB_BATTERY_ICON_AND_PERCENT);
+}
+
+void CrossPointSettings::migrateStatusBarBatteryStyles(CrossPointSettings& settings) {
+  // Hide Battery %: Never showed the number everywhere, In Reader hid it on the
+  // reader bars only, Always hid it on the header too.
+  const uint8_t readerStyle =
+      settings.hideBatteryPercentage == HIDE_NEVER ? SB_BATTERY_ICON_AND_PERCENT : SB_BATTERY_ICON_ONLY;
+  settings.statusBarBatteryStyle = readerStyle;
+  settings.statusBarTopBatteryStyle = readerStyle;
+}
+
+void CrossPointSettings::migrateHeaderStatusBar(CrossPointSettings& settings) {
+  // The classic header: date on the left with the optional clock right after
+  // it, battery on the right.
+  settings.statusBarHeaderDatePos = SB_POS_LEFT;
+  settings.statusBarHeaderClockPos = settings.showClockOutsideReader ? SB_POS_LEFT : SB_POS_HIDE;
+  settings.statusBarHeaderBatteryPos = SB_POS_RIGHT;
+  settings.statusBarHeaderBatteryStyle =
+      settings.hideBatteryPercentage == HIDE_ALWAYS ? SB_BATTERY_ICON_ONLY : SB_BATTERY_ICON_AND_PERCENT;
+}
+
+uint8_t CrossPointSettings::legacyHideBatteryPercentage() const {
+  // Closest older-firmware equivalent of the three styles. "% Only" has none
+  // and reads as "shown".
+  if (statusBarBatteryStyleOf(SB_BAR_HEADER) == SB_BATTERY_ICON_ONLY) return HIDE_ALWAYS;
+  if (statusBarBatteryStyleOf(SB_BAR_BOTTOM) == SB_BATTERY_ICON_ONLY) return HIDE_READER;
+  return HIDE_NEVER;
 }
 
 bool CrossPointSettings::statusBarElementPlaced(const uint8_t element) const {
@@ -381,6 +439,9 @@ bool CrossPointSettings::loadFromFile() {
   // Fall back to binary migration
   if (Storage.exists(SETTINGS_FILE_BIN)) {
     if (loadFromBinaryFile()) {
+      // settings.bin predates the per-bar battery styles and the header bar.
+      migrateStatusBarBatteryStyles(*this);
+      migrateHeaderStatusBar(*this);
       if (saveToFile()) {
         Storage.rename(SETTINGS_FILE_BIN, SETTINGS_FILE_BAK);
         LOG_DBG("CPS", "Migrated settings.bin to settings.json");

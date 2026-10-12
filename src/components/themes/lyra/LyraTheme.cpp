@@ -183,17 +183,9 @@ void LyraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
     powerHintShift = renderer.getTextWidth(SMALL_FONT_ID, powerButtonHintLabel) + 16;
   }
 
-  const bool showBatteryPercentage =
-      SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS;
-  // Position icon at right edge, drawBatteryRight will place text to the left
-  const int batteryX = rect.x + rect.width - 12 - LyraMetrics::values.batteryWidth - powerHintShift;
-  drawBatteryRight(renderer,
-                   Rect{batteryX, rect.y + 5, LyraMetrics::values.batteryWidth, LyraMetrics::values.batteryHeight},
-                   showBatteryPercentage);
-
-  // Date on the left of the header's top line — same one drawHeader hook as the
-  // base theme. Excludes the reader (it uses drawStatusBar instead).
-  HeaderDateUtils::drawTopLine(const_cast<GfxRenderer&>(renderer));
+  // Outside Reader bar along the header's top line -- the same helper as the
+  // base theme. The title sits on its own line below, so the centre is free.
+  drawHeaderStatusBar(renderer, rect, LyraMetrics::values, powerHintShift, /*centerFree=*/true);
 
   int maxTitleWidth =
       rect.width - LyraMetrics::values.contentSidePadding * 2 - (subtitle != nullptr ? maxSubtitleWidth : 0);

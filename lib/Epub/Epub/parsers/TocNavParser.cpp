@@ -71,9 +71,19 @@ void XMLCALL TocNavParser::startElement(void* userData, const XML_Char* name, co
   // Look for <nav epub:type="toc"> anywhere in body (or nested elements)
   if (self->state >= IN_BODY && strcmp(name, "nav") == 0) {
     for (int i = 0; atts[i]; i += 2) {
-      if ((strcmp(atts[i], "epub:type") == 0 || strcmp(atts[i], "type") == 0) && strcmp(atts[i + 1], "toc") == 0) {
+      if (strcmp(atts[i], "epub:type") != 0 && strcmp(atts[i], "type") != 0) continue;
+      if (strcmp(atts[i + 1], "toc") == 0) {
         self->state = IN_NAV_TOC;
+        self->inPageList = false;
         LOG_DBG("NAV", "Found nav toc element");
+        return;
+      }
+      // The print edition's page numbers. Same ol/li/a shape as the TOC, so it
+      // shares the states below and differs only in where an entry is sent.
+      if (strcmp(atts[i + 1], "page-list") == 0) {
+        self->state = IN_NAV_TOC;
+        self->inPageList = true;
+        LOG_DBG("NAV", "Found nav page-list element");
         return;
       }
     }
@@ -136,7 +146,9 @@ void XMLCALL TocNavParser::endElement(void* userData, const XML_Char* name) {
         anchor = FsHelpers::decodeUriEscapes(rawTarget.substr(pos + 1));
       }
 
-      if (self->cache) {
+      if (self->cache && self->inPageList) {
+        self->cache->createPageListEntry(self->currentLabel, href, anchor);
+      } else if (self->cache) {
         // olDepth gives us the nesting level (1-based from the outer ol)
         self->cache->createTocEntry(self->currentLabel, href, anchor, self->olDepth);
       }
@@ -165,6 +177,7 @@ void XMLCALL TocNavParser::endElement(void* userData, const XML_Char* name) {
 
   if (strcmp(name, "nav") == 0 && self->state >= IN_NAV_TOC) {
     self->state = IN_BODY;
+    self->inPageList = false;
     LOG_DBG("NAV", "Finished parsing nav toc");
     return;
   }

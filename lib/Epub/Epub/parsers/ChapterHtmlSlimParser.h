@@ -298,6 +298,7 @@ class ChapterHtmlSlimParser {
   std::vector<std::pair<std::string, uint16_t>> anchorData;
   std::string pendingAnchorId;          // deferred until after previous text block is flushed
   std::vector<std::string> tocAnchors;  // the list of anchors that are TOC chapter boundaries
+  bool recordPageBreakAnchors = false;
   uint16_t xpathParagraphIndex = 0;
   uint16_t xpathListItemIndex = 0;
 
@@ -411,4 +412,8 @@ class ChapterHtmlSlimParser {
   bool parseAndBuildPages();
   void addLineToPage(std::unique_ptr<TextBlock> line);
   const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
+  // Also record the ids of page-break markers (epub:type="pagebreak"), which are
+  // usually <span>s and so skipped as anchors. Only worth its RAM for a book that
+  // has a publisher page list to jump by (see PageList.h); off by default.
+  void setRecordPageBreakAnchors(const bool record) { recordPageBreakAnchors = record; }
 };

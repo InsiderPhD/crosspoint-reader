@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <cstdio>
 #include <ctime>
 
 #include "CrossPointSettings.h"
@@ -47,32 +48,26 @@ std::string HeaderDateUtils::getDisplayDateText() {
   return formatHeaderDateText(info.timestamp, info.usedFallback);
 }
 
-void HeaderDateUtils::drawTopLine(GfxRenderer& renderer) {
-  const auto info = getDisplayDateInfo();
-  std::string text = formatHeaderDateText(info.timestamp, info.usedFallback);
-  if (text.empty()) {
-    return;
-  }
-  // Clock Outside Reader: the time follows the date, from the same timestamp,
-  // and only while that timestamp is live -- a stale fallback date is still
-  // right most of the day, a stale time never is.
-  if (SETTINGS.showClockOutsideReader && !info.usedFallback) {
-    const std::string timeText = TimeUtils::formatTime(info.timestamp);
-    if (!timeText.empty()) {
-      text += "  ";
-      text += timeText;
-    }
-  }
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  // Draw on the LEFT, vertically aligned with battery-percentage on the right.
-  // The "+5" matches the y-offset the themes use for battery text.
-  renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, metrics.topPadding + 5, text.c_str());
+bool HeaderDateUtils::formatDate(const DisplayDateInfo& info, char* out, const size_t outLen) {
+  if (out == nullptr || outLen == 0) return false;
+  const std::string text = formatHeaderDateText(info.timestamp, info.usedFallback);
+  snprintf(out, outLen, "%s", text.c_str());
+  return out[0] != '\0';
+}
+
+bool HeaderDateUtils::formatClock(const DisplayDateInfo& info, char* out, const size_t outLen) {
+  if (out == nullptr || outLen == 0) return false;
+  out[0] = '\0';
+  if (info.usedFallback) return false;
+  const std::string text = TimeUtils::formatTime(info.timestamp);
+  snprintf(out, outLen, "%s", text.c_str());
+  return out[0] != '\0';
 }
 
 void HeaderDateUtils::drawHeaderWithDate(GfxRenderer& renderer, const char* title, const char* subtitle) {
   // Thin wrapper kept for callers that want a one-call header+date. drawHeader
-  // already overlays the date itself (both BaseTheme and LyraTheme call
-  // drawTopLine internally), so no second pass is needed here.
+  // already draws the Outside Reader bar (date included) itself, so no second
+  // pass is needed here.
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, title, subtitle);

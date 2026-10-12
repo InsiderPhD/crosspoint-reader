@@ -101,8 +101,13 @@ class CrossPointSettings {
     SB_ELEM_CLOCK,
     SB_ELEM_BOOKMARK,
     SB_ELEM_BLUETOOTH,
+    SB_ELEM_DATE,  // Outside Reader bar only; the reader bars have no slot for it
     STATUS_BAR_ELEMENT_COUNT
   };
+  // The three configurable bars. BOTTOM and TOP are the reader's; HEADER is the
+  // strip along the top of every non-reader screen ("Outside Reader"). The
+  // values 0 / 1 match the older `bool topBar` lookups. Append only.
+  enum STATUS_BAR_ID : uint8_t { SB_BAR_BOTTOM = 0, SB_BAR_TOP = 1, SB_BAR_HEADER = 2, STATUS_BAR_ID_COUNT };
   // Decimal places shown after a book-progress percentage: 10% / 10.1% / 10.12%.
   // The value doubles as the printf precision.
   enum STATUS_BAR_PERCENTAGE_FORMAT : uint8_t {
@@ -110,6 +115,22 @@ class CrossPointSettings {
     PERCENTAGE_ONE_DECIMAL = 1,
     PERCENTAGE_TWO_DECIMALS = 2,
     STATUS_BAR_PERCENTAGE_FORMAT_COUNT
+  };
+
+  // How a bar's Battery element renders. One choice per bar. Persisted: append only.
+  enum STATUS_BAR_BATTERY_STYLE : uint8_t {
+    SB_BATTERY_ICON_AND_PERCENT = 0,
+    SB_BATTERY_ICON_ONLY = 1,
+    SB_BATTERY_PERCENT_ONLY = 2,
+    STATUS_BAR_BATTERY_STYLE_COUNT
+  };
+  // Font of both reader status bars: Noto Sans 8 / Ubuntu 10 / Ubuntu 12, the
+  // three UI fonts that are always resident. Persisted: append only.
+  enum STATUS_BAR_TEXT_SIZE : uint8_t {
+    SB_TEXT_SMALL = 0,
+    SB_TEXT_MEDIUM = 1,
+    SB_TEXT_LARGE = 2,
+    STATUS_BAR_TEXT_SIZE_COUNT
   };
 
   enum ORIENTATION {
@@ -443,6 +464,11 @@ class CrossPointSettings {
   // Sleep screen orientation
   uint8_t sleepScreenOrientation = PORTRAIT;
   // Reading stats shown on the sleep screen (one SLEEP_STAT per slot; NONE = hidden).
+  // Master switch for reading statistics. Off: no session is opened, so nothing
+  // is recorded, saved or pushed (ReadingStatsStore::beginSession), and the
+  // surfaces that would show a frozen "today" hide their stats. History is
+  // kept. The reading-speed pace behind Time Left is independent of this.
+  uint8_t trackReadingStats = 1;
   uint8_t sleepStatSlot1 = SLEEP_STAT_NONE;
   uint8_t sleepStatSlot2 = SLEEP_STAT_NONE;
   uint8_t sleepStatSlot3 = SLEEP_STAT_NONE;
@@ -496,6 +522,25 @@ class CrossPointSettings {
   uint8_t statusBarTopClockPos = SB_POS_HIDE;
   uint8_t statusBarTopBookmarkPos = SB_POS_HIDE;
   uint8_t statusBarTopBluetoothPos = SB_POS_HIDE;
+  // Battery element style per bar (STATUS_BAR_BATTERY_STYLE). These replace the
+  // global Hide Battery % setting: a file without them is migrated from it on
+  // load (migrateStatusBarBatteryStyles), so existing screens do not change.
+  uint8_t statusBarBatteryStyle = SB_BATTERY_ICON_AND_PERCENT;
+  uint8_t statusBarTopBatteryStyle = SB_BATTERY_ICON_AND_PERCENT;
+  // Outside Reader bar: the strip the themes draw along the top of every
+  // non-reader screen. Its own position set, parallel to the two reader bars,
+  // for the elements that make sense without a book (no Bluetooth: the remote
+  // link only exists inside the reader). Defaults are the classic
+  // header: date on the left, battery on the right. Persisted by hand in
+  // JsonSettingsIO (not in the resident SettingsList).
+  uint8_t statusBarHeaderDatePos = SB_POS_LEFT;
+  uint8_t statusBarHeaderClockPos = SB_POS_HIDE;
+  uint8_t statusBarHeaderBatteryPos = SB_POS_RIGHT;
+  uint8_t statusBarHeaderBatteryStyle = SB_BATTERY_ICON_AND_PERCENT;
+  // Text size of both reader status bars (STATUS_BAR_TEXT_SIZE). Feeds
+  // UITheme::getStatusBarHeight(), so a change moves the reader viewport and
+  // the section caches rebuild through their viewport-size header check.
+  uint8_t statusBarTextSize = SB_TEXT_SMALL;
   // Master hide toggled by READER_ACTION_HIDE_STATUS_BAR. Layout still reserves
   // the bar's strip so the section cache stays valid; readers skip drawing the
   // bar and the EPUB reader re-centres the page in the freed space at draw time.
@@ -510,9 +555,9 @@ class CrossPointSettings {
   uint8_t statusBarTopMargin = 0;
   // Clock display in status bar (X3 only, requires DS3231 RTC)
   uint8_t statusBarClock = 0;
-  // Show the time next to the date on the header top line of the non-reader
-  // screens (Home, Library, Settings...). Uses the same timestamp as the date,
-  // so it works on every board once the clock is valid and hides while stale.
+  // RETIRED: superseded by statusBarHeaderClockPos (the Outside Reader bar).
+  // Read once to migrate an older file, and written back mirrored from the new
+  // field so settings.json still makes sense to older firmware.
   uint8_t showClockOutsideReader = 0;
   // RETIRED, kept so settings.json round-trips to older firmware and so an
   // un-migrated file still resolves to the same local time: the status-bar
@@ -603,7 +648,13 @@ class CrossPointSettings {
   char opdsServerUrl[128] = "";
   char opdsUsername[64] = "";
   char opdsPassword[64] = "";
-  // Hide battery percentage
+  // Save an OPDS download under the name the server sends (Content-Disposition)
+  // instead of "Author - Title.epub". Falls back to the generated name when the
+  // server sends none or the name is not safe on FAT.
+  uint8_t opdsUseServerFilename = 0;
+  // RETIRED: superseded by the three per-bar battery styles. Read once to
+  // migrate an older file, and written back mirrored from them (see
+  // legacyHideBatteryPercentage) for older firmware. Never renumber.
   uint8_t hideBatteryPercentage = HIDE_NEVER;
   // Long-press chapter skip on side buttons
   uint8_t longPressChapterSkip = 1;
@@ -671,6 +722,11 @@ class CrossPointSettings {
   uint8_t yoloSelection = 0;
   // Image rendering mode in EPUB reader
   uint8_t imageRendering = IMAGES_DISPLAY;
+  // Book images in four gray levels (1, the default) or dithered to pure black and
+  // white (0). Off skips the grayscale passes and their extra panel refresh on
+  // every image page. Drawing only: the image and section caches are the same
+  // either way. Per-book overridable (BookSettings).
+  uint8_t imageGrayscale = 1;
   // Footnote display mode (0 = render at bottom of page, 1 = show in popup menu)
   uint8_t footnoteDisplay = FOOTNOTE_ON_PAGE;
   // Bionic Reading: bold the first ~43% of each word's letters to guide the eye (0 = off, 1 = on)
@@ -870,8 +926,28 @@ class CrossPointSettings {
   // One element's STATUS_BAR_POS on one bar (STATUS_BAR_ELEMENT, topBar selects
   // the statusBarTop*Pos field). The read clamps an out-of-range value to
   // SB_POS_HIDE so a corrupt field never lands on a bar.
-  uint8_t statusBarPos(uint8_t element, bool topBar) const;
-  uint8_t& statusBarPosRef(uint8_t element, bool topBar);
+  uint8_t statusBarPos(uint8_t element, bool topBar) const {
+    return statusBarPos(element, topBar ? SB_BAR_TOP : SB_BAR_BOTTOM);
+  }
+  uint8_t& statusBarPosRef(uint8_t element, bool topBar) {
+    return statusBarPosRef(element, topBar ? SB_BAR_TOP : SB_BAR_BOTTOM);
+  }
+  // The same lookup by bar id, which also reaches the Outside Reader bar. An
+  // element a bar has no slot for (a book title on the header, the date on a
+  // reader bar) reads as SB_POS_HIDE.
+  uint8_t statusBarPos(uint8_t element, STATUS_BAR_ID bar) const;
+  uint8_t& statusBarPosRef(uint8_t element, STATUS_BAR_ID bar);
+  // A bar's battery style (STATUS_BAR_BATTERY_STYLE); the read is clamped.
+  uint8_t statusBarBatteryStyleOf(STATUS_BAR_ID bar) const;
+  uint8_t& statusBarBatteryStyleRef(STATUS_BAR_ID bar);
+  // Read-time migrations from the two retired settings. Each runs when its new
+  // keys are absent from the file (and after a settings.bin import).
+  static void migrateStatusBarBatteryStyles(CrossPointSettings& settings);
+  static void migrateHeaderStatusBar(CrossPointSettings& settings);
+  // The retired settings' values as the current configuration would have set
+  // them, for the mirrored write.
+  uint8_t legacyHideBatteryPercentage() const;
+  uint8_t legacyShowClockOutsideReader() const { return statusBarHeaderClockPos != SB_POS_HIDE ? 1 : 0; }
   // True when the element is placed on either bar (the readers use this to skip
   // building a value nobody shows).
   bool statusBarElementPlaced(uint8_t element) const;
