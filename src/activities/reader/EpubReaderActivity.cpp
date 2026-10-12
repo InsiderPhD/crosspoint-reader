@@ -3281,9 +3281,11 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
   if (!epub) return;
 
   // Push current position onto saved stack
+  bool pushed = false;
   if (savePosition && section && footnoteDepth < MAX_FOOTNOTE_DEPTH) {
     savedPositions[footnoteDepth] = {currentSpineIndex, section->currentPage};
     footnoteDepth++;
+    pushed = true;
     LOG_DBG("ERS", "Saved position [%d]: spine %d, page %d", footnoteDepth, currentSpineIndex, section->currentPage);
   }
 
@@ -3306,7 +3308,9 @@ void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool s
 
   if (targetSpineIndex < 0) {
     LOG_DBG("ERS", "Could not resolve href: %s", hrefStr.c_str());
-    if (savePosition && footnoteDepth > 0) footnoteDepth--;  // undo push
+    // Only what this call pushed: with the stack already full nothing was, and
+    // popping anyway would throw away the reader's way back.
+    if (pushed) footnoteDepth--;
     return;
   }
 
