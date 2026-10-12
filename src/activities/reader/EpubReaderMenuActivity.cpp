@@ -6,6 +6,7 @@
 #include <HalFrontlight.h>
 #include <I18n.h>
 
+#include "BookSettings.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReaderMenuVisibility.h"
@@ -67,6 +68,8 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   }
 #endif
   add(MenuAction::FONT_LAYOUT, StrId::STR_FONT_LAYOUT_PREVIEW);
+  // The same editor, but for this book only (BookSettings).
+  add(MenuAction::BOOK_SETTINGS, StrId::STR_BOOK_SETTINGS);
   add(MenuAction::READER_CONTROLS, StrId::STR_READER_CONTROLS);
   // The row that trims this menu. Hideable like the rest once the user is done
   // with it -- the same screen is always reachable from Settings > Reader.
@@ -426,6 +429,13 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
 
     if (menuItems[i].action == MenuAction::DARK_MODE) {
       const char* value = SETTINGS.darkMode ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+      const auto width = renderer.getTextWidth(UI_10_FONT_ID, value);
+      renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, value, !isSelected);
+    }
+
+    if (menuItems[i].action == MenuAction::BOOK_SETTINGS && BookSettings::hasOverrides()) {
+      // Says at a glance that this book is not following the global settings.
+      const char* value = tr(STR_CUSTOM);
       const auto width = renderer.getTextWidth(UI_10_FONT_ID, value);
       renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - 20 - width, displayY, value, !isSelected);
     }

@@ -3,6 +3,7 @@
 #include <BluetoothHIDManager.h>
 #include <HalPowerManager.h>
 
+#include "BookSettings.h"
 #include "SdCardFontGlobals.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
@@ -171,6 +172,11 @@ void ActivityManager::processPendingActions() {
           stackActivities.back()->onExit();
           stackActivities.pop_back();
         }
+        // A book's own reader settings must never outlive the reader. The EPUB
+        // reader ends the overlay itself in onExit(); this catches every other
+        // way out (a book that failed to load, a reader that never got as far
+        // as onEnter). Pushed sub-screens are not a way out and keep it.
+        if (!pendingActivity->isReaderActivity()) BookSettings::end();
       } else if (pendingAction == PendingAction::Push) {
         // Move current activity to stack
         stackActivities.push_back(std::move(currentActivity));

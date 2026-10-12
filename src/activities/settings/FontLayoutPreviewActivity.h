@@ -21,9 +21,18 @@ struct Rect;
 // automatically because the section-file cache is keyed on these values.
 //
 // Launched from both the in-book reader menu and Settings -> Reader.
+//
+// Mode::Book (reader menu > Book Settings) edits the open book's own settings
+// instead: every row changed becomes an override for that book (BookSettings),
+// saved to the book's sidecar on exit rather than to settings.json. Dark Mode
+// and Orientation stay device-wide and are left out; Hyphenation, Images and a
+// "Use Global Settings" reset row are added. Requires an active BookSettings
+// overlay, i.e. an open EPUB.
 class FontLayoutPreviewActivity final : public Activity {
  public:
-  explicit FontLayoutPreviewActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
+  enum class Mode : uint8_t { Global, Book };
+
+  explicit FontLayoutPreviewActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Mode mode = Mode::Global);
   void onEnter() override;
   void onExit() override;
   void loop() override;
@@ -53,6 +62,16 @@ class FontLayoutPreviewActivity final : public Activity {
 
   static const Row kRows[];
   static const int kRowCount;
+
+  // The rows this mode shows, as indices into kRows (built once in the
+  // constructor). The list, tap hit-testing and navigation all go through
+  // rowAt()/rowCount so they cannot disagree about what is on screen.
+  static constexpr int kMaxRows = 24;
+  static bool rowInMode(const Row& row, Mode mode);
+  const Row& rowAt(int i) const { return kRows[rowMap[i]]; }
+  const Mode mode;
+  uint8_t rowMap[kMaxRows] = {};
+  int rowCount = 0;
 
   // Orientation-aware screen split, shared by render() and the loop()'s tap
   // hit-testing so paint and hit-test can never disagree about where a row is.

@@ -28,6 +28,7 @@
 #include "BookFusionSyncActivity.h"
 #include "BookFusionSyncClient.h"
 #include "BookFusionTokenStore.h"
+#include "BookSettings.h"
 #include "BookmarkEntry.h"
 #include "ClipSelectionActivity.h"
 #include "ClippingStore.h"
@@ -54,6 +55,7 @@
 #include "ReaderUtils.h"
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontGlobals.h"
 #include "WifiCredentialStore.h"
 #include "activities/home/ReadingStatsDetailActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -611,6 +613,10 @@ void EpubReaderActivity::onExit() {
   ImageBlock::releaseRenderCache();
   section.reset();
   epub.reset();
+
+  // Nothing of this book can be laid out any more: put the global reader
+  // settings back in place of any per-book overrides.
+  BookSettings::end();
 
   if (exitPayload) {
     if (auto* fcm = renderer.getFontCacheManager()) {
@@ -1409,16 +1415,38 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
                              [this](const ActivityResult&) { requestUpdate(); });
       break;
     }
-    case EpubReaderMenuActivity::MenuAction::FONT_LAYOUT: {
-      startActivityForResult(std::make_unique<FontLayoutPreviewActivity>(renderer, mappedInput),
-                             [this](const ActivityResult&) {
-                               // The preview restores the renderer to its entry orientation on exit;
-                               // re-apply the (possibly changed) reader orientation, then repaginate
-                               // for whatever font/layout settings the user adjusted.
-                               ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
-                               reflowCurrentChapter();
-                               requestUpdate();
-                             });
+    case EpubReaderMenuActivity::MenuAction::FONT_LAYOUT:
+    case EpubReaderMenuActivity::MenuAction::BOOK_SETTINGS: {
+      // Font & Layout edits the GLOBAL settings, Book Settings this book's own.
+      // Same editor either way; it lays out a sample text, never the book, so
+      // the only copy of the book in memory stays the reader's.
+      const bool perBook = (action == EpubReaderMenuActivity::MenuAction::BOOK_SETTINGS);
+      // Drop the laid-out chapter BEFORE the editor opens rather than after it
+      // closes: the reader repaginates on return regardless, and the editor
+      // (preview snapshot, SD-font sample glyphs) then has that heap to itself.
+      reflowCurrentChapter();
+      if (!perBook) {
+        // Show the editor the global values, not this book's overrides.
+        BookSettings::suspend();
+      }
+      startActivityForResult(
+          std::make_unique<FontLayoutPreviewActivity>(
+              renderer, mappedInput,
+              perBook ? FontLayoutPreviewActivity::Mode::Book : FontLayoutPreviewActivity::Mode::Global),
+          [this](const ActivityResult&) {
+            // No-op unless suspended above: the book's overrides go back on top
+            // of whatever the global editor left.
+            BookSettings::resume();
+            // Either editor may leave a different font active than the one the
+            // book is read in (the global one after a global edit, the book's
+            // after "Use Global Settings").
+            ensureSdFontLoaded();
+            // The preview restores the renderer to its entry orientation on exit;
+            // re-apply the (possibly changed) reader orientation. The chapter is
+            // already marked for repagination with the new settings.
+            ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+            requestUpdate();
+          });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::SYNC_PUSH:
@@ -3547,7 +3575,10 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
 
     case A::READER_ACTION_BIONIC_READING:
       SETTINGS.bionicReading = !SETTINGS.bionicReading;
-      SETTINGS.saveToFile();
+      // A book that sets Bionic Reading itself keeps the toggle to itself.
+      if (!BookSettings::saveIfOverridden(&CrossPointSettings::bionicReading)) {
+        SETTINGS.saveToFile();
+      }
       reflowCurrentChapter();  // bionic affects layout — repaginate
       requestUpdate();
       return false;

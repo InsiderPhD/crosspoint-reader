@@ -9,6 +9,7 @@
 #include <string>
 
 #include "../lib/BookFusionSync/BookFusionTokenStore.h"
+#include "BookSettings.h"
 #include "BookmarkEntry.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -165,15 +166,17 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
     if (!info.valuePtr && !info.stringOffset) continue;
 
+    // While a book's own reader settings are live in SETTINGS (BookSettings),
+    // what is written here must still be the global value of each field.
     if (info.stringOffset) {
-      const char* strPtr = (const char*)&s + info.stringOffset;
+      const char* strPtr = BookSettings::globalString(s, (const char*)&s + info.stringOffset);
       if (info.obfuscated) {
         doc[std::string(info.key) + "_obf"] = obfuscation::obfuscateToBase64(strPtr);
       } else {
         doc[info.key] = strPtr;
       }
     } else {
-      doc[info.key] = s.*(info.valuePtr);
+      doc[info.key] = BookSettings::globalValue(s, info.valuePtr);
     }
   }
 

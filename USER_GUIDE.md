@@ -331,6 +331,7 @@ Available actions:
 | **Dark Mode** | Toggles light-on-dark reading in place. |
 | **Frontlight Brightness / Warmth** | *(frontlight devices only)* Adjusts the light in place, without leaving the page. |
 | **Font & Layout Preview** | Live split-screen font/layout editor. |
+| **Book Settings** | The same editor for this book only: any row you change (font, size, spacing, margins, alignment, indent, bionic, anti-aliasing, hyphenation, images) is saved with the book and marked `*`; everything else keeps following the global settings. **Use Global Settings** at the end of the list clears them. The row shows **Custom** while the book has its own settings. Dark Mode and Orientation stay device-wide. |
 | **Reader Controls** | Rebind per-button, per-tap-zone and home-pad reader actions. |
 | **Auto Page Turn** | Set the auto-turn interval (see **[Auto-Turn](#auto-turn)**). |
 | **Go to %** | Jump to a position by percentage. |

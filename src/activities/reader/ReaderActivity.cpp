@@ -4,11 +4,13 @@
 #include <HalStorage.h>
 #include <InflateReader.h>
 
+#include "BookSettings.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "Epub.h"
 #include "EpubReaderActivity.h"
 #include "RecentBooksStore.h"
+#include "SdCardFontGlobals.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
 #include "Xtc.h"
@@ -178,6 +180,16 @@ void ReaderActivity::onEnter() {
     GUI.drawPopup(renderer, tr(STR_LOADING));
   }
 
+  // Per-book reader settings go live here, before the book is loaded: a book
+  // that overrides the font swaps the SD font now, while the heap is still
+  // empty of the book, instead of in the middle of the reading session.
+  // XTC/TXT have no per-book settings; end() clears anything left behind.
+  BookSettings::end();
+  if (!isXtcFile(initialBookPath) && !isTxtFile(initialBookPath)) {
+    BookSettings::begin(Epub::cachePathFor(initialBookPath, "/.crosspoint"));
+    if (BookSettings::hasOverrides()) ensureSdFontLoaded();
+  }
+
   if (isXtcFile(initialBookPath)) {
     auto xtc = loadXtc(initialBookPath);
     if (!xtc) {
@@ -195,6 +207,7 @@ void ReaderActivity::onEnter() {
   } else {
     auto epub = loadEpub(initialBookPath);
     if (!epub) {
+      BookSettings::end();
       onGoBack();
       return;
     }

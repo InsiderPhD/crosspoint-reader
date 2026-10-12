@@ -39,7 +39,8 @@ class EpubReaderMenuActivity final : public Activity {
     SYNC_PUSH,
     SYNC_PULL,
     NEARBY_POSITION_SYNC,
-    DELETE_CACHE
+    DELETE_CACHE,
+    BOOK_SETTINGS
   };
 
   // syncProvider is the backend that would actually handle a Push/Pull for THIS
