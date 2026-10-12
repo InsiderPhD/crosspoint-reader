@@ -883,7 +883,7 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 
 **Current Versions** (as of docs/file-formats.md):
 - `book.bin`: **Version 13** (metadata structure) — `lib/Epub/Epub/BookMetadataCache.cpp`
-- `section.bin`: **Version 47** (layout structure) — `lib/Epub/Epub/Section.cpp`
+- `section.bin`: **Version 48** (layout structure) — `lib/Epub/Epub/Section.cpp`
 
 Check the constants in those files rather than trusting this list; they move often.
 
