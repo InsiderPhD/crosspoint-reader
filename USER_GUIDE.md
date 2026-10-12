@@ -691,6 +691,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **Check for Updates** *(action)* — OTA firmware update over WiFi.
 - **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.
 - **Language** *(action)* — set the UI language.
+- **About** *(action)* — device information: firmware version, board, chip, display, battery, free memory (and the largest free block), SD card size and free space, MAC address, uptime and the reason for the last restart. Press **Confirm** (or tap the first row) to save `support-info.txt` to the SD card root for a bug report. The file holds hardware facts, memory/SD/battery readings and a short list of numeric display settings; it never contains WiFi names or passwords, account details, tokens, the MAC address, file names or book titles.
 - **Time to Sleep** — auto-sleep after 1 / 5 / 10 / 15 / 30 min of inactivity.
 - **Show Hidden Files** — show dotfiles in the browser.
 - **Developer Mode** — reveals the Developer tab.

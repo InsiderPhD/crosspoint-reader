@@ -47,6 +47,7 @@ enum class SettingAction {
   SleepStats,
   Dictionary,
   FrontlightSchedule,  // frontlight boards only
+  About,               // device diagnostics + support export
 };
 
 struct SettingInfo {

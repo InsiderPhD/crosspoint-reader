@@ -1,5 +1,9 @@
 #include "HalSystem.h"
 
+#include <BoardConfig.h>
+#include <esp_mac.h>
+#include <esp_system.h>
+
 #include <string>
 
 #include "Arduino.h"
@@ -152,6 +156,94 @@ bool isRebootFromPanic() {
   // panics when the main loop wedges, and its trace shows where it was stuck.
   return resetReason == ESP_RST_PANIC || resetReason == ESP_RST_CPU_LOCKUP || resetReason == ESP_RST_TASK_WDT ||
          resetReason == ESP_RST_INT_WDT;
+}
+
+namespace {
+// Identifier tokens, not prose: they match the ESP-IDF enum names so a support
+// report can be matched against the IDF docs. Deliberately untranslated.
+const char* resetReasonName(const esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_POWERON:
+      return "POWERON";
+    case ESP_RST_EXT:
+      return "EXT";
+    case ESP_RST_SW:
+      return "SW";
+    case ESP_RST_PANIC:
+      return "PANIC";
+    case ESP_RST_INT_WDT:
+      return "INT_WDT";
+    case ESP_RST_TASK_WDT:
+      return "TASK_WDT";
+    case ESP_RST_WDT:
+      return "WDT";
+    case ESP_RST_DEEPSLEEP:
+      return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:
+      return "BROWNOUT";
+    case ESP_RST_SDIO:
+      return "SDIO";
+    case ESP_RST_USB:
+      return "USB";
+    case ESP_RST_JTAG:
+      return "JTAG";
+    case ESP_RST_EFUSE:
+      return "EFUSE";
+    case ESP_RST_PWR_GLITCH:
+      return "PWR_GLITCH";
+    case ESP_RST_CPU_LOCKUP:
+      return "CPU_LOCKUP";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+const char* displayControllerName(const BoardConfig::DisplayController controller) {
+  switch (controller) {
+    case BoardConfig::DisplayController::SSD1677:
+      return "SSD1677";
+    case BoardConfig::DisplayController::UC8253:
+      return "UC8253";
+    case BoardConfig::DisplayController::ED2208:
+      return "ED2208";
+    case BoardConfig::DisplayController::LgfxEpd:
+      return "LGFX EPD";
+    case BoardConfig::DisplayController::IT8951:
+      return "IT8951";
+    case BoardConfig::DisplayController::UC8279:
+      return "UC8279";
+    case BoardConfig::DisplayController::UC8179:
+      return "UC8179";
+    case BoardConfig::DisplayController::UC8279C:
+      return "UC8279C";
+    default:
+      return "?";
+  }
+}
+}  // namespace
+
+DeviceInfo getDeviceInfo() {
+  DeviceInfo info;
+  const auto& board = BoardConfig::ACTIVE;
+  info.boardName = board.name ? board.name : "";
+  info.displayController = displayControllerName(board.displayController);
+  info.displayWidth = board.displayWidth;
+  info.displayHeight = board.displayHeight;
+
+  info.chipModel = ESP.getChipModel();
+  info.chipRevision = ESP.getChipRevision();
+  info.cpuMHz = static_cast<uint16_t>(ESP.getCpuFreqMHz());
+  info.flashBytes = ESP.getFlashChipSize();
+  info.psramBytes = ESP.getPsramSize();  // 0 when the board has none
+  info.uptimeSeconds = static_cast<uint32_t>(millis() / 1000UL);
+
+  const esp_reset_reason_t reason = esp_reset_reason();
+  info.resetReason = resetReasonName(reason);
+  info.resetReasonCode = static_cast<uint8_t>(reason);
+
+  // eFuse read: no WiFi/BLE init, no heap.
+  info.macValid = esp_read_mac(info.mac, ESP_MAC_WIFI_STA) == ESP_OK;
+  return info;
 }
 
 }  // namespace HalSystem

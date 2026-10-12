@@ -8,6 +8,7 @@
 
 #include <cstring>
 
+#include "AboutActivity.h"
 #include "BluetoothSettingsActivity.h"
 #include "BookFusionSettingsActivity.h"
 #include "ButtonRemapActivity.h"
@@ -152,6 +153,9 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
+  // About: read-only device diagnostics plus the support-file export. Last in
+  // the tab, where "about" screens conventionally sit.
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_ABOUT, SettingAction::About));
   // Sleep Screen Stats: opens the dedicated picker + live-preview screen for the
   // three sleep-stat slots (the flat slot rows are skipped above). Sits with the
   // other stat settings, above the date/timezone/data-management actions.
@@ -498,6 +502,10 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::Language:
         startActivityForResult(std::make_unique<LanguageSelectActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::About:
+        // Changes no setting, so no save-on-return handler.
+        startActivityForResult(std::make_unique<AboutActivity>(renderer, mappedInput), nullptr);
         break;
       case SettingAction::Plugins:
 #if CROSSPOINT_SD_PLUGINS
