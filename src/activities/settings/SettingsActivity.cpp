@@ -46,6 +46,8 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TimeUtils.h"
+#include "util/TimeZoneRegistry.h"
 #include "util/TouchListNav.h"
 
 // Switch to a category tab: its list, its count, and the focus reset. Shared by
@@ -159,6 +161,11 @@ void SettingsActivity::onEnter() {
   // SettingsList — these actions go below them.
   statsSettings.push_back(SettingInfo::Action(StrId::STR_SET_DATE, SettingAction::SetDate));
   statsSettings.push_back(SettingInfo::Action(StrId::STR_TIME_ZONE, SettingAction::TimeZone));
+  // Device-only row (no key, so it never reaches the resident SettingsList or
+  // the JSON loop; JsonSettingsIO persists clockDst by hand). The order of the
+  // values is TimeZoneRegistry::DstMode. Applied lazily by configureTimezone().
+  statsSettings.push_back(SettingInfo::Enum(StrId::STR_CLOCK_DST, &CrossPointSettings::clockDst,
+                                            {StrId::STR_CLOCK_DST_AUTO, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}));
   // Data management: lossless JSON export/import (round-trip backup), a
   // one-way StoryGraph-compatible CSV of the book catalog, and a push of every
   // book's progress to Hardcover.
@@ -627,6 +634,9 @@ void SettingsActivity::render(RenderLock&&) {
           } else
 #endif
             valueText = std::to_string(value);
+        } else if (setting.type == SettingType::ACTION && setting.action == SettingAction::TimeZone) {
+          char buf[TimeZoneRegistry::OFFSET_BUFFER_SIZE];
+          valueText = TimeUtils::getCurrentTimeZoneLabel(buf, sizeof(buf));
         } else if (setting.type == SettingType::ACTION && setting.action == SettingAction::FontFamily) {
           if (SETTINGS.sdFontFamilyName[0] != '\0') {
             valueText = SETTINGS.sdFontFamilyName;

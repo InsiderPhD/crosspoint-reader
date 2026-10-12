@@ -1,11 +1,20 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
 namespace TimeUtils {
 
+// Push the active zone + DST mode (settings) into the C library. Cheap when
+// nothing changed, so callers invoke it before every local-time conversion.
 void configureTimezone();
+// Persist a zone picked from TimeZoneRegistry's table and apply it. No write
+// when it is already the stored zone.
+void setTimeZone(uint8_t index);
+// Table index of the zone in effect, or TimeZoneRegistry::NOT_CHOSEN when a
+// migrated quarter-hour offset has no table entry.
+uint8_t getTimeZoneIndex();
 bool syncTimeWithNtp(uint32_t timeoutMs = 5000);
 bool isClockValid();
 bool isClockValid(uint32_t epochSeconds);
@@ -26,7 +35,12 @@ bool wasTimeSyncedThisBoot();
 // of a date for a device that never sees WiFi. False when the board has no RTC,
 // the chip was never set, or it reports a pre-2024 (so untrustworthy) time.
 bool seedClockFromRtc();
-const char* getCurrentTimeZoneLabel();
+// Name of the zone in effect. Usually a flash string; `buf` (at least
+// TimeZoneRegistry::OFFSET_BUFFER_SIZE) is only written for a bare offset.
+const char* getCurrentTimeZoneLabel(char* buf, size_t bufSize);
+// The RTC-backed status-bar clock in the active zone and the user's 12/24h
+// format (needs >= 9 bytes). False on boards without an RTC.
+bool formatClock(char* buf, size_t bufSize);
 std::string formatDate(uint32_t epochSeconds, bool appendBang = false);
 std::string formatDateTime(uint32_t epochSeconds, bool appendBang = false);
 std::string formatTime(uint32_t epochSeconds);

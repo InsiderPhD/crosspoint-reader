@@ -8,12 +8,14 @@
 #include <cstring>
 #include <memory>
 
-#include "ClockOffsetActivity.h"
 #include "ClockSyncActivity.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "TimeZoneSelectActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/TimeUtils.h"
+#include "util/TimeZoneRegistry.h"
 #include "util/TouchListNav.h"
 
 namespace {
@@ -28,16 +30,18 @@ enum HubItem {
   HUB_TOP_MARGIN,
   HUB_XTC_STATUS_BAR,
   HUB_CLOCK_OUTSIDE_READER,  // Time after the date on the non-reader headers
-  HUB_CLOCK_FORMAT,          // X3 only
-  HUB_CLOCK_UTC_OFFSET,      // X3 only, launches ClockOffsetActivity
-  HUB_CLOCK_SYNC,            // X3 only, launches ClockSyncActivity
+  HUB_CLOCK_FORMAT,          // RTC boards only
+  HUB_CLOCK_TIME_ZONE,       // RTC boards only, launches TimeZoneSelectActivity
+  HUB_CLOCK_DST,             // RTC boards only
+  HUB_CLOCK_SYNC,            // RTC boards only, launches ClockSyncActivity
   HUB_COUNT
 };
 constexpr int HUB_BASE_ITEMS = HUB_CLOCK_FORMAT;  // Rows shown on every device
 const StrId hubNames[HUB_COUNT] = {
-    StrId::STR_BOTTOM_STATUS_BAR,     StrId::STR_TOP_STATUS_BAR,   StrId::STR_PERCENTAGE_FORMAT,
-    StrId::STR_STATUS_BAR_TOP_MARGIN, StrId::STR_XTC_STATUS_BAR,   StrId::STR_CLOCK_OUTSIDE_READER,
-    StrId::STR_CLOCK_FORMAT,          StrId::STR_CLOCK_UTC_OFFSET, StrId::STR_CLOCK_SYNC_NOW,
+    StrId::STR_BOTTOM_STATUS_BAR,     StrId::STR_TOP_STATUS_BAR, StrId::STR_PERCENTAGE_FORMAT,
+    StrId::STR_STATUS_BAR_TOP_MARGIN, StrId::STR_XTC_STATUS_BAR, StrId::STR_CLOCK_OUTSIDE_READER,
+    StrId::STR_CLOCK_FORMAT,          StrId::STR_TIME_ZONE,      StrId::STR_CLOCK_DST,
+    StrId::STR_CLOCK_SYNC_NOW,
 };
 
 // --- Bar rows: the positionable elements in display order, then the bar's own
@@ -85,18 +89,8 @@ uint8_t& progressBarThicknessField(const bool topBar) {
 constexpr int CLOCK_FORMAT_ITEMS = 2;
 const StrId clockFormatNames[CLOCK_FORMAT_ITEMS] = {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H};
 
-std::string formatUtcOffset(uint8_t biasedQ) {
-  // biasedQ is in quarter-hour steps, biased by 48 (so 48 = UTC+0).
-  if (biasedQ > 104) biasedQ = 48;
-  int totalMinutes = (static_cast<int>(biasedQ) - 48) * 15;
-  bool neg = totalMinutes < 0;
-  int absMinutes = neg ? -totalMinutes : totalMinutes;
-  int hours = absMinutes / 60;
-  int mins = absMinutes % 60;
-  char buf[16];
-  snprintf(buf, sizeof(buf), "UTC%c%d:%02d", neg ? '-' : '+', hours, mins);
-  return buf;
-}
+constexpr int CLOCK_DST_ITEMS = TimeZoneRegistry::DST_MODE_COUNT;
+const StrId clockDstNames[CLOCK_DST_ITEMS] = {StrId::STR_CLOCK_DST_AUTO, StrId::STR_STATE_ON, StrId::STR_STATE_OFF};
 
 constexpr int POSITION_ITEMS = CPS::STATUS_BAR_POS_COUNT;
 const StrId positionNames[POSITION_ITEMS] = {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER,
@@ -164,8 +158,8 @@ void StatusBarSettingsActivity::onEnter() {
   if (SETTINGS.xtcStatusBarMode >= XTC_STATUS_BAR_ITEMS) {
     SETTINGS.xtcStatusBarMode = CPS::XTC_STATUS_BAR_MODE::XTC_STATUS_BAR_HIDE;
   }
-  if (SETTINGS.clockUtcOffsetQ > 104) {
-    SETTINGS.clockUtcOffsetQ = 48;  // Default to UTC+0
+  if (SETTINGS.clockDst >= CLOCK_DST_ITEMS) {
+    SETTINGS.clockDst = TimeZoneRegistry::DST_AUTO;
   }
   if (SETTINGS.clockFormat >= CLOCK_FORMAT_ITEMS) {
     SETTINGS.clockFormat = 0;
@@ -264,10 +258,14 @@ void StatusBarSettingsActivity::handleSelection() {
       case HUB_CLOCK_FORMAT:
         SETTINGS.clockFormat = (SETTINGS.clockFormat + 1) % CLOCK_FORMAT_ITEMS;
         break;
-      case HUB_CLOCK_UTC_OFFSET:
-        // Launch the dedicated offset picker. It saves on exit, no result handler needed.
-        startActivityForResult(std::make_unique<ClockOffsetActivity>(renderer, mappedInput), nullptr);
+      case HUB_CLOCK_TIME_ZONE:
+        // The picker saves and applies the zone itself, no result handler needed.
+        startActivityForResult(std::make_unique<TimeZoneSelectActivity>(renderer, mappedInput), nullptr);
         return;
+      case HUB_CLOCK_DST:
+        // Applied lazily: every clock read goes through TimeUtils::configureTimezone().
+        SETTINGS.clockDst = (SETTINGS.clockDst + 1) % CLOCK_DST_ITEMS;
+        break;
       case HUB_CLOCK_SYNC:
         startActivityForResult(std::make_unique<ClockSyncActivity>(renderer, mappedInput), nullptr);
         return;
@@ -317,8 +315,14 @@ std::string StatusBarSettingsActivity::valueText(const int index) const {
         const uint8_t fmt = SETTINGS.clockFormat < CLOCK_FORMAT_ITEMS ? SETTINGS.clockFormat : 0;
         return std::string(I18N.get(clockFormatNames[fmt]));
       }
-      case HUB_CLOCK_UTC_OFFSET:
-        return formatUtcOffset(SETTINGS.clockUtcOffsetQ);
+      case HUB_CLOCK_TIME_ZONE: {
+        char buf[TimeZoneRegistry::OFFSET_BUFFER_SIZE];
+        return std::string(TimeUtils::getCurrentTimeZoneLabel(buf, sizeof(buf)));
+      }
+      case HUB_CLOCK_DST: {
+        const uint8_t dst = SETTINGS.clockDst < CLOCK_DST_ITEMS ? SETTINGS.clockDst : 0;
+        return std::string(I18N.get(clockDstNames[dst]));
+      }
       case HUB_CLOCK_SYNC:
         return SETTINGS.clockHasBeenSynced ? tr(STR_CLOCK_SYNCED) : tr(STR_NOT_SET);
       default:
