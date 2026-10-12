@@ -1,5 +1,6 @@
 #include "Page.h"
 
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -110,6 +111,112 @@ std::unique_ptr<PageHorizontalRule> PageHorizontalRule::deserialize(FsFile& file
     return nullptr;
   }
   return std::unique_ptr<PageHorizontalRule>(rule);
+}
+
+namespace {
+// One border edge: a strip `side.width` thick running `length` pixels from (x, y).
+// fillRect only, so it is integer work in every style.
+void drawBorderEdge(const GfxRenderer& renderer, const int x, const int y, const int length, const CssBorderSide& side,
+                    const bool horizontal) {
+  const int thickness = side.width;
+  const auto strip = [&](const int offset, const int along, const int span, const int depth) {
+    if (horizontal) {
+      renderer.fillRect(x + along, y + offset, span, depth, true);
+    } else {
+      renderer.fillRect(x + offset, y + along, depth, span, true);
+    }
+  };
+  switch (side.style()) {
+    case CssBorderStyle::Double:
+      if (thickness >= 3) {
+        const int line = std::max(1, thickness / 3);
+        strip(0, 0, length, line);
+        strip(thickness - line, 0, length, line);
+        return;
+      }
+      break;
+    case CssBorderStyle::Dotted:
+    case CssBorderStyle::Dashed: {
+      const bool dotted = side.style() == CssBorderStyle::Dotted;
+      const int dash = dotted ? thickness : std::max(3, thickness * 3);
+      const int gap = dotted ? std::max(2, thickness) : std::max(2, thickness * 2);
+      for (int along = 0; along < length; along += dash + gap) {
+        strip(0, along, std::min(dash, length - along), thickness);
+      }
+      return;
+    }
+    case CssBorderStyle::None:
+    case CssBorderStyle::Solid:
+      break;
+  }
+  strip(0, 0, length, thickness);
+}
+}  // namespace
+
+void PageBorderBox::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
+  (void)fontId;
+  const int x = xPos + xOffset;
+  const int y = yPos + yOffset;
+  // The shade is a sparse dot screen (one pixel in eight, staggered) in the black-and-white
+  // pass only: light enough that body text stays crisp on top of it, and kept out of the
+  // grayscale planes, where a set pixel means grey ink. Only black dots are written, so it
+  // never erases anything. Integer steps only; the dots are keyed to page coordinates so the
+  // slices of a box split across pages line up.
+  // Skipped during the font prewarm scan, which must not touch the framebuffer (the solid
+  // fills used for the edges gate on this themselves).
+  const auto* fontCache = renderer.getFontCacheManager();
+  const bool scanning = fontCache && fontCache->isScanning();
+  if (shaded && !scanning && renderer.getRenderMode() == GfxRenderer::BW) {
+    for (int row = (yPos & 1); row < height; row += 2) {
+      const int phase = (((yPos + row) >> 1) & 1) * 2;
+      for (int col = (4 + phase - (xPos & 3)) & 3; col < width; col += 4) {
+        renderer.drawPixel(x + col, y + row, true);
+      }
+    }
+  }
+  if (sides[0].visible()) drawBorderEdge(renderer, x, y, width, sides[0], true);
+  if (sides[2].visible()) drawBorderEdge(renderer, x, y + height - sides[2].width, width, sides[2], true);
+  if (sides[3].visible()) drawBorderEdge(renderer, x, y, height, sides[3], false);
+  if (sides[1].visible()) drawBorderEdge(renderer, x + width - sides[1].width, y, height, sides[1], false);
+}
+
+bool PageBorderBox::serialize(Print& file) {
+  serialization::writePod(file, xPos);
+  serialization::writePod(file, yPos);
+  serialization::writePod(file, width);
+  serialization::writePod(file, height);
+  for (const CssBorderSide& side : sides) serialization::writePod(file, side.packed());
+  serialization::writePod(file, shaded);
+  return true;
+}
+
+std::unique_ptr<PageBorderBox> PageBorderBox::deserialize(FsFile& file) {
+  int16_t xPos = 0;
+  int16_t yPos = 0;
+  uint16_t width = 0;
+  uint16_t height = 0;
+  CssBorderSide sides[4];
+  bool shaded = false;
+  serialization::readPod(file, xPos);
+  serialization::readPod(file, yPos);
+  serialization::readPod(file, width);
+  serialization::readPod(file, height);
+  for (CssBorderSide& side : sides) {
+    uint8_t packed = 0;
+    serialization::readPod(file, packed);
+    if (!CssBorderSide::unpack(packed, side)) {
+      LOG_ERR("PGE", "Deserialization failed: invalid border edge 0x%02X", packed);
+      return nullptr;
+    }
+  }
+  serialization::readPod(file, shaded);
+  if (width == 0 || height == 0) {
+    LOG_ERR("PGE", "Deserialization failed: empty border box");
+    return nullptr;
+  }
+  auto box = makeUniqueNoThrow<PageBorderBox>(width, height, sides, shaded, xPos, yPos);
+  if (!box) LOG_ERR("PGE", "Deserialization failed: could not allocate PageBorderBox");
+  return box;
 }
 
 void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
@@ -561,6 +668,12 @@ std::unique_ptr<Page> Page::deserialize(FsFile& file) {
         return nullptr;
       }
       page->elements.push_back(std::move(table));
+    } else if (tag == TAG_PageBorderBox) {
+      auto box = PageBorderBox::deserialize(file);
+      if (!box) {
+        return nullptr;
+      }
+      page->elements.push_back(std::move(box));
     } else {
       LOG_ERR("PGE", "Deserialization failed: Unknown tag %u", tag);
       return nullptr;

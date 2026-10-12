@@ -186,6 +186,45 @@ class ChapterHtmlSlimParser {
   void resolveLeadingImageAsBlock();
   void resolveLeadingImageAsInline();
 
+  // ── Publisher decorations: bordered / shaded blocks ────────────────────────
+  // One entry per open element that has a CSS border or a background shade. It records the
+  // vertical extent of what is laid out while it is open (noteContent) and becomes a
+  // PageBorderBox on each page the element touches. A fixed array, not a vector: nothing is
+  // allocated per bordered element, and nesting deeper than this simply draws no frame.
+  struct BoxScope {
+    int16_t depth = 0;
+    int16_t left = 0, right = 0, padTop = 0, padBottom = 0;
+    CssBorderSide sides[4];
+    bool shaded = false;
+    bool continued = false;         // already drew a slice on an earlier page: top edge stays open
+    int16_t top = -1, bottom = -1;  // content extent on the current page; -1 = nothing yet
+  };
+  static constexpr uint8_t MAX_BOX_SCOPES = 4;
+  BoxScope boxScopes[MAX_BOX_SCOPES];
+  uint8_t boxScopeCount = 0;
+  void noteContent(int top, int bottom);
+  void openBoxScope(BlockStyle& ownStyle, const CssStyle& cssStyle);
+  void closeBoxScope();
+  void emitBoxSegment(const BoxScope& box, bool closing);
+  // Every page completion goes through here, so open boxes get their slice of the page.
+  void completeCurrentPage();
+  // CSS page-break-before/after: finish the paragraph in hand and start a fresh page, unless
+  // the page is still empty.
+  void forcePageBreak();
+  // Style for an emptied text block that must not carry the spacing it has already spent.
+  BlockStyle neutralBlockStyle() const;
+
+  // ── Preformatted text (CSS white-space: pre / pre-wrap / pre-line) ─────────
+  // Line breaks in the source are kept, and so is each line's leading indentation; runs of
+  // spaces inside a line still collapse, so long lines wrap normally.
+  bool preAtLineStart = false;            // inside a preformatted block, before a line's first glyph
+  bool preLinesEmitted = false;           // a line of the current preformatted block has been laid out
+  uint8_t prePendingBlankLines = 0;       // blank source lines waiting for the next line of text
+  bool suppressParagraphSpacing = false;  // makePages(): this block is one line of a larger one
+  void preLineBreak();
+  void preLeadingSpace(int count);
+  void beginPreLine();
+
   // Style tracking (replaces depth-based approach)
   struct StyleStackEntry {
     int depth = 0;

@@ -303,6 +303,177 @@ bool CssParser::tryInterpretLength(std::string_view val, CssLength& out) {
   return true;
 }
 
+namespace {
+// --- Publisher decorations: borders, shading, forced page breaks -----------------------
+
+// True for the break values that force a new page. `avoid`/`auto` are the default and are
+// deliberately not recorded (see CssPropertyFlags).
+bool isForcedPageBreak(std::string_view value) {
+  value = trimCssWhitespace(stripTrailingImportant(value));
+  return iequalsAscii(value, "always") || iequalsAscii(value, "page") || iequalsAscii(value, "left") ||
+         iequalsAscii(value, "right");
+}
+
+// A background the panel should show as a light shade: a grey keyword or any hex colour that
+// is neither white nor black. Black backgrounds (inverted text) are not supported and are
+// left alone rather than shaded, which would put black text on a dark box.
+bool isShadedBackground(std::string_view value) {
+  value = trimCssWhitespace(stripTrailingImportant(value));
+  if (iequalsAscii(value, "gray") || iequalsAscii(value, "grey") || iequalsAscii(value, "lightgray") ||
+      iequalsAscii(value, "lightgrey") || iequalsAscii(value, "silver") || iequalsAscii(value, "gainsboro") ||
+      iequalsAscii(value, "whitesmoke")) {
+    return true;
+  }
+  if ((value.size() != 4 && value.size() != 7) || value[0] != '#') return false;
+  // Shade only light colours: every channel's leading hex digit at 8 or above, and not white.
+  bool allF = true;
+  const size_t step = value.size() == 4 ? 1 : 2;
+  for (size_t i = 1; i < value.size(); i += step) {
+    const char c = asciiToLower(value[i]);
+    const bool isHex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+    if (!isHex || c < '8') return false;
+    if (c != 'f' || (step == 2 && asciiToLower(value[i + 1]) != 'f')) allF = false;
+  }
+  return !allF;
+}
+
+bool tryBorderStyle(std::string_view token, CssBorderStyle& out) {
+  if (iequalsAscii(token, "none") || iequalsAscii(token, "hidden")) {
+    out = CssBorderStyle::None;
+  } else if (iequalsAscii(token, "solid") || iequalsAscii(token, "groove") || iequalsAscii(token, "ridge") ||
+             iequalsAscii(token, "inset") || iequalsAscii(token, "outset")) {
+    out = CssBorderStyle::Solid;
+  } else if (iequalsAscii(token, "double")) {
+    out = CssBorderStyle::Double;
+  } else if (iequalsAscii(token, "dotted")) {
+    out = CssBorderStyle::Dotted;
+  } else if (iequalsAscii(token, "dashed")) {
+    out = CssBorderStyle::Dashed;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+// Border width in whole pixels, 0..CssBorderSide::MAX_WIDTH. em/rem are taken at 16px: a
+// border is a hairline decoration, not something to scale with the reading font.
+bool tryBorderWidth(std::string_view token, uint8_t& out) {
+  if (iequalsAscii(token, "thin")) {
+    out = 1;
+    return true;
+  }
+  if (iequalsAscii(token, "medium")) {
+    out = 3;
+    return true;
+  }
+  if (iequalsAscii(token, "thick")) {
+    out = 5;
+    return true;
+  }
+  int scaleX4 = 4;  // quarter-pixel units per CSS unit, so pt (4/3 px) stays integer-ish
+  for (const std::string_view unit :
+       {std::string_view("rem"), std::string_view("em"), std::string_view("pt"), std::string_view("px")}) {
+    if (token.size() > unit.size() && iequalsAscii(token.substr(token.size() - unit.size()), unit)) {
+      if (unit == "em" || unit == "rem") scaleX4 = 64;
+      if (unit == "pt") scaleX4 = 5;
+      token.remove_suffix(unit.size());
+      break;
+    }
+  }
+  float number = 0;
+  if (!tryParseNumber(token, number) || number < 0) return false;
+  // Parse-time only (once per declaration, never per glyph or pixel).
+  const float px = number * static_cast<float>(scaleX4) / 4.0f;
+  const int rounded = px > 0.0f && px < 1.0f ? 1 : static_cast<int>(px + 0.5f);
+  out = static_cast<uint8_t>(rounded > CssBorderSide::MAX_WIDTH ? CssBorderSide::MAX_WIDTH : rounded);
+  return true;
+}
+
+// Handles border, border-<edge>, border[-<edge>]-style and border[-<edge>]-width. Returns
+// true when `name` is a border property (even one that is ignored, such as border-color).
+bool parseBorderDeclaration(std::string_view name, std::string_view value, CssStyle& style) {
+  constexpr std::string_view prefix = "border";
+  if (name.size() < prefix.size() || !iequalsAscii(name.substr(0, prefix.size()), prefix)) return false;
+  std::string_view rest = name.substr(prefix.size());
+  uint8_t edges = 0x0F;
+  static constexpr std::string_view edgeNames[4] = {"-top", "-right", "-bottom", "-left"};
+  for (uint8_t edge = 0; edge < 4; ++edge) {
+    const auto edgeName = edgeNames[edge];
+    if (rest.size() >= edgeName.size() && iequalsAscii(rest.substr(0, edgeName.size()), edgeName)) {
+      edges = static_cast<uint8_t>(1U << edge);
+      rest.remove_prefix(edgeName.size());
+      break;
+    }
+  }
+  value = trimCssWhitespace(stripTrailingImportant(value));
+
+  if (rest.empty()) {
+    // Shorthand: omitted parts reset to their initial values (style none, width medium).
+    CssBorderSide parsed;
+    bool recognised = false;
+    forEachDelimitedToken(value, isCssWhitespace, [&](std::string_view token) {
+      CssBorderStyle lineStyle;
+      uint8_t width;
+      if (tryBorderStyle(token, lineStyle)) {
+        parsed.setStyle(lineStyle);
+        recognised = true;
+      } else if (tryBorderWidth(token, width)) {
+        parsed.width = width;
+        recognised = true;
+      }
+    });
+    if (!recognised) return true;  // a colour alone changes nothing we draw
+    for (uint8_t edge = 0; edge < 4; ++edge) {
+      if (edges & (1U << edge)) style.borders[edge] = parsed;
+    }
+    style.defined.borderStyle |= edges;
+    style.defined.borderWidth |= edges;
+    return true;
+  }
+
+  const bool isStyle = iequalsAscii(rest, "-style");
+  const bool isWidth = iequalsAscii(rest, "-width");
+  if (!isStyle && !isWidth) return true;  // -color, -radius, -collapse, -spacing, -image: ignored
+
+  // One to four values in CSS order top/right/bottom/left; a single-edge property takes one.
+  std::string_view tokens[4];
+  size_t count = 0;
+  forEachDelimitedToken(value, isCssWhitespace, [&](std::string_view token) {
+    if (count < 4) tokens[count] = token;
+    ++count;
+  });
+  if (count == 0 || count > 4 || (edges != 0x0F && count != 1)) return true;
+  CssBorderSide parsed[4];
+  for (uint8_t edge = 0; edge < 4; ++edge) {
+    const size_t index = edge < count ? edge : (edge == 3 && count > 1 ? 1 : (edge == 2 || count == 1 ? 0 : 1));
+    if (isStyle) {
+      CssBorderStyle lineStyle;
+      if (!tryBorderStyle(tokens[index], lineStyle)) return true;
+      parsed[edge].setStyle(lineStyle);
+    } else {
+      uint8_t width;
+      if (!tryBorderWidth(tokens[index], width)) return true;
+      parsed[edge].width = width;
+    }
+  }
+  for (uint8_t edge = 0; edge < 4; ++edge) {
+    if (!(edges & (1U << edge))) continue;
+    const CssBorderSide& source = edges == 0x0F ? parsed[edge] : parsed[0];
+    if (isStyle) {
+      style.borders[edge].styleBits = source.styleBits;
+    } else {
+      style.borders[edge].width = source.width;
+    }
+  }
+  if (isStyle) {
+    style.defined.borderStyle |= edges;
+  } else {
+    style.defined.borderWidth |= edges;
+  }
+  return true;
+}
+}  // namespace
+
 // Declaration parsing
 
 void CssParser::parseDeclarationIntoStyle(std::string_view decl, CssStyle& style) {
@@ -411,6 +582,20 @@ void CssParser::parseDeclarationIntoStyle(std::string_view decl, CssStyle& style
       style.verticalAlign = CssVerticalAlign::Sub;
       style.defined.verticalAlign = 1;
     }
+  } else if (iequalsAscii(name, "page-break-before") || iequalsAscii(name, "break-before")) {
+    if (isForcedPageBreak(value)) style.defined.pageBreakBefore = 1;
+  } else if (iequalsAscii(name, "page-break-after") || iequalsAscii(name, "break-after")) {
+    if (isForcedPageBreak(value)) style.defined.pageBreakAfter = 1;
+  } else if (iequalsAscii(name, "white-space")) {
+    const std::string_view mode = trimCssWhitespace(stripTrailingImportant(value));
+    if (iequalsAscii(mode, "pre") || iequalsAscii(mode, "pre-wrap") || iequalsAscii(mode, "pre-line") ||
+        iequalsAscii(mode, "break-spaces")) {
+      style.defined.whiteSpacePre = 1;
+    }
+  } else if (iequalsAscii(name, "background") || iequalsAscii(name, "background-color")) {
+    if (isShadedBackground(value)) style.defined.shaded = 1;
+  } else {
+    parseBorderDeclaration(name, value, style);
   }
 }
 
@@ -758,8 +943,10 @@ bool CssParser::saveToCache() const {
     writeLength(style.imageWidth);
     file.write(static_cast<uint8_t>(style.display));
     file.write(static_cast<uint8_t>(style.verticalAlign));
+    file.write(static_cast<uint8_t>(style.direction));
+    for (const CssBorderSide& side : style.borders) file.write(side.packed());
 
-    // Write defined flags as uint16_t
+    // Write defined flags as uint32_t
     uint32_t definedBits = 0;
     if (style.defined.textAlign) definedBits |= 1 << 0;
     if (style.defined.fontStyle) definedBits |= 1 << 1;
@@ -778,6 +965,13 @@ bool CssParser::saveToCache() const {
     if (style.defined.imageWidth) definedBits |= 1 << 14;
     if (style.defined.display) definedBits |= 1 << 15;
     if (style.defined.verticalAlign) definedBits |= 1 << 16;
+    if (style.defined.direction) definedBits |= 1 << 17;
+    if (style.defined.pageBreakBefore) definedBits |= 1 << 18;
+    if (style.defined.pageBreakAfter) definedBits |= 1 << 19;
+    if (style.defined.whiteSpacePre) definedBits |= 1 << 20;
+    if (style.defined.shaded) definedBits |= 1 << 21;
+    definedBits |= static_cast<uint32_t>(style.defined.borderStyle) << 22;
+    definedBits |= static_cast<uint32_t>(style.defined.borderWidth) << 26;
     file.write(reinterpret_cast<const uint8_t*>(&definedBits), sizeof(definedBits));
   }
 
@@ -832,8 +1026,9 @@ bool CssParser::loadFromCache() {
 
   constexpr size_t CSS_LENGTH_FIELD_COUNT = 11;
   constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
-  constexpr size_t CSS_FIXED_STYLE_BYTES =
-      5 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) + sizeof(uint8_t) + sizeof(uint32_t);
+  // 4 enums + display, the lengths, verticalAlign + direction, 4 border edges, defined bits.
+  constexpr size_t CSS_FIXED_STYLE_BYTES = 5 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
+                                           2 * sizeof(uint8_t) + 4 * sizeof(uint8_t) + sizeof(uint32_t);
 
   // Read each rule
   for (uint16_t i = 0; i < ruleCount; ++i) {
@@ -932,6 +1127,22 @@ bool CssParser::loadFromCache() {
     }
     style.verticalAlign = static_cast<CssVerticalAlign>(verticalAlignVal);
 
+    uint8_t directionVal;
+    uint8_t borderBytes[4];
+    if (file.read(&directionVal, 1) != 1 || file.read(borderBytes, sizeof(borderBytes)) != sizeof(borderBytes)) {
+      rulesBySelector_.clear();
+      return false;
+    }
+    style.direction =
+        directionVal == static_cast<uint8_t>(CssTextDirection::Rtl) ? CssTextDirection::Rtl : CssTextDirection::Ltr;
+    for (uint8_t edge = 0; edge < 4; ++edge) {
+      if (!CssBorderSide::unpack(borderBytes[edge], style.borders[edge])) {
+        LOG_DBG("CSS", "Invalid border byte in cache");
+        rulesBySelector_.clear();
+        return false;
+      }
+    }
+
     // Read defined flags
     uint32_t definedBits = 0;
     if (file.read(&definedBits, sizeof(definedBits)) != sizeof(definedBits)) {
@@ -955,6 +1166,13 @@ bool CssParser::loadFromCache() {
     style.defined.imageWidth = (definedBits & 1 << 14) != 0;
     style.defined.display = (definedBits & 1 << 15) != 0;
     style.defined.verticalAlign = (definedBits & 1 << 16) != 0;
+    style.defined.direction = (definedBits & 1 << 17) != 0;
+    style.defined.pageBreakBefore = (definedBits & 1 << 18) != 0;
+    style.defined.pageBreakAfter = (definedBits & 1 << 19) != 0;
+    style.defined.whiteSpacePre = (definedBits & 1 << 20) != 0;
+    style.defined.shaded = (definedBits & 1 << 21) != 0;
+    style.defined.borderStyle = (definedBits >> 22) & 0x0F;
+    style.defined.borderWidth = (definedBits >> 26) & 0x0F;
 
     rulesBySelector_[selector] = style;
   }

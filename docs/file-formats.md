@@ -155,9 +155,18 @@ if (parsedSize != fileSize) {
 > paragraph with text is laid out in the line instead of as a centred block. It is still
 > stored as an ordinary `PageImage` (tag 2), positioned so its bottom edge sits on the
 > line's baseline; a line made taller by an image has its `PageLine` moved down by the
-> same amount. The CSS rule cache (`css_rules.cache`) moves to version 7 in the same
-> change: `display: inline` is now stored as display value 2 instead of being folded
-> into block (0).
+> same amount. Publisher decorations add page element tag 5, `PageBorderBox` (a CSS
+> border and/or background shade around a block's slice of the page): `xPos i16, yPos
+> i16, width u16, height u16`, four edge bytes in top/right/bottom/left order (low nibble
+> width in pixels 0-8, high nibble style 0 none / 1 solid / 2 double / 3 dotted /
+> 4 dashed; an edge cut by a page break has width 0), then `shaded bool`. Forced CSS page
+> breaks and `white-space: pre*` blocks change layout only.
+> The CSS rule cache (`css_rules.cache`) moves from version 6 to 8 with it. v7:
+> `display: inline` is stored as display value 2 instead of being folded into block (0).
+> v8: each rule's fixed payload grows from 65 to 70 bytes: `direction u8` and four border
+> edge bytes (same packing as above) follow `verticalAlign`, and the defined-flags word
+> gains bits 17 direction, 18 page-break-before, 19 page-break-after, 20 white-space pre,
+> 21 shaded background, 22-25 border style set per edge, 26-29 border width set per edge.
 >
 > Any change to the on-disk structure **must** bump this constant — a stale cache read
 > against a new layout is how you get a hard fault, not a graceful failure.

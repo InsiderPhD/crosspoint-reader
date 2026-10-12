@@ -34,7 +34,9 @@ class CssParser {
  public:
   // Bump when CSS cache format or rules change; section caches are invalidated when this changes
   // 7: `display: inline` is stored as CssDisplay::Inline (was folded into Block).
-  static constexpr uint8_t CSS_CACHE_VERSION = 7;
+  // 8: rules carry direction (parsed before, but dropped by the cache), four packed border
+  //    edges, and defined bits 17..29 (direction, page breaks, white-space, shade, borders).
+  static constexpr uint8_t CSS_CACHE_VERSION = 8;
 
   explicit CssParser(std::string cachePath) : cachePath(std::move(cachePath)) {}
   ~CssParser() = default;

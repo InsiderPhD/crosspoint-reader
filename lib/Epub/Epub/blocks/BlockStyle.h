@@ -34,7 +34,11 @@ struct BlockStyle {
   int16_t textIndent = 0;
   bool textIndentDefined = false;  // true if text-indent was explicitly set in CSS
   bool textAlignDefined = false;   // true if text-align was explicitly set in CSS
-  int fontOverride = 0;            // 0 = use default reader font; non-zero overrides fontId for this block
+  // CSS page-break-after / break-after: the page ends after this block. Layout-time only
+  // (never serialized), set on the element's own style and not inherited by children. Sits
+  // in the padding ahead of fontOverride: sizeof(BlockStyle) is unchanged.
+  bool pageBreakAfter = false;
+  int fontOverride = 0;  // 0 = use default reader font; non-zero overrides fontId for this block
 
   // Combined insets (margin + padding)
   [[nodiscard]] int16_t leftInset() const { return marginLeft + paddingLeft; }
@@ -48,6 +52,7 @@ struct BlockStyle {
     BlockStyle result = *this;
     result.marginBottom = 0;
     result.paddingBottom = 0;
+    result.pageBreakAfter = false;  // like the bottom spacing, applied when the element closes
     return result;
   }
 
@@ -57,6 +62,7 @@ struct BlockStyle {
     BlockStyle result = *this;
     result.marginBottom = std::max(marginBottom, source.marginBottom);
     result.paddingBottom = static_cast<int16_t>(paddingBottom + source.paddingBottom);
+    result.pageBreakAfter = pageBreakAfter || source.pageBreakAfter;
     return result;
   }
 
@@ -135,6 +141,7 @@ struct BlockStyle {
       blockStyle.textIndentDefined = true;
     }
     blockStyle.textAlignDefined = cssStyle.hasTextAlign();
+    blockStyle.pageBreakAfter = cssStyle.defined.pageBreakAfter;
     // User setting overrides CSS, unless "Book's Style" alignment setting is selected
     if (paragraphAlignment == CssTextAlign::None) {
       blockStyle.alignment = blockStyle.textAlignDefined ? cssStyle.textAlign : CssTextAlign::Justify;

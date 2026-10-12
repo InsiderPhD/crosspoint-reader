@@ -64,26 +64,67 @@ enum class CssTextDirection : uint8_t { Ltr = 0, Rtl = 1 };
 // Vertical alignment options for inline elements (e.g. superscript/subscript)
 enum class CssVerticalAlign : uint8_t { Baseline = 0, Super = 1, Sub = 2 };
 
+// Border line styles the renderer can draw. Values are stored in the CSS rule cache and in
+// section files (PageBorderBox): never renumber.
+enum class CssBorderStyle : uint8_t { None = 0, Solid = 1, Double = 2, Dotted = 3, Dashed = 4 };
+
+// One edge of a CSS border, packed into a byte so the four of them fit the padding CssStyle
+// already had (see the size assert below): rules are held in RAM for a whole section build.
+struct CssBorderSide {
+  static constexpr uint8_t MAX_WIDTH = 8;
+  uint8_t width : 4;      // pixels, 0..MAX_WIDTH. CSS's initial value is `medium` (3px).
+  uint8_t styleBits : 3;  // a CssBorderStyle
+
+  constexpr CssBorderSide() : width(3), styleBits(0) {}
+  [[nodiscard]] CssBorderStyle style() const { return static_cast<CssBorderStyle>(styleBits); }
+  void setStyle(const CssBorderStyle style) { styleBits = static_cast<uint8_t>(style); }
+  [[nodiscard]] bool visible() const { return width != 0 && styleBits != 0; }
+  // One-byte wire form, used by both caches.
+  [[nodiscard]] uint8_t packed() const { return static_cast<uint8_t>(width | (styleBits << 4)); }
+  static bool unpack(const uint8_t byte, CssBorderSide& out) {
+    const uint8_t width = byte & 0x0F;
+    const uint8_t style = byte >> 4;
+    if (width > MAX_WIDTH || style > static_cast<uint8_t>(CssBorderStyle::Dashed)) return false;
+    out.width = width;
+    out.styleBits = style;
+    return true;
+  }
+};
+static_assert(sizeof(CssBorderSide) == 1, "CssBorderSide must stay one byte");
+
 // Bitmask for tracking which properties have been explicitly set
 struct CssPropertyFlags {
-  uint16_t textAlign : 1;
-  uint16_t fontStyle : 1;
-  uint16_t fontWeight : 1;
-  uint16_t textDecoration : 1;
-  uint16_t textIndent : 1;
-  uint16_t marginTop : 1;
-  uint16_t marginBottom : 1;
-  uint16_t marginLeft : 1;
-  uint16_t marginRight : 1;
-  uint16_t paddingTop : 1;
-  uint16_t paddingBottom : 1;
-  uint16_t paddingLeft : 1;
-  uint16_t paddingRight : 1;
-  uint16_t imageHeight : 1;
-  uint16_t imageWidth : 1;
-  uint16_t display : 1;
-  uint16_t direction : 1;
-  uint16_t verticalAlign : 1;
+  uint32_t textAlign : 1;
+  uint32_t fontStyle : 1;
+  uint32_t fontWeight : 1;
+  uint32_t textDecoration : 1;
+  uint32_t textIndent : 1;
+  uint32_t marginTop : 1;
+  uint32_t marginBottom : 1;
+  uint32_t marginLeft : 1;
+  uint32_t marginRight : 1;
+  uint32_t paddingTop : 1;
+  uint32_t paddingBottom : 1;
+  uint32_t paddingLeft : 1;
+  uint32_t paddingRight : 1;
+  uint32_t imageHeight : 1;
+  uint32_t imageWidth : 1;
+  uint32_t display : 1;
+  uint32_t direction : 1;
+  uint32_t verticalAlign : 1;
+  // The four below are the VALUE as well as the "defined" mark: only the setting that
+  // changes layout is recorded (page-break always, white-space pre*, a non-white
+  // background). A rule that only restates the default (`page-break-after: avoid` on every
+  // heading, `background: #fff` on body) therefore still counts as a no-op and is not
+  // stored. The price: a later rule cannot switch one of these back off.
+  uint32_t pageBreakBefore : 1;
+  uint32_t pageBreakAfter : 1;
+  uint32_t whiteSpacePre : 1;
+  uint32_t shaded : 1;
+  // Per-edge masks (bit 0 top, 1 right, 2 bottom, 3 left) for CssStyle::borders: which
+  // edges had their line style / their width set.
+  uint32_t borderStyle : 4;
+  uint32_t borderWidth : 4;
 
   CssPropertyFlags()
       : textAlign(0),
@@ -103,12 +144,19 @@ struct CssPropertyFlags {
         imageWidth(0),
         display(0),
         direction(0),
-        verticalAlign(0) {}
+        verticalAlign(0),
+        pageBreakBefore(0),
+        pageBreakAfter(0),
+        whiteSpacePre(0),
+        shaded(0),
+        borderStyle(0),
+        borderWidth(0) {}
 
   [[nodiscard]] bool anySet() const {
     return textAlign || fontStyle || fontWeight || textDecoration || textIndent || marginTop || marginBottom ||
            marginLeft || marginRight || paddingTop || paddingBottom || paddingLeft || paddingRight || imageHeight ||
-           imageWidth || display || direction || verticalAlign;
+           imageWidth || display || direction || verticalAlign || pageBreakBefore || pageBreakAfter || whiteSpacePre ||
+           shaded || borderStyle || borderWidth;
   }
 
   void clearAll() {
@@ -116,13 +164,14 @@ struct CssPropertyFlags {
     marginTop = marginBottom = marginLeft = marginRight = 0;
     paddingTop = paddingBottom = paddingLeft = paddingRight = 0;
     imageHeight = imageWidth = display = direction = verticalAlign = 0;
+    pageBreakBefore = pageBreakAfter = whiteSpacePre = shaded = borderStyle = borderWidth = 0;
   }
 };
 
 // Represents a collection of CSS style properties
 // Only stores properties relevant to e-ink text rendering
 // Length values are stored as CssLength (value + unit) for deferred resolution
-// Cache serializes defined flags as uint32_t with bit indices 0..17.
+// Cache serializes defined flags as uint32_t with bit indices 0..29.
 static_assert(sizeof(CssPropertyFlags) <= sizeof(uint32_t),
               "CssPropertyFlags exceeds 32 bits; update cache read/write in CssParser.cpp");
 
@@ -132,22 +181,29 @@ struct CssStyle {
   CssFontWeight fontWeight = CssFontWeight::Normal;
   CssTextDecoration textDecoration = CssTextDecoration::None;
   CssTextDirection direction = CssTextDirection::Ltr;
-
-  CssLength textIndent;     // First-line indent (deferred resolution)
-  CssLength marginTop;      // Vertical spacing before block
-  CssLength marginBottom;   // Vertical spacing after block
-  CssLength marginLeft;     // Horizontal spacing left of block
-  CssLength marginRight;    // Horizontal spacing right of block
-  CssLength paddingTop;     // Padding before
-  CssLength paddingBottom;  // Padding after
-  CssLength paddingLeft;    // Padding left
-  CssLength paddingRight;   // Padding right
-  CssLength imageHeight;    // Height for img (e.g. 2em) – width derived from aspect ratio when only height set
-  CssLength imageWidth;     // Width for img when both or only width set
+  // Here, in what used to be padding ahead of the first CssLength, so the struct did not
+  // grow when the border edges were added below.
   CssDisplay display = CssDisplay::Block;                       // display property
   CssVerticalAlign verticalAlign = CssVerticalAlign::Baseline;  // vertical-align (super/sub positioning)
 
+  CssLength textIndent;      // First-line indent (deferred resolution)
+  CssLength marginTop;       // Vertical spacing before block
+  CssLength marginBottom;    // Vertical spacing after block
+  CssLength marginLeft;      // Horizontal spacing left of block
+  CssLength marginRight;     // Horizontal spacing right of block
+  CssLength paddingTop;      // Padding before
+  CssLength paddingBottom;   // Padding after
+  CssLength paddingLeft;     // Padding left
+  CssLength paddingRight;    // Padding right
+  CssLength imageHeight;     // Height for img (e.g. 2em) – width derived from aspect ratio when only height set
+  CssLength imageWidth;      // Width for img when both or only width set
+  CssBorderSide borders[4];  // top, right, bottom, left; see defined.borderStyle / borderWidth
+
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
+
+  [[nodiscard]] bool hasVisibleBorder() const {
+    return borders[0].visible() || borders[1].visible() || borders[2].visible() || borders[3].visible();
+  }
 
   // Apply properties from another style, only overwriting if the other style
   // has that property explicitly defined
@@ -224,6 +280,17 @@ struct CssStyle {
       verticalAlign = base.verticalAlign;
       defined.verticalAlign = 1;
     }
+    if (base.defined.pageBreakBefore) defined.pageBreakBefore = 1;
+    if (base.defined.pageBreakAfter) defined.pageBreakAfter = 1;
+    if (base.defined.whiteSpacePre) defined.whiteSpacePre = 1;
+    if (base.defined.shaded) defined.shaded = 1;
+    for (uint8_t edge = 0; edge < 4; ++edge) {
+      const uint8_t bit = static_cast<uint8_t>(1U << edge);
+      if (base.defined.borderStyle & bit) borders[edge].styleBits = base.borders[edge].styleBits;
+      if (base.defined.borderWidth & bit) borders[edge].width = base.borders[edge].width;
+    }
+    defined.borderStyle |= base.defined.borderStyle;
+    defined.borderWidth |= base.defined.borderWidth;
   }
 
   [[nodiscard]] bool hasTextAlign() const { return defined.textAlign; }
@@ -257,6 +324,11 @@ struct CssStyle {
     imageHeight = imageWidth = CssLength{};
     display = CssDisplay::Block;
     verticalAlign = CssVerticalAlign::Baseline;
+    for (auto& side : borders) side = CssBorderSide{};
     defined.clearAll();
   }
 };
+
+// A rule is held in RAM (one per selector) for the length of a section build, which is the
+// tightest heap state the reader has. New properties must be packed into what is here.
+static_assert(sizeof(CssStyle) <= 104, "CssStyle grew: every stored CSS rule pays for it during section builds");

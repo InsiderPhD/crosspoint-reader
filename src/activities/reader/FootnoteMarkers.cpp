@@ -266,6 +266,10 @@ class Scanner {
         case TAG_PageHorizontalRule:
           endRun();
           break;
+        case TAG_PageBorderBox:
+          // A frame around text, not something between two lines of it. (Boxes and inline
+          // images sit at the front of the element list, ahead of every line.)
+          break;
       }
     }
   }

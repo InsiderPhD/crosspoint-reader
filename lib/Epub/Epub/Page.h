@@ -19,6 +19,7 @@ enum PageElementTag : uint8_t {
   TAG_PageImage = 2,
   TAG_PageHorizontalRule = 3,
   TAG_PageTable = 4,  // persisted in section.bin: never renumber
+  TAG_PageBorderBox = 5,
 };
 
 // Table grid limits (ported from witchhunt-reader). Every fragment is also bounded by the
@@ -88,6 +89,29 @@ class PageHorizontalRule final : public PageElement {
   bool serialize(Print& file) override;
   PageElementTag getTag() const override { return TAG_PageHorizontalRule; }
   static std::unique_ptr<PageHorizontalRule> deserialize(FsFile& file);
+};
+
+// A CSS border and/or light background shade around a block element's slice of this page.
+// An element split by a page break gets one box per page, with the edge at the break left
+// open (zero-width side). Only pages that show such an element carry one: 20 bytes each.
+class PageBorderBox final : public PageElement {
+  uint16_t width;
+  uint16_t height;
+  CssBorderSide sides[4];  // top, right, bottom, left
+  bool shaded;
+
+ public:
+  PageBorderBox(const uint16_t width, const uint16_t height, const CssBorderSide (&sides)[4], const bool shaded,
+                const int16_t xPos, const int16_t yPos)
+      : PageElement(xPos, yPos),
+        width(width),
+        height(height),
+        sides{sides[0], sides[1], sides[2], sides[3]},
+        shaded(shaded) {}
+  void render(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) override;
+  bool serialize(Print& file) override;
+  PageElementTag getTag() const override { return TAG_PageBorderBox; }
+  static std::unique_ptr<PageBorderBox> deserialize(FsFile& file);
 };
 
 struct TableCell {

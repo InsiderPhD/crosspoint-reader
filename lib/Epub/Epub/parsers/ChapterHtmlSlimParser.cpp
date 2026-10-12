@@ -452,6 +452,204 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
   nextWordContinues = false;
 }
 
+BlockStyle ChapterHtmlSlimParser::neutralBlockStyle() const {
+  BlockStyle style;
+  style.alignment = (paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
+                        ? CssTextAlign::Justify
+                        : static_cast<CssTextAlign>(paragraphAlignment);
+  return style;
+}
+
+void ChapterHtmlSlimParser::completeCurrentPage() {
+  for (uint8_t i = 0; i < boxScopeCount; ++i) {
+    BoxScope& box = boxScopes[i];
+    emitBoxSegment(box, false);
+    if (box.top >= 0) box.continued = true;
+    box.top = box.bottom = -1;
+  }
+  completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
+  completedPageCount++;
+}
+
+void ChapterHtmlSlimParser::forcePageBreak() {
+  if (partWordBufferIndex > 0) flushPartWordBuffer();
+  if (currentTextBlock && !currentTextBlock->isEmpty()) {
+    makePages();
+    currentTextBlock->setBlockStyle(neutralBlockStyle());
+  }
+  if (!currentPage || currentPage->elements.empty()) return;  // already at the top of a page
+  completeCurrentPage();
+  currentPage.reset(new (std::nothrow) Page());
+  if (!currentPage) LOG_ERR("EHP", "Failed to create page after forced break");
+  currentPageNextY = 0;
+  previousBlockBottomMargin = 0;
+}
+
+// Something was placed on the page between `top` and `bottom`: every open box grows to hold it.
+void ChapterHtmlSlimParser::noteContent(const int top, const int bottom) {
+  for (uint8_t i = 0; i < boxScopeCount; ++i) {
+    BoxScope& box = boxScopes[i];
+    if (box.top < 0) box.top = static_cast<int16_t>(top);
+    box.bottom = static_cast<int16_t>(std::max<int>(box.bottom, bottom));
+  }
+}
+
+// Called for a block element before its style joins the stack. When the element has a visible
+// border or a shade, widens its padding so text clears the frame and starts tracking its extent.
+void ChapterHtmlSlimParser::openBoxScope(BlockStyle& ownStyle, const CssStyle& cssStyle) {
+  const bool shaded = cssStyle.defined.shaded;
+  if (currentTable || boxScopeCount >= MAX_BOX_SCOPES || (!cssStyle.hasVisibleBorder() && !shaded)) return;
+
+  // What came before must not end up inside the frame.
+  if (partWordBufferIndex > 0) flushPartWordBuffer();
+  if (currentTextBlock && !currentTextBlock->isEmpty()) {
+    makePages();
+    currentTextBlock->setBlockStyle(neutralBlockStyle());
+  }
+
+  BoxScope box;
+  box.depth = static_cast<int16_t>(depth);
+  box.shaded = shaded;
+  for (uint8_t edge = 0; edge < 4; ++edge) {
+    if (cssStyle.borders[edge].visible()) {
+      box.sides[edge] = cssStyle.borders[edge];
+    } else {
+      box.sides[edge].width = 0;
+      box.sides[edge].setStyle(CssBorderStyle::None);
+    }
+  }
+  const BlockStyle& parent = blockStyleStack.back();
+  box.left = static_cast<int16_t>(parent.leftInset() + ownStyle.marginLeft);
+  box.right = static_cast<int16_t>(viewportWidth - parent.rightInset() - ownStyle.marginRight);
+  if (box.right - box.left < 8) return;
+
+  // The border sits between margin and padding, so its width joins the padding; text also
+  // keeps a small gap from the frame when the book sets no padding of its own.
+  static constexpr int16_t MIN_FRAME_GAP = 4;
+  const auto pad = [&box](int16_t& padding, const CssBorderSide& side) {
+    if (!side.visible() && !box.shaded) return;
+    padding = static_cast<int16_t>(std::max(padding, MIN_FRAME_GAP) + (side.visible() ? side.width : 0));
+  };
+  pad(ownStyle.paddingTop, box.sides[0]);
+  pad(ownStyle.paddingRight, box.sides[1]);
+  pad(ownStyle.paddingBottom, box.sides[2]);
+  pad(ownStyle.paddingLeft, box.sides[3]);
+  box.padTop = ownStyle.paddingTop;
+  box.padBottom = ownStyle.paddingBottom;
+  boxScopes[boxScopeCount++] = box;
+}
+
+void ChapterHtmlSlimParser::closeBoxScope() {
+  if (boxScopeCount == 0) return;
+  BoxScope box = boxScopes[--boxScopeCount];
+  if (box.top < 0 && !box.continued) {
+    // An element with no content (a rule drawn with a border) still gets its own height. Its
+    // spacing is sitting on the empty text block; spend it here.
+    const int height = box.padTop + box.padBottom;
+    if (height <= 0) return;
+    int above = 0;
+    int below = 0;
+    if (currentTextBlock && currentTextBlock->isEmpty()) {
+      const BlockStyle pending = currentTextBlock->getBlockStyle();
+      above = pending.marginTop;
+      below = pending.marginBottom;
+      currentTextBlock->setBlockStyle(neutralBlockStyle());
+    }
+    if (!currentPage) {
+      currentPage.reset(new (std::nothrow) Page());
+      if (!currentPage) return;
+      currentPageNextY = 0;
+      previousBlockBottomMargin = 0;
+    }
+    if (!currentPage->elements.empty() && currentPageNextY + above + height > viewportHeight) {
+      completeCurrentPage();
+      currentPage.reset(new (std::nothrow) Page());
+      if (!currentPage) return;
+      currentPageNextY = 0;
+      previousBlockBottomMargin = 0;
+      above = 0;
+    }
+    const int top = currentPageNextY + above;
+    box.top = static_cast<int16_t>(top + box.padTop);
+    box.bottom = box.top;
+    currentPageNextY = static_cast<int16_t>(top + height + below);
+    previousBlockBottomMargin = 0;
+  }
+  // The frame is content of any box that encloses this one.
+  if (box.top >= 0) noteContent(box.top - box.padTop, box.bottom + box.padBottom);
+  emitBoxSegment(box, true);
+}
+
+void ChapterHtmlSlimParser::emitBoxSegment(const BoxScope& box, const bool closing) {
+  if (box.top < 0 || !currentPage) return;
+  const int top = std::max(0, box.top - (box.continued ? 0 : box.padTop));
+  const int bottom = std::min<int>(viewportHeight, box.bottom + (closing ? box.padBottom : 0));
+  if (bottom <= top) return;
+  // A page break slices the box: the edges at the break are left open.
+  CssBorderSide open;
+  open.width = 0;
+  const CssBorderSide sides[4] = {box.continued ? open : box.sides[0], box.sides[1], closing ? box.sides[2] : open,
+                                  box.sides[3]};
+  auto element =
+      makeUniqueNoThrow<PageBorderBox>(static_cast<uint16_t>(box.right - box.left), static_cast<uint16_t>(bottom - top),
+                                       sides, box.shaded, box.left, static_cast<int16_t>(top));
+  if (!element) {
+    LOG_ERR("EHP", "OOM: PageBorderBox");
+    return;
+  }
+  // In front of the content it frames, so the shade is painted first and text lands on it.
+  currentPage->elements.insert(currentPage->elements.begin(), std::move(element));
+}
+
+// A newline inside a preformatted block: the line so far is laid out as a block of its own,
+// without the paragraph spacing a real paragraph end would add.
+void ChapterHtmlSlimParser::preLineBreak() {
+  if (partWordBufferIndex > 0) flushPartWordBuffer();
+  nextWordContinues = false;
+  preAtLineStart = true;
+  if (!currentTextBlock) return;
+  if (currentTextBlock->isEmpty()) {
+    // A blank source line. Held back until text follows, so the newline after the opening
+    // tag and the ones before the closing tag add no space.
+    if (preLinesEmitted && prePendingBlankLines < 3) ++prePendingBlankLines;
+    return;
+  }
+  // Lines after the first keep the block's insets but not its top spacing or indent.
+  BlockStyle next = currentTextBlock->getBlockStyle();
+  next.marginTop = 0;
+  next.paddingTop = 0;
+  next.textIndent = 0;
+  next.textIndentDefined = true;
+  suppressParagraphSpacing = true;
+  makePages();
+  suppressParagraphSpacing = false;
+  recordPendingAnchor();
+  currentTextBlock->setBlockStyle(next);
+  preLinesEmitted = true;
+}
+
+// First glyph (or first kept space) of a preformatted line: spend the blank lines before it.
+void ChapterHtmlSlimParser::beginPreLine() {
+  if (prePendingBlankLines > 0 && currentTextBlock && currentTextBlock->isEmpty()) {
+    BlockStyle style = currentTextBlock->getBlockStyle();
+    const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression);
+    style.marginTop = static_cast<int16_t>(style.marginTop + prePendingBlankLines * lineHeight);
+    currentTextBlock->setBlockStyle(style);
+  }
+  prePendingBlankLines = 0;
+}
+
+// Indentation at the start of a preformatted line: each space is kept as a no-break space
+// token glued to the line's first word (the same token &nbsp; produces).
+void ChapterHtmlSlimParser::preLeadingSpace(const int count) {
+  if (!currentTextBlock) return;
+  beginPreLine();
+  for (int i = 0; i < count; ++i) {
+    currentTextBlock->addWord(" ", EpdFontFamily::REGULAR, false, !currentTextBlock->isEmpty());
+  }
+  nextWordContinues = true;
+}
+
 // Places an image as a block of its own: the paragraph before it is laid out, the image is
 // centred in the column and takes the vertical margins of its container.
 void ChapterHtmlSlimParser::placeBlockImage(std::unique_ptr<ImageBlock> imageBlock) {
@@ -484,8 +682,7 @@ void ChapterHtmlSlimParser::placeBlockImage(std::unique_ptr<ImageBlock> imageBlo
   // Create page for image - only break if image won't fit remaining space
   if (currentPage && !currentPage->elements.empty() &&
       (currentPageNextY + imageMarginTop + displayHeight + imageMarginBottom > viewportHeight)) {
-    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
-    completedPageCount++;
+    completeCurrentPage();
     currentPage.reset(new (std::nothrow) Page());
     if (!currentPage) {
       LOG_ERR("EHP", "Failed to create new page");
@@ -514,6 +711,7 @@ void ChapterHtmlSlimParser::placeBlockImage(std::unique_ptr<ImageBlock> imageBlo
     return;
   }
   currentPage->elements.push_back(std::move(pageImage));
+  noteContent(currentPageNextY, currentPageNextY + displayHeight);
   currentPageNextY += displayHeight + imageMarginBottom;
   previousBlockBottomMargin = 0;
 
@@ -643,8 +841,7 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
   const int16_t totalHeight = static_cast<int16_t>(topSpacing + ruleThickness + bottomSpacing);
 
   if (!currentPage->elements.empty() && currentPageNextY + totalHeight > viewportHeight) {
-    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
-    completedPageCount++;
+    completeCurrentPage();
     currentPage.reset(new (std::nothrow) Page());
     if (!currentPage) {
       LOG_ERR("EHP", "Failed to create page after horizontal-rule page break");
@@ -663,6 +860,7 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
     return;
   }
   currentPage->elements.push_back(std::move(pageRule));
+  noteContent(currentPageNextY, currentPageNextY + ruleThickness);
   currentPageNextY = static_cast<int16_t>(currentPageNextY + ruleThickness + bottomSpacing);
   previousBlockBottomMargin = 0;
 
@@ -1291,6 +1489,13 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     return;
   }
 
+  // Publisher decorations apply to real block elements outside tables (the grid has its own
+  // geometry). cssStyle is empty unless embedded styles are on.
+  const bool decoratedBlock = isHeaderOrBlock(name) && strcmp(name, "br") != 0 && !self->currentTable;
+  if (decoratedBlock && cssStyle.defined.pageBreakBefore) {
+    self->forcePageBreak();
+  }
+
   if (matches(name, HEADER_TAGS, NUM_HEADER_TAGS)) {
     self->currentCssStyle = cssStyle;
     auto headerBlockStyle =
@@ -1299,6 +1504,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     if (self->embeddedStyle && cssStyle.hasTextAlign()) {
       headerBlockStyle.alignment = cssStyle.textAlign;
     }
+    if (decoratedBlock) self->openBoxScope(headerBlockStyle, cssStyle);
     const auto accumulated =
         self->blockStyleStack.back().getCombinedBlockStyle(headerBlockStyle, BlockStyle::CombineAxis::Horizontal);
     self->blockStyleStack.push_back(accumulated);
@@ -1314,8 +1520,16 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       self->startNewTextBlock(self->blockStyleStack.back().withoutBottom());
     } else {
       self->currentCssStyle = cssStyle;
-      auto accumulated = self->blockStyleStack.back().getCombinedBlockStyle(userAlignmentBlockStyle,
-                                                                            BlockStyle::CombineAxis::Horizontal);
+      BlockStyle ownBlockStyle = userAlignmentBlockStyle;
+      if (decoratedBlock) self->openBoxScope(ownBlockStyle, cssStyle);
+      const bool preformatted = decoratedBlock && cssStyle.defined.whiteSpacePre;
+      if (preformatted) {
+        // Preformatted text has no first-line indent: its lines start where the source put them.
+        ownBlockStyle.textIndent = 0;
+        ownBlockStyle.textIndentDefined = true;
+      }
+      auto accumulated =
+          self->blockStyleStack.back().getCombinedBlockStyle(ownBlockStyle, BlockStyle::CombineAxis::Horizontal);
       // <pre> renders in the monospace code font. fontOverride must be set before the block
       // is created so layout (ParsedText::layoutAndExtractLines) measures in the same font
       // that TextBlock::render will draw with — otherwise wrapping uses the wrong glyph widths.
@@ -1335,6 +1549,13 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       } else if (strcmp(name, "pre") == 0) {
         // Track depth so characterData() can treat newlines as hard line breaks inside <pre>.
         self->preUntilDepth = std::min(self->preUntilDepth, self->depth);
+      }
+      if (preformatted && self->preUntilDepth > self->depth) {
+        // CSS white-space: pre* on a block. Same depth tracking as <pre>.
+        self->preUntilDepth = self->depth;
+        self->preAtLineStart = true;
+        self->preLinesEmitted = false;
+        self->prePendingBlankLines = 0;
       }
     }
   } else if (matches(name, UNDERLINE_TAGS, NUM_UNDERLINE_TAGS)) {
@@ -1506,7 +1727,17 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
       // Inside <pre>: a newline is a hard line break rather than collapsible whitespace.
       // Flush the pending word and start a fresh block that inherits the <pre> block style
       // (including the monospace fontOverride) so each source line renders on its own line.
-      if (s[i] == '\n' && self->preUntilDepth < self->depth && self->currentTextBlock) {
+      if (self->preUntilDepth < self->depth && self->currentTextBlock && !self->currentTableCell) {
+        if (s[i] == '\n') {
+          self->preLineBreak();
+          continue;
+        }
+        if ((s[i] == ' ' || s[i] == '\t') && self->preAtLineStart && self->partWordBufferIndex == 0) {
+          self->preLeadingSpace(s[i] == '\t' ? 4 : 1);
+          continue;
+        }
+      } else if (s[i] == '\n' && self->preUntilDepth < self->depth && self->currentTextBlock) {
+        // Inside a table cell: words go to the cell, so only the outer block is split.
         if (self->partWordBufferIndex > 0) {
           self->flushPartWordBuffer();
         }
@@ -1618,6 +1849,10 @@ void XMLCALL ChapterHtmlSlimParser::characterData(void* userData, const XML_Char
       }
     }
 
+    if (self->preAtLineStart) {
+      self->preAtLineStart = false;
+      self->beginPreLine();
+    }
     self->partWordBuffer[self->partWordBufferIndex++] = s[i];
   }
 
@@ -1791,6 +2026,9 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   // Leaving <pre> block
   if (self->preUntilDepth == self->depth) {
     self->preUntilDepth = INT_MAX;
+    self->preAtLineStart = false;
+    self->preLinesEmitted = false;
+    self->prePendingBlankLines = 0;
   }
 
   // Pop from inline style stack if we pushed an entry at this depth
@@ -1814,6 +2052,21 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
       if (self->currentTextBlock) {
         const auto style = self->currentTextBlock->getBlockStyle();
         self->currentTextBlock->setBlockStyle(style.addBottom(self->blockStyleStack.back()));
+      }
+      // A bordered / shaded element ends here: lay out what it still holds, then draw the frame.
+      if (self->boxScopeCount > 0 && self->boxScopes[self->boxScopeCount - 1].depth == self->depth) {
+        if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
+          self->makePages();
+          self->currentTextBlock->setBlockStyle(self->neutralBlockStyle());
+        }
+        self->closeBoxScope();
+      }
+      // page-break-after on an element whose last text is already laid out (or that had
+      // none): makePages() will not see this block again with the flag, so break here.
+      if (self->currentTextBlock && self->currentTextBlock->isEmpty() &&
+          self->currentTextBlock->getBlockStyle().pageBreakAfter) {
+        self->currentTextBlock->getBlockStyle().pageBreakAfter = false;
+        self->forcePageBreak();
       }
       self->blockStyleStack.pop_back();
     }
@@ -2051,8 +2304,7 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
       anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
       pendingAnchorId.clear();
     }
-    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
-    completedPageCount++;
+    completeCurrentPage();
     currentPage.reset();
     currentTextBlock.reset();
   }
@@ -2226,8 +2478,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
   const int effectiveViewportH = viewportHeight - footnoteBlockH;
 
   if (currentPageNextY + lineHeight > effectiveViewportH || forceBreakForAnchorAlignment) {
-    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
-    completedPageCount++;
+    completeCurrentPage();
     currentPage.reset(new (std::nothrow) Page());
     currentPageNextY = 0;
     previousBlockBottomMargin = 0;
@@ -2320,7 +2571,10 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
         LOG_ERR("EHP", "Failed to create inline PageImage");
         continue;
       }
-      currentPage->elements.push_back(std::move(pageImage));
+      // At the front of the page, not between this line and its neighbours: page elements
+      // are otherwise in reading order, and FootnoteMarkers follows an underlined link from
+      // one PageLine to the next, treating an image in between as the end of the run.
+      currentPage->elements.insert(currentPage->elements.begin(), std::move(pageImage));
     }
   }
   // A line holding nothing but images has no words to draw.
@@ -2333,6 +2587,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
     }
     currentPage->elements.push_back(std::move(pageLine));
   }
+  noteContent(currentPageNextY, currentPageNextY + lineHeight);
   currentPageNextY += lineHeight;
 }
 
@@ -2431,9 +2686,21 @@ void ChapterHtmlSlimParser::makePages(const bool includeLastLine) {
     currentPageNextY += blockStyle.paddingBottom;
   }
 
-  // Extra paragraph spacing if enabled (default behavior)
-  if (extraParagraphSpacing) {
+  // Extra paragraph spacing if enabled (default behavior). Not between the lines of one
+  // preformatted block (see preLineBreak).
+  if (extraParagraphSpacing && !suppressParagraphSpacing) {
     currentPageNextY += lineHeight / 2;
+  }
+
+  // CSS page-break-after on the element this paragraph closes.
+  if (blockStyle.pageBreakAfter) {
+    currentTextBlock->getBlockStyle().pageBreakAfter = false;
+    if (currentPage && !currentPage->elements.empty()) {
+      completeCurrentPage();
+      currentPage.reset(new (std::nothrow) Page());
+      currentPageNextY = 0;
+      previousBlockBottomMargin = 0;
+    }
   }
 }
 
@@ -2465,8 +2732,7 @@ bool ChapterHtmlSlimParser::ensurePage() {
 // Every table page break goes through here so completedPageCount stays in step with the LUT.
 void ChapterHtmlSlimParser::breakPage() {
   if (currentPage) {
-    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
-    completedPageCount++;
+    completeCurrentPage();
   }
   ensurePage();
 }
@@ -2670,6 +2936,7 @@ void ChapterHtmlSlimParser::flushTableFragment(TableFragmentPacker& packer) {
                                                          packer.xInset, currentPageNextY, packer.hasBorder);
     if (fragment) {
       currentPage->elements.push_back(std::move(fragment));
+      noteContent(currentPageNextY, currentPageNextY + fragTotalHeight);
       currentPageNextY += fragTotalHeight;
       previousBlockBottomMargin = 0;  // nothing collapses across a table
     } else {
