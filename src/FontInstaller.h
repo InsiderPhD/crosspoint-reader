@@ -35,6 +35,16 @@ class FontInstaller {
   /// or outBuf is too small. The result is guaranteed to pass isValidCpfontFilename().
   static bool sanitizeCpfontFilename(const char* name, char* outBuf, size_t outBufSize);
 
+  /// True if `name` ends in ".ttf" or ".otf" (case-insensitive). Compiled on
+  /// every build, so a board without vector font support can say why it
+  /// refuses the file instead of calling it an invalid .cpfont.
+  static bool hasVectorFontExtension(const char* name);
+
+  /// sanitizeCpfontFilename() for a TrueType/OpenType upload: same basename
+  /// rules, with the ".ttf"/".otf" extension kept as sent. Only meaningful on
+  /// builds with CROSSPOINT_VECTOR_FONTS.
+  static bool sanitizeVectorFontFilename(const char* name, char* outBuf, size_t outBufSize);
+
   /// Ensure /<root>/<family>/ exists, where <root> is /.fonts (preferred) or /fonts.
   /// Re-uses the existing root if the family is already installed; otherwise
   /// creates it under SdCardFontRegistry::defaultWriteRoot().
@@ -48,7 +58,8 @@ class FontInstaller {
   /// way ensureFamilyDir does (existing install dir, else default-write root).
   static void buildFontPath(const char* family, const char* filename, char* outBuf, size_t outBufSize);
 
-  /// Delete a family directory and all .cpfont files in it.
+  /// Delete a family directory and all font files in it (and, on builds with
+  /// vector font support, a loose <family>.ttf/.otf file in a fonts root).
   /// If the deleted family is the active reader font, clears the setting.
   Error deleteFamily(const char* familyName);
 
