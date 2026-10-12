@@ -69,7 +69,7 @@ void FileBrowserActivity::loadFiles() {
         }
       } else if (FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
                  FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
-                 FsHelpers::hasBmpExtension(filename)) {
+                 FsHelpers::hasImageExtension(filename)) {
         fileEntries.emplace_back(filename);
       }
     }

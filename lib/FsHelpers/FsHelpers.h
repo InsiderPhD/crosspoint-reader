@@ -43,6 +43,9 @@ inline bool hasPngExtension(const String& fileName) {
 // Check for .bmp extension (case-insensitive)
 bool hasBmpExtension(std::string_view fileName);
 
+// Any format the on-device image viewer opens: .bmp, .png, .jpg/.jpeg (case-insensitive)
+bool hasImageExtension(std::string_view fileName);
+
 // Check for .gif extension (case-insensitive)
 bool hasGifExtension(std::string_view fileName);
 inline bool hasGifExtension(const String& fileName) {

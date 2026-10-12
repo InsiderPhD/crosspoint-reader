@@ -33,7 +33,7 @@ bool ReaderActivity::isTxtFile(const std::string& path) {
          FsHelpers::hasMarkdownExtension(path);  // Treat .md as txt files (until we have a markdown reader)
 }
 
-bool ReaderActivity::isBmpFile(const std::string& path) { return FsHelpers::hasBmpExtension(path); }
+bool ReaderActivity::isImageFile(const std::string& path) { return FsHelpers::hasImageExtension(path); }
 
 std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) const {
   if (!Storage.exists(path.c_str())) {
@@ -146,8 +146,8 @@ void ReaderActivity::onEnter() {
   }
 
   currentBookPath = initialBookPath;
-  if (isBmpFile(initialBookPath)) {
-    onGoToBmpViewer(initialBookPath);  // BmpViewerActivity draws its own loading popup
+  if (isImageFile(initialBookPath)) {
+    onGoToBmpViewer(initialBookPath);  // BmpViewerActivity (BMP/JPEG/PNG) draws its own loading popup
     return;
   }
 
