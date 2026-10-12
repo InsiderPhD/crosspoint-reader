@@ -38,15 +38,22 @@ constexpr uint8_t kFixedRow = 13;
 // the bar's Confirm button (its swipe is disabled on the reading screen, see
 // MappedInputManager::setConfirmSwipeIgnored), rows 4/6 the bar's Left/Right.
 // Those are taps and flicks, never holds, so the long-press rows are hidden. Row 22
-// picks the axis the tap zones are cut along and so leads them. Rows 14-16
-// are the screen tap zones with 19-21 their hold (long-press) variants shown
-// as tap/hold pairs, 17/24/18 the home key tap, double tap and long press; the
-// side keys and Power keep their short/long pairs.
-constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 22, 14, 19, 15, 20, 16, 21, 17, 24, 18, 8, 9, 10, 11, 12, 13, 23};
+// picks the axis the tap zones are cut along and so leads them, followed by
+// row 25, the Hold Action mode. Rows 14-16 are the screen tap zones with 19-21
+// their hold (long-press) variants shown as tap/hold pairs (the hold rows only
+// while Hold Action is Shortcut, see rebuildVisibleRows), 17/24/18 the home key
+// tap, double tap and long press; the side keys and Power keep their
+// short/long pairs.
+constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 22, 25, 14, 19, 15, 20, 16, 21, 17, 24, 18, 8, 9, 10, 11, 12, 13, 23};
 
 // Row 22 is a layout choice, not a bindable action: it has no entry in
 // fieldForRow() and toggles in place instead of opening the action picker.
 constexpr uint8_t kTapZoneLayoutRow = 22;
+
+// Row 25 is the same kind of row: Hold Action cycles Shortcut / Dictionary /
+// Highlight in place. Rows 19-21 are the per-zone hold actions it switches off.
+constexpr uint8_t kHoldModeRow = 25;
+constexpr bool isHoldZoneRow(const uint8_t row) { return row >= 19 && row <= 21; }
 
 bool tapZonesAreBands() { return SETTINGS.readerTapZoneLayout == CrossPointSettings::TAP_ZONES_TOP_BOTTOM; }
 #else
@@ -56,12 +63,27 @@ constexpr uint8_t kRowIds[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 23}
 // Last row everywhere: Custom Combos opens the chord list rather than binding
 // an action of its own, so it has no entry in fieldForRow().
 constexpr uint8_t kCustomCombosRow = 23;
-constexpr uint8_t kVisibleRows = sizeof(kRowIds);
 }  // namespace
+
+void ReaderControlsActivity::rebuildVisibleRows() {
+  static_assert(sizeof(kRowIds) <= sizeof(visibleRowIds), "visibleRowIds cannot hold every row");
+  visibleRowCount = 0;
+  for (const uint8_t row : kRowIds) {
+#if FREEINK_DEVICE_X4PRO
+    // Outside Shortcut a hold is a word gesture and the per-zone actions do not
+    // apply, so their rows would be dead controls. Their stored values are left
+    // alone and come back with the rows.
+    if (isHoldZoneRow(row) && SETTINGS.readerHoldMode != CrossPointSettings::READER_HOLD_SHORTCUT) continue;
+#endif
+    visibleRowIds[visibleRowCount++] = row;
+  }
+  if (selectedRow >= visibleRowCount) selectedRow = static_cast<uint8_t>(visibleRowCount - 1);
+}
 
 void ReaderControlsActivity::onEnter() {
   Activity::onEnter();
   selectedRow = 0;
+  rebuildVisibleRows();
   isDirty = false;
   requestUpdate();
 }
@@ -78,7 +100,7 @@ void ReaderControlsActivity::loop() {
   }
 
   int tappedIndex;
-  switch (TouchListNav::tapRow(mappedInput, listRect(), kVisibleRows, selectedRow,
+  switch (TouchListNav::tapRow(mappedInput, listRect(), visibleRowCount, selectedRow,
                                /*hasSubtitle=*/false, tappedIndex)) {
     case TouchListNav::TapResult::SelectionMoved:
       selectedRow = static_cast<uint8_t>(tappedIndex);
@@ -86,33 +108,33 @@ void ReaderControlsActivity::loop() {
       return;
     case TouchListNav::TapResult::Activated:
       selectedRow = static_cast<uint8_t>(tappedIndex);
-      activateRow(kRowIds[selectedRow]);
+      activateRow(visibleRowIds[selectedRow]);
       return;
     case TouchListNav::TapResult::None:
       break;
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-    activateRow(kRowIds[selectedRow]);
+    activateRow(visibleRowIds[selectedRow]);
     return;
   }
 
   // Full Touch: a vertical swipe turns a page, matching the held side key.
   const int pageItems = GUI.listGeometry(listRect(), selectedRow, /*hasSubtitle=*/false).pageItems;
   int swipeIndex = selectedRow;
-  if (TouchListNav::pageSwipe(mappedInput, kVisibleRows, pageItems, swipeIndex)) {
+  if (TouchListNav::pageSwipe(mappedInput, visibleRowCount, pageItems, swipeIndex)) {
     selectedRow = static_cast<uint8_t>(swipeIndex);
     requestUpdate();
     return;
   }
 
   buttonNavigator.onNextRelease([this] {
-    selectedRow = static_cast<uint8_t>(ButtonNavigator::nextIndex(selectedRow, kVisibleRows));
+    selectedRow = static_cast<uint8_t>(ButtonNavigator::nextIndex(selectedRow, visibleRowCount));
     requestUpdate();
   });
 
   buttonNavigator.onPreviousRelease([this] {
-    selectedRow = static_cast<uint8_t>(ButtonNavigator::previousIndex(selectedRow, kVisibleRows));
+    selectedRow = static_cast<uint8_t>(ButtonNavigator::previousIndex(selectedRow, visibleRowCount));
     requestUpdate();
   });
 }
@@ -136,9 +158,9 @@ void ReaderControlsActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_READER_CONTROLS));
 
   GUI.drawList(
-      renderer, listRect(), kVisibleRows, selectedRow,
-      [this](int index) -> std::string { return getRowTitle(kRowIds[index]); }, nullptr, nullptr,
-      [this](int index) -> std::string { return getRowActionName(kRowIds[index]); }, true, nullptr);
+      renderer, listRect(), visibleRowCount, selectedRow,
+      [this](int index) -> std::string { return getRowTitle(visibleRowIds[index]); }, nullptr, nullptr,
+      [this](int index) -> std::string { return getRowActionName(visibleRowIds[index]); }, true, nullptr);
 
   const auto hints = mappedInput.mapLabels(tr(STR_SAVE_AND_BACK), tr(STR_CHANGE), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, hints.btn1, hints.btn2, hints.btn3, hints.btn4);
@@ -170,6 +192,8 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
       return tapZonesAreBands() ? tr(STR_HOLD_BOTTOM) : tr(STR_HOLD_RIGHT);
     case kTapZoneLayoutRow:
       return tr(STR_TAP_ZONES);
+    case kHoldModeRow:
+      return tr(STR_HOLD_ACTION);
     case 17:
       snprintf(buf, sizeof(buf), "%s %s", tr(STR_HOME_BUTTON), tr(STR_SHORT_PRESS));
       return buf;
@@ -273,6 +297,18 @@ const char* ReaderControlsActivity::getRowActionName(const uint8_t row) const {
 #if FREEINK_DEVICE_X4PRO
   if (row == kTapZoneLayoutRow) {
     return tapZonesAreBands() ? tr(STR_TAP_ZONES_TOP_BOTTOM) : tr(STR_TAP_ZONES_SIDES);
+  }
+  if (row == kHoldModeRow) {
+    switch (static_cast<CrossPointSettings::READER_HOLD_MODE>(SETTINGS.readerHoldMode)) {
+      case CrossPointSettings::READER_HOLD_DICTIONARY:
+        return tr(STR_DICTIONARY);
+      case CrossPointSettings::READER_HOLD_HIGHLIGHT:
+        return tr(STR_HOLD_ACTION_HIGHLIGHT);
+      case CrossPointSettings::READER_HOLD_SHORTCUT:
+      case CrossPointSettings::READER_HOLD_MODE_COUNT:
+        break;
+    }
+    return tr(STR_HOLD_ACTION_SHORTCUT);
   }
 #endif
   const auto action = getActionForRow(row);
@@ -422,6 +458,17 @@ void ReaderControlsActivity::activateRow(const uint8_t row) {
     // re-render immediately relabels the tap/hold rows below it.
     SETTINGS.readerTapZoneLayout =
         tapZonesAreBands() ? CrossPointSettings::TAP_ZONES_SIDES : CrossPointSettings::TAP_ZONES_TOP_BOTTOM;
+    isDirty = true;
+    requestUpdate();
+    return;
+  }
+  if (row == kHoldModeRow) {
+    // Three values, cycled in place like the row above. The hold-zone rows
+    // follow it in the list, so hiding or restoring them never moves this row
+    // out from under the selection.
+    SETTINGS.readerHoldMode =
+        static_cast<uint8_t>((SETTINGS.readerHoldMode + 1) % CrossPointSettings::READER_HOLD_MODE_COUNT);
+    rebuildVisibleRows();
     isDirty = true;
     requestUpdate();
     return;

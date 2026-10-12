@@ -16,8 +16,10 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "ListPickerActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/SleepBootImages.h"
 
 namespace {
 constexpr char SLEEP_COVER_PATH[] = "/sleep.bmp";
@@ -72,6 +74,47 @@ bool BmpViewerActivity::canSetSleepCover() const {
   return FsHelpers::hasBmpExtension(filePath) || FsHelpers::hasJpgExtension(filePath);
 }
 
+bool BmpViewerActivity::canSetBootImage() const { return FsHelpers::hasBmpExtension(filePath); }
+
+const char* BmpViewerActivity::confirmLabel() const {
+  if (canSetBootImage()) return tr(STR_IMAGE_OPTIONS);
+  return canSetSleepCover() ? tr(STR_SET_SLEEP_COVER) : "";
+}
+
+void BmpViewerActivity::openImageActions() {
+  // Row 0 copies the picture to /sleep.bmp (what Confirm did before this list
+  // existed); row 1 is the boot screen, phrased as its opposite when this
+  // image is already the one in use, as in the file browser's list.
+  const bool bootInUse = APP_STATE.bootImagePath == filePath;
+  const auto slash = filePath.find_last_of('/');
+  actionsTitle = (slash == std::string::npos) ? filePath : filePath.substr(slash + 1);
+
+  auto labelFn = [bootInUse](const int index) -> std::string {
+    if (index == 0) return tr(STR_SET_AS_SLEEP_IMAGE);
+    return bootInUse ? tr(STR_CLEAR_BOOT_SCREEN) : tr(STR_SET_AS_BOOT_SCREEN);
+  };
+  auto handler = [this, bootInUse](const ActivityResult& result) {
+    swallowConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+    swallowBackRelease = mappedInput.isPressed(MappedInputManager::Button::Back);
+    const auto* pick = std::get_if<ListPickResult>(&result.data);
+    if (!result.isCancelled && pick && pick->index == 0) {
+      doSetSleepCover();  // repaints the picture itself when it is done
+      return;
+    }
+    if (!result.isCancelled && pick && pick->index == 1) {
+      SleepBootImages::setBootImage(bootInUse ? std::string() : filePath);
+      GUI.drawPopup(renderer, tr(STR_DONE));
+      delay(1000);
+    }
+    // This screen draws in onEnter(), not render(): put the picture back over
+    // the list.
+    onEnter();
+  };
+  startActivityForResult(std::make_unique<ListPickerActivity>(renderer, mappedInput, actionsTitle.c_str(), 2, 0,
+                                                              std::move(labelFn), nullptr, /*markInitial=*/false),
+                         std::move(handler));
+}
+
 void BmpViewerActivity::showLoadError(const char* message) {
   renderer.clearScreen();
   renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2, message);
@@ -117,8 +160,7 @@ bool BmpViewerActivity::renderDecodedImage() {
   const bool hasPrevious = siblingImages.size() > 1 && currentImageIndex > 0;
   const bool hasNext = siblingImages.size() > 1 && currentImageIndex != -1 &&
                        currentImageIndex < static_cast<int>(siblingImages.size()) - 1;
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), canSetSleepCover() ? tr(STR_SET_SLEEP_COVER) : "",
-                                            hasPrevious ? "<" : "", hasNext ? ">" : "");
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel(), hasPrevious ? "<" : "", hasNext ? ">" : "");
   const auto drawImage = [&]() {
     if (!decoder.decodeToFramebuffer(filePath, renderer, config)) return false;
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -233,7 +275,7 @@ void BmpViewerActivity::onEnter() {
                       currentImageIndex < static_cast<int>(siblingImages.size()) - 1);
 
       const auto labels =
-          mappedInput.mapLabels(tr(STR_BACK), tr(STR_SET_SLEEP_COVER), (hasPrevious ? "<" : ""), (hasNext ? ">" : ""));
+          mappedInput.mapLabels(tr(STR_BACK), confirmLabel(), (hasPrevious ? "<" : ""), (hasNext ? ">" : ""));
 
       GUI.fillPopupProgress(renderer, popupRect, 50);
 
@@ -354,14 +396,28 @@ void BmpViewerActivity::loop() {
   Activity::loop();
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    if (swallowBackRelease) {
+      swallowBackRelease = false;
+      return;
+    }
     activityManager.goToFileBrowser(filePath);
     return;
   }
+  if (!mappedInput.isPressed(MappedInputManager::Button::Back)) swallowBackRelease = false;
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    doSetSleepCover();
+    if (swallowConfirmRelease) {
+      swallowConfirmRelease = false;
+      return;
+    }
+    if (canSetBootImage()) {
+      openImageActions();
+    } else {
+      doSetSleepCover();
+    }
     return;
   }
+  if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) swallowConfirmRelease = false;
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Left) ||
       mappedInput.wasReleased(MappedInputManager::Button::Up)) {

@@ -29,9 +29,10 @@ class BookContextMenu {
     RegenerateCover = 5,
     BookInfo = 6,
     ViewStats = 7,
-    Pin = 8,  // toggles: label reads Pin or Unpin from the store's current state
+    Pin = 8,     // toggles: label reads Pin or Unpin from the store's current state
+    Rename = 9,  // host runs FileRenameFlow, then keeps its cursor on the book
   };
-  static constexpr int OPTIONS_COUNT = 9;
+  static constexpr int OPTIONS_COUNT = 10;
   static constexpr uint32_t DEFAULT_HOLD_MS = 700;
 
   bool isOpen() const { return showing_; }

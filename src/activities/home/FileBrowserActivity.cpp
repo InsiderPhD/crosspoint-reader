@@ -10,26 +10,23 @@
 #include <algorithm>
 
 #include "../util/ConfirmationActivity.h"
-#include "../util/KeyboardEntryActivity.h"
 #include "../util/ListPickerActivity.h"
 #include "BookDetailsActivity.h"
 #include "BookFusionBookIdStore.h"
 #include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "LibraryScan.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookFinished.h"
-#include "util/BookMoveUtils.h"
+#include "util/SleepBootImages.h"
 #include "util/TouchListNav.h"
 
 namespace {
 constexpr unsigned long GO_HOME_MS = 1000;
-// FAT long names hold 255 UTF-16 units; counting bytes keeps any UTF-8 name inside that.
-constexpr size_t MAX_FILE_NAME_BYTES = 255;
-
 bool isBookEntry(const std::string& entry) {
   return FsHelpers::hasEpubExtension(entry) || FsHelpers::hasXtcExtension(entry);
 }
@@ -262,13 +259,7 @@ void FileBrowserActivity::clearFileMetadata(const std::string& fullPath) {
 }
 
 void FileBrowserActivity::loop() {
-  if (pendingRenameError) {
-    const char* reason = pendingRenameError;
-    pendingRenameError = nullptr;
-    startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_RENAME_FAILED), reason),
-                           [this](const ActivityResult&) { requestUpdate(); });
-    return;
-  }
+  if (renameFlow.poll(*this, renderer, mappedInput)) return;
 
   // Long press BACK (1s+) goes to root folder (Books mode only).
   // In firmware-pick mode we keep navigation simple: short Back = up dir / cancel.
@@ -428,6 +419,9 @@ void FileBrowserActivity::loop() {
                                  if (!res.isCancelled) {
                                    if (FsHelpers::hasEpubExtension(path)) Epub(path, "/.crosspoint").clearCache();
                                    Storage.remove(path.c_str());
+                                   // The folder's mtime does not change on remove, so the
+                                   // Library indexes would keep listing the book.
+                                   if (isBookEntry(path)) LibraryScan::invalidateIndex();
                                    RECENT_BOOKS.removeBook(path);
                                    RECENT_BOOKS.saveToFile();
                                    reload();
@@ -685,43 +679,15 @@ void FileBrowserActivity::openEntryActions() {
     lockNextConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
     const std::string target = inUse ? std::string() : fullPath;
     if (isDirectory) {
-      setSleepFolder(target);
+      SleepBootImages::setSleepFolder(target);
     } else {
-      setBootImage(target);
+      SleepBootImages::setBootImage(target);
     }
   };
   startActivityForResult(
       std::make_unique<ListPickerActivity>(renderer, mappedInput, entryActionsTitle.c_str(), rowCount, 0,
                                            std::move(labelFn), nullptr, /*markInitial=*/false),
       std::move(handler));
-}
-
-void FileBrowserActivity::setBootImage(const std::string& path) {
-  if (APP_STATE.bootImagePath == path) return;
-
-  APP_STATE.bootImagePath = path;
-  if (!APP_STATE.saveToFile()) {
-    LOG_ERR("FileBrowser", "Failed to save boot image: %s", path.c_str());
-  }
-  LOG_INF("FileBrowser", "Boot image: %s", path.empty() ? "<built-in>" : path.c_str());
-}
-
-void FileBrowserActivity::setSleepFolder(const std::string& path) {
-  if (APP_STATE.preferredSleepFolderPath == path) return;
-
-  APP_STATE.preferredSleepFolderPath = path;
-  if (!APP_STATE.saveToFile()) {
-    LOG_ERR("FileBrowser", "Failed to save sleep folder: %s", path.c_str());
-  }
-  LOG_INF("FileBrowser", "Sleep folder: %s", path.empty() ? "<default>" : path.c_str());
-
-  // Only the custom-image sleep screens read the folder. Choosing one is a
-  // request to see its images, so switch a mode that would ignore them.
-  if (!path.empty() && SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM &&
-      SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM) {
-    SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
-    SETTINGS.saveToFile();
-  }
 }
 
 void FileBrowserActivity::confirmDeleteSelectedEntry() {
@@ -739,16 +705,20 @@ void FileBrowserActivity::confirmDeleteSelectedEntry() {
       if (!isDirectory) clearFileMetadata(fullPath);
       if (deleted) {
         LOG_DBG("FileBrowser", "Deleted successfully");
+        // A removed folder is noticed by the Library indexes (it is one of the
+        // directories they check); a removed book is not, as its folder's
+        // mtime stays put.
+        if (!isDirectory && isBookEntry(fullPath)) LibraryScan::invalidateIndex();
         // The chosen sleep folder (or a parent of it) is gone: back to the default lookup.
         const std::string& sleepFolder = APP_STATE.preferredSleepFolderPath;
         if (isDirectory && !sleepFolder.empty() &&
             (sleepFolder == fullPath || sleepFolder.rfind(fullPath + "/", 0) == 0)) {
-          setSleepFolder(std::string());
+          SleepBootImages::setSleepFolder(std::string());
         }
         // Likewise the boot image, deleted itself or along with its folder.
         const std::string& bootImage = APP_STATE.bootImagePath;
         if (!bootImage.empty() && (bootImage == fullPath || (isDirectory && bootImage.rfind(fullPath + "/", 0) == 0))) {
-          setBootImage(std::string());
+          SleepBootImages::setBootImage(std::string());
         }
         loadFiles();
         if (files.empty()) {
@@ -771,50 +741,10 @@ void FileBrowserActivity::confirmDeleteSelectedEntry() {
 }
 
 void FileBrowserActivity::startRename(const std::string& path) {
-  const auto slash = path.find_last_of('/');
-  const std::string name = (slash == std::string::npos) ? path : path.substr(slash + 1);
-  // Only the part before the extension is edited, so a rename can never change
-  // what kind of file this is (and with it which reader and cache it uses).
-  const auto dot = name.find_last_of('.');
-  const bool hasExtension = dot != std::string::npos && dot > 0;
-  const std::string extension = hasExtension ? name.substr(dot) : std::string();
-  const std::string stem = hasExtension ? name.substr(0, dot) : name;
-  if (extension.size() >= MAX_FILE_NAME_BYTES) return;
-
-  startActivityForResult(
-      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_RENAME), stem,
-                                              MAX_FILE_NAME_BYTES - extension.size(), InputType::Text),
-      [this, path, extension](const ActivityResult& result) {
-        // The keyboard cancels on Back *press*; without this the release would
-        // land here and be taken as "go up a folder".
-        if (mappedInput.isPressed(MappedInputManager::Button::Back)) lockLongPressBack = true;
-        if (!result.isCancelled) renameFile(path, std::get<KeyboardResult>(result.data).text, extension);
-        requestUpdate();
-      });
-}
-
-void FileBrowserActivity::renameFile(const std::string& oldPath, const std::string& newStem,
-                                     const std::string& extension) {
-  const std::string newName = newStem + extension;
-  const auto slash = oldPath.find_last_of('/');
-  const std::string newPath = oldPath.substr(0, slash + 1) + newName;
-  if (newPath == oldPath) return;
-
-  switch (BookMoveUtils::renameFile(oldPath, newPath)) {
-    case BookMoveUtils::RenameResult::Ok:
-      loadFiles();
-      selectorIndex = findEntry(newName);
-      return;
-    case BookMoveUtils::RenameResult::InvalidName:
-      pendingRenameError = tr(STR_RENAME_INVALID_NAME);
-      return;
-    case BookMoveUtils::RenameResult::TargetExists:
-      pendingRenameError = tr(STR_RENAME_NAME_EXISTS);
-      return;
-    case BookMoveUtils::RenameResult::Failed:
-      pendingRenameError = "";  // the dialog heading says it all
-      return;
-  }
+  renameFlow.start(*this, renderer, mappedInput, path, [this](const std::string&, const std::string& newPath) {
+    loadFiles();
+    selectorIndex = findEntry(newPath.substr(newPath.find_last_of('/') + 1));
+  });
 }
 
 Rect FileBrowserActivity::listRect() const {

@@ -172,6 +172,16 @@ Defaults:
 | **Home pad, double tap** | Open reader menu |
 | **Home pad, hold** | Open reader menu *(fixed — see [Hardware Overview](#controls-on-the-x4-pro-experimental))* |
 
+**Hold Action** (in **Reader Controls**, under **Tap zones**) chooses what a touch-and-hold on the page does:
+
+| Hold Action | A hold does |
+| ----------- | ----------- |
+| **Shortcut** *(default)* | The **hold** action bound to that third of the screen. The three hold rows are only listed in this mode. |
+| **Dictionary** | Looks up the word under your finger when you lift it. Keep the finger down and slide to another word to look up the whole phrase instead. |
+| **Highlight** | Starts a clipping at the word under your finger. Keep the finger down and slide to the last word, then lift, to save that passage; lift without sliding and the word stays marked, ready for a tap on the last word (see [Bookmarks & Clippings](#8-bookmarks--clippings)). |
+
+In **Dictionary** and **Highlight** a hold on a margin, a picture or the gap between paragraphs does nothing, and the per-zone hold actions are switched off (your choices are kept and come back when you return to **Shortcut**). Dictionary still needs a dictionary to be chosen first. XTC books have no selectable words, so a hold does nothing there in these two modes.
+
 While a double-tap action is bound, a single tap waits about a third of a second to rule out a second tap; bind the double tap to **None** to make the single tap instant. A **leftward swipe does nothing** on the reading page — it used to open the menu and was too easy to trigger by accident; use the action bar's **Confirm** button (bindable as the Confirm row) or the middle tap zone instead.
 
 ### On-screen button hints
@@ -401,7 +411,9 @@ Neither action touches `My Clippings.txt`, so copy it off the SD card whenever y
 
 Open from **Home → Statistics**. Tracks sessions across `.epub`, `.txt`, and `.xtc`. Metrics include **Reading Time, Pages Read, Books Finished, Sessions, Average Session, Reading Speed,** and **In Progress**. Books at **≥90%** count as finished.
 
-Statistics are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), and **Sessions**:
+Statistics are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), **Sessions**, **Year**, and **Library**:
+
+The **Library** tab shows how many books you finished this month and this year, and your five most-read authors and tags by reading time (with the number of books behind each). Authors and tags come from the Library, so open the Library once after adding books; a book you have read but since deleted from the card is not listed there.
 
 <p>
 <img src="docs/images/user-guide/stats-overview.png" alt="Statistics Overview tab with streak, daily goal, totals, and reading profile scores" width="300">
@@ -710,7 +722,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **Check for Updates** *(action)* — OTA firmware update over WiFi.
 - **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.
 - **Language** *(action)* — set the UI language.
-- **About** *(action)* — device information: firmware version, board, chip, display, battery, free memory (and the largest free block), SD card size and free space, MAC address, uptime and the reason for the last restart. Press **Confirm** (or tap the first row) to save `support-info.txt` to the SD card root for a bug report. The file holds hardware facts, memory/SD/battery readings and a short list of numeric display settings; it never contains WiFi names or passwords, account details, tokens, the MAC address, file names or book titles.
+- **About** *(action)* — device information: firmware version, board, chip, display, battery, free memory (and the largest free block), SD card size and free space, MAC address, uptime and the reason for the last restart. Press **Confirm** (or tap the first row) to save `support-info.txt` to the SD card root for a bug report. The file holds hardware facts, memory/SD/battery readings, a short list of numeric display settings and three lifetime reading totals (books finished, total reading time, number of sessions); it never contains WiFi names or passwords, account details, tokens, the MAC address, file names or book titles.
 - **Time to Sleep** — auto-sleep after 1 / 5 / 10 / 15 / 30 min of inactivity.
 - **Show Hidden Files** — show dotfiles in the browser.
 - **Developer Mode** — reveals the Developer tab.

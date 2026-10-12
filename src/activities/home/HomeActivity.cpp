@@ -433,6 +433,9 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
                                  Storage.remove(path.c_str());
                                  RECENT_BOOKS.removeBook(path);
                                  RECENT_BOOKS.saveToFile();
+                                 // SdFat does not touch the folder's mtime on remove, so
+                                 // neither Library index would notice the book is gone.
+                                 LibraryScan::invalidateIndex();
                                  reloadRecents();
                                }
                              });
@@ -485,19 +488,40 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
       RECENT_BOOKS.saveToFile();
       reloadRecents();
       break;
-    case BookContextMenu::Action::BookInfo:
-      startActivityForResult(std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title,
-                                                                   contextMenu.author(), contextMenu.progressPercent()),
-                             [this](const ActivityResult&) { requestUpdate(); });
+    case BookContextMenu::Action::BookInfo: {
+      auto details = std::make_unique<BookDetailsActivity>(renderer, mappedInput, path, title, contextMenu.author(),
+                                                           contextMenu.progressPercent());
+      renamedInBookInfo = false;
+      details->setRenameListener(this, [](void* context, const std::string&, const std::string&) {
+        static_cast<HomeActivity*>(context)->renamedInBookInfo = true;
+      });
+      startActivityForResult(std::move(details), [this, reloadRecents](const ActivityResult&) {
+        if (renamedInBookInfo) {
+          renamedInBookInfo = false;
+          reloadRecents();
+        } else {
+          requestUpdate();
+        }
+      });
       break;
+    }
     case BookContextMenu::Action::ViewStats:
       startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, path),
                              [this](const ActivityResult&) { requestUpdate(); });
+      break;
+    case BookContextMenu::Action::Rename:
+      // RecentBooksStore re-paths the entry in place (BookMoveUtils), so the
+      // book keeps its slot and the selector, restored by reloadRecents, stays
+      // on it.
+      renameFlow.start(*this, renderer, mappedInput, path,
+                       [reloadRecents](const std::string&, const std::string&) { reloadRecents(); });
       break;
   }
 }
 
 void HomeActivity::loop() {
+  if (renameFlow.poll(*this, renderer, mappedInput)) return;
+
   const int menuCount = getMenuItemCount();
 
   // Active modal — drive it and dispatch the chosen action (if any) on a terminal event.

@@ -4,6 +4,8 @@
 #include <HalGPIO.h>
 #include <HardcoverTokenStore.h>
 #include <I18n.h>
+#include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <array>
@@ -42,7 +44,7 @@
 
 namespace {
 constexpr unsigned long BOOK_LONG_PRESS_MS = 1000;
-constexpr int TOTAL_STATS_PAGES = 7;
+constexpr int TOTAL_STATS_PAGES = 8;
 constexpr int PAGE_OVERVIEW = 0;
 constexpr int PAGE_PROFILE = 1;
 constexpr int PAGE_STARTED_BOOKS = 2;
@@ -50,6 +52,7 @@ constexpr int PAGE_WEEKLY = 3;
 constexpr int PAGE_MONTHLY = 4;
 constexpr int PAGE_SESSIONS = 5;
 constexpr int PAGE_YEAR = 6;
+constexpr int PAGE_LIBRARY = 7;
 
 // Tab labels in display order — index matches the PAGE_* enum values above.
 // The tab bar auto-scrolls to keep the selected tab's full label readable.
@@ -61,6 +64,7 @@ constexpr StrId TAB_NAMES[TOTAL_STATS_PAGES] = {
     StrId::STR_MONTH,
     StrId::STR_STATS_TAB_SESSIONS,
     StrId::STR_STATS_TAB_YEAR,
+    StrId::STR_LIBRARY,
 };
 
 // Sessions tab is capped at one screenful like the Books tab.
@@ -186,6 +190,24 @@ void drawMetricRow(GfxRenderer& renderer, const Rect& rect, const uint8_t* icon,
   renderer.drawIcon(icon, rect.x, rect.y + iconPad, iconSize, iconSize);
   renderer.drawText(UI_10_FONT_ID, rect.x + iconSize + 10, rect.y + textY, label);
   const int valueWidth = renderer.getTextWidth(UI_10_FONT_ID, value.c_str(), EpdFontFamily::BOLD);
+  renderer.drawText(UI_10_FONT_ID, rect.x + rect.width - valueWidth, rect.y + textY, value.c_str(), true,
+                    EpdFontFamily::BOLD);
+  renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1);
+}
+
+// A top-authors / top-tags row: the name (with its book count) on the left, cut
+// to whatever the reading time on the right leaves free.
+void drawNamedTotalRow(GfxRenderer& renderer, const Rect& rect, const LibraryReadingStats::NamedTotal& total) {
+  constexpr int textY = 6;
+  constexpr int gap = 12;
+  const std::string value =
+      ReadingStatsAnalytics::formatDurationHm(static_cast<uint64_t>(total.readingSeconds) * 1000ULL);
+  const int valueWidth = renderer.getTextWidth(UI_10_FONT_ID, value.c_str(), EpdFontFamily::BOLD);
+  char label[LibraryReadingStats::NAME_BYTES + 8];
+  snprintf(label, sizeof(label), "%s (%u)", total.name, static_cast<unsigned>(total.books));
+  const std::string shown =
+      renderer.truncatedText(UI_10_FONT_ID, label, std::max(0, rect.width - valueWidth - gap), EpdFontFamily::REGULAR);
+  renderer.drawText(UI_10_FONT_ID, rect.x, rect.y + textY, shown.c_str());
   renderer.drawText(UI_10_FONT_ID, rect.x + rect.width - valueWidth, rect.y + textY, value.c_str(), true,
                     EpdFontFamily::BOLD);
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1);
@@ -780,6 +802,7 @@ void ReadingStatsActivity::onExit() {
     renderer.setOrientation(entryOrientation);
     restoreOrientationOnExit = false;
   }
+  librarySummary.reset();
   Activity::onExit();
 }
 
@@ -1006,8 +1029,8 @@ void ReadingStatsActivity::loop() {
   // Overview and Weekly scroll vertically when their content overflows. Short
   // Up/Down OR Left/Right step the scroll offset; long-press still cycles tabs
   // via the navigator below. maxScroll is set during render.
-  const bool scrollablePage =
-      (currentPage == PAGE_OVERVIEW || currentPage == PAGE_PROFILE || currentPage == PAGE_WEEKLY);
+  const bool scrollablePage = (currentPage == PAGE_OVERVIEW || currentPage == PAGE_PROFILE ||
+                               currentPage == PAGE_WEEKLY || currentPage == PAGE_LIBRARY);
   if (scrollablePage && selectedItemIndex == 0 && maxScroll > 0) {
     // Full Touch: a vertical swipe scrolls a screenful, in the same content-drag
     // sense as the paginated lists (swipe up reveals what is below). Without
@@ -1160,6 +1183,8 @@ void ReadingStatsActivity::confirmRemoveSelectedBook() {
                                                                 getBookTitle(selectedBook)),
                          [this, selectedBook, currentSelection](const ActivityResult& result) {
                            if (!result.isCancelled && READING_STATS.removeBook(selectedBook.path)) {
+                             // Its reading time left the totals: recompute on the next visit.
+                             librarySummary.reset();
                              const int bookCount =
                                  std::min(static_cast<int>(getUnfinishedBooks().size()), BOOKS_PER_PAGE);
                              if (bookCount == 0) {
@@ -1650,6 +1675,80 @@ void ReadingStatsActivity::render(RenderLock&&) {
     GUI.drawSubHeader(renderer, Rect{0, chartHeaderTop, pageWidth, CHART_HEADER_HEIGHT},
                       formatAnnualReadingTitle(annualYear).c_str(), nullptr);
     drawReadingChart(renderer, Rect{sidePadding, chartTop, contentWidth, chartHeight}, annualBars, false);
+  } else if (currentPage == PAGE_LIBRARY) {
+    // Reading joined to the Library's metadata. Computed once per visit to the
+    // screen, on first draw of this tab (it reads the Library index from the
+    // card); later draws and scrolls reuse it. A failed allocation just shows
+    // the empty state: ~520 bytes, held only while Stats is open.
+    if (!librarySummary) {
+      librarySummary = makeUniqueNoThrow<LibraryReadingStats::Summary>();
+      if (librarySummary) {
+        LibraryReadingStats::compute(*librarySummary);
+      } else {
+        LOG_ERR("STATS", "No memory for the Library stats summary");
+      }
+    }
+    if (!librarySummary) {
+      renderer.drawCenteredText(UI_10_FONT_ID, (contentTop + contentBottom) / 2, tr(STR_NO_READING_STATS));
+    } else {
+      const LibraryReadingStats::Summary& summary = *librarySummary;
+      const int viewportHeight = scrollBottom - contentTop;
+      const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+      constexpr int LIST_HEADER_GAP = 4;
+
+      // A list with nothing in it explains itself in place of its rows: either
+      // the Library index has not been built yet, or nothing read so far
+      // matches a book the Library knows.
+      const char* emptyText = summary.indexAvailable ? tr(STR_NO_READING_STATS) : tr(STR_STATS_LIBRARY_NO_INDEX);
+      std::vector<std::string> emptyLines;
+      if (summary.authorCount == 0 || summary.tagCount == 0) {
+        emptyLines = renderer.wrappedText(UI_10_FONT_ID, emptyText, contentWidth, 3);
+      }
+      const int emptyHeight = static_cast<int>(emptyLines.size()) * lineHeight;
+      const auto listHeight = [&](const uint8_t count) {
+        return CHART_HEADER_HEIGHT + LIST_HEADER_GAP + (count > 0 ? SUMMARY_ROW_HEIGHT * count : emptyHeight) +
+               SUMMARY_GAP;
+      };
+
+      // ---- Measure pass ----
+      const int totalHeight =
+          SUMMARY_ROW_HEIGHT * 2 + SUMMARY_GAP + listHeight(summary.authorCount) + listHeight(summary.tagCount);
+      maxScroll = std::max(0, totalHeight - viewportHeight);
+      scrollOffset = std::clamp(scrollOffset, 0, maxScroll);
+
+      // ---- Draw pass ----
+      int y = contentTop - scrollOffset;
+      const auto finishedValue = [&](const uint16_t count) {
+        return summary.datesKnown ? std::to_string(count) : std::string("-");
+      };
+      drawMetricRow(renderer, Rect{sidePadding, y, contentWidth, SUMMARY_ROW_HEIGHT}, Check24Icon,
+                    tr(STR_FINISHED_THIS_MONTH), finishedValue(summary.finishedThisMonth));
+      y += SUMMARY_ROW_HEIGHT;
+      drawMetricRow(renderer, Rect{sidePadding, y, contentWidth, SUMMARY_ROW_HEIGHT}, Award24Icon,
+                    tr(STR_FINISHED_THIS_YEAR), finishedValue(summary.finishedThisYear));
+      y += SUMMARY_ROW_HEIGHT + SUMMARY_GAP;
+
+      const auto drawTotals = [&](const char* title, const LibraryReadingStats::NamedTotal* totals,
+                                  const uint8_t count) {
+        GUI.drawSubHeader(renderer, Rect{0, y, pageWidth, CHART_HEADER_HEIGHT}, title, nullptr);
+        y += CHART_HEADER_HEIGHT + LIST_HEADER_GAP;
+        if (count == 0) {
+          for (const auto& line : emptyLines) {
+            renderer.drawText(UI_10_FONT_ID, sidePadding, y, line.c_str());
+            y += lineHeight;
+          }
+        }
+        for (uint8_t i = 0; i < count; ++i) {
+          drawNamedTotalRow(renderer, Rect{sidePadding, y, contentWidth, SUMMARY_ROW_HEIGHT}, totals[i]);
+          y += SUMMARY_ROW_HEIGHT;
+        }
+        y += SUMMARY_GAP;
+      };
+      drawTotals(tr(STR_TOP_AUTHORS), summary.authors, summary.authorCount);
+      drawTotals(tr(STR_TOP_TAGS), summary.tags, summary.tagCount);
+
+      drawScrollChrome();
+    }
   }
 
   // Confirm advances the tab whenever the ribbon (selectedItemIndex == 0) is

@@ -173,6 +173,21 @@ class CrossPointSettings {
   // (readerTap*/readerHold*) are the same either way -- see the note there.
   enum TAP_ZONE_LAYOUT { TAP_ZONES_SIDES = 0, TAP_ZONES_TOP_BOTTOM = 1, TAP_ZONE_LAYOUT_COUNT };
 
+  // X4 Pro reading page: what a touch-and-hold does.
+  //   SHORTCUT    the three per-zone actions (readerHold*) -- the original behaviour
+  //   DICTIONARY  hold a word to look it up; keep the finger down and drag to
+  //               extend to a phrase; lifting runs the lookup
+  //   HIGHLIGHT   hold a word to anchor a clipping there; drag to extend; lifting
+  //               after a drag saves it, exactly as a drag inside the selector does
+  // Outside SHORTCUT the readerHold* values are ignored but kept as stored.
+  // Persisted: append only, never renumber.
+  enum READER_HOLD_MODE {
+    READER_HOLD_SHORTCUT = 0,
+    READER_HOLD_DICTIONARY = 1,
+    READER_HOLD_HIGHLIGHT = 2,
+    READER_HOLD_MODE_COUNT
+  };
+
   // Font family options (built-in fonts only; SD card fonts use sdFontFamilyName)
   enum FONT_FAMILY { BOOKERLY = 0, INTER = 1, OPENDYSLEXIC = 2, MONOSPACE = 3, FONT_FAMILY_COUNT };
   static constexpr uint8_t BUILTIN_FONT_COUNT = FONT_FAMILY_COUNT;
@@ -768,6 +783,8 @@ class CrossPointSettings {
   uint8_t readerHoldLeft = READER_ACTION_CREATE_CLIPPING;
   uint8_t readerHoldMiddle = READER_ACTION_CREATE_CLIPPING;
   uint8_t readerHoldRight = READER_ACTION_CREATE_CLIPPING;
+  // READER_HOLD_MODE: whether the three slots above apply at all.
+  uint8_t readerHoldMode = READER_HOLD_SHORTCUT;
   // Which axis the tap/hold zones above are cut along (TAP_ZONE_LAYOUT).
   uint8_t readerTapZoneLayout = TAP_ZONES_SIDES;
   uint8_t readerShortPressHome = READER_ACTION_GO_HOME;
