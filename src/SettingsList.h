@@ -144,7 +144,7 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
            {
                SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
                                  {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER,
-                                  StrId::STR_NONE_OPT, StrId::STR_COVER_CUSTOM},
+                                  StrId::STR_NONE_OPT, StrId::STR_COVER_CUSTOM, StrId::STR_PAGE_OVERLAY},
                                  "sleepScreen", StrId::STR_CAT_DISPLAY),
                SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
                                  {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode", StrId::STR_CAT_DISPLAY),
@@ -380,6 +380,16 @@ inline void appendSystemSettings(std::vector<SettingInfo>& v) {
                    StrId::STR_TIME_TO_SLEEP, &CrossPointSettings::sleepTimeout,
                    {StrId::STR_MIN_1, StrId::STR_MIN_5, StrId::STR_MIN_10, StrId::STR_MIN_15, StrId::STR_MIN_30},
                    "sleepTimeout", StrId::STR_CAT_SYSTEM),
+               SettingInfo::Enum(StrId::STR_POWER_WAKE, &CrossPointSettings::powerWakeMode,
+                                 {StrId::STR_WAKE_SHORT_PRESS, StrId::STR_WAKE_HOLD},
+                                 "powerWakeMode"
+#if FREEINK_MCU_C3
+                                 // The hold gate exists on the X3 / X4 only. Elsewhere the key
+                                 // still round-trips but the row is hidden (no category).
+                                 ,
+                                 StrId::STR_CAT_SYSTEM
+#endif
+                                 ),
                SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles,
                                    "showHiddenFiles", StrId::STR_CAT_SYSTEM),
                SettingInfo::Enum(StrId::STR_FOLDER_VIEW, &CrossPointSettings::folderView,
@@ -587,7 +597,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 89;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 90;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

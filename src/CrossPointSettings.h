@@ -25,6 +25,9 @@ class CrossPointSettings {
     COVER = 3,
     BLANK = 4,
     COVER_CUSTOM = 5,
+    // The screen that was showing stays up, with a transparent image from the
+    // SD card composited over it. See SleepActivity::renderOverlaySleepScreen.
+    OVERLAY = 6,
     SLEEP_SCREEN_MODE_COUNT
   };
   enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1, SLEEP_SCREEN_COVER_MODE_COUNT };
@@ -260,6 +263,10 @@ class CrossPointSettings {
     SEAMLESS_ALWAYS = 2,
     SEAMLESS_SLEEP_SCREEN_COUNT
   };
+
+  // What it takes to wake the device with the power button. Values are
+  // persisted. HOLD is honoured on the C3 boards only; see setup() in main.cpp.
+  enum POWER_WAKE { POWER_WAKE_SHORT_PRESS = 0, POWER_WAKE_HOLD = 1, POWER_WAKE_COUNT };
 
   // Reading stat selectable on the sleep screen (one per picker slot).
   enum SLEEP_STAT {
@@ -519,6 +526,9 @@ class CrossPointSettings {
   uint8_t textAntiAliasing = 1;
   // Short power button click behaviour (reader scope only)
   uint8_t shortPwrBtn = PAGE_TURN;
+  // Power-button wake: any press (default, the behaviour before this setting
+  // existed) or only a press held until the device has started up.
+  uint8_t powerWakeMode = POWER_WAKE_SHORT_PRESS;
   // Last-chosen sort order in list activities (Library / Recents / FileBrowser).
   // Stored as a SortMode value; defaults to AlphabeticAsc on first run.
   uint8_t sortMode = 0;

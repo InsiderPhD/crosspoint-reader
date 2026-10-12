@@ -117,6 +117,20 @@ class FileBrowserActivity final : public Activity {
   // BookMoveUtils::renameFile so a book keeps its reading state.
   void startRename(const std::string& path);
   void renameFile(const std::string& oldPath, const std::string& newStem, const std::string& extension);
+  // Hold-Confirm / long tap on a row that is not a book. Folders and BMP
+  // images get a short action list (sleep folder or boot screen, then delete);
+  // anything else goes straight to delete.
+  void openEntryActions();
+  // Full path of files[selectorIndex], without a folder's trailing '/'.
+  std::string selectedEntryPath() const;
+  // Makes `path` the folder the Custom sleep screen picks from; empty restores
+  // the default /.sleep, /sleep lookup.
+  void setSleepFolder(const std::string& path);
+  // Makes `path` the image shown at boot; empty restores the built-in logo.
+  void setBootImage(const std::string& path);
+  // Header of the open entry action list. ListPickerActivity keeps only the
+  // pointer, so the text has to outlive it.
+  std::string entryActionsTitle;
 
  public:
   explicit FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialPath = "/",

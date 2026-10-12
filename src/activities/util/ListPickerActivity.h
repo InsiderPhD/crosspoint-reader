@@ -16,6 +16,9 @@ struct Rect;
  * An optional onCursor callback fires on every cursor move so a caller can
  * preview the choice live (the warmth picker lights the panel with it). The
  * caller is responsible for undoing the preview when the result comes back.
+ *
+ * markInitial flags the row the picker opened on as the current value. Pass
+ * false when the rows are actions rather than values of one setting.
  */
 class ListPickerActivity final : public Activity {
  public:

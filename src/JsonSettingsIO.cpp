@@ -103,11 +103,14 @@ void JsonSettingsIO::serializeState(const CrossPointState& s, String& json) {
   for (int i = 0; i < CrossPointState::SLEEP_RECENT_COUNT; i++) recentArr.add(s.recentSleepImages[i]);
   doc["recentSleepPos"] = s.recentSleepPos;
   doc["recentSleepFill"] = s.recentSleepFill;
+  doc["preferredSleepFolderPath"] = s.preferredSleepFolderPath;
+  doc["recentSleepFolderHash"] = s.recentSleepFolderHash;
   doc["readerActivityLoadCount"] = s.readerActivityLoadCount;
   doc["lastSleepFromReader"] = s.lastSleepFromReader;
   doc["lastKnownValidTimestamp"] = s.lastKnownValidTimestamp;
   doc["lastHardcoverSyncDay"] = s.lastHardcoverSyncDay;
   doc["showBootScreen"] = s.showBootScreen;
+  doc["bootImagePath"] = s.bootImagePath;
 
   json = "";
   serializeJson(doc, json);
@@ -141,11 +144,14 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
     const uint8_t legacy = doc["lastSleepImage"] | static_cast<uint8_t>(UINT8_MAX);
     if (legacy != UINT8_MAX) s.pushRecentSleep(static_cast<uint16_t>(legacy));
   }
+  s.preferredSleepFolderPath = doc["preferredSleepFolderPath"] | std::string("");
+  s.recentSleepFolderHash = doc["recentSleepFolderHash"] | static_cast<uint16_t>(0);
   s.readerActivityLoadCount = doc["readerActivityLoadCount"] | static_cast<uint8_t>(0);
   s.lastSleepFromReader = doc["lastSleepFromReader"] | false;
   s.lastKnownValidTimestamp = doc["lastKnownValidTimestamp"] | static_cast<uint32_t>(0);
   s.lastHardcoverSyncDay = doc["lastHardcoverSyncDay"] | static_cast<uint32_t>(0);
   s.showBootScreen = doc["showBootScreen"] | true;
+  s.bootImagePath = doc["bootImagePath"] | std::string("");
   return true;
 }
 
