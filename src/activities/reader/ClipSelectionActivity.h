@@ -37,15 +37,18 @@ class ClipSelectionActivity final : public Activity {
   // initialCursorIdx/preAnchored implement the Kindle-style entry: a tap-and-hold on a
   // word in the reader opens this overlay with that word already under the cursor and
   // anchored, so the selection grows from where the finger landed.
-  // singleWordMode turns the two-stage anchor->finish into a one-press pick and
-  // returns a WordPickResult instead of a ClippingResult — the reader's
-  // dictionary lookup needs one word, not a range, and none of the surrounding
-  // context ClipTextBuilder assembles. Everything else (cursor movement, touch,
-  // rendering) is deliberately shared, so there is only ever one word selector
-  // on the page to keep working.
+  // lookupMode is the reader's dictionary lookup: it returns a WordPickResult
+  // (the text to look up) instead of a ClippingResult, with none of the
+  // surrounding context ClipTextBuilder assembles. One Confirm press looks up
+  // the word under the cursor, so the common single-word case stays one press.
+  // A phrase is the less common case and takes one extra gesture: hold Confirm
+  // to anchor the first word, move to the last, press Confirm (on touch: drag
+  // from the highlighted word to the last one). Everything else (cursor
+  // movement, rendering, the range highlight) is deliberately shared, so there
+  // is only ever one word selector on the page to keep working.
   ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList, int fontId,
                         Section& section, int startPageInSection, int marginTop, int marginLeft,
-                        int initialCursorIdx = 0, bool preAnchored = false, bool singleWordMode = false);
+                        int initialCursorIdx = 0, bool preAnchored = false, bool lookupMode = false);
 
   void onEnter() override;
   void onExit() override;
@@ -59,8 +62,15 @@ class ClipSelectionActivity final : public Activity {
   // closes the range and saves the clip.
   bool tapActivatesConfirm() const override { return false; }
   // Range selection follows a dragging finger; the drag's closing swipe must
-  // not be injected as Back/Confirm.
-  bool ownsSwipes() const override { return !singleWordMode; }
+  // not be injected as Back/Confirm. Lookup mode keeps the Back swipe, and only
+  // claims the contact once it has become a phrase drag (see handleLookupDrag).
+  bool ownsSwipes() const override {
+#if FREEINK_DEVICE_X4PRO
+    return !lookupMode || dragging;
+#else
+    return !lookupMode;
+#endif
+  }
 
  private:
   WordList wordList;
@@ -69,7 +79,11 @@ class ClipSelectionActivity final : public Activity {
   int startPageInSection = 0;
   int marginTop = 0;
   int marginLeft = 0;
-  bool singleWordMode = false;
+  bool lookupMode = false;
+  // Lookup mode: the current Confirm press began on this screen (the press that
+  // opened it may still be down), and it has already been spent on anchoring.
+  bool confirmPressedHere = false;
+  bool anchorHoldTriggered = false;
 
   int currentDisplayPage = -1;
   int savedSectionPage = 0;
@@ -94,11 +108,16 @@ class ClipSelectionActivity final : public Activity {
 
   // Drag and tap-tap range selection. True when it consumed this frame.
   bool handleRangeTouch();
+  // Lookup mode: a drag that starts on the cursor word selects a phrase and
+  // looks it up on lift. True while it owns the contact.
+  bool handleLookupDrag();
 #endif
 
   // Anchor at the cursor if unset, then build and return the clipping for the
   // anchored range. Shared by the Confirm button and the touch finish paths.
   void finishSelection();
+  // Lookup mode's finish: the cursor word, or the anchored range joined into a phrase.
+  void finishLookup();
 
   bool renderSelectionPage(int pageIdx);
   void prewarmHighlightedWords() const;

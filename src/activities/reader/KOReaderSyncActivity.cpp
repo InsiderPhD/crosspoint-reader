@@ -245,6 +245,9 @@ void KOReaderSyncActivity::performUpload() {
   progress.document = documentHash;
   progress.progress = koPos.xpath;
   progress.percentage = koPos.percentage;
+  if (epub) {
+    progress.metadata = KOReaderMetadata::fromBook(*epub);
+  }
 
   const auto result = KOReaderSyncClient::updateProgress(progress);
 

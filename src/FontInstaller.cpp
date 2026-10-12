@@ -2,9 +2,11 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
+#include <strings.h>  // strcasecmp
 
 #include <cctype>
 #include <cstring>
+#include <initializer_list>
 
 #include "CrossPointSettings.h"
 
@@ -55,6 +57,28 @@ bool FontInstaller::isValidCpfontFilename(const char* name) {
   return true;
 }
 
+// Copies `name` to outBuf with every basename character that is not
+// alphanumeric/hyphen/underscore (spaces, %, etc.) replaced by '_', keeping its
+// last extLen characters (the extension, already checked by the caller) as
+// they are. This also neutralises any slash, backslash or '.' in the basename,
+// so path traversal cannot survive sanitisation.
+static bool sanitizeFontFilename(const char* name, const size_t extLen, char* outBuf, const size_t outBufSize) {
+  const size_t nameLen = strlen(name);
+  if (nameLen <= extLen) return false;  // empty basename
+  // Need room for the sanitised basename + extension + NUL.
+  if (nameLen + 1 > outBufSize) return false;
+
+  const size_t baseLen = nameLen - extLen;
+  for (size_t i = 0; i < baseLen; ++i) {
+    const char c = name[i];
+    const bool ok = std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_';
+    outBuf[i] = ok ? c : '_';
+  }
+  memcpy(outBuf + baseLen, name + baseLen, extLen);
+  outBuf[nameLen] = '\0';
+  return true;
+}
+
 bool FontInstaller::sanitizeCpfontFilename(const char* name, char* outBuf, size_t outBufSize) {
   if (name == nullptr || outBuf == nullptr || outBufSize == 0) return false;
 
@@ -64,24 +88,21 @@ bool FontInstaller::sanitizeCpfontFilename(const char* name, char* outBuf, size_
   // Must already carry the ".cpfont" extension (case-sensitive, matching the validator).
   if (nameLen <= kExtLen) return false;
   if (strcmp(name + nameLen - kExtLen, kExt) != 0) return false;
+  return sanitizeFontFilename(name, kExtLen, outBuf, outBufSize);
+}
 
-  const size_t baseLen = nameLen - kExtLen;
-  // Need room for the sanitised basename + extension + NUL.
-  if (baseLen + kExtLen + 1 > outBufSize) return false;
+bool FontInstaller::hasVectorFontExtension(const char* name) {
+  if (name == nullptr) return false;
+  static constexpr size_t kExtLen = 4;  // ".ttf" / ".otf"
+  const size_t nameLen = strlen(name);
+  if (nameLen < kExtLen) return false;
+  const char* ext = name + nameLen - kExtLen;
+  return strcasecmp(ext, ".ttf") == 0 || strcasecmp(ext, ".otf") == 0;
+}
 
-  // Replace every disallowed basename character (spaces, %, etc.) with '_'. This also
-  // neutralises any '/', '\' or '.' so path traversal can't survive sanitisation.
-  size_t j = 0;
-  for (size_t i = 0; i < baseLen; ++i) {
-    const char c = name[i];
-    const bool ok = std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_';
-    outBuf[j++] = ok ? c : '_';
-  }
-  if (j == 0) return false;  // empty basename
-
-  memcpy(outBuf + j, kExt, kExtLen);
-  outBuf[j + kExtLen] = '\0';
-  return true;
+bool FontInstaller::sanitizeVectorFontFilename(const char* name, char* outBuf, size_t outBufSize) {
+  if (outBuf == nullptr || outBufSize == 0 || !hasVectorFontExtension(name)) return false;
+  return sanitizeFontFilename(name, 4, outBuf, outBufSize);
 }
 
 bool FontInstaller::ensureFamilyDir(const char* familyName) {
@@ -161,6 +182,24 @@ FontInstaller::Error FontInstaller::deleteFamily(const char* familyName) {
     }
     removedAny = true;
   }
+
+#if CROSSPOINT_VECTOR_FONTS
+  // A vector family can also be a loose file in a fonts root. isValidFamilyName()
+  // above limits the name to [A-Za-z0-9_-], so it cannot leave the root.
+  for (const char* root : roots) {
+    for (const char* ext : {".ttf", ".otf"}) {
+      char filePath[160];
+      snprintf(filePath, sizeof(filePath), "%s/%s%s", root, familyName, ext);
+      if (!Storage.exists(filePath)) continue;
+      sawAny = true;
+      if (!Storage.remove(filePath)) {
+        LOG_ERR("FONT", "Failed to remove font file: %s", filePath);
+        return Error::SD_WRITE_ERROR;
+      }
+      removedAny = true;
+    }
+  }
+#endif
 
   if (!sawAny) {
     LOG_DBG("FONT", "Family not found in any fonts root: %s", familyName);

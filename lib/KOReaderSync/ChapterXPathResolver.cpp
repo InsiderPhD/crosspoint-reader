@@ -28,6 +28,24 @@ struct NameCounter {
   int count;
 };
 
+// Mirrors crengine's IsEmptySpace(): only these four count as empty space.
+bool isWhitespaceOnly(const XML_Char* data, const int len) {
+  for (int i = 0; i < len; i++) {
+    const char c = data[i];
+    if (c != ' ' && c != '\r' && c != '\n' && c != '\t') {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Elements whose text never reaches the page. Needed now that text is counted in every
+// element rather than only inside <p>/<li>: an inline <style> or <script> in the body
+// would otherwise shift every offset after it.
+bool isNonVisibleElement(const std::string& name) {
+  return name == "head" || name == "style" || name == "script" || name == "title" || name == "rp";
+}
+
 struct ParentState {
   std::vector<NameCounter> children;
 
@@ -125,7 +143,9 @@ class ParagraphTextCounter final : public Print {
     return size;
   }
 
-  size_t totalVisibleChars() const { return visibleChars; }
+  // Visible codepoints up to the end of the last non-whitespace run. Trailing formatting
+  // whitespace is excluded so a 100% target still resolves inside real text.
+  size_t totalVisibleChars() const { return lastTextEndChars; }
 
  private:
   static void XMLCALL startElement(void* userData, const XML_Char* name, const XML_Char**) {
@@ -155,8 +175,8 @@ class ParagraphTextCounter final : public Print {
       return;
     }
 
-    if (name == "p") {
-      paragraphDepth++;
+    if (nonVisibleDepth > 0 || isNonVisibleElement(name)) {
+      nonVisibleDepth++;
     }
     depth++;
   }
@@ -174,17 +194,25 @@ class ParagraphTextCounter final : public Print {
       return;
     }
 
-    if (name == "p" && paragraphDepth > 0) {
-      paragraphDepth--;
+    if (nonVisibleDepth > 0) {
+      nonVisibleDepth--;
     }
   }
 
   void onCharacterData(const XML_Char* data, const int len) {
-    if (!insideBody || paragraphDepth <= 0 || len <= 0) {
+    if (!insideBody || nonVisibleDepth > 0 || len <= 0) {
       return;
     }
 
     visibleChars += countUtf8Codepoints(data, len);
+    if (!isWhitespaceOnly(data, len)) {
+      // Trailing whitespace inside this run is single-byte, so bytes equal codepoints here.
+      int trailing = 0;
+      while (trailing < len && isWhitespaceOnly(data + len - 1 - trailing, 1)) {
+        trailing++;
+      }
+      lastTextEndChars = visibleChars - static_cast<size_t>(trailing);
+    }
   }
 
  private:
@@ -194,8 +222,9 @@ class ParagraphTextCounter final : public Print {
   bool stopped = false;
   int depth = 0;
   int bodyDepth = -1;
-  int paragraphDepth = 0;
+  uint16_t nonVisibleDepth = 0;
   size_t visibleChars = 0;
+  size_t lastTextEndChars = 0;
 };
 
 class XPathParagraphResolver final : public Print {
@@ -403,22 +432,21 @@ class XPathProgressResolver final : public Print {
         insideBody = true;
         bodyDepth = depth;
         parentStates.emplace_back();
+        // Text may sit directly in <body>, so it needs its own text-node counter.
+        textNodeIndexStack.push_back(0);
       }
       depth++;
       return;
     }
 
+    pendingTextNode = true;
     const int siblingIndex = parentStates.back().nextIndex(name);
     path.push_back({name, siblingIndex});
     parentStates.emplace_back();
     textNodeIndexStack.push_back(0);
-    pendingTextNode = true;
 
-    if (name == "p") {
-      paragraphDepth++;
-    }
-    if (name == "li") {
-      liDepth++;
+    if (nonVisibleDepth > 0 || isNonVisibleElement(name)) {
+      nonVisibleDepth++;
     }
 
     depth++;
@@ -440,18 +468,13 @@ class XPathProgressResolver final : public Print {
       return;
     }
 
-    if (name == "p" && paragraphDepth > 0) {
-      paragraphDepth--;
-    }
-    if (name == "li" && liDepth > 0) {
-      liDepth--;
+    if (nonVisibleDepth > 0) {
+      nonVisibleDepth--;
     }
 
+    pendingTextNode = true;
     if (!textNodeIndexStack.empty()) {
       textNodeIndexStack.pop_back();
-    }
-    if (paragraphDepth > 0 || liDepth > 0) {
-      pendingTextNode = true;
     }
     if (!path.empty()) {
       path.pop_back();
@@ -461,8 +484,12 @@ class XPathProgressResolver final : public Print {
     }
   }
 
+  // Every body codepoint outside non-visible elements counts, whichever element holds it
+  // (<p>, <div>, <span>, <li>, headings, table cells, ...). Kindle/MOBI-derived EPUBs put
+  // all their text in <div><span> beside one empty <p>; a <p>/<li>-only filter resolved
+  // every position in such a chapter to that empty <p>, i.e. the chapter's first page.
   void onCharacterData(const XML_Char* data, const int len) {
-    if (!insideBody || (paragraphDepth <= 0 && liDepth <= 0) || len <= 0 || stopped) {
+    if (!insideBody || nonVisibleDepth > 0 || len <= 0 || stopped) {
       return;
     }
 
@@ -482,9 +509,11 @@ class XPathProgressResolver final : public Print {
       pendingTextNode = false;
     }
 
+    // Whitespace-only runs are never used as anchors: a target that falls inside one is
+    // carried forward and resolves at the start of the next text run instead.
     const size_t nextVisibleChars = visibleChars + codepointCount;
-    if (targetVisibleChar <= nextVisibleChars) {
-      const size_t delta = targetVisibleChar - visibleChars;
+    if (targetVisibleChar <= nextVisibleChars && !isWhitespaceOnly(data, len)) {
+      const size_t delta = targetVisibleChar > visibleChars ? targetVisibleChar - visibleChars : 0;
       const int texNode = textNodeIndexStack.empty() ? 0 : textNodeIndexStack.back();
       const size_t charOff = visibleChars - textNodeStartChars + delta;
       xpath = buildParagraphXPath(spineIndex, path, texNode, charOff);
@@ -504,8 +533,7 @@ class XPathProgressResolver final : public Print {
   bool pendingTextNode = true;
   int depth = 0;
   int bodyDepth = -1;
-  int paragraphDepth = 0;
-  int liDepth = 0;
+  uint16_t nonVisibleDepth = 0;
   size_t visibleChars = 0;
   size_t textNodeStartChars = 0;
   std::vector<int> textNodeIndexStack;

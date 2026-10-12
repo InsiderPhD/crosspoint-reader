@@ -106,6 +106,12 @@ static uint8_t lookupKernClass(const EpdKernClassEntry* entries, const uint16_t 
 }
 
 int8_t EpdFont::getKerning(const uint32_t leftCp, const uint32_t rightCp) const {
+#if CROSSPOINT_VECTOR_FONTS
+  // Runtime vector fonts carry no class tables; they answer per pair.
+  if (data->kernHandler) {
+    return data->kernHandler(data->glyphMissCtx, leftCp, rightCp);
+  }
+#endif
   if (!data->kernMatrix) {
     return 0;
   }

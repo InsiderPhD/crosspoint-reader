@@ -96,6 +96,7 @@ $exclude = @(
     'lib\EpdFont\builtinFonts'
     'lib\Epub\Epub\hyphenation\generated'
     'lib\uzlib'
+    'lib\EpdFont\third_party'
     '.pio'
     '.venv'
 )

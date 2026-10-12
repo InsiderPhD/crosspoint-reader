@@ -46,6 +46,15 @@ uint16_t getSdCardSpaceAdvance(SdCardFont& font, const EpdFontFamily::Style styl
 }  // namespace
 
 const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const EpdGlyph* glyph) const {
+#if CROSSPOINT_VECTOR_FONTS
+  // Runtime vector font (TtfEpdFont): the glyph was rasterised into the font's
+  // own arena, which EpdFontData::bitmap points at. Checked first because its
+  // glyphMissCtx is not an SdCardFont, so it must never reach the cast below.
+  // nullptr when the arena has been released or the glyph has no outline.
+  if (fontData->kernHandler != nullptr) {
+    return (fontData->bitmap && glyph->dataLength > 0) ? &fontData->bitmap[glyph->dataOffset] : nullptr;
+  }
+#endif
   if (fontData->groups != nullptr) {
     auto* fd = fontCacheManager_ ? fontCacheManager_->getDecompressor() : nullptr;
     if (!fd) {
@@ -1786,7 +1795,14 @@ void GfxRenderer::preserveImagePolarity(const int x, const int y, const int widt
   // Only meaningful for the B/W frame that invertScreen() is about to flip. The
   // grayscale planes are separate mask buffers that the invert never touches, and
   // during a strip pass the live target is the band scratch, not frameBuffer.
-  if (!darkModeActive || renderMode != BW || _stripActive || !frameBuffer) return;
+  if (!darkModeActive) return;
+  invertRect(x, y, width, height);
+}
+
+void GfxRenderer::invertRect(const int x, const int y, const int width, const int height) const {
+  // B/W frame only: the grayscale planes are separate mask buffers, and during a
+  // strip pass the live target is the band scratch, not frameBuffer.
+  if (renderMode != BW || _stripActive || !frameBuffer) return;
 
   int x0, y0, x1, y1;
   if (!logicalRectToPhysicalBounds(orientation, x, y, width, height, panelWidth, panelHeight, &x0, &y0, &x1, &y1)) {

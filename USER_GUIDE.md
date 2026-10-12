@@ -200,14 +200,17 @@ To look a word up, open the reader menu and choose **Look Up**, or bind **Look U
 | **Previous / next word** | **Left** / **Right** |
 | **Previous / next line** | side **Up** / **Down** |
 | **Look up the word** | **Confirm** |
-| **Back to reading** | **Back** |
+| **Look up a phrase** | hold **Confirm** on its first word, move to its last word, **Confirm** |
+| **Back to reading** | **Back** (with a phrase started: drops the phrase first) |
 
-On the X4 Pro you can also tap a word to highlight it, tap it again to look it up, or hold on it to do both at once. In the definition screen, **Left**/**Right** (or side **Up**/**Down**) page through a long entry and **Back** returns to word selection.
+On the X4 Pro you can also tap a word to highlight it, tap it again to look it up, or hold on it to do both at once; for a phrase, tap its first word and then drag from that word to the last one. In the definition screen, **Left**/**Right** (or side **Up**/**Down**) page through a long entry and **Back** returns to word selection.
 
 Two things that look like faults but are not:
 
 - **The first lookup on a new dictionary shows "Indexing dictionary…"** for a few seconds while it builds small `.qidx`/`.sidx` sidecar files next to the dictionary. Once only. They are safe to delete at any time — they just get rebuilt.
 - **On the X3 and X4, Bluetooth must be off.** A lookup needs a large contiguous block of RAM that the BLE stack is holding, so the reader refuses with *"Turn off Bluetooth to look up words"* rather than failing halfway. Toggle the remote off from the reader menu, look the word up, and turn it back on. The X4 Pro has no such restriction.
+
+A phrase (up to eight words on the page) is looked up as written, so dictionary entries with spaces in them — idioms, phrasal verbs, compound terms — can be found. If the whole phrase is not an entry, its leading words are tried, longest first (`gave up the` → `gave up` → `gave`); the heading of the definition shows which form matched.
 
 If a word is not found as written, the lookup automatically retries the dictionary's own synonyms (`oxen` → `ox`) and then common word endings (`dogs` → `dog`, `running` → `run`) before reporting a miss.
 
@@ -322,7 +325,7 @@ Available actions:
 | Action | What it does |
 |--------|--------------|
 | **Select Chapter** | Table of contents — jump to any chapter. |
-| **Footnotes** | *(shown only when the page has footnotes)* View footnotes in a menu. |
+| **Footnotes** | *(shown only when the page has footnotes)* Pick a footnote on the page and jump to it (see [Footnotes](#footnotes)). |
 | **Orientation** | Cycles orientation in place (Portrait / Landscape CW / Inverted / Landscape CCW). |
 | **Show Button Hints** | Cycles the on-screen button-hint mode in place. |
 | **Dark Mode** | Toggles light-on-dark reading in place. |
@@ -361,6 +364,14 @@ Rows marked *in place* cycle their value without closing the menu. Rows marked *
 
 - **On page** — footnote text is rendered at the bottom of the referencing page, beneath a horizontal rule. Layout reserves space so it never overlaps the body text.
 - **In menu** — footnotes are collected into the reader menu instead.
+
+**Jumping to a footnote** works the same in both modes. Choose **Footnotes** in the reader menu, or bind the **Footnotes** action to a button in Reader Controls:
+
+- If the page has one footnote, the reader goes straight to it.
+- If it has several, the first reference marker on the page is highlighted. **Left/Right** (or the side buttons, or a page-turn remote) move the highlight from marker to marker, **Confirm** (or a short press of Power) opens the highlighted footnote, and **Back** puts the page back as it was. On the X4 Pro, tap a marker to open it; a tap anywhere else cancels.
+- On a page where a marker could not be matched to its footnote (for example the tail of a long note carried over from the previous page), the footnote list opens instead.
+
+While you are reading a footnote the bottom of the screen shows **Back to Page**: press **Back** to return to the page you came from. Following a link inside a footnote stacks up to three levels deep, and Back unwinds them one at a time.
 
 ---
 
@@ -520,6 +531,8 @@ curl -i "http://<server-ip>:17200/users/create" \
 
 **Document Matching** (KOReader Sync settings) chooses how books are matched across devices: **Filename** or **Binary** (content hash).
 
+**Send Book Details** (off by default) is the privacy switch for what a progress upload says about the book. Off, the server only ever sees the document hash and your position. On, the upload also carries the file name, title and author, which some self-hosted servers use to show a readable library. **Server Type** says what kind of server the URL points at: **Standard** for `sync.koreader.rocks`, `koreader/kosync` and anything else that speaks plain KOSync; **Extended** for a custom server that also wants the ISBN and the series name and number, which are then added when **Send Book Details** is on.
+
 ---
 
 ## 11. Bluetooth Page Turner
@@ -609,7 +622,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 ### Reader tab
 
-- **Font Family** — Bookerly / Inter / Open Dyslexic / Monospace. SD-card fonts can also be loaded (see [sd-card-fonts](./docs/sd-card-fonts.md)).
+- **Font Family** — Bookerly / Inter / Open Dyslexic / Monospace. SD-card fonts can also be loaded, and on the X4 Pro and X4C a `.ttf`/`.otf` file can be used directly (see [sd-card-fonts](./docs/sd-card-fonts.md)).
 - **Font Size** — Small / Medium / Large / X-Large (plus an X-Small size).
 - **Line Spacing** — Tight / Normal / Wide.
 - **Screen Margin** — 5–40 px in 5-px steps.

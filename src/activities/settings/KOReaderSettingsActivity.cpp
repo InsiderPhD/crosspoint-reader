@@ -14,9 +14,21 @@
 #include "util/TouchListNav.h"
 
 namespace {
-constexpr int MENU_ITEMS = 5;
-const StrId menuNames[MENU_ITEMS] = {StrId::STR_USERNAME, StrId::STR_PASSWORD, StrId::STR_SYNC_SERVER_URL,
-                                     StrId::STR_DOCUMENT_MATCHING, StrId::STR_AUTHENTICATE};
+// Row order on screen.
+enum Row : int {
+  ROW_USERNAME = 0,
+  ROW_PASSWORD,
+  ROW_SERVER_URL,
+  ROW_SERVER_TYPE,
+  ROW_DOCUMENT_MATCHING,
+  ROW_SEND_METADATA,
+  ROW_AUTHENTICATE,
+  MENU_ITEMS
+};
+constexpr StrId menuNames[MENU_ITEMS] = {StrId::STR_USERNAME,          StrId::STR_PASSWORD,
+                                         StrId::STR_SYNC_SERVER_URL,   StrId::STR_KOSYNC_SERVER_TYPE,
+                                         StrId::STR_DOCUMENT_MATCHING, StrId::STR_KOSYNC_SEND_METADATA,
+                                         StrId::STR_AUTHENTICATE};
 }  // namespace
 
 void KOReaderSettingsActivity::onEnter() {
@@ -67,7 +79,7 @@ void KOReaderSettingsActivity::loop() {
 }
 
 void KOReaderSettingsActivity::handleSelection() {
-  if (selectedIndex == 0) {
+  if (selectedIndex == ROW_USERNAME) {
     // Username
     startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_USERNAME),
                                                                    KOREADER_STORE.getUsername(), 64, InputType::Text),
@@ -78,7 +90,7 @@ void KOReaderSettingsActivity::handleSelection() {
                                KOREADER_STORE.saveToFile();
                              }
                            });
-  } else if (selectedIndex == 1) {
+  } else if (selectedIndex == ROW_PASSWORD) {
     // Password
     startActivityForResult(
         std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_PASSWORD),
@@ -90,7 +102,7 @@ void KOReaderSettingsActivity::handleSelection() {
             KOREADER_STORE.saveToFile();
           }
         });
-  } else if (selectedIndex == 2) {
+  } else if (selectedIndex == ROW_SERVER_URL) {
     // Sync Server URL - prefill with https:// if empty to save typing
     const std::string currentUrl = KOREADER_STORE.getServerUrl();
     const std::string prefillUrl = currentUrl.empty() ? "https://" : currentUrl;
@@ -105,7 +117,17 @@ void KOReaderSettingsActivity::handleSelection() {
                                KOREADER_STORE.saveToFile();
                              }
                            });
-  } else if (selectedIndex == 3) {
+  } else if (selectedIndex == ROW_SERVER_TYPE) {
+    // Server Type - what the server accepts beyond standard KOSync
+    KOREADER_STORE.setServerType(KOREADER_STORE.supportsExtendedMetadata() ? KOReaderServerType::KOSYNC
+                                                                           : KOReaderServerType::OTHER);
+    KOREADER_STORE.saveToFile();
+    requestUpdate();
+  } else if (selectedIndex == ROW_SEND_METADATA) {
+    KOREADER_STORE.setSendMetadata(!KOREADER_STORE.getSendMetadata());
+    KOREADER_STORE.saveToFile();
+    requestUpdate();
+  } else if (selectedIndex == ROW_DOCUMENT_MATCHING) {
     // Document Matching - toggle between Filename and Binary
     const auto current = KOREADER_STORE.getMatchMethod();
     const auto newMethod =
@@ -113,7 +135,7 @@ void KOReaderSettingsActivity::handleSelection() {
     KOREADER_STORE.setMatchMethod(newMethod);
     KOREADER_STORE.saveToFile();
     requestUpdate();
-  } else if (selectedIndex == 4) {
+  } else if (selectedIndex == ROW_AUTHENTICATE) {
     // Authenticate
     if (!KOREADER_STORE.hasCredentials()) {
       // Can't authenticate without credentials - just show message briefly
@@ -146,19 +168,29 @@ void KOReaderSettingsActivity::render(RenderLock&&) {
       [](int index) { return std::string(I18N.get(menuNames[index])); }, nullptr, nullptr,
       [this](int index) {
         // Draw status for each setting
-        if (index == 0) {
-          auto username = KOREADER_STORE.getUsername();
-          return username.empty() ? std::string(tr(STR_NOT_SET)) : username;
-        } else if (index == 1) {
-          return KOREADER_STORE.getPassword().empty() ? std::string(tr(STR_NOT_SET)) : std::string("******");
-        } else if (index == 2) {
-          auto serverUrl = KOREADER_STORE.getServerUrl();
-          return serverUrl.empty() ? std::string(tr(STR_DEFAULT_VALUE)) : serverUrl;
-        } else if (index == 3) {
-          return KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME ? std::string(tr(STR_FILENAME))
-                                                                                  : std::string(tr(STR_BINARY));
-        } else if (index == 4) {
-          return KOREADER_STORE.hasCredentials() ? "" : std::string("[") + tr(STR_SET_CREDENTIALS_FIRST) + "]";
+        switch (index) {
+          case ROW_USERNAME: {
+            auto username = KOREADER_STORE.getUsername();
+            return username.empty() ? std::string(tr(STR_NOT_SET)) : username;
+          }
+          case ROW_PASSWORD:
+            return KOREADER_STORE.getPassword().empty() ? std::string(tr(STR_NOT_SET)) : std::string("******");
+          case ROW_SERVER_URL: {
+            auto serverUrl = KOREADER_STORE.getServerUrl();
+            return serverUrl.empty() ? std::string(tr(STR_DEFAULT_VALUE)) : serverUrl;
+          }
+          case ROW_SERVER_TYPE:
+            return std::string(KOREADER_STORE.supportsExtendedMetadata() ? tr(STR_KOSYNC_TYPE_EXTENDED)
+                                                                         : tr(STR_KOSYNC_TYPE_STANDARD));
+          case ROW_SEND_METADATA:
+            return std::string(KOREADER_STORE.getSendMetadata() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
+          case ROW_DOCUMENT_MATCHING:
+            return KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME ? std::string(tr(STR_FILENAME))
+                                                                                    : std::string(tr(STR_BINARY));
+          case ROW_AUTHENTICATE:
+            return KOREADER_STORE.hasCredentials() ? "" : std::string("[") + tr(STR_SET_CREDENTIALS_FIRST) + "]";
+          default:
+            return std::string(tr(STR_NOT_SET));
         }
         return std::string(tr(STR_NOT_SET));
       },

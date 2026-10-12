@@ -69,6 +69,13 @@ OVERRIDES = f"""
 #define WOLFSSL_HAVE_SP_RSA
 #define WOLFSSL_HAVE_SP_ECC
 #define WOLFSSL_HAVE_SP_DH
+
+/* Input record buffer policy, read by the patched ShrinkInputBuffer /
+ * GrowInputBuffer in src/internal.c (see scripts/patch_wolfssl.py). Defined
+ * here rather than as -D flags so reverting the script also turns the patched
+ * branches back into stock wolfSSL without clearing the dependency cache. */
+#define CROSSPOINT_WOLFSSL_RETAIN_INPUT_BUFFER
+#define CROSSPOINT_WOLFSSL_RELEASE_EMPTY_INPUT_BUFFER
 """
 
 
@@ -115,12 +122,107 @@ def patch_embos_rtos_include(path: Path) -> None:
     print(f"Patched wolfSSL settings.h: hid embOS RTOS.h include from LDF: {path.relative_to(PROJECT_DIR)}")
 
 
+# --- Input record buffer: keep it between records, free it before regrowing ---
+#
+# Stock wolfSSL keeps a 5-byte static input buffer (STATIC_BUFFER_LEN ==
+# RECORD_HEADER_SZ), so EVERY record is read into a malloc'd buffer sized to
+# that record, and ShrinkInputBuffer frees it again as soon as the record is
+# consumed. A server that ignores max_fragment_length sends 16KB records, so a
+# download costs one ~16.4KB malloc + ForceZero + free per record: megabytes of
+# transfer means hundreds of trips through the allocator for the single largest
+# block the session ever needs, each one a fresh chance for a small allocation
+# made in between (lwIP pbufs, the HTTP client's strings) to land in the hole
+# and leave no 16.4KB run for the next record -> MEMORY_E (-125) mid-transfer.
+#
+# RETAIN: after the handshake, ShrinkInputBuffer(NO_FORCED_FREE) becomes a
+# no-op, so the buffer grown for the first full-size record is reused for every
+# later record that fits. One allocation per connection instead of one per
+# record, and an under-provisioned heap fails on the first record rather than
+# megabytes in.
+#   * Gated on HANDSHAKE_DONE, which upstream's patch is not: during the
+#     handshake the stock shrink still runs, so the certificate-chain record's
+#     buffer is NOT held across the signature verify. The handshake is the
+#     tightest moment on the C3 (TlsFramebufferBorrow's 48KB arena carries the
+#     session plus every crypto temporary) and its peak stays byte-identical.
+#   * Released on close: wolfSSL_free -> SSL_ResourceFree calls
+#     ShrinkInputBuffer(ssl, FORCED_FREE), which this patch leaves alone.
+#     SecureClient::stop() (and its destructor) call wolfSSL_free, so nothing
+#     outlives the connection. Resident cost while a connection is OPEN: the
+#     largest record received so far (<= ~16.4KB), held between records where
+#     stock wolfSSL would have returned it. Under TlsFramebufferBorrow that
+#     block lives in the framebuffer arena, not the heap.
+#
+# RELEASE_EMPTY: with retention a later, larger record would make
+# GrowInputBuffer malloc the new buffer while the old one is still held (old +
+# new contiguous at once -- worse than stock). When the old buffer is fully
+# consumed and no decrypted plaintext still points into it, free it first, so
+# peak contiguous demand is never above stock's single record buffer.
+#
+# Both branches are compiled only when user_settings.h (rewritten above on
+# every build) defines the CROSSPOINT_WOLFSSL_* switches.
+SHRINK_MARKER = "/* CrossPoint: keep a grown input buffer until the connection is freed */"
+SHRINK_ORIGINAL = """    if (!forcedFree && (usedLength > STATIC_BUFFER_LEN ||
+            ssl->buffers.clearOutputBuffer.length > 0))
+        return;
+"""
+SHRINK_PATCHED = f"""    {SHRINK_MARKER}
+#if defined(CROSSPOINT_WOLFSSL_RETAIN_INPUT_BUFFER)
+    if (!forcedFree && ssl->options.handShakeState == HANDSHAKE_DONE)
+        return;
+#endif
+{SHRINK_ORIGINAL}"""
+
+GROW_MARKER = "/* CrossPoint: release a consumed input buffer before growing it */"
+GROW_ORIGINAL = """    tmp = (byte*)XMALLOC(size + usedLength + align,
+                             ssl->heap, DYNAMIC_TYPE_IN_BUFFER);
+    WOLFSSL_MSG("growing input buffer");
+"""
+GROW_PATCHED = f"""    {GROW_MARKER}
+#if defined(CROSSPOINT_WOLFSSL_RELEASE_EMPTY_INPUT_BUFFER)
+    /* No unread ciphertext or pending plaintext may refer to this buffer.
+     * ShrinkInputBuffer zeroes/frees it and restores valid static-buffer state,
+     * including on allocation failure below. Records that fit never get here. */
+    if (ssl->buffers.inputBuffer.dynamicFlag && usedLength == 0 &&
+            ssl->buffers.inputBuffer.length == ssl->buffers.inputBuffer.idx &&
+            ssl->buffers.clearOutputBuffer.length == 0) {{
+        ShrinkInputBuffer(ssl, FORCED_FREE);
+    }}
+#endif
+{GROW_ORIGINAL}"""
+
+
+def _patch_once(path: Path, marker: str, original: str, patched: str, what: str) -> None:
+    text = path.read_text()
+    if marker in text:
+        if text.count(patched) != 1:
+            # An older revision of this script left a different patch body.
+            print(f"WARNING: stale wolfSSL {what} patch in {path} -- delete .pio/libdeps/<env>/Arduino-wolfSSL and rebuild")
+        return
+    if text.count(original) != 1:
+        # Refuse to guess: an unpatched build is stock wolfSSL (correct, just
+        # one malloc per record again), a mis-applied patch is not.
+        print(f"WARNING: wolfSSL {what} not patched, source differs from the pinned 5.7.2: {path}")
+        return
+    path.write_text(text.replace(original, patched, 1))
+    print(f"Patched wolfSSL {what}: {path}")
+
+
+def patch_input_buffer(path: Path) -> None:
+    _patch_once(path, SHRINK_MARKER, SHRINK_ORIGINAL, SHRINK_PATCHED, "input buffer retention")
+    _patch_once(path, GROW_MARKER, GROW_ORIGINAL, GROW_PATCHED, "input buffer growth")
+
+
 # Only the env being built: the 4096 override is per env, and rewriting the
 # other envs' copies on every build would make their next build recompile
 # wolfSSL for nothing. Each env patches its own copy when it builds.
 _env_settings = Path(env.subst("$PROJECT_LIBDEPS_DIR")) / env["PIOENV"] / "Arduino-wolfSSL" / "src" / "user_settings.h"
 if _env_settings.exists():
     patch_user_settings(_env_settings, wants_sp_4096())
+    _env_internal = _env_settings.parent / "src" / "internal.c"
+    if _env_internal.exists():
+        patch_input_buffer(_env_internal)
+    else:
+        print(f"WARNING: wolfSSL internal.c not found for env {env['PIOENV']} — input buffer patch not applied")
 else:
     print(f"WARNING: wolfSSL user_settings.h not found for env {env['PIOENV']} — TLS overrides not applied")
 

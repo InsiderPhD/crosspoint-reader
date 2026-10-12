@@ -130,6 +130,10 @@ class PageTableFragment final : public PageElement {
   PageElementTag getTag() const override { return TAG_PageTable; }
   static std::unique_ptr<PageTableFragment> deserialize(FsFile& file);
   uint16_t getTotalHeight() const { return totalHeight; }
+  // Cell geometry for callers that locate words inside the grid (see render()).
+  uint16_t getTotalWidth() const { return totalWidth; }
+  uint16_t getLineStep() const { return lineStep; }
+  uint8_t getColumnCount() const { return columnCount; }
   const std::vector<TableRow>& getRows() const { return rows; }
 };
 
