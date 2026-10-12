@@ -107,6 +107,15 @@ class EpubReaderActivity final : public Activity {
   // The status bar is drawn mid-render, before that move lands, so its footnote
   // indicator reads this instead of the vector.
   bool currentPageHasFootnotes = false;
+  // Choosing a footnote on the page itself (EpubReaderFootnoteSelect.cpp). This is
+  // the feature's entire resident state: where each marker is drawn is re-derived
+  // from the page on every render, never stored.
+  //   footnoteMarkerMask   bit i = currentPageFootnotes[i] has a marker on this page
+  //   footnoteSelectIndex  highlighted entry, or -1 when not selecting
+  //   footnoteSelectHeld   buttons still down from the press that opened it
+  uint16_t footnoteMarkerMask = 0;
+  int8_t footnoteSelectIndex = -1;
+  uint8_t footnoteSelectHeld = 0;
   struct SavedPosition {
     int spineIndex;
     int pageNumber;
@@ -194,6 +203,20 @@ class EpubReaderActivity final : public Activity {
   // Footnote navigation
   void navigateToHref(const std::string& href, bool savePosition = false);
   void restoreSavedPosition();
+  // Footnotes entry point (reader action and reader menu): follows the page's only
+  // footnote directly, otherwise highlights its markers for the reader to step
+  // through, falling back to the list when not every reference could be located.
+  void openFootnoteSelect();
+  void openFootnoteList();
+  // Runs the selection's input while it is up. True = the frame is spent.
+  bool handleFootnoteSelectInput();
+  void stepFootnoteSelect(int direction);
+  void followSelectedFootnote();
+  void cancelFootnoteSelect();
+  // Marker under a tap (logical screen coordinates), or -1.
+  int8_t footnoteMarkerAt(int x, int y);
+  // Inverts the selected marker in the freshly rendered B/W frame.
+  void drawFootnoteSelection(const Page& page, int marginLeft, int marginTop) const;
 
   // Dispatch a reader action (from the per-button settings) to its implementation.
   // Returns true if the action was terminal (i.e. the activity is exiting and the
