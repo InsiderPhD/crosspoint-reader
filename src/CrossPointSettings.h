@@ -24,6 +24,9 @@ class CrossPointSettings {
     COVER = 3,
     BLANK = 4,
     COVER_CUSTOM = 5,
+    // The screen that was showing stays up, with a transparent image from the
+    // SD card composited over it. See SleepActivity::renderOverlaySleepScreen.
+    OVERLAY = 6,
     SLEEP_SCREEN_MODE_COUNT
   };
   enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1, SLEEP_SCREEN_COVER_MODE_COUNT };

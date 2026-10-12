@@ -15,6 +15,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "SleepOverlay.h"
 #include "SleepStatsCard.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
@@ -32,6 +33,12 @@ void SleepActivity::onEnter() {
 
   if (renderSeamless) {
     return renderLastScreenSleepScreen();
+  }
+
+  // Page Overlay composites onto the screen that is still in the framebuffer,
+  // so it has to run before the popup below draws over it.
+  if (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY) {
+    return renderOverlaySleepScreen();
   }
 
   // Scrub the panel before the sleep image goes up: promote the popup paint
@@ -72,6 +79,12 @@ namespace {
 constexpr char ROOT_SLEEP_IMAGE[] = "/sleep.bmp";
 constexpr char DEFAULT_SLEEP_DIR_HIDDEN[] = "/.sleep";
 constexpr char DEFAULT_SLEEP_DIR[] = "/sleep";
+// Page Overlay images are kept apart from the Custom ones: an ordinary sleep
+// image has no transparent area and would simply hide the page.
+constexpr char ROOT_OVERLAY_PNG[] = "/sleep-overlay.png";
+constexpr char ROOT_OVERLAY_BMP[] = "/sleep-overlay.bmp";
+constexpr char OVERLAY_DIR_HIDDEN[] = "/.sleep-overlay";
+constexpr char OVERLAY_DIR[] = "/sleep-overlay";
 
 // Non-zero 16-bit FNV-1a fold of a folder path: tags which folder the
 // recently-shown history in APP_STATE was counted in.
@@ -94,8 +107,9 @@ bool openSleepDir(const char* path, FsFile& dir) {
   return false;
 }
 
-// Picks one .bmp from the open directory `dir` (whose path is `dirPath`) and
-// returns its full path in `outPath`. Records the pick in APP_STATE's history.
+// Picks one .bmp (or, with allowPng, .png) from the open directory `dir` (whose
+// path is `dirPath`) and returns its full path in `outPath`. Records the pick
+// in APP_STATE's history.
 //
 // One pass, two candidates, no list. Holding every filename in a vector and
 // opening every BMP to parse its header made sleep entry scale with the
@@ -106,7 +120,7 @@ bool openSleepDir(const char* path, FsFile& dir) {
 //    ago. Used only when every image is recent (a folder smaller than the
 //    history), where it gives a strict rotation rather than a repeat.
 // The caller validates the pick's header once, after selection.
-bool pickSleepImage(FsFile& dir, const std::string& dirPath, std::string& outPath) {
+bool pickSleepImage(FsFile& dir, const std::string& dirPath, const bool allowPng, std::string& outPath) {
   // The history is a list of positions in ONE folder's listing. Against any
   // other folder its indices would exclude arbitrary images, so start over.
   const uint16_t folderHash = sleepFolderHash(dirPath);
@@ -136,8 +150,8 @@ bool pickSleepImage(FsFile& dir, const std::string& dirPath, std::string& outPat
       continue;
     }
 
-    if (!FsHelpers::hasBmpExtension(filename)) {
-      LOG_DBG("SLP", "Skipping non-.bmp file name: %s", name);
+    if (!FsHelpers::hasBmpExtension(filename) && !(allowPng && FsHelpers::hasPngExtension(filename))) {
+      LOG_DBG("SLP", "Skipping non-image file name: %s", name);
       continue;
     }
 
@@ -183,7 +197,7 @@ bool SleepActivity::renderSleepImageFromFolder(const char* dirPath) const {
     return false;
   }
   std::string imagePath;
-  const bool picked = pickSleepImage(dir, dirPath, imagePath);
+  const bool picked = pickSleepImage(dir, dirPath, /*allowPng=*/false, imagePath);
   dir.close();
   if (!picked) {
     return false;
@@ -247,6 +261,65 @@ void SleepActivity::renderCustomSleepScreen() const {
   }
 
   renderDefaultSleepScreen();
+}
+
+bool SleepActivity::drawSleepOverlay() const {
+  using SleepOverlay::Result;
+
+  // A single image on the card root wins, as /sleep.bmp does for Custom.
+  if (SleepOverlay::drawPng(renderer, ROOT_OVERLAY_PNG) == Result::Drawn) return true;
+  if (SleepOverlay::drawBmp(renderer, ROOT_OVERLAY_BMP) == Result::Drawn) return true;
+
+  const char* overlayDir = nullptr;
+  FsFile dir;
+  if (openSleepDir(OVERLAY_DIR_HIDDEN, dir)) {
+    overlayDir = OVERLAY_DIR_HIDDEN;
+  } else if (openSleepDir(OVERLAY_DIR, dir)) {
+    overlayDir = OVERLAY_DIR;
+  }
+  if (!overlayDir) {
+    return false;
+  }
+
+  std::string imagePath;
+  bool picked = pickSleepImage(dir, overlayDir, /*allowPng=*/true, imagePath);
+  if (picked && FsHelpers::hasPngExtension(imagePath)) {
+    if (SleepOverlay::drawPng(renderer, imagePath.c_str()) == Result::Drawn) {
+      dir.close();
+      return true;
+    }
+    // A PNG needs one 45-60KB block for its decoder and a BMP needs none, so a
+    // folder that also holds BMPs can still supply an overlay when the heap is
+    // too fragmented for the PNG.
+    dir.rewindDirectory();
+    picked = pickSleepImage(dir, overlayDir, /*allowPng=*/false, imagePath);
+  }
+  dir.close();
+  return picked && SleepOverlay::drawBmp(renderer, imagePath.c_str()) == Result::Drawn;
+}
+
+void SleepActivity::renderOverlaySleepScreen() const {
+  ReaderUtils::applyOrientation(renderer, SETTINGS.sleepScreenOrientation);
+
+  // Dark mode screens are inverted in the framebuffer just before they are
+  // shown, so the page being kept is white-on-black. Flip it to its natural
+  // polarity, composite, and flip the result back: the overlay then follows
+  // dark mode like the rest of the UI, and black line art stays visible
+  // instead of vanishing into a black page.
+  if (SETTINGS.darkMode) renderer.invertScreen();
+
+  if (!drawSleepOverlay()) {
+    LOG_INF("SLP", "No overlay image drawn; sleeping on the page alone");
+  }
+  SleepStatsCard::draw(renderer);
+
+  if (SETTINGS.darkMode) renderer.invertScreen();
+
+  // A full waveform, like every other generated sleep screen: this image has
+  // to survive the rail collapsing on battery (see renderDefaultSleepScreen).
+  // That is also why this is not the flash-free seamless path, and the wake
+  // shows the boot screen as usual.
+  renderer.displayBuffer(HalDisplay::FULL_REFRESH, /*powerOffAfter=*/true);
 }
 
 void SleepActivity::renderDefaultSleepScreen() const {
