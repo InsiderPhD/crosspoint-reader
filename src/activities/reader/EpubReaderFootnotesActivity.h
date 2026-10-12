@@ -39,5 +39,8 @@ class EpubReaderFootnotesActivity final : public Activity {
   const std::vector<FootnoteEntry>& footnotes;
   int selectedIndex = 0;
   int scrollOffset = 0;
+  // Buttons still held from the press that opened the list; their release is spent.
+  bool ignoreConfirmRelease = false;
+  bool ignoreBackRelease = false;
   ButtonNavigator buttonNavigator;
 };
