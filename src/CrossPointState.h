@@ -10,6 +10,17 @@ class CrossPointState {
   static constexpr uint8_t SLEEP_RECENT_COUNT = 16;
 
   std::string openEpubPath;
+  // Folder the Custom sleep screen picks its images from, chosen in the file
+  // browser. Empty (the default) keeps the built-in lookup: /sleep.bmp, then
+  // /.sleep, then /sleep. A set folder that has since gone missing falls back
+  // to that same lookup.
+  std::string preferredSleepFolderPath;
+  // Which folder the recentSleepImages indices below were counted in (a
+  // non-zero hash of its path). The history holds positions in a directory
+  // listing, so it only means something for one folder: the picker drops it
+  // when it runs against a different one. 0 = not recorded yet (state.json
+  // from an older firmware), adopted without dropping anything.
+  uint16_t recentSleepFolderHash = 0;
   uint16_t recentSleepImages[SLEEP_RECENT_COUNT] = {};  // circular buffer of recent wallpaper indices
   uint8_t recentSleepPos = 0;                           // next write slot
   uint8_t recentSleepFill = 0;                          // valid entries (0..SLEEP_RECENT_COUNT)
@@ -43,6 +54,7 @@ class CrossPointState {
   bool isRecentSleep(uint16_t idx, uint8_t checkCount) const;
 
   void pushRecentSleep(uint16_t idx);
+  void clearRecentSleepHistory();
 
   // Persist a freshly-validated wall-clock timestamp so future boots can fall back to it
   // for header date display when NTP isn't available this boot. Caller must still saveToFile().

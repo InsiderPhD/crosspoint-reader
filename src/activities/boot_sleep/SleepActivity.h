@@ -12,6 +12,9 @@ class SleepActivity final : public Activity {
  private:
   void renderDefaultSleepScreen() const;
   void renderCustomSleepScreen() const;
+  // Picks an image from dirPath (rotation history in APP_STATE) and paints it.
+  // False when the folder is missing or has no usable image; nothing is drawn.
+  bool renderSleepImageFromFolder(const char* dirPath) const;
   void renderCoverSleepScreen() const;
   void renderBitmapSleepScreen(const Bitmap& bitmap) const;
   void renderLastScreenSleepScreen() const;

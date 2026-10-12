@@ -68,115 +68,183 @@ void SleepActivity::onEnter() {
   }
 }
 
-void SleepActivity::renderCustomSleepScreen() const {
-  // Check if we have a /.sleep (preferred) or /sleep directory
-  const char* sleepDir = nullptr;
-  auto dir = Storage.open("/.sleep");
+namespace {
+constexpr char ROOT_SLEEP_IMAGE[] = "/sleep.bmp";
+constexpr char DEFAULT_SLEEP_DIR_HIDDEN[] = "/.sleep";
+constexpr char DEFAULT_SLEEP_DIR[] = "/sleep";
 
-  // Look for sleep.bmp on the root of the sd card to determine if we should
-  // render a custom sleep screen instead of the default.
-  // This takes priority over the /sleep folder.
+// Non-zero 16-bit FNV-1a fold of a folder path: tags which folder the
+// recently-shown history in APP_STATE was counted in.
+uint16_t sleepFolderHash(const std::string_view path) {
+  uint32_t hash = 2166136261u;
+  for (const char c : path) {
+    hash ^= static_cast<uint8_t>(c);
+    hash *= 16777619u;
+  }
+  const auto folded = static_cast<uint16_t>((hash >> 16) ^ (hash & 0xFFFFu));
+  return folded == 0 ? 1 : folded;
+}
+
+bool openSleepDir(const char* path, FsFile& dir) {
+  dir = Storage.open(path);
+  if (dir && dir.isDirectory()) {
+    return true;
+  }
+  if (dir) dir.close();
+  return false;
+}
+
+// Picks one .bmp from the open directory `dir` (whose path is `dirPath`) and
+// returns its full path in `outPath`. Records the pick in APP_STATE's history.
+//
+// One pass, two candidates, no list. Holding every filename in a vector and
+// opening every BMP to parse its header made sleep entry scale with the
+// folder (two card seeks per file, plus one heap block per name). Instead:
+//  - nonRecentName: a uniform reservoir sample over the images that are not
+//    in the recently-shown history;
+//  - oldestRecentName: of the images that are in it, the one shown longest
+//    ago. Used only when every image is recent (a folder smaller than the
+//    history), where it gives a strict rotation rather than a repeat.
+// The caller validates the pick's header once, after selection.
+bool pickSleepImage(FsFile& dir, const std::string& dirPath, std::string& outPath) {
+  // The history is a list of positions in ONE folder's listing. Against any
+  // other folder its indices would exclude arbitrary images, so start over.
+  const uint16_t folderHash = sleepFolderHash(dirPath);
+  if (APP_STATE.recentSleepFolderHash != 0 && APP_STATE.recentSleepFolderHash != folderHash) {
+    APP_STATE.clearRecentSleepHistory();
+  }
+  APP_STATE.recentSleepFolderHash = folderHash;
+
+  std::string nonRecentName;
+  std::string oldestRecentName;
+  uint16_t candidateCount = 0;
+  uint16_t nonRecentCount = 0;
+  uint16_t nonRecentIndex = 0;
+  uint16_t oldestRecentIndex = 0;
+  uint8_t oldestRecentAge = 0;
+  bool haveOldestRecent = false;
+  char name[500];
+  for (auto dirFile = dir.openNextFile(); dirFile; dirFile = dir.openNextFile()) {
+    if (dirFile.isDirectory()) {
+      dirFile.close();
+      continue;
+    }
+    dirFile.getName(name, sizeof(name));
+    dirFile.close();
+    const std::string_view filename(name);
+    if (filename.empty() || filename.front() == '.') {
+      continue;
+    }
+
+    if (!FsHelpers::hasBmpExtension(filename)) {
+      LOG_DBG("SLP", "Skipping non-.bmp file name: %s", name);
+      continue;
+    }
+
+    if (candidateCount == UINT16_MAX) {
+      break;
+    }
+    const uint16_t candidateIndex = candidateCount++;
+
+    const uint8_t age = APP_STATE.recentSleepAge(candidateIndex);
+    if (age == CrossPointState::SLEEP_NOT_RECENT) {
+      nonRecentCount++;
+      // Reservoir sampling: the k-th eligible image replaces the pick with
+      // probability 1/k, which leaves every eligible image equally likely.
+      if (random(nonRecentCount) == 0) {
+        nonRecentName.assign(filename.data(), filename.size());
+        nonRecentIndex = candidateIndex;
+      }
+    } else if (!haveOldestRecent || age > oldestRecentAge) {
+      oldestRecentName.assign(filename.data(), filename.size());
+      oldestRecentIndex = candidateIndex;
+      oldestRecentAge = age;
+      haveOldestRecent = true;
+    }
+  }
+  if (candidateCount == 0) {
+    return false;
+  }
+
+  const bool useNonRecent = nonRecentCount > 0;
+  outPath = dirPath;
+  if (outPath.empty() || outPath.back() != '/') outPath += '/';
+  outPath += useNonRecent ? nonRecentName : oldestRecentName;
+  APP_STATE.pushRecentSleep(useNonRecent ? nonRecentIndex : oldestRecentIndex);
+  APP_STATE.saveToFile();
+  LOG_DBG("SLP", "Randomly loading: %s (%u candidates)", outPath.c_str(), candidateCount);
+  return true;
+}
+}  // namespace
+
+bool SleepActivity::renderSleepImageFromFolder(const char* dirPath) const {
+  FsFile dir;
+  if (!openSleepDir(dirPath, dir)) {
+    return false;
+  }
+  std::string imagePath;
+  const bool picked = pickSleepImage(dir, dirPath, imagePath);
+  dir.close();
+  if (!picked) {
+    return false;
+  }
+
+  FsFile imageFile;
+  if (!Storage.openFileForRead("SLP", imagePath, imageFile)) {
+    return false;
+  }
+  Bitmap bitmap(imageFile, true);
+  if (bitmap.parseHeaders() != BmpReaderError::Ok) {
+    LOG_ERR("SLP", "Invalid BMP sleep image: %s", imagePath.c_str());
+    imageFile.close();
+    return false;
+  }
+  renderBitmapSleepScreen(bitmap);
+  imageFile.close();
+  return true;
+}
+
+void SleepActivity::renderCustomSleepScreen() const {
+  // A folder the user picked in the file browser wins over everything else.
+  // Missing, or holding no images: the built-in lookup below still applies, so
+  // a removed folder cannot leave the device without its sleep image.
+  const std::string& preferredDir = APP_STATE.preferredSleepFolderPath;
+  if (!preferredDir.empty()) {
+    if (renderSleepImageFromFolder(preferredDir.c_str())) {
+      return;
+    }
+    LOG_INF("SLP", "No usable image in chosen sleep folder, falling back: %s", preferredDir.c_str());
+  }
+
+  // /sleep.bmp on the root of the SD card takes priority over the default
+  // sleep folders.
   FsFile file;
-  if (Storage.openFileForRead("SLP", "/sleep.bmp", file)) {
+  if (Storage.openFileForRead("SLP", ROOT_SLEEP_IMAGE, file)) {
     Bitmap bitmap(file, true);
     if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-      LOG_DBG("SLP", "Loading: /sleep.bmp");
+      LOG_DBG("SLP", "Loading: %s", ROOT_SLEEP_IMAGE);
       renderBitmapSleepScreen(bitmap);
       file.close();
-      if (dir) dir.close();
       return;
     }
     file.close();
   }
 
-  if (dir && dir.isDirectory()) {
-    sleepDir = "/.sleep";
-  } else {
-    dir = Storage.open("/sleep");
-    if (dir && dir.isDirectory()) {
-      sleepDir = "/sleep";
+  // /.sleep (preferred) or /sleep. Only the first that exists is used, as
+  // before: an empty /.sleep does not fall through to /sleep.
+  const char* defaultDir = nullptr;
+  {
+    FsFile probe;
+    if (openSleepDir(DEFAULT_SLEEP_DIR_HIDDEN, probe)) {
+      defaultDir = DEFAULT_SLEEP_DIR_HIDDEN;
+    } else if (openSleepDir(DEFAULT_SLEEP_DIR, probe)) {
+      defaultDir = DEFAULT_SLEEP_DIR;
     }
+    if (probe) probe.close();
   }
-
-  if (sleepDir) {
-    // One pass, two candidates, no list. Holding every filename in a vector and
-    // opening every BMP to parse its header made sleep entry scale with the
-    // folder (two card seeks per file, plus one heap block per name). Instead:
-    //  - nonRecentName: a uniform reservoir sample over the images that are not
-    //    in the recently-shown history;
-    //  - oldestRecentName: of the images that are in it, the one shown longest
-    //    ago. Used only when every image is recent (a folder smaller than the
-    //    history), where it gives a strict rotation rather than a repeat.
-    // The pick's header is validated once, after selection.
-    std::string nonRecentName;
-    std::string oldestRecentName;
-    uint16_t candidateCount = 0;
-    uint16_t nonRecentCount = 0;
-    uint16_t nonRecentIndex = 0;
-    uint16_t oldestRecentIndex = 0;
-    uint8_t oldestRecentAge = 0;
-    bool haveOldestRecent = false;
-    char name[500];
-    for (auto dirFile = dir.openNextFile(); dirFile; dirFile = dir.openNextFile()) {
-      if (dirFile.isDirectory()) {
-        dirFile.close();
-        continue;
-      }
-      dirFile.getName(name, sizeof(name));
-      dirFile.close();
-      const std::string_view filename(name);
-      if (filename.empty() || filename.front() == '.') {
-        continue;
-      }
-
-      if (!FsHelpers::hasBmpExtension(filename)) {
-        LOG_DBG("SLP", "Skipping non-.bmp file name: %s", name);
-        continue;
-      }
-
-      if (candidateCount == UINT16_MAX) {
-        break;
-      }
-      const uint16_t candidateIndex = candidateCount++;
-
-      const uint8_t age = APP_STATE.recentSleepAge(candidateIndex);
-      if (age == CrossPointState::SLEEP_NOT_RECENT) {
-        nonRecentCount++;
-        // Reservoir sampling: the k-th eligible image replaces the pick with
-        // probability 1/k, which leaves every eligible image equally likely.
-        if (random(nonRecentCount) == 0) {
-          nonRecentName.assign(filename.data(), filename.size());
-          nonRecentIndex = candidateIndex;
-        }
-      } else if (!haveOldestRecent || age > oldestRecentAge) {
-        oldestRecentName.assign(filename.data(), filename.size());
-        oldestRecentIndex = candidateIndex;
-        oldestRecentAge = age;
-        haveOldestRecent = true;
-      }
-    }
-    if (candidateCount > 0) {
-      const bool useNonRecent = nonRecentCount > 0;
-      const uint16_t pickedIndex = useNonRecent ? nonRecentIndex : oldestRecentIndex;
-      const std::string filename = std::string(sleepDir) + "/" + (useNonRecent ? nonRecentName : oldestRecentName);
-      APP_STATE.pushRecentSleep(pickedIndex);
-      APP_STATE.saveToFile();
-      FsFile randFile;
-      if (Storage.openFileForRead("SLP", filename, randFile)) {
-        LOG_DBG("SLP", "Randomly loading: %s (%u candidates)", filename.c_str(), candidateCount);
-        Bitmap bitmap(randFile, true);
-        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-          renderBitmapSleepScreen(bitmap);
-          randFile.close();
-          dir.close();
-          return;
-        }
-        LOG_ERR("SLP", "Invalid BMP sleep image: %s", filename.c_str());
-        randFile.close();
-      }
-    }
+  if (defaultDir && renderSleepImageFromFolder(defaultDir)) {
+    return;
   }
-  if (dir) dir.close();
 
   renderDefaultSleepScreen();
 }

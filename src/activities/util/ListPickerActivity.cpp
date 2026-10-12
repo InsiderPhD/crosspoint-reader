@@ -93,7 +93,7 @@ void ListPickerActivity::render(RenderLock&&) {
   // The right-hand marker flags the value the picker opened on.
   GUI.drawList(
       renderer, listRect(), itemCount, selectedIndex, labelFn, nullptr, nullptr,
-      [this](int index) { return index == startIndex ? tr(STR_SELECTED) : ""; }, true);
+      [this](int index) { return (markInitial && index == startIndex) ? tr(STR_SELECTED) : ""; }, true);
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

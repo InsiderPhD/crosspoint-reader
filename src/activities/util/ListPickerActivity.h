@@ -16,6 +16,9 @@ struct Rect;
  * An optional onCursor callback fires on every cursor move so a caller can
  * preview the choice live (the warmth picker lights the panel with it). The
  * caller is responsible for undoing the preview when the result comes back.
+ *
+ * markInitial flags the row the picker opened on as the current value. Pass
+ * false when the rows are actions rather than values of one setting.
  */
 class ListPickerActivity final : public Activity {
  public:
@@ -23,13 +26,14 @@ class ListPickerActivity final : public Activity {
   using CursorFn = std::function<void(int index)>;
 
   ListPickerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const char* title, int itemCount,
-                     int initialIndex, LabelFn labelFn, CursorFn onCursor = nullptr)
+                     int initialIndex, LabelFn labelFn, CursorFn onCursor = nullptr, bool markInitial = true)
       : Activity("ListPicker", renderer, mappedInput),
         title(title),
         itemCount(itemCount),
         selectedIndex(initialIndex),
         labelFn(std::move(labelFn)),
-        onCursor(std::move(onCursor)) {}
+        onCursor(std::move(onCursor)),
+        markInitial(markInitial) {}
 
   void onEnter() override;
   void loop() override;
@@ -48,5 +52,6 @@ class ListPickerActivity final : public Activity {
   int startIndex = 0;  // the row the picker opened on, marked in the list
   LabelFn labelFn;
   CursorFn onCursor;
+  const bool markInitial;
   ButtonNavigator buttonNavigator;
 };

@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -172,6 +173,12 @@ void BmpViewerActivity::doSetSleepCover() {
   if (success) {
     SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
     SETTINGS.saveToFile();
+    // A chosen sleep folder outranks /sleep.bmp. Picking one image here is the
+    // newer request, so drop the folder or this image would never be shown.
+    if (!APP_STATE.preferredSleepFolderPath.empty()) {
+      APP_STATE.preferredSleepFolderPath.clear();
+      APP_STATE.saveToFile();
+    }
     GUI.drawPopup(renderer, tr(STR_DONE));
   } else {
     GUI.drawPopup(renderer, tr(STR_FAILED_LOWER));
