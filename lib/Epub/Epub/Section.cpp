@@ -25,7 +25,9 @@ namespace {
 //     also covers VoidTagCloser's layout change and hash-keyed shared img_ files.
 // 45: a long paragraph's soft flush no longer restarts the paragraph: first-line indent
 //     and top spacing apply once per paragraph (upstream d5693c321). Layout-only change.
-constexpr uint8_t SECTION_FILE_VERSION = 45;
+// 46: user text-layout controls. Header gains characterSpacing, wordSpacingPercent and
+//     paragraphIndent (cache validation); every TextBlock's style tail gains characterSpacing.
+constexpr uint8_t SECTION_FILE_VERSION = 46;
 // Staging buffer for page serialization, one per section build (not per page). 2KB is four
 // SD sectors: a typical text page (~3-6KB serialized) goes out in two to four writes, and a
 // field larger than the buffer (a long line's word arena) bypasses it. Heap, not stack: 2KB
@@ -33,8 +35,9 @@ constexpr uint8_t SECTION_FILE_VERSION = 45;
 constexpr size_t PAGE_WRITE_BUFFER_SIZE = 2048;
 constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
-                                 sizeof(uint8_t) + sizeof(uint8_t) + sizeof(bool) + sizeof(uint32_t) +
-                                 sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
+                                 sizeof(uint8_t) + sizeof(uint8_t) + sizeof(bool) + sizeof(int8_t) + sizeof(uint8_t) +
+                                 sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
+                                 sizeof(uint32_t);
 
 struct PageLutEntry {
   uint32_t fileOffset;
@@ -75,7 +78,8 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
                                      const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                                      const uint16_t viewportHeight, const bool hyphenationEnabled,
                                      const bool embeddedStyle, const uint8_t imageRendering,
-                                     const uint8_t footnoteDisplay, const bool bionicReadingEnabled) {
+                                     const uint8_t footnoteDisplay, const bool bionicReadingEnabled,
+                                     const TextLayoutOptions& textLayout) {
   if (!file) {
     LOG_DBG("SCT", "File not open for writing header");
     return;
@@ -84,8 +88,9 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
                                    sizeof(extraParagraphSpacing) + sizeof(paragraphAlignment) + sizeof(viewportWidth) +
                                    sizeof(viewportHeight) + sizeof(pageCount) + sizeof(hyphenationEnabled) +
                                    sizeof(embeddedStyle) + sizeof(imageRendering) + sizeof(footnoteDisplay) +
-                                   sizeof(bionicReadingEnabled) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                   sizeof(uint32_t) + sizeof(uint32_t),
+                                   sizeof(bionicReadingEnabled) + sizeof(textLayout.characterSpacing) +
+                                   sizeof(textLayout.wordSpacingPercent) + sizeof(textLayout.paragraphIndent) +
+                                   sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
                 "Header size mismatch");
   serialization::writePod(file, SECTION_FILE_VERSION);
   serialization::writePod(file, fontId);
@@ -99,6 +104,9 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
   serialization::writePod(file, imageRendering);
   serialization::writePod(file, footnoteDisplay);
   serialization::writePod(file, bionicReadingEnabled);
+  serialization::writePod(file, textLayout.characterSpacing);
+  serialization::writePod(file, textLayout.wordSpacingPercent);
+  serialization::writePod(file, textLayout.paragraphIndent);
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
@@ -110,7 +118,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
                               const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                               const uint16_t viewportHeight, const bool hyphenationEnabled, const bool embeddedStyle,
                               const uint8_t imageRendering, const uint8_t footnoteDisplay,
-                              const bool bionicReadingEnabled) {
+                              const bool bionicReadingEnabled, const TextLayoutOptions& textLayout) {
   if (!Storage.openFileForRead("SCT", filePath, file)) {
     return false;
   }
@@ -137,6 +145,7 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
     uint8_t fileImageRendering;
     uint8_t fileFootnoteDisplay;
     bool fileBionicReadingEnabled;
+    TextLayoutOptions fileTextLayout;
     serialization::readPod(file, fileFontId);
     serialization::readPod(file, fileLineCompression);
     serialization::readPod(file, fileExtraParagraphSpacing);
@@ -148,13 +157,19 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
     serialization::readPod(file, fileImageRendering);
     serialization::readPod(file, fileFootnoteDisplay);
     serialization::readPod(file, fileBionicReadingEnabled);
+    serialization::readPod(file, fileTextLayout.characterSpacing);
+    serialization::readPod(file, fileTextLayout.wordSpacingPercent);
+    serialization::readPod(file, fileTextLayout.paragraphIndent);
 
     if (fontId != fileFontId || lineCompression != fileLineCompression ||
         extraParagraphSpacing != fileExtraParagraphSpacing || paragraphAlignment != fileParagraphAlignment ||
         viewportWidth != fileViewportWidth || viewportHeight != fileViewportHeight ||
         hyphenationEnabled != fileHyphenationEnabled || embeddedStyle != fileEmbeddedStyle ||
         imageRendering != fileImageRendering || footnoteDisplay != fileFootnoteDisplay ||
-        bionicReadingEnabled != fileBionicReadingEnabled) {
+        bionicReadingEnabled != fileBionicReadingEnabled ||
+        textLayout.characterSpacing != fileTextLayout.characterSpacing ||
+        textLayout.wordSpacingPercent != fileTextLayout.wordSpacingPercent ||
+        textLayout.paragraphIndent != fileTextLayout.paragraphIndent) {
       // Explicit close() required: member variable persists beyond function scope
       file.close();
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
@@ -191,7 +206,7 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
                                 const uint16_t viewportWidth, const uint16_t viewportHeight,
                                 const bool hyphenationEnabled, const bool embeddedStyle, const uint8_t imageRendering,
                                 const uint8_t footnoteDisplay, const bool bionicReadingEnabled,
-                                const std::function<void()>& popupFn) {
+                                const TextLayoutOptions& textLayout, const std::function<void()>& popupFn) {
   const auto localPath = epub->getSpineItem(spineIndex).href;
   const auto tmpHtmlPath = epub->getCachePath() + "/.tmp_" + std::to_string(spineIndex) + ".html";
 
@@ -278,7 +293,7 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
   }
   writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
                          viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, footnoteDisplay,
-                         bionicReadingEnabled);
+                         bionicReadingEnabled, textLayout);
   // One up-front block instead of ~log2(pages) grow-copy-free cycles while the
   // parser is fighting for contiguous heap. A page is ~2-3KB of XHTML, so
   // 2KB/page slightly over-estimates; the cap bounds the block at 4KB (512 x 8B)
@@ -333,6 +348,7 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
       },
       embeddedStyle, contentBase, imageBasePath, imageRendering, popupFn, cssParser, footnoteDisplay == 0,
       bionicReadingEnabled);
+  visitor.setTextLayout(textLayout);
   Hyphenator::setPreferredLanguage(epub->getLanguage());
   // TEMP diagnostic: fragmentation OOM suspected when cold-building a large chapter right after a
   // BookFusion download (synced progress jumps straight into a deep, big spine item). "largest" is

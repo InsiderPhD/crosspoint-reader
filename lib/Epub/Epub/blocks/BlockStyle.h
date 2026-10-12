@@ -16,6 +16,11 @@ struct BlockStyle {
   static constexpr float MAX_HORIZONTAL_INSET_EM = 2.0f;
 
   CssTextAlign alignment = CssTextAlign::Justify;
+  // Letter spacing the line was laid out with (half-pixel steps, see GfxRenderer::drawText).
+  // Stamped by ParsedText from the user setting, never from CSS, and carried per line so
+  // TextBlock::render draws with exactly the spacing the word positions were computed for.
+  // Sits in the padding after `alignment`: sizeof(BlockStyle) is unchanged.
+  int8_t characterSpacing = 0;
 
   // Spacing (in pixels)
   int16_t marginTop = 0;

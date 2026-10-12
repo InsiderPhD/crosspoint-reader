@@ -1752,7 +1752,9 @@ void EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
           if (clipword::isBlank(clipVisibleText(wordText))) continue;
 
           const auto textStyle = static_cast<EpdFontFamily::Style>(block.wordStyle(i) & ~EpdFontFamily::UNDERLINE);
-          int wordWidth = renderer.getTextAdvanceX(readerFontId, wordText, textStyle);
+          // With the line's own letter spacing, so the selection box covers the word as drawn.
+          int wordWidth =
+              renderer.getTextAdvanceX(readerFontId, wordText, textStyle, block.getBlockStyle().characterSpacing);
           if (wordWidth <= 0) continue;
 
           WordRef word;
@@ -2126,7 +2128,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
                                   SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                   viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
                                   SETTINGS.imageRendering, ReaderUtils::effectiveFootnoteDisplay(),
-                                  SETTINGS.bionicReading)) {
+                                  SETTINGS.bionicReading, SETTINGS.readerTextLayout())) {
       LOG_DBG("ERS", "Cache not found, building...");
 
       // A full chapter re-parse (ChapterHtmlSlimParser) is heap-heavy and can OOM mid-session
@@ -2153,11 +2155,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
 
       const auto popupFn = [this]() { GUI.drawPopup(renderer, tr(STR_INDEXING)); };
 
-      if (!section->createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(),
-                                      SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
-                                      SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
-                                      SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
-                                      ReaderUtils::effectiveFootnoteDisplay(), SETTINGS.bionicReading, popupFn)) {
+      if (!section->createSectionFile(
+              SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(), SETTINGS.getReaderLineCompression(),
+              SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
+              SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
+              ReaderUtils::effectiveFootnoteDisplay(), SETTINGS.bionicReading, SETTINGS.readerTextLayout(), popupFn)) {
         LOG_ERR("ERS", "Failed to persist page data to SD");
         section.reset();
         // Say so, with a way out: this used to leave the "Indexing" popup on the
@@ -2344,7 +2346,7 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
                                   SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
                                   viewportHeight, SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle,
                                   SETTINGS.imageRendering, ReaderUtils::effectiveFootnoteDisplay(),
-                                  SETTINGS.bionicReading)) {
+                                  SETTINGS.bionicReading, SETTINGS.readerTextLayout())) {
     return;
   }
 
@@ -2373,11 +2375,11 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
   LOG_DBG("ERS", "Silently indexing next chapter: %d (largest block %u)", nextSpineIndex,
           static_cast<unsigned>(ReaderUtils::largestFreeBlock()));
 
-  if (!nextSection.createSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(),
-                                     SETTINGS.getReaderLineCompression(), SETTINGS.extraParagraphSpacing,
-                                     SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
-                                     SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
-                                     ReaderUtils::effectiveFootnoteDisplay(), SETTINGS.bionicReading)) {
+  if (!nextSection.createSectionFile(
+          SETTINGS.getReaderFontId(), SETTINGS.getCodeFontId(), SETTINGS.getReaderLineCompression(),
+          SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth, viewportHeight,
+          SETTINGS.hyphenationEnabled, SETTINGS.embeddedStyle, SETTINGS.imageRendering,
+          ReaderUtils::effectiveFootnoteDisplay(), SETTINGS.bionicReading, SETTINGS.readerTextLayout())) {
     LOG_ERR("ERS", "Failed silent indexing for chapter: %d", nextSpineIndex);
   }
 }

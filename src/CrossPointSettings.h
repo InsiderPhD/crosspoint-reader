@@ -1,4 +1,5 @@
 #pragma once
+#include <Epub/TextLayoutOptions.h>
 #include <HalStorage.h>
 
 #include <cstdint>
@@ -548,6 +549,17 @@ class CrossPointSettings {
   void* sdFontResolverCtx = nullptr;
   uint8_t fontSize = MEDIUM;
   uint8_t lineSpacing = NORMAL;
+  // Gap between words as a percentage of the font's own space advance. 100 = the font's
+  // spacing, i.e. the layout every book had before this setting existed.
+  static constexpr uint8_t WORD_SPACING_MIN = 50;
+  static constexpr uint8_t WORD_SPACING_MAX = 200;
+  static constexpr uint8_t WORD_SPACING_STEP = 25;
+  uint8_t wordSpacing = 100;
+  // Letter spacing as an index into half-pixel steps: 0..6 means -1.5 .. +1.5 px, so the
+  // default CHARACTER_SPACING_ZERO is "none". Persisted, so the mapping must not move.
+  static constexpr uint8_t CHARACTER_SPACING_ZERO = 3;
+  static constexpr uint8_t CHARACTER_SPACING_COUNT = 7;
+  uint8_t characterSpacing = CHARACTER_SPACING_ZERO;
   uint8_t paragraphAlignment = JUSTIFIED;
   // Auto-sleep timeout setting (default 10 minutes)
   uint8_t sleepTimeout = SLEEP_10_MIN;
@@ -825,6 +837,9 @@ class CrossPointSettings {
 
  public:
   float getReaderLineCompression() const;
+  // The reader's spacing controls in the form the EPUB layout engine and the section cache
+  // key take them. Out-of-range stored values fall back to "no change".
+  TextLayoutOptions readerTextLayout() const;
   unsigned long getSleepTimeoutMs() const;
   int getRefreshFrequency() const;
 };

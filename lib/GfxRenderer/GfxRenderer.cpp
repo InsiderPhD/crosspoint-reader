@@ -12,6 +12,20 @@
 #include "GlyphBitmap.h"
 
 namespace {
+// Letter spacing goes between two visible glyphs only: never beside a space (word gaps have
+// their own control, and the paragraph-indent em-space must keep its width) and never around
+// a zero-width mark.
+constexpr bool isTrackedGlyph(const uint32_t cp) {
+  return cp > 0x20 && cp != 0xA0 && !(cp >= 0x2000 && cp <= 0x200B) && cp != 0x202F && cp != 0x3000;
+}
+constexpr bool isTrackingBoundary(const uint32_t leftCp, const uint32_t rightCp) {
+  return isTrackedGlyph(leftCp) && isTrackedGlyph(rightCp);
+}
+// Pixels the boundary after `gapsSoFar` earlier ones contributes; see GfxRenderer::trackingPixels.
+constexpr int trackingStep(const int gapsSoFar, const int8_t tracking) {
+  return GfxRenderer::trackingPixels(gapsSoFar + 1, tracking) - GfxRenderer::trackingPixels(gapsSoFar, tracking);
+}
+
 uint8_t resolveSdCardStyle(const SdCardFont& font, const EpdFontFamily::Style style) {
   return font.resolveStyle(static_cast<uint8_t>(style));
 }
@@ -415,9 +429,10 @@ void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* te
 }
 
 void GfxRenderer::drawText(const int fontId, const int x, const int y, const char* text, const bool black,
-                           const EpdFontFamily::Style style) const {
+                           const EpdFontFamily::Style style, const int8_t tracking) const {
   const int yPos = y + getFontAscenderSize(fontId);
   int lastBaseX = x;
+  int trackingGaps = 0;  // glyph boundaries spaced so far (tracking != 0 only)
   int lastBaseLeft = 0;
   int lastBaseWidth = 0;
   int lastBaseTop = 0;
@@ -459,7 +474,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
       continue;
     }
 
-    cp = font.applyLigatures(cp, text, style);
+    if (tracking == 0) cp = font.applyLigatures(cp, text, style);
 
     // Differential rounding: snap (previous advance + current kern) as one unit so
     // identical character pairs always produce the same pixel step regardless of
@@ -467,6 +482,9 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     if (prevCp != 0) {
       const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
       lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);       // snap 12.4 fixed-point to nearest pixel
+      if (tracking != 0 && isTrackingBoundary(prevCp, cp)) {
+        lastBaseX += trackingStep(trackingGaps++, tracking);
+      }
     }
 
     const EpdGlyph* glyph = font.getGlyph(cp, style);
@@ -1886,28 +1904,40 @@ int GfxRenderer::getSpaceAdvance(const int fontId, const uint32_t leftCp, const 
 }
 
 int GfxRenderer::getKerning(const int fontId, const uint32_t leftCp, const uint32_t rightCp,
-                            const EpdFontFamily::Style style) const {
+                            const EpdFontFamily::Style style, const int8_t tracking) const {
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) return 0;
   const int kernFP = fontIt->second.getKerning(leftCp, rightCp, style);  // 4.4 fixed-point
-  return fp4::toPixel(kernFP);                                           // snap 4.4 fixed-point to nearest pixel
+  const int trackingPx = (tracking != 0 && isTrackingBoundary(leftCp, rightCp)) ? trackingPixels(1, tracking) : 0;
+  return fp4::toPixel(kernFP) + trackingPx;  // snap 4.4 fixed-point to nearest pixel
 }
 
-int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style) const {
+int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style,
+                                 const int8_t tracking) const {
   // Advance table fast-path for SD card fonts during layout.
   // No kerning/ligature lookup — consistent with previous metadataOnly behavior
   // where kern/lig data was not loaded.
   auto sdIt = sdCardFonts_.find(fontId);
   if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
     int32_t widthFP = 0;
+    int trackingGaps = 0;
+    uint32_t prevBaseCp = 0;
     const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
     const uint8_t styleIdx = resolveSdCardStyle(*sdIt->second, style);
     while (uint32_t cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text))) {
       if (utf8IsVariationSelector(cp)) continue;  // no advance, and never in the advance table
       int32_t advFP = sdIt->second->getAdvance(cp, styleIdx);
       widthFP += isSupSub ? (advFP + 1) / 2 : advFP;
+      // Count the boundaries drawText will space: it steps over combining marks without
+      // moving its previous-glyph cursor, so they are stepped over here too.
+      if (tracking != 0 && !utf8IsCombiningMark(cp)) {
+        if (isTrackingBoundary(prevBaseCp, cp)) ++trackingGaps;
+        prevBaseCp = cp;
+      }
     }
-    return fp4::toPixel(widthFP);
+    // Added in whole pixels, exactly as drawText accumulates it, so tracking brings no
+    // measure/draw drift of its own on top of the advance table's.
+    return fp4::toPixel(widthFP) + trackingPixels(trackingGaps, tracking);
   }
 
   const auto fontIt = fontMap.find(fontId);
@@ -1919,6 +1949,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   uint32_t cp;
   uint32_t prevCp = 0;
   int widthPx = 0;
+  int trackingGaps = 0;
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
   const auto& font = fontIt->second;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
@@ -1926,13 +1957,16 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     if (utf8IsVariationSelector(cp) || utf8IsCombiningMark(cp)) {
       continue;
     }
-    cp = font.applyLigatures(cp, text, style);
+    if (tracking == 0) cp = font.applyLigatures(cp, text, style);
 
     // Differential rounding: snap (previous advance + current kern) together,
     // matching drawText so measurement and rendering agree exactly.
     if (prevCp != 0) {
       const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
       widthPx += fp4::toPixel(prevAdvanceFP + kernFP);         // snap 12.4 fixed-point to nearest pixel
+      if (tracking != 0 && isTrackingBoundary(prevCp, cp)) {
+        widthPx += trackingStep(trackingGaps++, tracking);
+      }
     }
 
     const EpdGlyph* glyph = font.getGlyph(cp, style);

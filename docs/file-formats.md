@@ -125,7 +125,7 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-> **Current version: 45** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> **Current version: 46** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
 > The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
 > v30 inline ("on page") footnotes; v31–v33 KOReader xpath/paragraph sync data and
 > nested block styles; v34 `<pre>` blocks carry a monospace font override; v35 hanging
@@ -145,6 +145,12 @@ if (parsedSize != fileSize) {
 > v45 changes layout only (no structural change): a paragraph long enough to be
 > flushed in several passes keeps its first-line indent and top spacing to its
 > opening line instead of repeating them at each flush.
+> v46 user text-layout controls: the header gains `characterSpacing i8` (half-pixel
+> steps), `wordSpacingPercent u8` and `paragraphIndent u8` directly after
+> `bionicReadingEnabled` and before `pageCount`, all three compared on load like the
+> other render settings; and every TextBlock's style tail gains `characterSpacing i8`
+> after `fontOverride`, so a line is drawn with the letter spacing its word positions
+> were computed for.
 >
 > Any change to the on-disk structure **must** bump this constant — a stale cache read
 > against a new layout is how you get a hard fault, not a graceful failure.

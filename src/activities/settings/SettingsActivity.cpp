@@ -82,6 +82,7 @@ void SettingsActivity::onEnter() {
     // iterates getSettingsList() directly.
     if (setting.key &&
         (std::strcmp(setting.key, "fontSize") == 0 || std::strcmp(setting.key, "lineSpacing") == 0 ||
+         std::strcmp(setting.key, "wordSpacing") == 0 || std::strcmp(setting.key, "characterSpacing") == 0 ||
          std::strcmp(setting.key, "paragraphAlignment") == 0 || std::strcmp(setting.key, "screenMargin") == 0 ||
          std::strcmp(setting.key, "extraParagraphSpacing") == 0 || std::strcmp(setting.key, "bionicReading") == 0 ||
          std::strcmp(setting.key, "textAntiAliasing") == 0 || std::strcmp(setting.key, "orientation") == 0)) {

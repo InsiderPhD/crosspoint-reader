@@ -504,6 +504,17 @@ bool CrossPointSettings::loadFromBinaryFile() {
   return true;
 }
 
+TextLayoutOptions CrossPointSettings::readerTextLayout() const {
+  TextLayoutOptions options;
+  if (characterSpacing < CHARACTER_SPACING_COUNT) {
+    options.characterSpacing = static_cast<int8_t>(static_cast<int>(characterSpacing) - CHARACTER_SPACING_ZERO);
+  }
+  if (wordSpacing >= WORD_SPACING_MIN && wordSpacing <= WORD_SPACING_MAX) {
+    options.wordSpacingPercent = wordSpacing;
+  }
+  return options;
+}
+
 float CrossPointSettings::getReaderLineCompression() const {
   switch (fontFamily) {
     case BOOKERLY:
