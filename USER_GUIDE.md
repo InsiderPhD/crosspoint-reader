@@ -401,7 +401,9 @@ Neither action touches `My Clippings.txt`, so copy it off the SD card whenever y
 
 Open from **Home → Statistics**. Tracks sessions across `.epub`, `.txt`, and `.xtc`. Metrics include **Reading Time, Pages Read, Books Finished, Sessions, Average Session, Reading Speed,** and **In Progress**. Books at **≥90%** count as finished.
 
-Statistics are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), and **Sessions**:
+Statistics are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), **Sessions**, **Year**, and **Library**:
+
+The **Library** tab shows how many books you finished this month and this year, and your five most-read authors and tags by reading time (with the number of books behind each). Authors and tags come from the Library, so open the Library once after adding books; a book you have read but since deleted from the card is not listed there.
 
 <p>
 <img src="docs/images/user-guide/stats-overview.png" alt="Statistics Overview tab with streak, daily goal, totals, and reading profile scores" width="300">
