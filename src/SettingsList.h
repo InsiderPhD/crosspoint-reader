@@ -392,6 +392,10 @@ inline void appendSystemSettings(std::vector<SettingInfo>& v) {
                // esp_image_verify (see OtaBootSwitch.h).
                SettingInfo::Toggle(StrId::STR_ENABLE_PRERELEASES, &CrossPointSettings::allowPreReleases,
                                    "allowPreReleases", StrId::STR_CAT_DEV),
+               // Dev tab: the CLX1 Library index is on by default; this is the
+               // switch back to the in-RAM path list for comparison on hardware.
+               SettingInfo::Toggle(StrId::STR_LIBRARY_USE_INDEX, &CrossPointSettings::libraryUseIndex,
+                                   "libraryUseIndex", StrId::STR_CAT_DEV),
            });
 }
 
@@ -587,7 +591,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 89;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 90;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT
