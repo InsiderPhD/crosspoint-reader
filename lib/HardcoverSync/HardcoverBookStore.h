@@ -35,6 +35,10 @@ class HardcoverBookStore {
   static bool load(const char* epubPath, HardcoverBookLink& out);
   static bool save(const char* epubPath, const HardcoverBookLink& link);
 
+  // The EPUB was renamed or moved: re-key its sidecar (the file name is a hash
+  // of the path) so the book stays linked. True when there was nothing to move.
+  static bool movePath(const char* oldEpubPath, const char* newEpubPath);
+
  private:
   static void buildSidecarPath(const char* epubPath, char* outPath, size_t maxLen);
 };

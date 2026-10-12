@@ -238,3 +238,19 @@ bool BookFusionBookIdStore::saveLastSyncedPosition(const char* epubPath, const B
   }
   return ok;
 }
+
+bool BookFusionBookIdStore::movePath(const char* oldEpubPath, const char* newEpubPath) {
+  char oldSidecar[64];
+  char newSidecar[64];
+  buildSidecarPath(oldEpubPath, oldSidecar, sizeof(oldSidecar));
+  buildSidecarPath(newEpubPath, newSidecar, sizeof(newSidecar));
+  if (!Storage.exists(oldSidecar)) return true;
+  // Anything already at the new key belongs to a book that is gone (the caller
+  // checked the new file name was free), so it is replaced.
+  if (Storage.exists(newSidecar)) Storage.remove(newSidecar);
+  if (!Storage.rename(oldSidecar, newSidecar)) {
+    LOG_ERR("BFS", "Failed to move sidecar %s -> %s", oldSidecar, newSidecar);
+    return false;
+  }
+  return true;
+}

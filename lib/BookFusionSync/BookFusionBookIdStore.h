@@ -49,6 +49,10 @@ class BookFusionBookIdStore {
   static uint64_t loadLastSyncedReadingMs(const char* epubPath);
   static bool saveLastSyncedReadingMs(const char* epubPath, uint64_t totalReadingMs);
 
+  // The EPUB was renamed or moved: re-key its sidecar (the file name is a hash
+  // of the path) so the book stays linked. True when there was nothing to move.
+  static bool movePath(const char* oldEpubPath, const char* newEpubPath);
+
  private:
   // Derives /.crosspoint/bookfusion_<32hexchars>.json from the epub path.
   static void buildSidecarPath(const char* epubPath, char* outPath, size_t maxLen);

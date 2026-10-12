@@ -151,6 +151,30 @@ bool hasBmpExtension(std::string_view fileName) { return checkFileExtension(file
 
 bool hasGifExtension(std::string_view fileName) { return checkFileExtension(fileName, ".gif"); }
 
+bool isValidFileName(std::string_view name) {
+  if (name.empty() || name == "." || name == "..") return false;
+  if (name.back() == ' ' || name.back() == '.') return false;
+  for (const char c : name) {
+    const auto uc = static_cast<unsigned char>(c);
+    if (uc < 0x20 || uc == 0x7F) return false;
+    switch (c) {
+      case '/':
+      case '\\':
+      case ':':
+      case '*':
+      case '?':
+      case '"':
+      case '<':
+      case '>':
+      case '|':
+        return false;
+      default:
+        break;
+    }
+  }
+  return true;
+}
+
 bool hasEpubExtension(std::string_view fileName) { return checkFileExtension(fileName, ".epub"); }
 
 bool hasXtcExtension(std::string_view fileName) {

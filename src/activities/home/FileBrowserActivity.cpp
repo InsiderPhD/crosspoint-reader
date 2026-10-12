@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include "../util/ConfirmationActivity.h"
+#include "../util/KeyboardEntryActivity.h"
 #include "BookDetailsActivity.h"
 #include "BookFusionBookIdStore.h"
 #include "ClippingStore.h"
@@ -18,10 +19,17 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/BookMoveUtils.h"
 #include "util/TouchListNav.h"
 
 namespace {
 constexpr unsigned long GO_HOME_MS = 1000;
+// FAT long names hold 255 UTF-16 units; counting bytes keeps any UTF-8 name inside that.
+constexpr size_t MAX_FILE_NAME_BYTES = 255;
+
+bool isBookEntry(const std::string& entry) {
+  return FsHelpers::hasEpubExtension(entry) || FsHelpers::hasXtcExtension(entry);
+}
 }  // namespace
 
 void FileBrowserActivity::loadFiles() {
@@ -243,6 +251,14 @@ void FileBrowserActivity::clearFileMetadata(const std::string& fullPath) {
 }
 
 void FileBrowserActivity::loop() {
+  if (pendingRenameError) {
+    const char* reason = pendingRenameError;
+    pendingRenameError = nullptr;
+    startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_RENAME_FAILED), reason),
+                           [this](const ActivityResult&) { requestUpdate(); });
+    return;
+  }
+
   // Long press BACK (1s+) goes to root folder (Books mode only).
   // In firmware-pick mode we keep navigation simple: short Back = up dir / cancel.
   if (mode == Mode::Books && mappedInput.isPressed(MappedInputManager::Button::Back) &&
@@ -284,12 +300,11 @@ void FileBrowserActivity::loop() {
     return;
   }
 
-  // Long press on a book file → context menu
-  if (!showingBookOptions && !longPressBookTriggered && !files.empty() && selectorIndex < files.size()) {
-    const std::string& entry = files[selectorIndex];
-    const bool isBook =
-        entry.back() != '/' && (FsHelpers::hasEpubExtension(entry) || FsHelpers::hasXtcExtension(entry));
-    if (isBook && mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= 700UL) {
+  // Long press on a file → context menu (folders keep the hold-to-delete flow below).
+  if (mode == Mode::Books && !showingBookOptions && !longPressBookTriggered && !files.empty() &&
+      selectorIndex < files.size()) {
+    const bool isFile = files[selectorIndex].back() != '/';
+    if (isFile && mappedInput.isPressed(MappedInputManager::Button::Confirm) && mappedInput.getHeldTime() >= 700UL) {
       longPressBookTriggered = true;
       openBookOptions(/*awaitRelease=*/true);
       return;
@@ -298,8 +313,8 @@ void FileBrowserActivity::loop() {
 
   if (showingBookOptions) {
     int optionIds[UITheme::BOOK_OPTIONS_COUNT];
-    const int optionCount =
-        UITheme::getVisibleBookOptions(optionIds, UITheme::BOOK_OPTIONS_COUNT, bookOptionsHasClippings);
+    const int optionCount = UITheme::getVisibleBookOptions(optionIds, UITheme::BOOK_OPTIONS_COUNT,
+                                                           bookOptionsHasClippings, bookOptionsFileOnly);
     buttonNavigator.onNext([this, optionCount] {
       bookOptionsIndex = (bookOptionsIndex + 1) % optionCount;
       requestUpdate();
@@ -392,6 +407,8 @@ void FileBrowserActivity::loop() {
           Xtc(path, "/.crosspoint").clearCache();
         }
         reload();
+      } else if (opt == UITheme::BOOK_OPT_RENAME) {
+        startRename(path);
       } else if (opt == UITheme::BOOK_OPT_DELETE) {
         startActivityForResult(std::make_unique<ConfirmationActivity>(
                                    renderer, mappedInput, tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
@@ -455,16 +472,14 @@ void FileBrowserActivity::loop() {
       const int index =
           GUI.hitTestList(listRect(), static_cast<int>(files.size()), static_cast<int>(selectorIndex), false, lx, ly);
       if (index >= 0) {
-        const std::string& entry = files[index];
-        const bool isBook =
-            entry.back() != '/' && (FsHelpers::hasEpubExtension(entry) || FsHelpers::hasXtcExtension(entry));
+        const bool isFile = files[index].back() != '/';
         selectorIndex = static_cast<size_t>(index);
         mappedInput.suppressTouchContact();
-        if (isBook) {
-          // Books: context menu (delete lives inside it).
+        if (isFile) {
+          // Files: context menu (rename and delete live inside it).
           openBookOptions(/*awaitRelease=*/false);
         } else {
-          // Folders and non-book files: the hold-Confirm delete flow.
+          // Folders: the hold-Confirm delete flow.
           confirmDeleteSelectedEntry();
         }
         return;
@@ -638,6 +653,53 @@ void FileBrowserActivity::confirmDeleteSelectedEntry() {
   startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, entry), handler);
 }
 
+void FileBrowserActivity::startRename(const std::string& path) {
+  const auto slash = path.find_last_of('/');
+  const std::string name = (slash == std::string::npos) ? path : path.substr(slash + 1);
+  // Only the part before the extension is edited, so a rename can never change
+  // what kind of file this is (and with it which reader and cache it uses).
+  const auto dot = name.find_last_of('.');
+  const bool hasExtension = dot != std::string::npos && dot > 0;
+  const std::string extension = hasExtension ? name.substr(dot) : std::string();
+  const std::string stem = hasExtension ? name.substr(0, dot) : name;
+  if (extension.size() >= MAX_FILE_NAME_BYTES) return;
+
+  startActivityForResult(
+      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_RENAME), stem,
+                                              MAX_FILE_NAME_BYTES - extension.size(), InputType::Text),
+      [this, path, extension](const ActivityResult& result) {
+        // The keyboard cancels on Back *press*; without this the release would
+        // land here and be taken as "go up a folder".
+        if (mappedInput.isPressed(MappedInputManager::Button::Back)) lockLongPressBack = true;
+        if (!result.isCancelled) renameFile(path, std::get<KeyboardResult>(result.data).text, extension);
+        requestUpdate();
+      });
+}
+
+void FileBrowserActivity::renameFile(const std::string& oldPath, const std::string& newStem,
+                                     const std::string& extension) {
+  const std::string newName = newStem + extension;
+  const auto slash = oldPath.find_last_of('/');
+  const std::string newPath = oldPath.substr(0, slash + 1) + newName;
+  if (newPath == oldPath) return;
+
+  switch (BookMoveUtils::renameFile(oldPath, newPath)) {
+    case BookMoveUtils::RenameResult::Ok:
+      loadFiles();
+      selectorIndex = findEntry(newName);
+      return;
+    case BookMoveUtils::RenameResult::InvalidName:
+      pendingRenameError = tr(STR_RENAME_INVALID_NAME);
+      return;
+    case BookMoveUtils::RenameResult::TargetExists:
+      pendingRenameError = tr(STR_RENAME_NAME_EXISTS);
+      return;
+    case BookMoveUtils::RenameResult::Failed:
+      pendingRenameError = "";  // the dialog heading says it all
+      return;
+  }
+}
+
 Rect FileBrowserActivity::listRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pathReserved = renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing;
@@ -653,11 +715,14 @@ void FileBrowserActivity::openBookOptions(const bool awaitRelease) {
   awaitingBookOptionsRelease = awaitRelease;
   bookOptionsIndex = 0;
   bookOptionsLayoutValid = false;  // stale until render() draws this popup
+  bookOptionsFileOnly = !isBookEntry(entry);
   std::string cleanBase = basepath;
   if (cleanBase.back() != '/') cleanBase += '/';
   bookOptionsPath = cleanBase + entry;
   const auto dotPos = entry.rfind('.');
-  bookOptionsTitle = (dotPos != std::string::npos) ? entry.substr(0, dotPos) : std::string(entry);
+  // A plain file shows its whole name: the extension is all that says what it is.
+  bookOptionsTitle =
+      (dotPos != std::string::npos && !bookOptionsFileOnly) ? entry.substr(0, dotPos) : std::string(entry);
   const auto& recentList = RECENT_BOOKS.getBooks();
   auto it = std::find_if(recentList.begin(), recentList.end(),
                          [this](const RecentBook& rb) { return rb.path == bookOptionsPath; });
@@ -802,9 +867,9 @@ void FileBrowserActivity::render(RenderLock&&) {
     const auto lastSlash = bookOptionsPath.rfind('/');
     const std::string folder =
         (lastSlash != std::string::npos) ? bookOptionsPath.substr(0, lastSlash) : bookOptionsPath;
-    const auto layout = UITheme::drawBookOptionsPopup(renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(),
-                                                      folder.c_str(), bookOptionsProgress, bookOptionsIndex,
-                                                      bookOptionsHasClippings, RECENT_BOOKS.isPinned(bookOptionsPath));
+    const auto layout = UITheme::drawBookOptionsPopup(
+        renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(), folder.c_str(), bookOptionsProgress,
+        bookOptionsIndex, bookOptionsHasClippings, RECENT_BOOKS.isPinned(bookOptionsPath), bookOptionsFileOnly);
     bookOptionsPopupX = layout.popup.x;
     bookOptionsPopupY = layout.popup.y;
     bookOptionsPopupW = layout.popup.width;

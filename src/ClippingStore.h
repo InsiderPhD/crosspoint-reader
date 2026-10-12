@@ -80,6 +80,11 @@ class ClippingStore {
   // True when a clippings file exists on SD for this book (cheap existence check; nothing loaded).
   static bool hasForFilePath(const std::string& filePath, const std::string& bookType);
   static void deleteForFilePath(const std::string& filePath, const std::string& bookType);
+  // The book file was renamed or moved: re-key its clippings file and rewrite
+  // the path in its header, keeping the stored title/author. Streams the
+  // records across (no clipping is loaded). True when there was nothing to move.
+  static bool moveForFilePath(const std::string& oldFilePath, const std::string& newFilePath,
+                              const std::string& bookType);
   static bool migrateForFilePath(const std::string& oldFilePath, const std::string& newFilePath,
                                  const std::string& title, const std::string& author, const std::string& bookType);
 

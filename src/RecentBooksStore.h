@@ -53,6 +53,13 @@ class RecentBooksStore {
                   const std::string& coverBmpPath);
   void updateProgress(const std::string& path, int8_t progressPercent);
   void removeBook(const std::string& path);
+  // A book file was renamed or moved: carry its recents entry (progress
+  // included), its shelved mark and its pin over to the new path. The cover
+  // thumbnail path lives inside the book's cache directory, so its
+  // oldCachePath prefix is swapped for newCachePath. Persists only when
+  // something changed; returns false only if that save failed.
+  bool updatePath(const std::string& oldPath, const std::string& newPath, const std::string& oldCachePath,
+                  const std::string& newCachePath);
 
   // "Shelve Book": drop the entry and remember the path so library backfill
   // skips it. Persists.

@@ -33,8 +33,10 @@ class FileBrowserActivity final : public Activity {
   // release so we don't immediately auto-open the first entry.
   bool lockNextConfirmRelease = false;
 
-  // Book context menu
+  // Context menu: the full book list for EPUB/XTC rows, Rename + Delete for
+  // any other file (bookOptionsFileOnly).
   bool showingBookOptions = false;
+  bool bookOptionsFileOnly = false;
   bool longPressBookTriggered = false;
   bool awaitingBookOptionsRelease = false;
   int bookOptionsIndex = 0;
@@ -54,6 +56,11 @@ class FileBrowserActivity final : public Activity {
   std::string bookOptionsAuthor;
   int bookOptionsProgress = -1;
   bool bookOptionsHasClippings = false;
+
+  // Why the last rename was refused (a tr() string). Set from the keyboard's
+  // result handler and shown as a dialog from the next loop(), where starting
+  // an activity is safe.
+  const char* pendingRenameError = nullptr;
 
   // Files state
   std::string basepath = "/";
@@ -104,8 +111,12 @@ class FileBrowserActivity final : public Activity {
   // until release; the touch path suppressed its contact, so nothing is held.
   void openBookOptions(bool awaitRelease);
   // Hold-Confirm delete flow for files[selectorIndex] (confirmation dialog +
-  // removal), also fired by a Full Touch long tap on a non-book row.
+  // removal), also fired by a Full Touch long tap on a folder row.
   void confirmDeleteSelectedEntry();
+  // Rename: keyboard pre-filled with the name minus its extension, then
+  // BookMoveUtils::renameFile so a book keeps its reading state.
+  void startRename(const std::string& path);
+  void renameFile(const std::string& oldPath, const std::string& newStem, const std::string& extension);
 
  public:
   explicit FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialPath = "/",

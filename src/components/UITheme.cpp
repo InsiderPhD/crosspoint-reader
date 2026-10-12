@@ -184,22 +184,30 @@ const char* bookOptionLabel(int optionId, const bool pinned) {
       return tr(STR_DELETE_CLIPPINGS);
     case UITheme::BOOK_OPT_BOOK_INFO:
       return tr(STR_BOOK_INFO);
+    case UITheme::BOOK_OPT_RENAME:
+      return tr(STR_RENAME);
     default:
       return "";
   }
 }
 }  // namespace
 
-int UITheme::getVisibleBookOptions(int* ids, int maxIds, const bool includeDeleteClippings) {
+int UITheme::getVisibleBookOptions(int* ids, int maxIds, const bool includeDeleteClippings, const bool fileOnly) {
   int n = 0;
   const auto add = [&](int id) {
     if (n < maxIds) ids[n++] = id;
   };
+  if (fileOnly) {
+    add(BOOK_OPT_RENAME);
+    add(BOOK_OPT_DELETE);
+    return n;
+  }
   add(BOOK_OPT_BOOK_INFO);  // First: the most common, least destructive action
   add(BOOK_OPT_MARK_READ);
   add(BOOK_OPT_RESET_PROGRESS);
   if (getInstance().getMetrics().homePinnedBooks) add(BOOK_OPT_PIN);
   add(BOOK_OPT_SHELVE);
+  add(BOOK_OPT_RENAME);
   add(BOOK_OPT_DELETE);
   if (includeDeleteClippings) add(BOOK_OPT_DELETE_CLIPPINGS);
   if (SETTINGS.devMode) add(BOOK_OPT_REINDEX);  // "Delete Book Cache" — testing only
@@ -209,14 +217,16 @@ int UITheme::getVisibleBookOptions(int* ids, int maxIds, const bool includeDelet
 UITheme::BookOptionsPopupLayout UITheme::drawBookOptionsPopup(GfxRenderer& renderer, const char* title,
                                                               const char* author, const char* folderPath,
                                                               int progressPercent, int selectedOptionIndex,
-                                                              const bool includeDeleteClippings, const bool pinned) {
+                                                              const bool includeDeleteClippings, const bool pinned,
+                                                              const bool fileOnly) {
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   constexpr int POPUP_W = 420;
   constexpr int BORDER = 2;
   constexpr int H_PAD = 14;
   constexpr int INFO_H = 28;
-  constexpr int INFO_COUNT = 3;
+  // A plain file has no author or progress to show: just its folder.
+  const int INFO_COUNT = fileOnly ? 1 : 3;
   constexpr int OPTION_H = 34;
   constexpr int LINE_V_PAD = 6;
 
@@ -225,7 +235,7 @@ UITheme::BookOptionsPopupLayout UITheme::drawBookOptionsPopup(GfxRenderer& rende
   const int titleBlockH = LINE_V_PAD + static_cast<int>(titleLines.size()) * lineH + LINE_V_PAD;
 
   int ids[BOOK_OPTIONS_COUNT];
-  const int optionCount = getVisibleBookOptions(ids, BOOK_OPTIONS_COUNT, includeDeleteClippings);
+  const int optionCount = getVisibleBookOptions(ids, BOOK_OPTIONS_COUNT, includeDeleteClippings, fileOnly);
   const int popupH = titleBlockH + INFO_COUNT * INFO_H + optionCount * OPTION_H + H_PAD;
   const int px = (pageWidth - POPUP_W) / 2;
   const int py = (pageHeight - popupH) / 2;
@@ -238,19 +248,23 @@ UITheme::BookOptionsPopupLayout UITheme::drawBookOptionsPopup(GfxRenderer& rende
   }
   renderer.drawLine(px + BORDER, py + titleBlockH, px + POPUP_W - BORDER - 1, py + titleBlockH);
 
-  char infoBuf[80];
-  snprintf(infoBuf, sizeof(infoBuf), "%s: %s", tr(STR_BOOK_INFO_AUTHOR), (author && author[0]) ? author : "--");
-  renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + titleBlockH + (INFO_H - lineH) / 2, infoBuf);
-
   const std::string truncFolder = renderer.truncatedText(UI_10_FONT_ID, folderPath, POPUP_W - H_PAD * 2);
-  renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + titleBlockH + INFO_H + (INFO_H - lineH) / 2, truncFolder.c_str());
-
-  if (progressPercent < 0) {
-    snprintf(infoBuf, sizeof(infoBuf), "%s: %s", tr(STR_BOOK_INFO_PROGRESS), tr(STR_BOOK_INFO_NOT_STARTED));
+  if (fileOnly) {
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + titleBlockH + (INFO_H - lineH) / 2, truncFolder.c_str());
   } else {
-    snprintf(infoBuf, sizeof(infoBuf), "%s: %d%%", tr(STR_BOOK_INFO_PROGRESS), progressPercent);
+    char infoBuf[80];
+    snprintf(infoBuf, sizeof(infoBuf), "%s: %s", tr(STR_BOOK_INFO_AUTHOR), (author && author[0]) ? author : "--");
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + titleBlockH + (INFO_H - lineH) / 2, infoBuf);
+
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + titleBlockH + INFO_H + (INFO_H - lineH) / 2, truncFolder.c_str());
+
+    if (progressPercent < 0) {
+      snprintf(infoBuf, sizeof(infoBuf), "%s: %s", tr(STR_BOOK_INFO_PROGRESS), tr(STR_BOOK_INFO_NOT_STARTED));
+    } else {
+      snprintf(infoBuf, sizeof(infoBuf), "%s: %d%%", tr(STR_BOOK_INFO_PROGRESS), progressPercent);
+    }
+    renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + titleBlockH + INFO_H * 2 + (INFO_H - lineH) / 2, infoBuf);
   }
-  renderer.drawText(UI_10_FONT_ID, px + H_PAD, py + titleBlockH + INFO_H * 2 + (INFO_H - lineH) / 2, infoBuf);
 
   renderer.drawLine(px + BORDER, py + titleBlockH + INFO_COUNT * INFO_H, px + POPUP_W - BORDER - 1,
                     py + titleBlockH + INFO_COUNT * INFO_H);

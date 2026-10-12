@@ -354,6 +354,64 @@ void ClippingStore::deleteForFilePath(const std::string& filePath, const std::st
   }
 }
 
+bool ClippingStore::moveForFilePath(const std::string& oldFilePath, const std::string& newFilePath,
+                                    const std::string& bookType) {
+  const std::string oldStorePath = storeFilePathForBook(oldFilePath, bookType);
+  if (!Storage.exists(oldStorePath.c_str())) {
+    return true;
+  }
+  const std::string newStorePath = storeFilePathForBook(newFilePath, bookType);
+
+  FsFile in;
+  if (!Storage.openFileForRead("CLIP", oldStorePath, in)) {
+    return false;
+  }
+  uint8_t version = 0;
+  uint16_t count = 0;
+  std::string title;
+  std::string author;
+  std::string storedPath;
+  if (!serialization::tryReadPod(in, version) || !isReadableVersion(version) || !serialization::tryReadPod(in, count) ||
+      !serialization::tryReadString(in, title) || !serialization::tryReadString(in, author) ||
+      !serialization::tryReadString(in, storedPath)) {
+    in.close();
+    LOG_ERR("CLIP", "Failed to read clipping header: %s", oldStorePath.c_str());
+    return false;
+  }
+
+  FsFile out = Storage.open(newStorePath.c_str(), O_WRITE | O_CREAT | O_TRUNC);
+  if (!out) {
+    in.close();
+    LOG_ERR("CLIP", "Failed to open clipping file for write: %s", newStorePath.c_str());
+    return false;
+  }
+
+  // Same header with the new path, then the records byte for byte: their layout
+  // depends on `version`, which is carried over unchanged, so nothing here has
+  // to understand it and no clipping text is ever held in RAM.
+  bool ok = serialization::tryWritePod(out, version) && serialization::tryWritePod(out, count) &&
+            serialization::tryWriteString(out, title) && serialization::tryWriteString(out, author) &&
+            serialization::tryWriteString(out, newFilePath);
+  uint8_t chunk[128];
+  while (ok) {
+    const int got = in.read(chunk, sizeof(chunk));
+    if (got < 0) ok = false;
+    if (got <= 0) break;
+    ok = out.write(chunk, static_cast<size_t>(got)) == static_cast<size_t>(got);
+  }
+  in.close();
+  out.flush();
+  out.close();
+
+  if (!ok) {
+    LOG_ERR("CLIP", "Failed to move clippings %s -> %s", oldStorePath.c_str(), newStorePath.c_str());
+    Storage.remove(newStorePath.c_str());
+    return false;
+  }
+  Storage.remove(oldStorePath.c_str());
+  return true;
+}
+
 bool ClippingStore::migrateForFilePath(const std::string& oldFilePath, const std::string& newFilePath,
                                        const std::string& title, const std::string& author,
                                        const std::string& bookType) {

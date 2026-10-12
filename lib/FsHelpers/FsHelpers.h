@@ -13,6 +13,13 @@ std::string normalisePath(const std::string& path);
 
 void sortFileList(std::vector<std::string>& strs);
 
+// True when `name` can be used as a single FAT32 file name typed by the user:
+// non-empty, not "." or "..", no path separators, none of the characters FAT
+// long names forbid (\ / : * ? " < > |) or control bytes, and no trailing
+// space or dot (FAT silently strips those, so the name on the card would not
+// be the name asked for). Bytes >= 0x80 (UTF-8) are allowed.
+bool isValidFileName(std::string_view name);
+
 /**
  * Check if the given filename ends with the specified extension (case-insensitive).
  */

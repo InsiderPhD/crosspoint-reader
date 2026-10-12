@@ -25,6 +25,10 @@ class KOReaderSyncStateStore {
   static bool loadLastSyncedPosition(const char* epubPath, KOReaderStoredPosition& out);
   static bool saveLastSyncedPosition(const char* epubPath, const KOReaderStoredPosition& position);
 
+  // The EPUB was renamed or moved: re-key its sidecar (the file name is a hash
+  // of the path) so the sync state follows it. True when there was nothing to move.
+  static bool movePath(const char* oldEpubPath, const char* newEpubPath);
+
  private:
   static void buildSidecarPath(const char* epubPath, char* outPath, size_t maxLen);
 };

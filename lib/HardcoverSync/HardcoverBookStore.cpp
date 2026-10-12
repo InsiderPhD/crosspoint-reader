@@ -76,3 +76,19 @@ bool HardcoverBookStore::save(const char* epubPath, const HardcoverBookLink& lin
   }
   return ok;
 }
+
+bool HardcoverBookStore::movePath(const char* oldEpubPath, const char* newEpubPath) {
+  char oldSidecar[72];
+  char newSidecar[72];
+  buildSidecarPath(oldEpubPath, oldSidecar, sizeof(oldSidecar));
+  buildSidecarPath(newEpubPath, newSidecar, sizeof(newSidecar));
+  if (!Storage.exists(oldSidecar)) return true;
+  // Anything already at the new key belongs to a book that is gone (the caller
+  // checked the new file name was free), so it is replaced.
+  if (Storage.exists(newSidecar)) Storage.remove(newSidecar);
+  if (!Storage.rename(oldSidecar, newSidecar)) {
+    LOG_ERR("HCB", "Failed to move sidecar %s -> %s", oldSidecar, newSidecar);
+    return false;
+  }
+  return true;
+}

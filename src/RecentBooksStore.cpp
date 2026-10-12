@@ -87,6 +87,34 @@ void RecentBooksStore::removeBook(const std::string& path) {
   if (it != recentBooks.end() || wasPinned) saveToFile();
 }
 
+bool RecentBooksStore::updatePath(const std::string& oldPath, const std::string& newPath,
+                                  const std::string& oldCachePath, const std::string& newCachePath) {
+  if (oldPath == newPath) return true;
+  bool changed = false;
+
+  for (auto& book : recentBooks) {
+    if (book.path != oldPath) continue;
+    book.path = newPath;
+    // The '/' check keeps ".../epub_12" from matching ".../epub_123/thumb.bmp".
+    if (!oldCachePath.empty() && book.coverBmpPath.size() > oldCachePath.size() &&
+        book.coverBmpPath[oldCachePath.size()] == '/' &&
+        book.coverBmpPath.compare(0, oldCachePath.size(), oldCachePath) == 0) {
+      book.coverBmpPath.replace(0, oldCachePath.size(), newCachePath);
+    }
+    changed = true;
+  }
+  for (auto* list : {&shelvedPaths, &pinnedPaths}) {
+    for (auto& path : *list) {
+      if (path == oldPath) {
+        path = newPath;
+        changed = true;
+      }
+    }
+  }
+
+  return changed ? saveToFile() : true;
+}
+
 void RecentBooksStore::shelveBook(const std::string& path) {
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
