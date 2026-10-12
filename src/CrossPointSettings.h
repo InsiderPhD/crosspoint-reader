@@ -119,6 +119,14 @@ class CrossPointSettings {
     SB_BATTERY_PERCENT_ONLY = 2,
     STATUS_BAR_BATTERY_STYLE_COUNT
   };
+  // Font of both reader status bars: Noto Sans 8 / Ubuntu 10 / Ubuntu 12, the
+  // three UI fonts that are always resident. Persisted: append only.
+  enum STATUS_BAR_TEXT_SIZE : uint8_t {
+    SB_TEXT_SMALL = 0,
+    SB_TEXT_MEDIUM = 1,
+    SB_TEXT_LARGE = 2,
+    STATUS_BAR_TEXT_SIZE_COUNT
+  };
 
   enum ORIENTATION {
     PORTRAIT = 0,       // 480x800 logical coordinates (current default)
@@ -494,6 +502,10 @@ class CrossPointSettings {
   // existing configuration rendering exactly as before.
   uint8_t statusBarBatteryStyle = SB_BATTERY_ICON_AND_PERCENT;
   uint8_t statusBarTopBatteryStyle = SB_BATTERY_ICON_AND_PERCENT;
+  // Text size of both reader status bars (STATUS_BAR_TEXT_SIZE). Feeds
+  // UITheme::getStatusBarHeight(), so a change moves the reader viewport and
+  // the section caches rebuild through their viewport-size header check.
+  uint8_t statusBarTextSize = SB_TEXT_SMALL;
   // Master hide toggled by READER_ACTION_HIDE_STATUS_BAR. Layout still reserves
   // the bar's strip so the section cache stays valid; readers skip drawing the
   // bar and the EPUB reader re-centres the page in the freed space at draw time.

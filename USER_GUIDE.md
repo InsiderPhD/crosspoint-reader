@@ -662,6 +662,7 @@ The **Customise Status Bar** screen itself holds the settings both bars share:
 
 - **Hide status bar** — master toggle for both bars. The layout still reserves their strips so your cached pages stay valid; the reader just skips drawing them and re-centres the page in the freed space. Also available as a bindable **Hide Status Bar** reader action.
 - **Percentage Format** — show book progress as `10%`, `10.1%` or `10.12%`.
+- **Text Size** — Small / Medium / Large text for both bars. A larger size reserves a slightly taller bar, so the book re-paginates the next time a chapter is opened.
 - **Top Margin** — 0–20 px of extra space between the body text and each bar, in 4 px steps.
 - **XTC Status Bar** — XTC pages are pre-rendered, so the bars are overlays: Hide / Bottom / Top / Both. *Top* paints the bottom bar's layout along the top edge (as it did before the top bar existed); *Both* paints each bar where it belongs.
 - **Clock** extras — time zone, daylight saving and 12h/24h format.

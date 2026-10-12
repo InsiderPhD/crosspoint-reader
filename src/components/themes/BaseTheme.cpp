@@ -1093,6 +1093,10 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();
   const bool drawAtTop = drawSide == StatusBarSide::Top;
+  // Text size: the font, and how far the fixed-size icons drop so they keep
+  // sitting on the taller font's baseline. Both are 0-cost at the default.
+  const int fontId = UITheme::getStatusBarFontId();
+  const int iconDrop = UITheme::getStatusBarTextExtraHeight();
 
   // Which elements and fill-bar settings this bar shows come from configSide;
   // where it is painted comes from drawSide. The two differ only for the XTC
@@ -1171,7 +1175,7 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
   auto addText = [&](const uint8_t element, std::string s) {
     const uint8_t pos = posOf(element);
     if (pos == CPS::SB_POS_HIDE || s.empty()) return;
-    const int w = renderer.getTextWidth(SMALL_FONT_ID, s.c_str());
+    const int w = renderer.getTextWidth(fontId, s.c_str());
     if (w <= 0) return;
     items.push_back(SbItem{pos, 0, std::move(s), w});
   };
@@ -1185,7 +1189,7 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     } else {
       int w = metrics.batteryWidth;
       if (showBatteryPercentage) {
-        w += batteryPercentSpacing + renderer.getTextWidth(SMALL_FONT_ID, pctBuf);
+        w += batteryPercentSpacing + renderer.getTextWidth(fontId, pctBuf);
       }
       items.push_back(SbItem{pos, 1, std::string(), w});
     }
@@ -1236,7 +1240,7 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
   }
   // Auto page-turn banner takes the middle cluster.
   if (!centerOverride.empty()) {
-    const int w = renderer.getTextWidth(SMALL_FONT_ID, centerOverride.c_str());
+    const int w = renderer.getTextWidth(fontId, centerOverride.c_str());
     if (w > 0) items.push_back(SbItem{CPS::SB_POS_MIDDLE, 0, centerOverride, w});
   }
 
@@ -1266,8 +1270,8 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
         if (it.pos == zone && it.kind == 0 && (!widest || it.width > widest->width)) widest = &it;
       if (!widest || widest->width <= 8) break;
       const int newW = std::max(8, widest->width - over);
-      widest->text = renderer.truncatedText(SMALL_FONT_ID, widest->text.c_str(), newW);
-      widest->width = renderer.getTextWidth(SMALL_FONT_ID, widest->text.c_str());
+      widest->text = renderer.truncatedText(fontId, widest->text.c_str(), newW);
+      widest->width = renderer.getTextWidth(fontId, widest->text.c_str());
     }
   };
 
@@ -1296,14 +1300,27 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     const int x = cursor[it.pos];
     cursor[it.pos] += it.width + elementGap;
     if (it.kind == 1) {
-      GUI.drawBatteryLeft(renderer, Rect{x, contentY, metrics.batteryWidth, metrics.batteryHeight},
-                          showBatteryPercentage);
+      if (fontId == SMALL_FONT_ID) {
+        // The theme draws icon and percentage together in the Small font.
+        GUI.drawBatteryLeft(renderer, Rect{x, contentY, metrics.batteryWidth, metrics.batteryHeight},
+                            showBatteryPercentage);
+      } else {
+        // Larger sizes: the theme draws the icon alone and the percentage is
+        // set here in the bar's font.
+        GUI.drawBatteryLeft(renderer, Rect{x, contentY + iconDrop, metrics.batteryWidth, metrics.batteryHeight},
+                            /*showPercentage=*/false);
+        if (showBatteryPercentage) {
+          char pctBuf[8];
+          snprintf(pctBuf, sizeof(pctBuf), "%u%%", powerManager.getBatteryPercentage());
+          renderer.drawText(fontId, x + metrics.batteryWidth + batteryPercentSpacing, contentY, pctBuf);
+        }
+      }
     } else if (it.kind == 2) {
-      drawBookmarkStatusIcon(renderer, x, contentY + 5);
+      drawBookmarkStatusIcon(renderer, x, contentY + 5 + iconDrop);
     } else if (it.kind == 3) {
-      renderer.drawIcon(it.icon, x, contentY + 4, btStatusIconSize, btStatusIconSize);
+      renderer.drawIcon(it.icon, x, contentY + 4 + iconDrop, btStatusIconSize, btStatusIconSize);
     } else {
-      renderer.drawText(SMALL_FONT_ID, x, contentY, it.text.c_str());
+      renderer.drawText(fontId, x, contentY, it.text.c_str());
     }
   }
 }

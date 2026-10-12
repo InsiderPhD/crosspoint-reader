@@ -1980,8 +1980,7 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
   if (automaticPageTurnActive &&
       (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight())) {
     orientedMarginBottom +=
-        std::max(SETTINGS.screenMargin,
-                 static_cast<uint8_t>(statusBarHeight + UITheme::getInstance().getMetrics().statusBarVerticalMargin));
+        std::max(SETTINGS.screenMargin, static_cast<uint8_t>(statusBarHeight + UITheme::getStatusBarTextLaneHeight()));
   } else {
     orientedMarginBottom += std::max(SETTINGS.screenMargin, statusBarHeight);
   }
@@ -3108,7 +3107,7 @@ void EpubReaderActivity::renderStatusBar() const {
     // Offset the banner text when there is no status/progress-bar strip below it.
     const uint8_t statusBarHeight = UITheme::getInstance().getStatusBarHeight();
     if (statusBarHeight == 0 || statusBarHeight == UITheme::getInstance().getProgressBarHeight()) {
-      textYOffset += UITheme::getInstance().getMetrics().statusBarVerticalMargin;
+      textYOffset += UITheme::getStatusBarTextLaneHeight();
     }
   }
 

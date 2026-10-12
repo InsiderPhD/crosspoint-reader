@@ -27,6 +27,7 @@ enum HubItem {
   HUB_BOTTOM_BAR = 0,
   HUB_TOP_BAR,
   HUB_PERCENTAGE_FORMAT,
+  HUB_TEXT_SIZE,
   HUB_TOP_MARGIN,
   HUB_XTC_STATUS_BAR,
   HUB_CLOCK_OUTSIDE_READER,  // Time after the date on the non-reader headers
@@ -38,9 +39,16 @@ enum HubItem {
 };
 constexpr int HUB_BASE_ITEMS = HUB_CLOCK_FORMAT;  // Rows shown on every device
 const StrId hubNames[HUB_COUNT] = {
-    StrId::STR_BOTTOM_STATUS_BAR,     StrId::STR_TOP_STATUS_BAR, StrId::STR_PERCENTAGE_FORMAT,
-    StrId::STR_STATUS_BAR_TOP_MARGIN, StrId::STR_XTC_STATUS_BAR, StrId::STR_CLOCK_OUTSIDE_READER,
-    StrId::STR_CLOCK_FORMAT,          StrId::STR_TIME_ZONE,      StrId::STR_CLOCK_DST,
+    StrId::STR_BOTTOM_STATUS_BAR,
+    StrId::STR_TOP_STATUS_BAR,
+    StrId::STR_PERCENTAGE_FORMAT,
+    StrId::STR_STATUS_BAR_TEXT_SIZE,
+    StrId::STR_STATUS_BAR_TOP_MARGIN,
+    StrId::STR_XTC_STATUS_BAR,
+    StrId::STR_CLOCK_OUTSIDE_READER,
+    StrId::STR_CLOCK_FORMAT,
+    StrId::STR_TIME_ZONE,
+    StrId::STR_CLOCK_DST,
     StrId::STR_CLOCK_SYNC_NOW,
 };
 
@@ -118,6 +126,9 @@ const StrId percentageFormatNames[PERCENTAGE_FORMAT_ITEMS] = {StrId::STR_PERCENT
                                                               StrId::STR_PERCENTAGE_FORMAT_ONE_DECIMAL,
                                                               StrId::STR_PERCENTAGE_FORMAT_TWO_DECIMALS};
 
+constexpr int TEXT_SIZE_ITEMS = CPS::STATUS_BAR_TEXT_SIZE_COUNT;
+const StrId textSizeNames[TEXT_SIZE_ITEMS] = {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE};
+
 constexpr int XTC_STATUS_BAR_ITEMS = CPS::XTC_STATUS_BAR_MODE_COUNT;
 const StrId xtcStatusBarNames[XTC_STATUS_BAR_ITEMS] = {StrId::STR_HIDE, StrId::STR_BOTTOM, StrId::STR_TOP,
                                                        StrId::STR_BOTH};
@@ -164,6 +175,9 @@ void StatusBarSettingsActivity::onEnter() {
   }
   if (SETTINGS.statusBarPercentageFormat >= PERCENTAGE_FORMAT_ITEMS) {
     SETTINGS.statusBarPercentageFormat = CPS::PERCENTAGE_WHOLE;
+  }
+  if (SETTINGS.statusBarTextSize >= TEXT_SIZE_ITEMS) {
+    SETTINGS.statusBarTextSize = CPS::SB_TEXT_SMALL;
   }
   if (SETTINGS.statusBarTopMargin > CPS::STATUS_BAR_TOP_MARGIN_MAX) {
     SETTINGS.statusBarTopMargin = CPS::STATUS_BAR_TOP_MARGIN_MAX;
@@ -254,6 +268,9 @@ void StatusBarSettingsActivity::handleSelection() {
       case HUB_PERCENTAGE_FORMAT:
         SETTINGS.statusBarPercentageFormat = (SETTINGS.statusBarPercentageFormat + 1) % PERCENTAGE_FORMAT_ITEMS;
         break;
+      case HUB_TEXT_SIZE:
+        SETTINGS.statusBarTextSize = (SETTINGS.statusBarTextSize + 1) % TEXT_SIZE_ITEMS;
+        break;
       case HUB_TOP_MARGIN:
         // Cycle 0 -> 4 -> ... -> max -> back to 0.
         if (SETTINGS.statusBarTopMargin + CPS::STATUS_BAR_TOP_MARGIN_STEP > CPS::STATUS_BAR_TOP_MARGIN_MAX) {
@@ -318,6 +335,8 @@ std::string StatusBarSettingsActivity::valueText(const int index) const {
         return std::string();  // Opens the bar's own page.
       case HUB_PERCENTAGE_FORMAT:
         return I18N.get(percentageFormatNames[SETTINGS.statusBarPercentageFormat]);
+      case HUB_TEXT_SIZE:
+        return I18N.get(textSizeNames[SETTINGS.statusBarTextSize < TEXT_SIZE_ITEMS ? SETTINGS.statusBarTextSize : 0]);
       case HUB_TOP_MARGIN: {
         char buf[8];
         snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(SETTINGS.statusBarTopMargin));
