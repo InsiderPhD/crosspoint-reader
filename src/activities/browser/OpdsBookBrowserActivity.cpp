@@ -7,6 +7,8 @@
 #include <OpdsStream.h>
 #include <WiFi.h>
 
+#include <cstdio>
+
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
@@ -241,11 +243,21 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
 
     for (size_t i = pageStartIndex; i < entries.size() && i < static_cast<size_t>(pageStartIndex + PAGE_ITEMS); i++) {
       const auto& entry = entries[i];
+      const int rowY = listTop + 2 + (i % PAGE_ITEMS) * ROW_H;
+      const bool black = i != static_cast<size_t>(selectorIndex);
+      // A category's advertised size, right-aligned; the title gives up the room.
+      int titleWidth = pageWidth - 40;
+      if (entry.type == OpdsEntryType::NAVIGATION && entry.count >= 0) {
+        char countLabel[16];
+        snprintf(countLabel, sizeof(countLabel), "(%ld)", static_cast<long>(entry.count));
+        const int countWidth = renderer.getTextWidth(UI_10_FONT_ID, countLabel);
+        renderer.drawText(UI_10_FONT_ID, pageWidth - 20 - countWidth, rowY, countLabel, black);
+        titleWidth -= countWidth + 10;
+      }
       std::string displayText = (entry.type == OpdsEntryType::NAVIGATION) ? "> " + entry.title : entry.title;
       if (entry.type == OpdsEntryType::BOOK && !entry.author.empty()) displayText += " - " + entry.author;
-      auto item = renderer.truncatedText(UI_10_FONT_ID, displayText.c_str(), pageWidth - 40);
-      renderer.drawText(UI_10_FONT_ID, 20, listTop + 2 + (i % PAGE_ITEMS) * ROW_H, item.c_str(),
-                        i != static_cast<size_t>(selectorIndex));
+      auto item = renderer.truncatedText(UI_10_FONT_ID, displayText.c_str(), titleWidth);
+      renderer.drawText(UI_10_FONT_ID, 20, rowY, item.c_str(), black);
     }
   }
   renderer.displayBuffer();
