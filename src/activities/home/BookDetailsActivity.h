@@ -53,6 +53,14 @@ class BookDetailsActivity final : public Activity {
   std::vector<std::string> ownedSiblingPaths;
   std::vector<uint16_t> siblingOrder;
   int siblingPos = -1;
+  // Third form, for a parent that holds no path strings at all (the Library on
+  // its CLX1 index): the parent resolves one position to a path on demand. A
+  // plain function pointer + context, no std::function. The last resolved path
+  // is kept here so siblingPathAt() can still hand out a pointer.
+  bool (*siblingResolver)(void* context, int pos, std::string& out) = nullptr;
+  void* siblingResolverContext = nullptr;
+  int siblingResolverCount = 0;
+  mutable std::string resolvedSiblingPath;
 
   void loadMetadata();
   void freeDescBuffer();
@@ -85,6 +93,16 @@ class BookDetailsActivity final : public Activity {
     ownedSiblingPaths = std::move(paths);
     siblingPaths = &ownedSiblingPaths;
     siblingOrder.clear();
+    siblingPos = pos;
+  }
+
+  // Library on the CLX1 index: `resolve(context, pos, out)` yields the path at
+  // display position `pos` (0..count-1). The parent must outlive this child,
+  // which it does by staying on the activity stack.
+  void setSiblingsResolver(void* context, bool (*resolve)(void*, int, std::string&), int count, int pos) {
+    siblingResolverContext = context;
+    siblingResolver = resolve;
+    siblingResolverCount = count;
     siblingPos = pos;
   }
 

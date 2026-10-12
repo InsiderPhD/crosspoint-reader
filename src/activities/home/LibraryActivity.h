@@ -1,7 +1,11 @@
 #pragma once
 
+#include <LibraryIndexFile.h>
+
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -10,6 +14,10 @@
 #include "components/SortMenu.h"
 #include "sorting/SortMode.h"
 #include "util/ButtonNavigator.h"
+
+namespace library {
+struct BuildProgress;
+}
 
 class LibraryActivity final : public Activity {
  public:
@@ -35,6 +43,9 @@ class LibraryActivity final : public Activity {
   // While the sort/context menus are open, taps belong to them (inside-row
   // hit-testing + injected Confirm); the grid resumes tap ownership on close.
   bool handlesDirectTouch() const override { return !contextMenu.isOpen() && !sortMenu.isOpen(); }
+  // A first scan of a large card can outlast the sleep timeout; the device must
+  // not go to sleep (and block on the render lock) in the middle of one.
+  bool preventAutoSleep() override { return scanInProgress.load(); }
 
   // Delete the persisted library index so the next library open re-scans the SD
   // card. Call after adding or removing a book from outside the library (e.g. a
@@ -66,6 +77,11 @@ class LibraryActivity final : public Activity {
     // refreshCurrentPageMeta, which no longer probes the SD for covers itself.
     bool coverResolved = false;
     std::string thumbPath;
+    // Index mode only: the book's full path and its record ordinal in the CLX1
+    // index, so loop() can act on the selected book without touching the index
+    // file the render task reads from.
+    std::string path;
+    uint16_t ordinal = 0xFFFF;
   };
   std::array<SlotMeta, MAX_PAGE_SIZE> currentPageMeta;
 
@@ -128,14 +144,70 @@ class LibraryActivity final : public Activity {
 
   // Returns the path at the current logical position (after sort direction is applied).
   // Empty string if list is empty.
-  std::string currentPath() const;
-  std::string pathAtLogicalIndex(size_t logicalIdx) const;
+  // Render-task only in index mode (it reads the index file).
+  std::string pathAtLogicalIndex(size_t logicalIdx);
 
-  size_t currentPage() const { return bookPaths.empty() ? 0 : selectorIndex / pageSize(); }
+  // Books in the displayed list, whichever backing store holds them.
+  size_t bookCount() const { return indexMode ? viewCount : bookPaths.size(); }
+  size_t currentPage() const { return bookCount() == 0 ? 0 : selectorIndex / pageSize(); }
   size_t totalPages() const {
     const int p = pageSize();
-    return (bookPaths.size() + p - 1) / p;
+    return (bookCount() + p - 1) / p;
   }
+
+  // --- CLX1 index backing (SETTINGS.libraryUseIndex) -------------------------
+  //
+  // With the index, nothing per-book is held as a string: bookPaths and the
+  // author/tag/date caches above stay empty. What is resident while the Library
+  // is open is the index file handle (a few hundred bytes), `view` (2 bytes per
+  // book), an optional 1-bit-per-book hidden set and a 512-byte folder offset
+  // table. All of it is released in onExit(); nothing outlives the activity.
+  //
+  // Threading: the index file handle, `view` and currentPageMeta are owned by
+  // the render task. loop() reaches them only through selectedPath(), which
+  // takes the render lock with a try (never blocking the input loop).
+  library::LibraryIndexFile index;
+  bool indexMode = false;
+  // Display row -> record ordinal for the current sort, hidden books removed.
+  std::unique_ptr<uint16_t[]> view;
+  uint16_t viewCount = 0;
+  // By record ordinal: books deleted during this visit (the index on the card
+  // still lists them until the next scan). Null until first needed.
+  std::unique_ptr<uint8_t[]> hiddenBits;
+  // Sparse folder-record offsets so a path read does not walk every folder.
+  std::unique_ptr<uint32_t[]> folderOffsets;
+  uint16_t folderStride = 0;
+  // Page currentPageMeta describes; npos while it is being rebuilt.
+  size_t metaPage = static_cast<size_t>(-1);
+  // Mutations requested by loop()/activity results, applied by the next render.
+  bool pendingViewRebuild = false;
+  uint16_t pendingHideOrdinal = 0xFFFF;
+  // Confirm/tap arrived while the render task held the page meta; retried.
+  bool pendingOpen = false;
+  size_t pendingOpenIndex = 0;
+  // Scan in progress on the render task. loop() keeps running on the main task
+  // and turns a Back release into a cancel request the builder polls.
+  std::atomic<bool> scanInProgress{false};
+  std::atomic<bool> scanCancelRequested{false};
+  // A cancelled first scan leaves no index to show: go Home from loop().
+  std::atomic<bool> exitRequested{false};
+
+  // Load the book list from whichever backing store is usable.
+  void loadLibrary();
+  // Validate (and if needed rebuild, with progress + cancel) the CLX1 index,
+  // open it and build the view. False = use the in-RAM path list instead.
+  bool openIndexBacking();
+  void closeIndexBacking();
+  // Recompute `view` for currentSort. Keeps the previous view on failure.
+  bool rebuildView();
+  bool indexedPath(uint16_t ordinal, std::string& out);
+  // Selected book's path for loop(): page meta when current, else the index,
+  // both under a try-lock in index mode. False = nothing selected or busy.
+  bool selectedPath(std::string& out);
+  void drawScanScreen(const char* message);
+  static bool scanCancelCallback(void* context);
+  static void scanProgressCallback(void* context, const library::BuildProgress& progress);
+  static bool siblingPathCallback(void* context, int pos, std::string& out);
 
   // Enumerate every .epub / .xtc on the SD (recursive, iterative via queue).
   // Order: directory enumeration order (insertion order on FAT/exFAT). The
