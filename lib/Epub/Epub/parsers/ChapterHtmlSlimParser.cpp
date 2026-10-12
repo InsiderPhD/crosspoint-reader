@@ -445,14 +445,132 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
       if (currentTable->pendingRowBytes >= MAX_TABLE_ROW_BUFFER_BYTES) degradeRowAtOpenCell("row size budget");
     }
   } else if (currentTextBlock) {
+    resolveLeadingImageAsInline();
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues);
   }
   partWordBufferIndex = 0;
   nextWordContinues = false;
 }
 
+// Places an image as a block of its own: the paragraph before it is laid out, the image is
+// centred in the column and takes the vertical margins of its container.
+void ChapterHtmlSlimParser::placeBlockImage(std::unique_ptr<ImageBlock> imageBlock) {
+  const int displayWidth = imageBlock->getWidth();
+  const int displayHeight = imageBlock->getHeight();
+
+  // Flush any pending text block so it appears before the image
+  if (partWordBufferIndex > 0) {
+    flushPartWordBuffer();
+  }
+  if (currentTextBlock && !currentTextBlock->isEmpty()) {
+    const BlockStyle parentBlockStyle = currentTextBlock->getBlockStyle();
+    startNewTextBlock(parentBlockStyle);
+  }
+
+  // Apply vertical margins from the container to the image.
+  // Top margin lives on the empty text block (deposited via vertical merge
+  // in startNewTextBlock). Bottom margin was stripped by withoutBottom() for
+  // deferred application at element close, so read it from the stack.
+  int16_t imageMarginTop = 0;
+  int16_t imageMarginBottom = 0;
+  if (currentTextBlock && currentTextBlock->isEmpty()) {
+    const auto& bs = currentTextBlock->getBlockStyle();
+    imageMarginTop = bs.topInset();
+    if (blockStyleStack.size() > 1) {
+      imageMarginBottom = blockStyleStack.back().bottomInset();
+    }
+  }
+
+  // Create page for image - only break if image won't fit remaining space
+  if (currentPage && !currentPage->elements.empty() &&
+      (currentPageNextY + imageMarginTop + displayHeight + imageMarginBottom > viewportHeight)) {
+    completePageFn(std::move(currentPage), xpathParagraphIndex, xpathListItemIndex);
+    completedPageCount++;
+    currentPage.reset(new (std::nothrow) Page());
+    if (!currentPage) {
+      LOG_ERR("EHP", "Failed to create new page");
+      return;
+    }
+    currentPageNextY = 0;
+    previousBlockBottomMargin = 0;
+  } else if (!currentPage) {
+    currentPage.reset(new (std::nothrow) Page());
+    if (!currentPage) {
+      LOG_ERR("EHP", "Failed to create initial page");
+      return;
+    }
+    currentPageNextY = 0;
+    previousBlockBottomMargin = 0;
+  }
+
+  // Apply top margin from container block
+  currentPageNextY += imageMarginTop;
+
+  // Add the image to the page
+  int xPos = (viewportWidth - displayWidth) / 2;
+  auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, currentPageNextY);
+  if (!pageImage) {
+    LOG_ERR("EHP", "Failed to create PageImage");
+    return;
+  }
+  currentPage->elements.push_back(std::move(pageImage));
+  currentPageNextY += displayHeight + imageMarginBottom;
+  previousBlockBottomMargin = 0;
+
+  // The image consumed the empty block's accumulated vertical spacing.
+  // Reset the block so the Vertical merge in startNewTextBlock doesn't
+  // re-apply the same margins to the next text paragraph.
+  if (currentTextBlock && currentTextBlock->isEmpty()) {
+    BlockStyle resetStyle;
+    resetStyle.alignment = (paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
+                               ? CssTextAlign::Justify
+                               : static_cast<CssTextAlign>(paragraphAlignment);
+    currentTextBlock->setBlockStyle(resetStyle);
+  }
+}
+
+// Adds an image to the open paragraph as an inline token. False when no more can wait on the
+// paragraph's unfinished line; the caller then places the image as a block.
+bool ChapterHtmlSlimParser::addInlineImage(std::unique_ptr<ImageBlock> imageBlock, const bool attachToPrevious) {
+  if (!currentTextBlock || !imageBlock) return false;
+  if (pendingInlineImages.size() >= MAX_PENDING_INLINE_IMAGES) {
+    // Lay out every finished line; their images move onto pages and leave the list.
+    makePages(/*includeLastLine=*/false);
+    if (pendingInlineImages.size() >= MAX_PENDING_INLINE_IMAGES) return false;
+  }
+  const uint16_t id = nextInlineImageId++;
+  const auto width = static_cast<uint16_t>(imageBlock->getWidth());
+  const auto height = static_cast<uint16_t>(imageBlock->getHeight());
+  if (pendingInlineImages.empty()) pendingInlineImages.reserve(4);
+  pendingInlineImages.push_back({id, std::move(imageBlock)});
+  currentTextBlock->addInlineImage(id, width, height, attachToPrevious);
+  return true;
+}
+
+// A block boundary arrived with no text after the image: it stands alone, so it is the block
+// image it would have been before inline images existed, placed with the parser in the same
+// state (nothing but whitespace and inline tags has been seen since it was parsed).
+void ChapterHtmlSlimParser::resolveLeadingImageAsBlock() {
+  if (!leadingImage.block) return;
+  auto imageBlock = std::move(leadingImage.block);
+  // Whitespace since the image has already cleared the flag; otherwise restore what it was.
+  if (nextWordContinues) nextWordContinues = leadingImage.savedNextWordContinues;
+  placeBlockImage(std::move(imageBlock));
+}
+
+// The first word of the paragraph arrived: the image flows in front of it.
+void ChapterHtmlSlimParser::resolveLeadingImageAsInline() {
+  if (!leadingImage.block) return;
+  auto imageBlock = std::move(leadingImage.block);
+  if (!addInlineImage(std::move(imageBlock), /*attachToPrevious=*/false)) {
+    LOG_ERR("EHP", "Leading inline image dropped: no text block");
+  }
+}
+
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
+  resolveLeadingImageAsBlock();  // safety net; block boundaries normally resolve it first
+  paragraphClosed = false;
   nextWordContinues = false;  // New block = new paragraph, no continuation
   if (currentTextBlock) {
     // already have a text block running and it is empty - just reuse it
@@ -574,6 +692,14 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   if (self->skipUntilDepth < self->depth) {
     self->depth += 1;
     return;
+  }
+
+  // An image waiting to learn whether it is inline (see LeadingImage) stays undecided across
+  // inline wrappers only. Any block, table part, rule or further image means no text followed
+  // it. Ahead of the paragraph counters, so a page it completes is stamped as it used to be.
+  if (self->leadingImage.block && (isHeaderOrBlock(name) || isTableStructuralTag(name) || strcmp(name, "hr") == 0 ||
+                                   matches(name, IMAGE_TAGS, NUM_IMAGE_TAGS))) {
+    self->resolveLeadingImageAsBlock();
   }
 
   if (strcmp(name, "p") == 0) {
@@ -1004,83 +1130,46 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                   }
                 }
 
-                // Flush any pending text block so it appears before the image
-                if (self->partWordBufferIndex > 0) {
-                  self->flushPartWordBuffer();
-                }
-                if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
-                  const BlockStyle parentBlockStyle = self->currentTextBlock->getBlockStyle();
-                  self->startNewTextBlock(parentBlockStyle);
-                }
-
-                // Apply vertical margins from the container to the image.
-                // Top margin lives on the empty text block (deposited via vertical merge
-                // in startNewTextBlock). Bottom margin was stripped by withoutBottom() for
-                // deferred application at element close, so read it from the stack.
-                int16_t imageMarginTop = 0;
-                int16_t imageMarginBottom = 0;
-                if (self->currentTextBlock && self->currentTextBlock->isEmpty()) {
-                  const auto& bs = self->currentTextBlock->getBlockStyle();
-                  imageMarginTop = bs.topInset();
-                  if (self->blockStyleStack.size() > 1) {
-                    imageMarginBottom = self->blockStyleStack.back().bottomInset();
-                  }
-                }
-
-                // Create page for image - only break if image won't fit remaining space
-                if (self->currentPage && !self->currentPage->elements.empty() &&
-                    (self->currentPageNextY + imageMarginTop + displayHeight + imageMarginBottom >
-                     self->viewportHeight)) {
-                  self->completePageFn(std::move(self->currentPage), self->xpathParagraphIndex,
-                                       self->xpathListItemIndex);
-                  self->completedPageCount++;
-                  self->currentPage.reset(new (std::nothrow) Page());
-                  if (!self->currentPage) {
-                    LOG_ERR("EHP", "Failed to create new page");
-                    return;
-                  }
-                  self->currentPageNextY = 0;
-                  self->previousBlockBottomMargin = 0;
-                } else if (!self->currentPage) {
-                  self->currentPage.reset(new (std::nothrow) Page());
-                  if (!self->currentPage) {
-                    LOG_ERR("EHP", "Failed to create initial page");
-                    return;
-                  }
-                  self->currentPageNextY = 0;
-                  self->previousBlockBottomMargin = 0;
-                }
-
-                // Apply top margin from container block
-                self->currentPageNextY += imageMarginTop;
-
-                // Create ImageBlock and add to page
                 auto imageBlock = makeUniqueNoThrow<ImageBlock>(cachedImagePath, displayWidth, displayHeight);
                 if (!imageBlock) {
                   LOG_ERR("EHP", "Failed to create ImageBlock");
                   return;
                 }
-                int xPos = (self->viewportWidth - displayWidth) / 2;
-                auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, self->currentPageNextY);
-                if (!pageImage) {
-                  LOG_ERR("EHP", "Failed to create PageImage");
-                  return;
-                }
-                self->currentPage->elements.push_back(std::move(pageImage));
-                self->currentPageNextY += displayHeight + imageMarginBottom;
-                self->previousBlockBottomMargin = 0;
 
-                // The image consumed the empty block's accumulated vertical spacing.
-                // Reset the block so the Vertical merge in startNewTextBlock doesn't
-                // re-apply the same margins to the next text paragraph.
-                if (self->currentTextBlock && self->currentTextBlock->isEmpty()) {
-                  BlockStyle resetStyle;
-                  resetStyle.alignment = (self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
-                                             ? CssTextAlign::Justify
-                                             : static_cast<CssTextAlign>(self->paragraphAlignment);
-                  self->currentTextBlock->setBlockStyle(resetStyle);
+                // Inline or block? Inline needs an image small enough to sit in a line (at most
+                // two line heights tall, or told to by CSS display:inline, and narrower than
+                // the column) inside a paragraph that is still open. CSS display:block always
+                // wins. Table cells never take inline images: the grid has no image support
+                // and has already given this row up (see "image in cell" above).
+                const bool cssInline = imgStyle.hasDisplay() && imgStyle.display == CssDisplay::Inline;
+                const bool cssBlock = imgStyle.hasDisplay() && imgStyle.display == CssDisplay::Block;
+                const int textLineHeight =
+                    static_cast<int>(self->renderer.getLineHeight(self->fontId) * self->lineCompression);
+                const bool inlineSized = displayWidth > 0 && displayHeight > 0 && displayWidth < containerWidth &&
+                                         (cssInline || displayHeight <= textLineHeight * 2);
+                if (inlineSized && !cssBlock && self->currentTextBlock && !self->currentTable &&
+                    !self->paragraphClosed) {
+                  if (self->partWordBufferIndex > 0 || !self->currentTextBlock->isEmpty()) {
+                    // Text already on the paragraph: the image joins the line.
+                    const bool attachToPrevious = self->partWordBufferIndex > 0 || self->nextWordContinues;
+                    if (self->partWordBufferIndex > 0) self->flushPartWordBuffer();
+                    if (self->addInlineImage(std::move(imageBlock), attachToPrevious)) {
+                      self->nextWordContinues = true;  // until whitespace says otherwise
+                      self->depth += 1;
+                      return;
+                    }
+                    // Too many images waiting on one line: this one is placed as a block.
+                  } else {
+                    // Opens its paragraph: wait for what follows (see LeadingImage).
+                    self->leadingImage.block = std::move(imageBlock);
+                    self->leadingImage.savedNextWordContinues = self->nextWordContinues;
+                    self->nextWordContinues = true;
+                    self->depth += 1;
+                    return;
+                  }
                 }
 
+                self->placeBlockImage(std::move(imageBlock));
                 self->depth += 1;
                 return;
               } else {
@@ -1590,6 +1679,12 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
     return;
   }
 
+  // The block closed with nothing after its leading image: it is a block image. Before the
+  // closing element's bottom margin is folded into the text block below.
+  if ((headerOrBlockTag || tableStructuralTag) && self->partWordBufferIndex == 0) {
+    self->resolveLeadingImageAsBlock();
+  }
+
   // Flush buffer with current style BEFORE any style changes
   if (self->partWordBufferIndex > 0) {
     // Flush if style will change OR if we're closing a block/structural element
@@ -1707,6 +1802,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
 
   // Clear block style when leaving header or block elements
   if (headerOrBlockTag) {
+    if (strcmp(name, "br") != 0) self->paragraphClosed = true;
     self->currentCssStyle.reset();
     self->updateEffectiveInlineStyle();
 
@@ -1948,6 +2044,7 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   }
 
   // Process last page if there is still text
+  resolveLeadingImageAsBlock();
   if (currentTextBlock) {
     makePages();
     if (!pendingAnchorId.empty()) {
@@ -2064,7 +2161,19 @@ int ChapterHtmlSlimParser::lookupFootnoteLineCount(const char* href, const int w
 }
 
 void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
-  const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
+  const int textLineHeight = renderer.getLineHeight(fontId) * lineCompression;
+  // Inline images on this line. They sit on the text baseline, as CSS places an inline image
+  // by default; one taller than the font's ascent pushes the line's text down by the excess,
+  // so the line grows upwards-in-effect and nothing overlaps the line above.
+  static const std::vector<ParsedText::InlineImagePlacement> kNoLineImages;
+  const auto& lineImages =
+      (currentTextBlock && !pendingInlineImages.empty()) ? currentTextBlock->currentLineImages() : kNoLineImages;
+  int imageRise = 0;
+  if (!lineImages.empty()) {
+    const int ascender = renderer.getFontAscenderSize(fontId);
+    for (const auto& image : lineImages) imageRise = std::max(imageRise, static_cast<int>(image.height) - ascender);
+  }
+  const int lineHeight = textLineHeight + imageRise;
 
   if (!currentPage) {
     currentPage.reset(new (std::nothrow) Page());
@@ -2073,7 +2182,8 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
   }
 
   // Compute word total including this line to know which pending footnotes arrive with it.
-  const int newWordTotal = wordsExtractedInBlock + line->wordCount();
+  // Inline images were counted as words when footnote references recorded their position.
+  const int newWordTotal = wordsExtractedInBlock + line->wordCount() + static_cast<int>(lineImages.size());
 
   // Reserve space for footnotes already on the page PLUS any pending footnotes that will
   // be assigned by this line. This ensures the reference line itself is never placed where
@@ -2194,12 +2304,35 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line) {
 
   // Apply horizontal left inset (margin + padding) as x position offset
   const int16_t xOffset = line->getBlockStyle().leftInset();
-  auto pageLine = makeUniqueNoThrow<PageLine>(std::move(line), xOffset, currentPageNextY);
-  if (!pageLine) {
-    LOG_ERR("EHP", "Failed to create PageLine");
-    return;
+  if (!lineImages.empty()) {
+    const int baselineY = currentPageNextY + imageRise + renderer.getFontAscenderSize(fontId);
+    for (const auto& image : lineImages) {
+      const auto it = std::find_if(pendingInlineImages.begin(), pendingInlineImages.end(),
+                                   [&image](const PendingInlineImage& pending) { return pending.id == image.id; });
+      if (it == pendingInlineImages.end()) {
+        LOG_ERR("EHP", "Missing inline image %u", image.id);
+        continue;
+      }
+      auto pageImage = makeUniqueNoThrow<PageImage>(std::move(it->block), static_cast<int16_t>(xOffset + image.x),
+                                                    static_cast<int16_t>(baselineY - image.height));
+      pendingInlineImages.erase(it);
+      if (!pageImage) {
+        LOG_ERR("EHP", "Failed to create inline PageImage");
+        continue;
+      }
+      currentPage->elements.push_back(std::move(pageImage));
+    }
   }
-  currentPage->elements.push_back(std::move(pageLine));
+  // A line holding nothing but images has no words to draw.
+  if (!line->isEmpty()) {
+    auto pageLine =
+        makeUniqueNoThrow<PageLine>(std::move(line), xOffset, static_cast<int16_t>(currentPageNextY + imageRise));
+    if (!pageLine) {
+      LOG_ERR("EHP", "Failed to create PageLine");
+      return;
+    }
+    currentPage->elements.push_back(std::move(pageLine));
+  }
   currentPageNextY += lineHeight;
 }
 

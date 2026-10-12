@@ -11,6 +11,7 @@
 #include <limits>
 #include <vector>
 
+#include "InlineImageToken.h"
 #include "hyphenation/Hyphenator.h"
 
 constexpr int MAX_COST = std::numeric_limits<int>::max();
@@ -72,6 +73,10 @@ void stripSoftHyphensInPlace(std::string& word) {
 uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
                           const EpdFontFamily::Style style, const TextLayoutOptions& layout,
                           const bool appendHyphen = false) {
+  // An inline image is as wide as it is drawn; no font is involved.
+  if (uint16_t id, width, height; parseInlineImageToken(word, id, width, height)) {
+    return width;
+  }
   if (word.size() == 1 && word[0] == ' ' && !appendHyphen) {
     return static_cast<uint16_t>(std::max(0, layout.scaleSpace(renderer.getSpaceWidth(fontId, style))));
   }
@@ -97,6 +102,11 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
 // cannot disagree about a line's width.
 int gapBetween(const GfxRenderer& renderer, const int fontId, const std::string& left, const std::string& right,
                const EpdFontFamily::Style leftStyle, const bool continues, const TextLayoutOptions& layout) {
+  // Beside an inline image there are no glyphs to kern against: glued means touching, and a
+  // real word gap is the plain (word-spacing scaled) space.
+  if (isInlineImageToken(left) || isInlineImageToken(right)) {
+    return continues ? 0 : layout.scaleSpace(renderer.getSpaceWidth(fontId, leftStyle));
+  }
   const uint32_t leftCp = lastCodepoint(left);
   const uint32_t rightCp = firstCodepoint(right);
   if (continues) {
@@ -238,9 +248,16 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   wordContinues.push_back(attachToPrevious);
 }
 
+void ParsedText::addInlineImage(const uint16_t id, const uint16_t width, const uint16_t height,
+                                const bool attachToPrevious) {
+  words.push_back(makeInlineImageToken(id, width, height));
+  wordStyles.push_back(EpdFontFamily::REGULAR);
+  wordContinues.push_back(attachToPrevious && words.size() > 1);
+}
+
 // Returns true if word i should be rendered with bionic bolding: feature on and not already bold.
 bool ParsedText::isBionicWord(const size_t i) const {
-  return bionicReadingEnabled && (wordStyles[i] & EpdFontFamily::BOLD) == 0;
+  return bionicReadingEnabled && (wordStyles[i] & EpdFontFamily::BOLD) == 0 && !isInlineImageToken(words[i]);
 }
 
 // Consumes data to minimize memory usage
@@ -289,7 +306,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
     allText.reserve(totalSize);
     for (size_t i = 0; i < words.size(); i++) {
       if (i > 0) allText += ' ';
-      allText += words[i];
+      if (!isInlineImageToken(words[i])) allText += words[i];
     }
     if (hyphenationEnabled) allText += '-';
 
@@ -325,6 +342,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
   for (size_t i = 0; i < lineCount; ++i) {
     extractLine(i, pageWidth, wordWidths, wordContinues, lineBreakIndices, processLine, renderer, fontId, scratch);
   }
+  lineImages.clear();  // only meaningful inside processLine
 
   if (preserveSource) {
     words = std::move(savedWords);
@@ -532,8 +550,10 @@ void ParsedText::applyParagraphIndent() {
     // CSS text-indent is explicitly set (even if 0) - don't use fallback EmSpace
     // The actual indent positioning is handled in extractLine()
   } else if (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left) {
-    // No CSS text-indent defined - use EmSpace fallback for visual indent
-    words.front().insert(0, "\xe2\x80\x83");
+    // No CSS text-indent defined - use EmSpace fallback for visual indent. Not in front of an
+    // inline image (a drop-cap glyph image): it is not text, and it marks the paragraph's
+    // opening on its own.
+    if (!isInlineImageToken(words.front())) words.front().insert(0, "\xe2\x80\x83");
   }
 }
 
@@ -616,6 +636,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   }
 
   const std::string& word = words[wordIndex];
+  if (isInlineImageToken(word)) return false;  // an image cannot be split across lines
   const auto style = wordStyles[wordIndex];
 
   // Collect candidate breakpoints (byte offsets and hyphen requirements).
@@ -696,6 +717,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
                              const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
                              const GfxRenderer& renderer, const int fontId, LineScratch& scratch) {
   scratch.clear();
+  lineImages.clear();
   const size_t lineBreak = lineBreakIndices[breakIndex];
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
 
@@ -832,6 +854,12 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   outSuffixX.reserve(lineWordCount);
 
   for (size_t i = 0; i < lineWordCount; ++i) {
+    // An inline image took part in the layout as a word; it leaves the line here. The caller
+    // reads its position from currentLineImages() and places the image on the page.
+    if (uint16_t imageId, imageWidth, imageHeight; parseInlineImageToken(ew[i], imageId, imageWidth, imageHeight)) {
+      lineImages.push_back({imageId, lineXPos[i], imageHeight});
+      continue;
+    }
     if (i < esuf.size() && esuf[i] && !outWords.empty()) {
       // Merge suffix string into the preceding bold-prefix word.
       const uint8_t boundary = static_cast<uint8_t>(std::min(outWords.back().size(), size_t{255}));

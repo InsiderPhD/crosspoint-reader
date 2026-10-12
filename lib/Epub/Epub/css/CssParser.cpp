@@ -388,7 +388,11 @@ void CssParser::parseDeclarationIntoStyle(std::string_view decl, CssStyle& style
     }
   } else if (iequalsAscii(name, "display")) {
     const std::string_view displayValue = stripTrailingImportant(value);
-    style.display = iequalsAscii(displayValue, "none") ? CssDisplay::None : CssDisplay::Block;
+    // Inline is kept apart from Block only so an <img> can be told to flow with the text
+    // (or not to); for every other element the two behave alike.
+    style.display = iequalsAscii(displayValue, "none")     ? CssDisplay::None
+                    : iequalsAscii(displayValue, "inline") ? CssDisplay::Inline
+                                                           : CssDisplay::Block;
     style.defined.display = 1;
   } else if (iequalsAscii(name, "direction")) {
     const std::string_view directionValue = stripTrailingImportant(value);

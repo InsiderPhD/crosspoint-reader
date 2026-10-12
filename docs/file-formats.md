@@ -125,7 +125,7 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-> **Current version: 46** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> **Current version: 47** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
 > The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
 > v30 inline ("on page") footnotes; v31–v33 KOReader xpath/paragraph sync data and
 > nested block styles; v34 `<pre>` blocks carry a monospace font override; v35 hanging
@@ -151,6 +151,13 @@ if (parsedSize != fileSize) {
 > other render settings; and every TextBlock's style tail gains `characterSpacing i8`
 > after `fontOverride`, so a line is drawn with the letter spacing its word positions
 > were computed for.
+> v47 changes layout only (the page payload is unchanged): a small image that shares its
+> paragraph with text is laid out in the line instead of as a centred block. It is still
+> stored as an ordinary `PageImage` (tag 2), positioned so its bottom edge sits on the
+> line's baseline; a line made taller by an image has its `PageLine` moved down by the
+> same amount. The CSS rule cache (`css_rules.cache`) moves to version 7 in the same
+> change: `display: inline` is now stored as display value 2 instead of being folded
+> into block (0).
 >
 > Any change to the on-disk structure **must** bump this constant — a stale cache read
 > against a new layout is how you get a hard fault, not a graceful failure.

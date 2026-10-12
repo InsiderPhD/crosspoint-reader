@@ -15,6 +15,16 @@
 class GfxRenderer;
 
 class ParsedText {
+ public:
+  // Where an inline image landed on the line being extracted. `x` is relative to the line's
+  // left edge, like TextBlock word positions.
+  struct InlineImagePlacement {
+    uint16_t id;
+    int16_t x;
+    uint16_t height;
+  };
+
+ private:
   // std::deque, not std::vector: a paragraph can hold thousands of tokens (CJK
   // splits every character), and a vector grows by reallocating its whole element
   // array into ONE contiguous block (32 B/std::string -> 64-128 KB at a few thousand
@@ -41,6 +51,9 @@ class ParsedText {
   // captured at construction); characterSpacing is also stamped into blockStyle there so
   // every emitted line carries it to TextBlock::render.
   TextLayoutOptions layout;
+  // Inline images on the line handed to processLine (see currentLineImages). Empty, with no
+  // allocation, for every paragraph that has none.
+  std::vector<InlineImagePlacement> lineImages;
 
   struct LineScratch;
 
@@ -71,6 +84,13 @@ class ParsedText {
   ~ParsedText() = default;
 
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false);
+  // Adds an image that flows in the line like a word `width` pixels wide (InlineImageToken.h).
+  // attachToPrevious: no whitespace separated it from the word before, so the two stay
+  // together on a line with no gap between them.
+  void addInlineImage(uint16_t id, uint16_t width, uint16_t height, bool attachToPrevious);
+  // Valid only inside a processLine callback: the inline images on the line being handed
+  // over, which the TextBlock itself does not carry.
+  const std::vector<InlineImagePlacement>& currentLineImages() const { return lineImages; }
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }

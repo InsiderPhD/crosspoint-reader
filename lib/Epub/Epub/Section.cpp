@@ -27,7 +27,9 @@ namespace {
 //     and top spacing apply once per paragraph (upstream d5693c321). Layout-only change.
 // 46: user text-layout controls. Header gains characterSpacing, wordSpacingPercent and
 //     paragraphIndent (cache validation); every TextBlock's style tail gains characterSpacing.
-constexpr uint8_t SECTION_FILE_VERSION = 46;
+// 47: small images that share a paragraph with text are laid out in the line (inline
+//     images). Layout-only: the page payload is unchanged, an inline image is a PageImage.
+constexpr uint8_t SECTION_FILE_VERSION = 47;
 // Staging buffer for page serialization, one per section build (not per page). 2KB is four
 // SD sectors: a typical text page (~3-6KB serialized) goes out in two to four writes, and a
 // field larger than the buffer (a long line's word arena) bypasses it. Heap, not stack: 2KB

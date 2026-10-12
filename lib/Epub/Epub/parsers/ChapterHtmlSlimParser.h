@@ -154,6 +154,38 @@ class ChapterHtmlSlimParser {
   std::string contentBase;
   std::string imageBasePath;
 
+  // ── Inline images ──────────────────────────────────────────────────────────
+  // A small image that shares its paragraph with text flows in the line (see
+  // InlineImageToken.h); everything else stays a centred block image, as before.
+  //
+  // Images already added to currentTextBlock as tokens, waiting for the line they land on.
+  // Bounded: at MAX_PENDING_INLINE_IMAGES the paragraph is soft-flushed, and an image that
+  // still does not fit is placed as a block. Empty (no allocation) for books without any.
+  struct PendingInlineImage {
+    uint16_t id;
+    std::unique_ptr<ImageBlock> block;
+  };
+  static constexpr size_t MAX_PENDING_INLINE_IMAGES = 16;
+  std::vector<PendingInlineImage> pendingInlineImages;
+  uint16_t nextInlineImageId = 1;
+  // An inline-sized image that OPENS its paragraph cannot be classified when it is parsed:
+  // followed by text it is inline (a drop-cap glyph, a leading icon); alone in its block it
+  // is what it has always been, a centred block image (a scene-break ornament). It waits
+  // here until the next word (inline) or the next block boundary (block) decides.
+  struct LeadingImage {
+    std::unique_ptr<ImageBlock> block;
+    bool savedNextWordContinues = false;
+  };
+  LeadingImage leadingImage;
+  // True once the block element that owns currentTextBlock's words has closed: the words are
+  // still buffered (they are laid out when the next block starts), but an image that follows
+  // is not inside that paragraph.
+  bool paragraphClosed = false;
+  bool addInlineImage(std::unique_ptr<ImageBlock> block, bool attachToPrevious);
+  void placeBlockImage(std::unique_ptr<ImageBlock> block);
+  void resolveLeadingImageAsBlock();
+  void resolveLeadingImageAsInline();
+
   // Style tracking (replaces depth-based approach)
   struct StyleStackEntry {
     int depth = 0;

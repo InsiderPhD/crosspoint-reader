@@ -54,8 +54,9 @@ enum class CssFontWeight : uint8_t { Normal = 0, Bold = 1 };
 // Text decoration options
 enum class CssTextDecoration : uint8_t { None = 0, Underline = 1 };
 
-// Display options - only None and Block are relevant for e-ink rendering
-enum class CssDisplay : uint8_t { Block = 0, None = 1 };
+// Display options. None hides the element; Inline matters for images only (see
+// ChapterHtmlSlimParser's inline-image rule). Values are stored in the CSS rule cache.
+enum class CssDisplay : uint8_t { Block = 0, None = 1, Inline = 2 };
 
 // Text direction (LTR / RTL)
 enum class CssTextDirection : uint8_t { Ltr = 0, Rtl = 1 };
@@ -143,7 +144,7 @@ struct CssStyle {
   CssLength paddingRight;   // Padding right
   CssLength imageHeight;    // Height for img (e.g. 2em) – width derived from aspect ratio when only height set
   CssLength imageWidth;     // Width for img when both or only width set
-  CssDisplay display = CssDisplay::Block;                       // display property (Block or None)
+  CssDisplay display = CssDisplay::Block;                       // display property
   CssVerticalAlign verticalAlign = CssVerticalAlign::Baseline;  // vertical-align (super/sub positioning)
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
