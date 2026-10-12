@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 struct BookFusionStoredPosition {
   float percentage = 0.0f;
@@ -51,9 +52,19 @@ class BookFusionBookIdStore {
 
   // The EPUB was renamed or moved: re-key its sidecar (the file name is a hash
   // of the path) so the book stays linked. True when there was nothing to move.
+  // The move is also noted in the moved-book list (below).
   static bool movePath(const char* oldEpubPath, const char* newEpubPath);
+
+  // Reverse lookup for a book that has been renamed or moved on the device. The
+  // sidecar name is a one-way hash of the path, so "is book_id N on the card,
+  // and where?" cannot be answered from the sidecars; movePath() therefore
+  // records id -> current path in /.crosspoint/bookfusion_moved.json. Only moved
+  // books are listed, so the file stays a few entries long. False when the book
+  // was never moved. The caller checks the path still holds that book.
+  static bool loadMovedPath(uint32_t bookId, std::string& outPath);
 
  private:
   // Derives /.crosspoint/bookfusion_<32hexchars>.json from the epub path.
   static void buildSidecarPath(const char* epubPath, char* outPath, size_t maxLen);
+  static bool saveMovedPath(uint32_t bookId, const char* epubPath);
 };

@@ -3,6 +3,7 @@
 #include <FontDecompressor.h>
 #include <Logging.h>
 #include <SdCardFont.h>
+#include <TtfEpdFont.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -61,6 +62,9 @@ void FontCacheManager::clearCachesDeep() {
   for (auto& [id, font] : sdCardFonts_) {
     font->clearPersistentCache();
   }
+#if CROSSPOINT_VECTOR_FONTS
+  TtfEpdFont::releaseAllCaches();
+#endif
 }
 
 void FontCacheManager::releaseSdFontCaches() {
@@ -68,6 +72,12 @@ void FontCacheManager::releaseSdFontCaches() {
   for (auto& [id, font] : sdCardFonts_) {
     font->releaseResidentCaches();
   }
+#if CROSSPOINT_VECTOR_FONTS
+  // A vector font's glyph arenas (PSRAM) go on the same transitions. Unlike the
+  // SD caches above they hold no prewarmed state: a released glyph is simply
+  // rasterised again the next time it is measured or drawn.
+  TtfEpdFont::releaseAllCaches();
+#endif
 }
 
 void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t styleMask) {

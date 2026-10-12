@@ -51,12 +51,18 @@ int resolveYearFromTimestamp(const uint32_t timestamp) {
     return 0;
   }
 
-  time_t currentTime = static_cast<time_t>(timestamp);
-  tm localTime = {};
-  if (localtime_r(&currentTime, &localTime) == nullptr) {
+  // Through TimeUtils so the Time Zone + DST rule is applied first: a bare
+  // localtime_r() here could run before anything configured TZ this boot (a
+  // board with no RTC opens Stats without ever calling configureTimezone) and
+  // put the first hours of 1 January in the old year.
+  int year = 0;
+  unsigned month = 0;
+  unsigned day = 0;
+  const uint32_t dayOrdinal = TimeUtils::getLocalDayOrdinal(timestamp);
+  if (dayOrdinal == 0 || !TimeUtils::getDateFromDayOrdinal(dayOrdinal, year, month, day)) {
     return 0;
   }
-  return localTime.tm_year + 1900;
+  return year;
 }
 
 }  // namespace

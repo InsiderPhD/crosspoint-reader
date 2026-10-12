@@ -233,7 +233,15 @@ class EpubReaderActivity final : public Activity {
   // dictionary (see ClipSelectionActivity's lookupMode). The word geometry
   // build is identical, which is the whole reason this is a mode rather than a
   // second copy of it.
-  void startClipSelection(int anchorX = -1, int anchorY = -1, bool forLookup = false);
+  // liveContact (X4 Pro Hold Action modes): the finger holding the anchor point
+  // is still down and is handed to the overlay to continue as a drag, so the
+  // overlay opens ONLY if a word is under that point (and, for a lookup, the
+  // lookup is allowed). Returns true when the overlay was opened; on false with
+  // liveContact the caller still owns the contact and must suppress it.
+  bool startClipSelection(int anchorX = -1, int anchorY = -1, bool forLookup = false, bool liveContact = false);
+  // True when a lookup can run now; otherwise raises the on-page message saying
+  // why not (no dictionary set, or Bluetooth holding the heap a lookup needs).
+  bool dictionaryLookupAllowed();
   // Open the word picker for a lookup, or show "No dictionary set" when none is
   // configured — there is nothing to pick a word for otherwise.
   void openDictionaryLookup();

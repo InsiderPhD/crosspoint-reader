@@ -6,6 +6,7 @@
 #include <atomic>
 
 class GfxRenderer;
+class TtfEpdFont;
 
 /// Facade that owns the SD card font registry, manager, and resolver logic.
 /// Hides implementation details behind a single begin() + ensureLoaded() API.
@@ -46,6 +47,21 @@ class SdCardFontSystem {
   }
 
  private:
+#if CROSSPOINT_VECTOR_FONTS
+  // --- TrueType/OpenType families (TtfEpdFont; PSRAM boards only) ------------
+  // Load the selected vector family at the size the font-size setting maps to
+  // and register it with the renderer as an ordinary font family. A no-op when
+  // that family and size are already loaded, unless forceReload.
+  void loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRenderer& renderer, bool forceReload);
+  // Unregister and free the loaded vector family, if any.
+  void unloadTtf(GfxRenderer& renderer);
+
+  TtfEpdFont* ttf_ = nullptr;  // owned; PSRAM (TtfEpdFont::create)
+  char ttfFamily_[32] = "";    // loaded vector family ("" = none); sized as sdFontFamilyName
+  int ttfFontId_ = 0;          // renderer font id for ttf_ (0 = none)
+  uint8_t ttfPointSize_ = 0;   // size ttf_ was built at
+#endif
+
   SdCardFontRegistry registry_;
   SdCardFontManager manager_;
   std::atomic<bool> registryDirty_{false};

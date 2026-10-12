@@ -127,12 +127,18 @@ void EpubReaderBookmarksActivity::armStaleReleaseGuard() {
 }
 
 void EpubReaderBookmarksActivity::showBookmarkActions() {
-  if (bookmarks.empty()) {
+  if (bookmarks.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(bookmarks.size())) {
     return;
   }
+  // Headed by the bookmark's own name when it has one, so the list says which
+  // bookmark is about to be renamed or deleted. The picker keeps only the
+  // pointer: the name is not touched until the picker has closed (rename and
+  // delete both run from its result handler), so nothing is copied.
+  const std::string& name = bookmarks[selectorIndex].name;
+  const char* title = name.empty() ? tr(STR_BOOKMARK) : name.c_str();
   // Heap: one small activity object, freed when the list closes.
   auto picker = makeUniqueNoThrow<ListPickerActivity>(
-      renderer, mappedInput, tr(STR_BOOKMARK), ACTION_COUNT, 0,
+      renderer, mappedInput, title, ACTION_COUNT, 0,
       [](int index) { return std::string(index == ACTION_RENAME ? tr(STR_RENAME) : tr(STR_DELETE)); }, nullptr,
       /*markInitial=*/false);
   if (!picker) {

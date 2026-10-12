@@ -202,6 +202,9 @@ class CrossPointWebServer {
     std::string filePath;
     bool valid = false;
     bool magicChecked = false;
+    bool isVector = false;  // .ttf/.otf upload (builds with CROSSPOINT_VECTOR_FONTS) vs .cpfont
+    // Why the upload was refused, for the browser. Points at a string literal.
+    const char* error = nullptr;
     size_t bytesWritten = 0;
     static constexpr size_t BUFFER_SIZE = 4096;
     std::vector<uint8_t> buffer;

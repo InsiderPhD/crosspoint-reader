@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "../Activity.h"
+#include "../util/FileRenameFlow.h"
 #include "./FileBrowserActivity.h"
 #include "RecentBooksStore.h"
 #include "components/BookContextMenu.h"
@@ -19,6 +20,10 @@ class HomeActivity final : public Activity {
   bool coverRendered = false;      // Track if cover has been rendered once
   bool coverBufferStored = false;  // Track if cover buffer is stored
   BookContextMenu contextMenu;
+  FileRenameFlow renameFlow;
+  // Set by Book Info (a child of this screen) when it renames the book, so the
+  // recents are reloaded on the way back.
+  bool renamedInBookInfo = false;
   uint8_t* coverBuffer = nullptr;  // HomeActivity's own buffer for cover image
   size_t coverBufferSize = 0;      // Bytes allocated to coverBuffer
   // Logical rect last passed to drawRecentBookCover. The cover snapshot only

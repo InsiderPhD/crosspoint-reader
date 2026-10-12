@@ -24,7 +24,7 @@ constexpr unsigned long LOOKUP_ANCHOR_HOLD_MS = 500;
 ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList,
                                              const int fontId, Section& section, const int startPageInSection,
                                              const int marginTop, const int marginLeft, const int initialCursorIdx,
-                                             const bool preAnchored, const bool lookupMode)
+                                             const bool preAnchored, const bool lookupMode, const bool adoptContact)
     : Activity("ClipSelection", renderer, mappedInput),
       wordList(std::move(wordList)),
       fontId(fontId),
@@ -40,6 +40,19 @@ ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputM
   if (preAnchored) {
     startMarkIdx = cursorIdx;
   }
+#if FREEINK_DEVICE_X4PRO
+  if (adoptContact) {
+    // Seed the drag tracker as though it had already seen this contact land on
+    // the cursor word: touchWasHeld stops the first frame from re-reading the
+    // start word from wherever the finger has drifted to, and makes a contact
+    // that ended while the reader was building the word list read as a lift.
+    contactAdopted = true;
+    touchWasHeld = true;
+    contactStartWord = cursorIdx;
+  }
+#else
+  (void)adoptContact;
+#endif
 }
 
 void ClipSelectionActivity::onEnter() {
@@ -125,6 +138,13 @@ void ClipSelectionActivity::finishSelection() {
 void ClipSelectionActivity::loop() {
   const int total = static_cast<int>(wordList.words.size());
   using Button = MappedInputManager::Button;
+
+#if FREEINK_DEVICE_X4PRO
+  // Ahead of the buttons: while the finger that opened this screen is still
+  // down, a side key or page-turn remote must not move the cursor out from
+  // under the word it is holding.
+  if (handleAdoptedContact()) return;
+#endif
 
   auto moveCursor = [this](const int nextIdx) {
     if (nextIdx == cursorIdx) return;
@@ -234,6 +254,48 @@ void ClipSelectionActivity::loop() {
 }
 
 #if FREEINK_DEVICE_X4PRO
+bool ClipSelectionActivity::handleAdoptedContact() {
+  if (!contactAdopted) return false;
+
+  // Same tracking as the two drag handlers below, with the start word fixed by
+  // the reader's hold instead of read from the first frame.
+  int lx, ly;
+  const bool held = mappedInput.heldTouchPoint(lx, ly);
+  if (held) {
+    const int idx = clipword::findWordAt(wordList, wordList.words[cursorIdx].pageIdx, lx, ly);
+    if (!dragging && idx >= 0 && idx != contactStartWord) {
+      dragging = true;
+      startMarkIdx = contactStartWord;
+    }
+    // Word gaps report -1: keep the last word until the finger reaches another.
+    if (dragging && idx >= 0 && idx != cursorIdx) {
+      cursorIdx = idx;
+      requestUpdate();
+    }
+    return true;
+  }
+
+  // The contact is over as far as this screen can tell. Besides a lift,
+  // heldTouchPoint() also goes false when a second finger lands or the finger
+  // slides onto an action-bar button, with the first finger still down. Drop
+  // whatever is left of the contact in every case: its eventual lift must not
+  // come back as a tap on a word, an action-bar press, or (once this screen has
+  // finished, in the same frame) a tap zone in the reader.
+  mappedInput.suppressTouchContact();
+  contactAdopted = false;
+  touchWasHeld = false;
+  // A drag that came back to the word it started on is a finger that wandered
+  // during the hold, not a range.
+  const bool draggedRange = dragging && cursorIdx != contactStartWord;
+  dragging = false;
+  // Lookup: lifting is the lookup, of the held word or the dragged phrase.
+  // Clip: lifting after a drag saves, as a drag begun on this screen does; with
+  // no drag the held word stays anchored (as it is after a Shortcut-mode hold)
+  // for a tap, a new drag or the buttons to finish.
+  if (lookupMode || draggedRange) finishSelection();
+  return true;
+}
+
 bool ClipSelectionActivity::handleLookupDrag() {
   // Deliberately narrower than handleRangeTouch(): only a contact that lands on
   // the word already under the cursor can become a drag. Any other contact stays
