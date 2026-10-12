@@ -144,6 +144,8 @@ class ChapterHtmlSlimParser {
   uint16_t viewportWidth;
   uint16_t viewportHeight;
   bool hyphenationEnabled;
+  // User spacing controls, handed to every ParsedText layout pass (body and table cells).
+  TextLayoutOptions textLayout;
   const CssParser* cssParser;
   bool embeddedStyle;
   uint8_t imageRendering;
@@ -333,6 +335,8 @@ class ChapterHtmlSlimParser {
         imageBasePath(imageBasePath) {}
 
   ~ChapterHtmlSlimParser() = default;
+  // Call before parseAndBuildPages(). A setter rather than one more constructor argument.
+  void setTextLayout(const TextLayoutOptions& options) { textLayout = options; }
   bool parseAndBuildPages();
   void addLineToPage(std::unique_ptr<TextBlock> line);
   const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }

@@ -273,16 +273,28 @@ class GfxRenderer {
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   void drawCenteredText(int fontId, int y, const char* text, bool black = true,
                         EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+  // `tracking` is extra letter spacing in HALF-pixel steps (negative tightens), added at every
+  // boundary between two visible glyphs; see trackingPixels(). 0 is the plain path, byte for
+  // byte what it always drew. Any other value also turns ligatures off, since a ligature is one
+  // glyph and could not be spaced, and so measurement and drawing count the same boundaries.
   void drawText(int fontId, int x, int y, const char* text, bool black = true,
-                EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+                EpdFontFamily::Style style = EpdFontFamily::REGULAR, int8_t tracking = 0) const;
   int getSpaceWidth(int fontId, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   /// Returns the total inter-word advance: fp4::toPixel(spaceAdvance + kern(leftCp,' ') + kern(' ',rightCp)).
   /// Using a single snap avoids the +/-1 px rounding error that arises when space advance and kern are
   /// snapped separately and then added as integers.
   int getSpaceAdvance(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style) const;
-  /// Returns the kerning adjustment between two adjacent codepoints.
-  int getKerning(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style) const;
-  int getTextAdvanceX(int fontId, const char* text, EpdFontFamily::Style style) const;
+  /// Returns the kerning adjustment between two adjacent codepoints, plus one boundary's worth
+  /// of \p tracking when both are visible glyphs.
+  int getKerning(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style, int8_t tracking = 0) const;
+  /// Advance of \p text as drawText(..., tracking) lays it out.
+  int getTextAdvanceX(int fontId, const char* text, EpdFontFamily::Style style, int8_t tracking = 0) const;
+  /// Whole pixels that \p tracking (half-pixel steps) adds over \p gaps glyph boundaries. The
+  /// running total is snapped, not each step, so an odd setting alternates 0/1 px along a word
+  /// instead of rounding every boundary the same way. Integer only: no FPU on the C3.
+  static constexpr int trackingPixels(const int gaps, const int8_t tracking) {
+    return fp4::toPixel(gaps * static_cast<int>(tracking) * fp4::HALF);
+  }
   int getFontAscenderSize(int fontId) const;
   int getLineHeight(int fontId) const;
   std::string truncatedText(int fontId, const char* text, int maxWidth,

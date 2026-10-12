@@ -2270,7 +2270,7 @@ void ChapterHtmlSlimParser::makePages(const bool includeLastLine) {
         if (topSpacingPending) applyTopSpacing();
         addLineToPage(std::move(textBlock));
       },
-      includeLastLine);
+      includeLastLine, /*preserveSource=*/false, textLayout);
 
   // Bottom spacing, the footnote fallback and paragraph spacing belong to the END of the
   // paragraph: a soft flush leaves the block open, with its last line still to come.
@@ -2499,7 +2499,7 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
             ++producedLines;  // count past the cap: the overflow is the signal
             if (cell.lines.size() < MAX_CELL_LINES) cell.lines.push_back(std::move(tb));
           },
-          /*includeLastLine=*/true, /*preserveSource=*/true);
+          /*includeLastLine=*/true, /*preserveSource=*/true, textLayout);
       // Never truncate (that silently deleted words in witchhunt): the source is intact thanks
       // to preserveSource, so the caller can still emit it as paragraphs.
       if (producedLines > MAX_CELL_LINES) {

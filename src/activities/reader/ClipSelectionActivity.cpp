@@ -299,7 +299,11 @@ void ClipSelectionActivity::applyWordStyle(const WordRef& word, const ClipWordSt
 
   if (!clipword::isBlank(text)) {
     const bool textBlack = !invert;
-    renderer.drawText(fontId, drawX, word.y, clipword::hasEmSpacePrefix(text) ? text + 3 : text, textBlack, textStyle);
+    // Redrawn over the page's own glyphs, so it must use the page's letter spacing. Read from
+    // the setting rather than stored per word: the page was laid out with this value (the
+    // section cache is keyed on it) and WordRef is deliberately kept at 14 bytes.
+    renderer.drawText(fontId, drawX, word.y, clipword::hasEmSpacePrefix(text) ? text + 3 : text, textBlack, textStyle,
+                      SETTINGS.readerTextLayout().characterSpacing);
   }
 
   if ((style.flags & ClipWordStyle::UNDERLINE) != 0) {

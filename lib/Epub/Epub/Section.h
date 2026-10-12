@@ -5,6 +5,7 @@
 #include <string>
 
 #include "Epub.h"
+#include "TextLayoutOptions.h"
 
 class BufferedPrint;
 class Page;
@@ -20,7 +21,7 @@ class Section {
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
                               bool embeddedStyle, uint8_t imageRendering, uint8_t footnoteDisplay,
-                              bool bionicReadingEnabled);
+                              bool bionicReadingEnabled, const TextLayoutOptions& textLayout);
   // `out` is the build's staged view of `file` (see createSectionFile). It is empty on
   // entry and on return, so file.position() is exact at every page boundary.
   uint32_t onPageComplete(std::unique_ptr<Page> page, BufferedPrint& out);
@@ -37,12 +38,14 @@ class Section {
   ~Section() = default;
   bool loadSectionFile(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                        uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled, bool embeddedStyle,
-                       uint8_t imageRendering, uint8_t footnoteDisplay, bool bionicReadingEnabled);
+                       uint8_t imageRendering, uint8_t footnoteDisplay, bool bionicReadingEnabled,
+                       const TextLayoutOptions& textLayout);
   bool clearCache() const;
   bool createSectionFile(int fontId, int codeFontId, float lineCompression, bool extraParagraphSpacing,
                          uint8_t paragraphAlignment, uint16_t viewportWidth, uint16_t viewportHeight,
                          bool hyphenationEnabled, bool embeddedStyle, uint8_t imageRendering, uint8_t footnoteDisplay,
-                         bool bionicReadingEnabled, const std::function<void()>& popupFn = nullptr);
+                         bool bionicReadingEnabled, const TextLayoutOptions& textLayout,
+                         const std::function<void()>& popupFn = nullptr);
   std::unique_ptr<Page> loadPageFromSectionFile();
 
   // Look up the page number for an anchor id from the section cache file.

@@ -24,8 +24,15 @@ constexpr StrId kFamilyLabels[] = {StrId::STR_BOOKERLY, StrId::STR_INTER, StrId:
                                    StrId::STR_MONOSPACE};
 constexpr StrId kSizeLabels[] = {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE, StrId::STR_X_LARGE};
 constexpr StrId kSpacingLabels[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE};
+// Same order as the persisted index (SettingsList.h): -1.5 px .. +1.5 px.
+constexpr StrId kCharSpacingLabels[] = {
+    StrId::STR_SPACING_MINUS_3, StrId::STR_SPACING_MINUS_2, StrId::STR_SPACING_MINUS_1, StrId::STR_SPACING_ZERO,
+    StrId::STR_SPACING_PLUS_1,  StrId::STR_SPACING_PLUS_2,  StrId::STR_SPACING_PLUS_3};
 constexpr StrId kAlignLabels[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
                                   StrId::STR_BOOK_S_STYLE};
+// Same order as the persisted index (TextLayoutOptions::PARAGRAPH_INDENT_*).
+constexpr StrId kIndentLabels[] = {StrId::STR_BOOK_S_STYLE, StrId::STR_NONE_OPT, StrId::STR_SMALL,
+                                   StrId::STR_MEDIUM,       StrId::STR_LARGE,    StrId::STR_X_LARGE};
 constexpr StrId kOrientLabels[] = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
                                    StrId::STR_LANDSCAPE_CCW};
 
@@ -55,42 +62,47 @@ struct PreviewWord {
   int width;
 };
 
-// Width (advance) of a single word, honoring the bionic bold prefix.
-int measureWord(const GfxRenderer& renderer, int fontId, const char* s, int len, bool bionic) {
+// Width (advance) of a single word, honoring the bionic bold prefix. `tracking` is the
+// reader's letter spacing (half-pixel steps), applied as the real engine applies it: inside
+// each run, plus one boundary where the bold prefix meets its regular suffix.
+int measureWord(const GfxRenderer& renderer, int fontId, const char* s, int len, bool bionic, int8_t tracking) {
   char buf[kWordBufSize];
   if (len >= kWordBufSize) len = kWordBufSize - 1;
   if (!bionic) {
     snprintf(buf, sizeof(buf), "%.*s", len, s);
-    return renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::REGULAR);
+    return renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::REGULAR, tracking);
   }
   const int boldLen = boldPrefixLen(len);
   snprintf(buf, sizeof(buf), "%.*s", boldLen, s);
-  int w = renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::BOLD);
+  int w = renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::BOLD, tracking);
   if (boldLen < len) {
+    w += GfxRenderer::trackingPixels(1, tracking);
     snprintf(buf, sizeof(buf), "%.*s", len - boldLen, s + boldLen);
-    w += renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::REGULAR);
+    w += renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::REGULAR, tracking);
   }
   return w;
 }
 
 // Draw one word at (x, y-top); returns its advance so callers can position the
 // next word. Splits into bold prefix + regular suffix when bionic is on.
-int drawWord(const GfxRenderer& renderer, int fontId, const char* s, int len, bool bionic, int x, int y) {
+int drawWord(const GfxRenderer& renderer, int fontId, const char* s, int len, bool bionic, int x, int y,
+             int8_t tracking) {
   char buf[kWordBufSize];
   if (len >= kWordBufSize) len = kWordBufSize - 1;
   if (!bionic) {
     snprintf(buf, sizeof(buf), "%.*s", len, s);
-    renderer.drawText(fontId, x, y, buf, true, EpdFontFamily::REGULAR);
-    return renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::REGULAR);
+    renderer.drawText(fontId, x, y, buf, true, EpdFontFamily::REGULAR, tracking);
+    return renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::REGULAR, tracking);
   }
   const int boldLen = boldPrefixLen(len);
   snprintf(buf, sizeof(buf), "%.*s", boldLen, s);
-  renderer.drawText(fontId, x, y, buf, true, EpdFontFamily::BOLD);
-  int w = renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::BOLD);
+  renderer.drawText(fontId, x, y, buf, true, EpdFontFamily::BOLD, tracking);
+  int w = renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::BOLD, tracking);
   if (boldLen < len) {
+    w += GfxRenderer::trackingPixels(1, tracking);
     snprintf(buf, sizeof(buf), "%.*s", len - boldLen, s + boldLen);
-    renderer.drawText(fontId, x + w, y, buf, true, EpdFontFamily::REGULAR);
-    w += renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::REGULAR);
+    renderer.drawText(fontId, x + w, y, buf, true, EpdFontFamily::REGULAR, tracking);
+    w += renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::REGULAR, tracking);
   }
   return w;
 }
@@ -98,7 +110,8 @@ int drawWord(const GfxRenderer& renderer, int fontId, const char* s, int len, bo
 // Draw a packed line of words with the given alignment. `naturalWidth` is the
 // line width at single spacing; `lineMax` is the available width.
 void drawLine(const GfxRenderer& renderer, int fontId, const PreviewWord* words, int count, int naturalWidth,
-              int lineMax, int lineLeft, int y, uint8_t align, bool bionic, int spaceW, bool isLastLine) {
+              int lineMax, int lineLeft, int y, uint8_t align, bool bionic, int spaceW, bool isLastLine,
+              int8_t tracking) {
   const bool justify =
       (align == CrossPointSettings::JUSTIFIED || align == CrossPointSettings::BOOK_STYLE) && !isLastLine && count > 1;
 
@@ -110,7 +123,7 @@ void drawLine(const GfxRenderer& renderer, int fontId, const PreviewWord* words,
     const int rem = extra % gaps;
     int x = lineLeft;
     for (int k = 0; k < count; ++k) {
-      x += drawWord(renderer, fontId, words[k].s, words[k].len, bionic, x, y);
+      x += drawWord(renderer, fontId, words[k].s, words[k].len, bionic, x, y, tracking);
       if (k < count - 1) x += base + (k < rem ? 1 : 0);
     }
     return;
@@ -123,7 +136,7 @@ void drawLine(const GfxRenderer& renderer, int fontId, const PreviewWord* words,
     x = lineLeft + (lineMax - naturalWidth);
   }
   for (int k = 0; k < count; ++k) {
-    x += drawWord(renderer, fontId, words[k].s, words[k].len, bionic, x, y);
+    x += drawWord(renderer, fontId, words[k].s, words[k].len, bionic, x, y, tracking);
     if (k < count - 1) x += spaceW;
   }
 }
@@ -131,7 +144,7 @@ void drawLine(const GfxRenderer& renderer, int fontId, const PreviewWord* words,
 // Lay out one paragraph via greedy word-wrap; returns the y below the last line
 // drawn. Stops early once the next line would exceed `regionBottom`.
 int renderParagraph(const GfxRenderer& renderer, const char* text, int fontId, int lineH, int textLeft, int maxWidth,
-                    uint8_t align, bool bionic, int spaceW, int indentPx, int y, int regionBottom) {
+                    uint8_t align, bool bionic, int spaceW, int indentPx, int y, int regionBottom, int8_t tracking) {
   PreviewWord words[kMaxWordsPerParagraph];
   int nWords = 0;
   const char* p = text;
@@ -142,7 +155,7 @@ int renderParagraph(const GfxRenderer& renderer, const char* text, int fontId, i
     while (*p && *p != ' ') ++p;
     words[nWords].s = start;
     words[nWords].len = static_cast<int>(p - start);
-    words[nWords].width = measureWord(renderer, fontId, start, words[nWords].len, bionic);
+    words[nWords].width = measureWord(renderer, fontId, start, words[nWords].len, bionic, tracking);
     ++nWords;
   }
 
@@ -162,7 +175,8 @@ int renderParagraph(const GfxRenderer& renderer, const char* text, int fontId, i
     }
     const bool isLastLine = (j + 1 >= nWords);
     const int lineLeft = textLeft + (firstLine ? indentPx : 0);
-    drawLine(renderer, fontId, words + i, count, naturalWidth, lineMax, lineLeft, y, align, bionic, spaceW, isLastLine);
+    drawLine(renderer, fontId, words + i, count, naturalWidth, lineMax, lineLeft, y, align, bionic, spaceW, isLastLine,
+             tracking);
     y += lineH;
     i = j + 1;
     firstLine = false;
@@ -179,11 +193,18 @@ const FontLayoutPreviewActivity::Row FontLayoutPreviewActivity::kRows[] = {
      CrossPointSettings::FONT_SIZE_COUNT, 0, 0, 0, true, false},
     {StrId::STR_LINE_SPACING, RowKind::Enum, &CrossPointSettings::lineSpacing, kSpacingLabels,
      CrossPointSettings::LINE_COMPRESSION_COUNT, 0, 0, 0, false, false},
+    {StrId::STR_WORD_SPACING, RowKind::Value, &CrossPointSettings::wordSpacing, nullptr, 0,
+     CrossPointSettings::WORD_SPACING_MIN, CrossPointSettings::WORD_SPACING_MAX, CrossPointSettings::WORD_SPACING_STEP,
+     false, false},
+    {StrId::STR_CHARACTER_SPACING, RowKind::Enum, &CrossPointSettings::characterSpacing, kCharSpacingLabels,
+     CrossPointSettings::CHARACTER_SPACING_COUNT, 0, 0, 0, false, false},
     {StrId::STR_PARA_ALIGNMENT, RowKind::Enum, &CrossPointSettings::paragraphAlignment, kAlignLabels,
      CrossPointSettings::PARAGRAPH_ALIGNMENT_COUNT, 0, 0, 0, false, false},
     {StrId::STR_SCREEN_MARGIN, RowKind::Value, &CrossPointSettings::screenMargin, nullptr, 0, 5, 40, 5, false, false},
     {StrId::STR_EXTRA_SPACING, RowKind::Toggle, &CrossPointSettings::extraParagraphSpacing, nullptr, 0, 0, 0, 0, false,
      false},
+    {StrId::STR_PARAGRAPH_INDENT, RowKind::Enum, &CrossPointSettings::paragraphIndent, kIndentLabels,
+     TextLayoutOptions::PARAGRAPH_INDENT_COUNT, 0, 0, 0, false, false},
     {StrId::STR_BIONIC_READING, RowKind::Toggle, &CrossPointSettings::bionicReading, nullptr, 0, 0, 0, 0, false, false},
     {StrId::STR_TEXT_AA, RowKind::Toggle, &CrossPointSettings::textAntiAliasing, nullptr, 0, 0, 0, 0, false, false},
     {StrId::STR_READER_DARK_MODE, RowKind::Toggle, &CrossPointSettings::darkMode, nullptr, 0, 0, 0, 0, false, false},
@@ -415,8 +436,11 @@ std::string FontLayoutPreviewActivity::rowValueText(const Row& row) const {
     }
     case RowKind::Toggle:
       return SETTINGS.*(row.field) ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-    case RowKind::Value:
-      return std::to_string(SETTINGS.*(row.field));
+    case RowKind::Value: {
+      std::string text = std::to_string(SETTINGS.*(row.field));
+      if (row.field == &CrossPointSettings::wordSpacing) text += '%';
+      return text;
+    }
     case RowKind::Action:
       return "";
   }
@@ -447,8 +471,17 @@ void FontLayoutPreviewActivity::renderPreview(int x, int y, int w, int h) const 
 
   const uint8_t align = SETTINGS.paragraphAlignment;
   const bool bionic = SETTINGS.bionicReading != 0;
-  const int spaceW = renderer.getSpaceWidth(fontId);
-  const int indentPx = (align == CrossPointSettings::BOOK_STYLE) ? spaceW * 4 : 0;
+  // The reader's spacing controls, applied the way the layout engine applies them.
+  const TextLayoutOptions textLayout = SETTINGS.readerTextLayout();
+  const int spaceW = textLayout.scaleSpace(renderer.getSpaceWidth(fontId));
+  // A chosen Paragraph Indent shows as the reader lays it out: N word spaces on left/justified
+  // text. "Book's Style" depends on each book's CSS, so it keeps the preview's old stand-in.
+  const bool naturalAlign = align == CrossPointSettings::JUSTIFIED || align == CrossPointSettings::LEFT_ALIGN ||
+                            align == CrossPointSettings::BOOK_STYLE;
+  int indentPx = (align == CrossPointSettings::BOOK_STYLE) ? spaceW * 4 : 0;
+  if (textLayout.overridesParagraphIndent()) {
+    indentPx = naturalAlign ? textLayout.paragraphIndentSpaces() * spaceW : 0;
+  }
 
   const int regionBottom = y + h;
   int cursorY = y;
@@ -456,7 +489,7 @@ void FontLayoutPreviewActivity::renderPreview(int x, int y, int w, int h) const 
   for (const StrId para : kSampleParas) {
     if (cursorY + lineH > regionBottom) break;
     cursorY = renderParagraph(renderer, I18N.get(para), fontId, lineH, textLeft, maxWidth, align, bionic, spaceW,
-                              indentPx, cursorY, regionBottom);
+                              indentPx, cursorY, regionBottom, textLayout.characterSpacing);
     // renderParagraph already advanced one lineH past the last line (normal line
     // spacing). Extra paragraph spacing adds lineHeight/2 on top (matches the
     // reader: ChapterHtmlSlimParser.cpp:1900); off adds nothing.

@@ -116,6 +116,8 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
 
   const int effectiveFontId = blockStyle.fontOverride != 0 ? blockStyle.fontOverride : fontId;
   const int ascender = renderer.getFontAscenderSize(effectiveFontId);
+  // Must be the value layout measured with, or words drift off their stored x positions.
+  const int8_t tracking = blockStyle.characterSpacing;
   for (uint16_t i = 0; i < numWords; i++) {
     const int wordX = xposArr[i] + x;
     const EpdFontFamily::Style currentStyle = wordStyle(i);
@@ -143,15 +145,19 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       memcpy(boldBuf, word, boldLen);
       boldBuf[boldLen] = '\0';
       const auto boldStyle = static_cast<EpdFontFamily::Style>(currentStyle | EpdFontFamily::BOLD);
-      renderer.drawText(effectiveFontId, wordX, wordY, boldBuf, true, boldStyle);
+      renderer.drawText(effectiveFontId, wordX, wordY, boldBuf, true, boldStyle, tracking);
       const int suffixX = wordX + static_cast<int>(bionicSuffixX(i));
-      renderer.drawText(effectiveFontId, suffixX, wordY, word + boldLen, true, currentStyle);
+      renderer.drawText(effectiveFontId, suffixX, wordY, word + boldLen, true, currentStyle, tracking);
     } else {
-      renderer.drawText(effectiveFontId, wordX, wordY, word, true, currentStyle);
+      renderer.drawText(effectiveFontId, wordX, wordY, word, true, currentStyle, tracking);
     }
 
     if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
-      const int fullWordWidth = renderer.getTextWidth(effectiveFontId, word, currentStyle);
+      // getTextWidth measures untracked ink, so a letter-spaced word takes its advance
+      // instead (already halved for SUP/SUB, hence the flag below).
+      const bool tracked = tracking != 0;
+      const int fullWordWidth = tracked ? renderer.getTextAdvanceX(effectiveFontId, word, currentStyle, tracking)
+                                        : renderer.getTextWidth(effectiveFontId, word, currentStyle);
       // y is the top of the text line; add ascender to reach baseline, then offset 2px below
       const int underlineY = wordY + ascender + 2;
 
@@ -163,7 +169,8 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
           static_cast<uint8_t>(word[2]) == 0x83) {
         const char* visiblePtr = word + 3;
         const int prefixWidth = renderer.getTextAdvanceX(effectiveFontId, "\xe2\x80\x83", currentStyle);
-        const int visibleWidth = renderer.getTextWidth(effectiveFontId, visiblePtr, currentStyle);
+        const int visibleWidth = tracked ? renderer.getTextAdvanceX(effectiveFontId, visiblePtr, currentStyle, tracking)
+                                         : renderer.getTextWidth(effectiveFontId, visiblePtr, currentStyle);
         startX = wordX + prefixWidth;
         underlineWidth = visibleWidth;
       }
@@ -171,7 +178,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       // SUP/SUB words are rendered at 50% glyph scale (see the baseline comment
       // above and drawText), but getTextWidth reports the full-size width, so the
       // underline would be drawn ~2x too long. Halve it to match the scaled glyphs.
-      if ((currentStyle & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
+      if (!tracked && (currentStyle & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0) {
         underlineWidth = (underlineWidth + 1) / 2;
       }
 
@@ -214,6 +221,7 @@ bool TextBlock::serialize(Print& file) const {
   serialization::writePod(file, blockStyle.textIndent);
   serialization::writePod(file, blockStyle.textIndentDefined);
   serialization::writePod(file, blockStyle.fontOverride);
+  serialization::writePod(file, blockStyle.characterSpacing);
 
   return true;
 }
@@ -291,6 +299,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file) {
   serialization::readPod(file, blockStyle.textIndent);
   serialization::readPod(file, blockStyle.textIndentDefined);
   serialization::readPod(file, blockStyle.fontOverride);
+  serialization::readPod(file, blockStyle.characterSpacing);
 
   return block;
 }

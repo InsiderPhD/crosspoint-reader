@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "TextLayoutOptions.h"
 #include "blocks/BlockStyle.h"
 #include "blocks/TextBlock.h"
 
@@ -35,10 +36,17 @@ class ParsedText {
   // first-line indent, no em-space. Cleared when the block is finalised, because the parser
   // reuses an emptied ParsedText for the next paragraph. Ported from upstream d5693c321.
   bool firstLineConsumed = false;
+  // The user's spacing controls for the layout pass in progress. Set on entry to
+  // layoutAndExtractLines (the parser swaps blockStyle as CSS resolves, so it cannot be
+  // captured at construction); characterSpacing is also stamped into blockStyle there so
+  // every emitted line carries it to TextBlock::render.
+  TextLayoutOptions layout;
 
   struct LineScratch;
 
   void applyParagraphIndent();
+  // Pixel indent of this paragraph's opening line (negative for a hanging indent).
+  int resolveFirstLineIndent(const GfxRenderer& renderer, int fontId) const;
   std::vector<size_t> computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
                                         std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec);
   std::vector<size_t> computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
@@ -77,5 +85,6 @@ class ParsedText {
   // and must then emit the SAME text as paragraphs.
   void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
-                             bool includeLastLine = true, bool preserveSource = false);
+                             bool includeLastLine = true, bool preserveSource = false,
+                             const TextLayoutOptions& layoutOptions = {});
 };

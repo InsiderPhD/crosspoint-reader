@@ -199,12 +199,28 @@ inline void appendReaderTypographySettings(std::vector<SettingInfo>& v) {
           SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing,
                             {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE}, "lineSpacing",
                             StrId::STR_CAT_READER),
+          SettingInfo::Value(StrId::STR_WORD_SPACING, &CrossPointSettings::wordSpacing,
+                             {CrossPointSettings::WORD_SPACING_MIN, CrossPointSettings::WORD_SPACING_MAX,
+                              CrossPointSettings::WORD_SPACING_STEP},
+                             "wordSpacing", StrId::STR_CAT_READER),
+          // Order is the persisted index: -1.5 px .. +1.5 px in half-pixel steps.
+          SettingInfo::Enum(StrId::STR_CHARACTER_SPACING, &CrossPointSettings::characterSpacing,
+                            {StrId::STR_SPACING_MINUS_3, StrId::STR_SPACING_MINUS_2, StrId::STR_SPACING_MINUS_1,
+                             StrId::STR_SPACING_ZERO, StrId::STR_SPACING_PLUS_1, StrId::STR_SPACING_PLUS_2,
+                             StrId::STR_SPACING_PLUS_3},
+                            "characterSpacing", StrId::STR_CAT_READER),
           SettingInfo::Value(StrId::STR_SCREEN_MARGIN, &CrossPointSettings::screenMargin, {5, 40, 5}, "screenMargin",
                              StrId::STR_CAT_READER),
           SettingInfo::Enum(StrId::STR_PARA_ALIGNMENT, &CrossPointSettings::paragraphAlignment,
                             {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
                              StrId::STR_BOOK_S_STYLE},
                             "paragraphAlignment", StrId::STR_CAT_READER),
+          // Order is the persisted index (TextLayoutOptions::PARAGRAPH_INDENT_*): the book's
+          // own indent, none, then 1..4 word spaces.
+          SettingInfo::Enum(StrId::STR_PARAGRAPH_INDENT, &CrossPointSettings::paragraphIndent,
+                            {StrId::STR_BOOK_S_STYLE, StrId::STR_NONE_OPT, StrId::STR_SMALL, StrId::STR_MEDIUM,
+                             StrId::STR_LARGE, StrId::STR_X_LARGE},
+                            "paragraphIndent", StrId::STR_CAT_READER),
           SettingInfo::Toggle(StrId::STR_EMBEDDED_STYLE, &CrossPointSettings::embeddedStyle, "embeddedStyle",
                               StrId::STR_CAT_READER),
           SettingInfo::Toggle(StrId::STR_HYPHENATION, &CrossPointSettings::hyphenationEnabled, "hyphenationEnabled",
@@ -570,7 +586,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 86;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 89;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

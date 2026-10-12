@@ -65,14 +65,20 @@ void stripSoftHyphensInPlace(std::string& word) {
 // Returns the advance width for a word while ignoring soft hyphen glyphs and optionally appending a visible hyphen.
 // Uses advance width (sum of glyph advances + kerning) rather than bounding box width so that italic glyph overhangs
 // don't inflate inter-word spacing.
+//
+// `layout` carries the user's spacing controls: letter spacing is applied inside the word, and
+// a lone " " token (a non-breaking space kept as its own word) is a word gap, so it scales
+// with word spacing like every other gap.
 uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
-                          const EpdFontFamily::Style style, const bool appendHyphen = false) {
+                          const EpdFontFamily::Style style, const TextLayoutOptions& layout,
+                          const bool appendHyphen = false) {
   if (word.size() == 1 && word[0] == ' ' && !appendHyphen) {
-    return renderer.getSpaceWidth(fontId, style);
+    return static_cast<uint16_t>(std::max(0, layout.scaleSpace(renderer.getSpaceWidth(fontId, style))));
   }
+  const int8_t tracking = layout.characterSpacing;
   const bool hasSoftHyphen = containsSoftHyphen(word);
   if (!hasSoftHyphen && !appendHyphen) {
-    return renderer.getTextAdvanceX(fontId, word.c_str(), style);
+    return static_cast<uint16_t>(std::max(0, renderer.getTextAdvanceX(fontId, word.c_str(), style, tracking)));
   }
 
   std::string sanitized = word;
@@ -82,7 +88,21 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
   if (appendHyphen) {
     sanitized.push_back('-');
   }
-  return renderer.getTextAdvanceX(fontId, sanitized.c_str(), style);
+  return static_cast<uint16_t>(std::max(0, renderer.getTextAdvanceX(fontId, sanitized.c_str(), style, tracking)));
+}
+
+// Natural gap in front of a word that is not first on its line: the (word-spacing scaled)
+// space advance, or for a continuation the cross-boundary kerning plus letter spacing.
+// The single definition every layout stage uses, so the line breaker and the positioner
+// cannot disagree about a line's width.
+int gapBetween(const GfxRenderer& renderer, const int fontId, const std::string& left, const std::string& right,
+               const EpdFontFamily::Style leftStyle, const bool continues, const TextLayoutOptions& layout) {
+  const uint32_t leftCp = lastCodepoint(left);
+  const uint32_t rightCp = firstCodepoint(right);
+  if (continues) {
+    return renderer.getKerning(fontId, leftCp, rightCp, leftStyle, layout.characterSpacing);
+  }
+  return layout.scaleSpace(renderer.getSpaceAdvance(fontId, leftCp, rightCp, leftStyle));
 }
 
 // One render fragment of a bionic-split word. Bionic reading stores whole words and expands
@@ -142,17 +162,16 @@ void appendBionicFrags(const std::string& word, const EpdFontFamily::Style baseS
 // inter-fragment kerning that the old per-fragment layout accumulated as gaps. Matches the
 // pre-refactor line width so the line-break DP makes identical decisions.
 uint16_t measureBionicWordWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
-                                const EpdFontFamily::Style baseStyle) {
+                                const EpdFontFamily::Style baseStyle, const TextLayoutOptions& layout) {
   std::vector<BionicFrag> frags;
   appendBionicFrags(word, baseStyle, frags);
-  if (frags.empty()) return measureWordWidth(renderer, fontId, word, baseStyle);
+  if (frags.empty()) return measureWordWidth(renderer, fontId, word, baseStyle, layout);
 
   int total = 0;
   for (size_t i = 0; i < frags.size(); ++i) {
-    total += measureWordWidth(renderer, fontId, frags[i].text, frags[i].style);
+    total += measureWordWidth(renderer, fontId, frags[i].text, frags[i].style, layout);
     if (i + 1 < frags.size()) {
-      total +=
-          renderer.getKerning(fontId, lastCodepoint(frags[i].text), firstCodepoint(frags[i + 1].text), frags[i].style);
+      total += gapBetween(renderer, fontId, frags[i].text, frags[i + 1].text, frags[i].style, true, layout);
     }
   }
   return static_cast<uint16_t>(std::max(0, total));
@@ -227,11 +246,14 @@ bool ParsedText::isBionicWord(const size_t i) const {
 // Consumes data to minimize memory usage
 void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int baseFontId, const uint16_t viewportWidth,
                                        const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
-                                       const bool includeLastLine, const bool preserveSource) {
+                                       const bool includeLastLine, const bool preserveSource,
+                                       const TextLayoutOptions& layoutOptions) {
   if (words.empty()) {
     if (includeLastLine && !preserveSource) firstLineConsumed = false;
     return;
   }
+  layout = layoutOptions;
+  blockStyle.characterSpacing = layout.characterSpacing;
 
   // Bounded by the caller: only a table cell (<=12KB row budget) sets this; freed on return.
   std::deque<std::string> savedWords;
@@ -334,8 +356,8 @@ std::vector<uint16_t> ParsedText::calculateWordWidths(const GfxRenderer& rendere
   wordWidths.reserve(words.size());
 
   for (size_t i = 0; i < words.size(); ++i) {
-    wordWidths.push_back(isBionicWord(i) ? measureBionicWordWidth(renderer, fontId, words[i], wordStyles[i])
-                                         : measureWordWidth(renderer, fontId, words[i], wordStyles[i]));
+    wordWidths.push_back(isBionicWord(i) ? measureBionicWordWidth(renderer, fontId, words[i], wordStyles[i], layout)
+                                         : measureWordWidth(renderer, fontId, words[i], wordStyles[i], layout));
   }
 
   return wordWidths;
@@ -347,15 +369,8 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     return {};
   }
 
-  // Calculate first line indent (only for left/justified text).
-  // Positive text-indent (paragraph indent) is suppressed when extraParagraphSpacing is on.
-  // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
-  // it is structural (positions the bullet/marker), not decorative.
-  const int firstLineIndent =
-      !firstLineConsumed && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
-              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
-          ? blockStyle.textIndent
-          : 0;
+  // First line indent; see resolveFirstLineIndent for the rules.
+  const int firstLineIndent = firstLineConsumed ? 0 : resolveFirstLineIndent(renderer, fontId);
 
   // Ensure any word that would overflow even as the first entry on a line is split using fallback hyphenation.
   for (size_t i = 0; i < wordWidths.size(); ++i) {
@@ -370,14 +385,31 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 
   const size_t totalWordCount = words.size();
 
+  // Natural gap in front of each word when it is not the first on its line: the inter-word
+  // space advance, or the cross-boundary kerning for a continuation. It depends only on the
+  // word and its predecessor, never on where the line starts, so it is measured once here
+  // instead of once per (line start, word) pair inside the DP below -- that inner loop asked
+  // the font for the same kerning pairs a line's worth of times over. Ported from upstream
+  // f67907556. The 2 bytes/word this costs are paid for by narrowing the DP's answer table
+  // (see lineLen), so the layout peak is unchanged.
+  std::vector<int16_t> gapBefore(totalWordCount);
+  gapBefore[0] = 0;
+  for (size_t j = 1; j < totalWordCount; ++j) {
+    // Continuation words (nonbreaking spaces, attached punctuation) take kerning only.
+    gapBefore[j] = static_cast<int16_t>(
+        gapBetween(renderer, fontId, words[j - 1], words[j], wordStyles[j - 1], continuesVec[j], layout));
+  }
+
   // DP table to store the minimum badness (cost) of lines starting at index i
   std::vector<int> dp(totalWordCount);
-  // 'ans[i]' stores the index 'j' of the *last word* in the optimal line starting at 'i'
-  std::vector<size_t> ans(totalWordCount);
+  // 'lineLen[i]' stores how many words FOLLOW word i on the optimal line starting at 'i'
+  // (last word index = i + lineLen[i]). A count rather than an absolute index so it fits
+  // 16 bits: a line cannot hold more words than that, and the loop below stops at the cap.
+  std::vector<uint16_t> lineLen(totalWordCount);
 
   // Base Case
   dp[totalWordCount - 1] = 0;
-  ans[totalWordCount - 1] = totalWordCount - 1;
+  lineLen[totalWordCount - 1] = 0;
 
   for (int i = totalWordCount - 2; i >= 0; --i) {
     int currlen = 0;
@@ -386,16 +418,9 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     // First line has reduced width due to text-indent
     const int effectivePageWidth = i == 0 ? pageWidth - firstLineIndent : pageWidth;
 
-    for (size_t j = i; j < totalWordCount; ++j) {
-      // Add space before word j, unless it's the first word on the line or a continuation
-      int gap = 0;
-      if (j > static_cast<size_t>(i) && !continuesVec[j]) {
-        gap =
-            renderer.getSpaceAdvance(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
-      } else if (j > static_cast<size_t>(i) && continuesVec[j]) {
-        // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-        gap = renderer.getKerning(fontId, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
-      }
+    for (size_t j = i; j < totalWordCount && j - static_cast<size_t>(i) <= UINT16_MAX; ++j) {
+      // Add the gap before word j, unless it's the first word on the line
+      const int gap = j > static_cast<size_t>(i) ? gapBefore[j] : 0;
       currlen += wordWidths[j] + gap;
 
       if (currlen > effectivePageWidth) {
@@ -424,14 +449,15 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
 
       if (cost < dp[i]) {
         dp[i] = cost;
-        ans[i] = j;  // j is the index of the last word in this optimal line
+        // j is the index of the last word in this optimal line
+        lineLen[i] = static_cast<uint16_t>(j - static_cast<size_t>(i));
       }
     }
 
     // Handle oversized word: if no valid configuration found, force single-word line
     // This prevents cascade failure where one oversized word breaks all preceding words
     if (dp[i] == MAX_COST) {
-      ans[i] = i;  // Just this word on its own line
+      lineLen[i] = 0;  // Just this word on its own line
       // Inherit cost from next word to allow subsequent words to find valid configurations
       if (i + 1 < static_cast<int>(totalWordCount)) {
         dp[i] = dp[i + 1];
@@ -446,7 +472,7 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   size_t currentWordIndex = 0;
 
   while (currentWordIndex < totalWordCount) {
-    size_t nextBreakIndex = ans[currentWordIndex] + 1;
+    size_t nextBreakIndex = currentWordIndex + lineLen[currentWordIndex] + 1;
 
     // Safety check: prevent infinite loop if nextBreakIndex doesn't advance
     if (nextBreakIndex <= currentWordIndex) {
@@ -461,10 +487,44 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   return lineBreakIndices;
 }
 
+// Pixel indent of the paragraph's opening line. Only left/justified text is indented.
+//
+// A negative CSS text-indent is a hanging indent (e.g. margin-left:3em; text-indent:-1em): it
+// is structural (it positions the bullet/marker), not decorative, so it always applies.
+//
+// Otherwise, with the Paragraph Indent setting on "Book's Style", the book's own positive
+// text-indent is used and is suppressed while extraParagraphSpacing is on -- the engine's
+// long-standing rule, where a book with no text-indent gets the em-space from
+// applyParagraphIndent() instead.
+//
+// With any other setting the user's indent replaces a missing or positive CSS indent and no
+// longer depends on extraParagraphSpacing. An explicit CSS zero is still respected: it is how
+// a book marks the paragraphs that must stay flush (the first one after a heading), and how
+// this parser marks table cells. Deviates from upstream 458be7ed2, which overrides zero too.
+int ParsedText::resolveFirstLineIndent(const GfxRenderer& renderer, const int fontId) const {
+  if (blockStyle.alignment != CssTextAlign::Justify && blockStyle.alignment != CssTextAlign::Left) {
+    return 0;
+  }
+  const bool cssIndent = blockStyle.textIndentDefined;
+  if (cssIndent && blockStyle.textIndent < 0) {
+    return blockStyle.textIndent;
+  }
+  if (!layout.overridesParagraphIndent()) {
+    return cssIndent && !extraParagraphSpacing ? blockStyle.textIndent : 0;
+  }
+  if (cssIndent && blockStyle.textIndent == 0) {
+    return 0;
+  }
+  const int spaces = layout.paragraphIndentSpaces();
+  // In word-space units so the indent tracks both the font size and the Word Spacing setting.
+  return spaces == 0 ? 0 : spaces * layout.scaleSpace(renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR));
+}
+
 void ParsedText::applyParagraphIndent() {
   // firstLineConsumed: these words continue a soft-flushed paragraph, whose real first
   // word already took the em-space; indenting again would land mid-sentence.
-  if (extraParagraphSpacing || firstLineConsumed || words.empty()) {
+  // A user-chosen indent is positioned by resolveFirstLineIndent(), never by an em-space.
+  if (extraParagraphSpacing || firstLineConsumed || words.empty() || layout.overridesParagraphIndent()) {
     return;
   }
 
@@ -481,15 +541,8 @@ void ParsedText::applyParagraphIndent() {
 std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& renderer, const int fontId,
                                                             const int pageWidth, std::vector<uint16_t>& wordWidths,
                                                             std::vector<bool>& continuesVec) {
-  // Calculate first line indent (only for left/justified text).
-  // Positive text-indent (paragraph indent) is suppressed when extraParagraphSpacing is on.
-  // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
-  // it is structural (positions the bullet/marker), not decorative.
-  const int firstLineIndent =
-      !firstLineConsumed && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
-              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
-          ? blockStyle.textIndent
-          : 0;
+  // First line indent; see resolveFirstLineIndent for the rules.
+  const int firstLineIndent = firstLineConsumed ? 0 : resolveFirstLineIndent(renderer, fontId);
 
   std::vector<size_t> lineBreakIndices;
   size_t currentIndex = 0;
@@ -505,15 +558,11 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
     // Consume as many words as possible for current line, splitting when prefixes fit
     while (currentIndex < wordWidths.size()) {
       const bool isFirstWord = currentIndex == lineStart;
-      int spacing = 0;
-      if (!isFirstWord && !continuesVec[currentIndex]) {
-        spacing = renderer.getSpaceAdvance(fontId, lastCodepoint(words[currentIndex - 1]),
-                                           firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
-      } else if (!isFirstWord && continuesVec[currentIndex]) {
-        // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-        spacing = renderer.getKerning(fontId, lastCodepoint(words[currentIndex - 1]),
-                                      firstCodepoint(words[currentIndex]), wordStyles[currentIndex - 1]);
-      }
+      // Space advance, or cross-boundary kerning for continuation words (e.g. nonbreaking
+      // spaces, attached punctuation)
+      const int spacing = isFirstWord ? 0
+                                      : gapBetween(renderer, fontId, words[currentIndex - 1], words[currentIndex],
+                                                   wordStyles[currentIndex - 1], continuesVec[currentIndex], layout);
       const int candidateWidth = spacing + wordWidths[currentIndex];
 
       // Word fits on current line
@@ -587,7 +636,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
     }
 
     const bool needsHyphen = info.requiresInsertedHyphen;
-    const int prefixWidth = measureWordWidth(renderer, fontId, word.substr(0, offset), style, needsHyphen);
+    const int prefixWidth = measureWordWidth(renderer, fontId, word.substr(0, offset), style, layout, needsHyphen);
     if (prefixWidth > availableWidth || prefixWidth <= chosenWidth) {
       continue;  // Skip if too wide or not an improvement
     }
@@ -637,7 +686,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 
   // Update cached widths to reflect the new prefix/remainder pairing.
   wordWidths[wordIndex] = static_cast<uint16_t>(chosenWidth);
-  const uint16_t remainderWidth = measureWordWidth(renderer, fontId, remainder, style);
+  const uint16_t remainderWidth = measureWordWidth(renderer, fontId, remainder, style, layout);
   wordWidths.insert(wordWidths.begin() + wordIndex + 1, remainderWidth);
   return true;
 }
@@ -670,7 +719,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
           es.push_back(frags[k].style);
           ec.push_back(k == 0 ? continuesVec[w] : true);
           esuf.push_back(frags[k].isSuffix);
-          eww.push_back(measureWordWidth(renderer, fontId, frags[k].text, frags[k].style));
+          eww.push_back(measureWordWidth(renderer, fontId, frags[k].text, frags[k].style, layout));
           ew.push_back(std::move(frags[k].text));
         }
         continue;
@@ -685,16 +734,9 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   }
   const size_t lineWordCount = ew.size();
 
-  // Calculate first line indent (only for left/justified text).
-  // Positive text-indent (paragraph indent) is suppressed when extraParagraphSpacing is on.
-  // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
-  // it is structural (positions the bullet/marker), not decorative.
+  // First line indent; see resolveFirstLineIndent for the rules.
   const bool isFirstLine = breakIndex == 0 && !firstLineConsumed;
-  const int firstLineIndent =
-      isFirstLine && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
-              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
-          ? blockStyle.textIndent
-          : 0;
+  const int firstLineIndent = isFirstLine ? resolveFirstLineIndent(renderer, fontId) : 0;
 
   // Calculate total word width for this line, count actual word gaps,
   // and accumulate total natural gap widths (including space kerning adjustments).
@@ -707,8 +749,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     // Count gaps: each word after the first creates a gap, unless it's a continuation
     if (wordIdx > 0 && !ec[wordIdx]) {
       actualGapCount++;
-      totalNaturalGaps += renderer.getSpaceAdvance(fontId, lastCodepoint(ew[wordIdx - 1]), firstCodepoint(ew[wordIdx]),
-                                                   es[wordIdx - 1]);
+      totalNaturalGaps += gapBetween(renderer, fontId, ew[wordIdx - 1], ew[wordIdx], es[wordIdx - 1], false, layout);
     } else if (wordIdx > 0 && ec[wordIdx]) {
       // Non-breaking space tokens (" " with continues=true) are visible, stretchable spaces —
       // count them as justifiable gaps so justifyExtra is distributed to them too.
@@ -716,8 +757,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
         actualGapCount++;
       }
       // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-      totalNaturalGaps +=
-          renderer.getKerning(fontId, lastCodepoint(ew[wordIdx - 1]), firstCodepoint(ew[wordIdx]), es[wordIdx - 1]);
+      totalNaturalGaps += gapBetween(renderer, fontId, ew[wordIdx - 1], ew[wordIdx], es[wordIdx - 1], true, layout);
     }
   }
 
@@ -752,7 +792,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     if (nextIsContinuation) {
       int advance = eww[wordIdx];
       // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
-      advance += renderer.getKerning(fontId, lastCodepoint(ew[wordIdx]), firstCodepoint(ew[wordIdx + 1]), es[wordIdx]);
+      advance += gapBetween(renderer, fontId, ew[wordIdx], ew[wordIdx + 1], es[wordIdx], true, layout);
       // Non-breaking space tokens are stretchable — expand them during justification like normal spaces.
       if (ew[wordIdx] == " " && ec[wordIdx] && blockStyle.alignment == CssTextAlign::Justify && !isLastLine) {
         advance += justifyExtra;
@@ -761,8 +801,7 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     } else {
       int gap = 0;
       if (wordIdx + 1 < lineWordCount) {
-        gap =
-            renderer.getSpaceAdvance(fontId, lastCodepoint(ew[wordIdx]), firstCodepoint(ew[wordIdx + 1]), es[wordIdx]);
+        gap = gapBetween(renderer, fontId, ew[wordIdx], ew[wordIdx + 1], es[wordIdx], false, layout);
       }
       if (blockStyle.alignment == CssTextAlign::Justify && !isLastLine) {
         gap += justifyExtra;
