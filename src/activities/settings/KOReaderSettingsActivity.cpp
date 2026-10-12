@@ -3,7 +3,6 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
-#include <cstdio>
 #include <cstring>
 
 #include "KOReaderAuthActivity.h"
@@ -15,11 +14,9 @@
 #include "util/TouchListNav.h"
 
 namespace {
-// Row order on screen. Username, password and server URL belong to the profile
-// shown in the first row, which is also the profile every sync uses.
+// Row order on screen.
 enum Row : int {
-  ROW_PROFILE = 0,
-  ROW_USERNAME,
+  ROW_USERNAME = 0,
   ROW_PASSWORD,
   ROW_SERVER_URL,
   ROW_SERVER_TYPE,
@@ -28,20 +25,10 @@ enum Row : int {
   ROW_AUTHENTICATE,
   MENU_ITEMS
 };
-constexpr StrId menuNames[MENU_ITEMS] = {
-    StrId::STR_KOSYNC_PROFILE,       StrId::STR_USERNAME,           StrId::STR_PASSWORD,
-    StrId::STR_SYNC_SERVER_URL,      StrId::STR_KOSYNC_SERVER_TYPE, StrId::STR_DOCUMENT_MATCHING,
-    StrId::STR_KOSYNC_SEND_METADATA, StrId::STR_AUTHENTICATE};
-
-// "2/3: alice" or "2/3: Not Set". Built per render; the profile count is tiny.
-std::string profileLabel() {
-  const uint8_t index = KOREADER_STORE.getActiveProfile();
-  const std::string& user = KOREADER_STORE.getProfileUsername(index);
-  char prefix[12];
-  snprintf(prefix, sizeof(prefix), "%u/%u: ", static_cast<unsigned>(index) + 1,
-           static_cast<unsigned>(KOReaderCredentialStore::PROFILE_COUNT));
-  return std::string(prefix) + (user.empty() ? tr(STR_NOT_SET) : user.c_str());
-}
+constexpr StrId menuNames[MENU_ITEMS] = {StrId::STR_USERNAME,          StrId::STR_PASSWORD,
+                                         StrId::STR_SYNC_SERVER_URL,   StrId::STR_KOSYNC_SERVER_TYPE,
+                                         StrId::STR_DOCUMENT_MATCHING, StrId::STR_KOSYNC_SEND_METADATA,
+                                         StrId::STR_AUTHENTICATE};
 }  // namespace
 
 void KOReaderSettingsActivity::onEnter() {
@@ -92,15 +79,7 @@ void KOReaderSettingsActivity::loop() {
 }
 
 void KOReaderSettingsActivity::handleSelection() {
-  if (selectedIndex == ROW_PROFILE) {
-    // Step to the next profile slot. The slot shown is the one in use, so there
-    // is no separate "edit" and "activate" to get out of step.
-    const uint8_t next = (KOREADER_STORE.getActiveProfile() + 1) % KOReaderCredentialStore::PROFILE_COUNT;
-    if (KOREADER_STORE.setActiveProfile(next)) {
-      KOREADER_STORE.saveToFile();
-    }
-    requestUpdate();
-  } else if (selectedIndex == ROW_USERNAME) {
+  if (selectedIndex == ROW_USERNAME) {
     // Username
     startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_KOREADER_USERNAME),
                                                                    KOREADER_STORE.getUsername(), 64, InputType::Text),
@@ -139,7 +118,7 @@ void KOReaderSettingsActivity::handleSelection() {
                              }
                            });
   } else if (selectedIndex == ROW_SERVER_TYPE) {
-    // Server Type - what the profile's server accepts beyond standard KOSync
+    // Server Type - what the server accepts beyond standard KOSync
     KOREADER_STORE.setServerType(KOREADER_STORE.supportsExtendedMetadata() ? KOReaderServerType::KOSYNC
                                                                            : KOReaderServerType::OTHER);
     KOREADER_STORE.saveToFile();
@@ -190,8 +169,6 @@ void KOReaderSettingsActivity::render(RenderLock&&) {
       [this](int index) {
         // Draw status for each setting
         switch (index) {
-          case ROW_PROFILE:
-            return profileLabel();
           case ROW_USERNAME: {
             auto username = KOREADER_STORE.getUsername();
             return username.empty() ? std::string(tr(STR_NOT_SET)) : username;
@@ -215,6 +192,7 @@ void KOReaderSettingsActivity::render(RenderLock&&) {
           default:
             return std::string(tr(STR_NOT_SET));
         }
+        return std::string(tr(STR_NOT_SET));
       },
       true);
 

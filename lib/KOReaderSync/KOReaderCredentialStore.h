@@ -1,5 +1,4 @@
 #pragma once
-#include <array>
 #include <cstdint>
 #include <string>
 
@@ -9,7 +8,7 @@ enum class DocumentMatchMethod : uint8_t {
   BINARY = 1,    // Match by partial MD5 of file content (more accurate, but files must be identical)
 };
 
-// What a profile's server accepts beyond the standard KOSync payload. The
+// What the server accepts beyond the standard KOSync payload. The
 // numbers are upstream CrossPoint's (koreader.json "serverType"); never renumber.
 enum class KOReaderServerType : uint8_t {
   CROSSPOINT = 0,  // Upstream's rich-position server. Not implemented here: loads as KOSYNC.
@@ -28,45 +27,19 @@ bool loadKOReader(KOReaderCredentialStore& store, const char* json, bool* needsR
  * Passwords are XOR-obfuscated with the device's unique hardware MAC address
  * and base64-encoded before writing to JSON (not cryptographically secure,
  * but prevents casual reading and ties credentials to the specific device).
- *
- * Server profiles: PROFILE_COUNT fixed slots, each its own server URL and
- * account, and one active slot. The slot index is the profile's identity (it is
- * what koreader.json and the per-book sync sidecars record), so slots are never
- * reordered or compacted. Every credential accessor below reads the profile
- * that is in effect, which today is always the globally active one.
- *
- * Per-book override (not built): the per-book sidecar written by
- * KOReaderSyncStateStore is the place for it. A later change stores an override
- * index there and makes current() consult it (set on book open, cleared on
- * close) before falling back to activeProfile; no caller of this class changes.
- *
- * Resident cost: the two extra slots are six empty std::strings (~150 bytes)
- * until the user fills them in.
  */
 class KOReaderCredentialStore {
- public:
-  static constexpr uint8_t PROFILE_COUNT = 3;
-
  private:
-  struct Profile {
-    std::string username;
-    std::string password;
-    std::string serverUrl;  // Custom sync server URL (empty = default)
-    KOReaderServerType serverType = KOReaderServerType::KOSYNC;
-  };
-
   static KOReaderCredentialStore instance;
-  std::array<Profile, PROFILE_COUNT> profiles;
-  uint8_t activeProfile = 0;
+  std::string username;
+  std::string password;
+  std::string serverUrl;                                            // Custom sync server URL (empty = default)
+  KOReaderServerType serverType = KOReaderServerType::KOSYNC;       // What kind of server serverUrl points at
   DocumentMatchMethod matchMethod = DocumentMatchMethod::FILENAME;  // Default to filename for compatibility
   // Privacy switch for title/author/filename (and, on an OTHER server, ISBN and
   // series). Off by default: the book you are reading is nobody's business
-  // unless you say so. Global rather than per profile so one switch covers it.
+  // unless you say so.
   bool sendMetadata = false;
-
-  // The profile in effect. The single point a per-book override would hook.
-  Profile& current() { return profiles[activeProfile]; }
-  const Profile& current() const { return profiles[activeProfile]; }
 
   // Private constructor for singleton
   KOReaderCredentialStore() = default;
@@ -88,18 +61,10 @@ class KOReaderCredentialStore {
   bool saveToFile() const;
   bool loadFromFile();
 
-  // Server profiles. Switching does not save; call saveToFile().
-  uint8_t getActiveProfile() const { return activeProfile; }
-  bool setActiveProfile(uint8_t index);
-  // For profile pickers: whether a slot has an account, and its username.
-  // Passwords are only ever reachable for the profile in effect.
-  bool profileHasCredentials(uint8_t index) const;
-  const std::string& getProfileUsername(uint8_t index) const;
-
-  // Credential management (profile in effect)
+  // Credential management
   void setCredentials(const std::string& user, const std::string& pass);
-  const std::string& getUsername() const { return current().username; }
-  const std::string& getPassword() const { return current().password; }
+  const std::string& getUsername() const { return username; }
+  const std::string& getPassword() const { return password; }
 
   // Get MD5 hash of password for API authentication
   std::string getMd5Password() const;
@@ -112,15 +77,15 @@ class KOReaderCredentialStore {
 
   // Server URL management
   void setServerUrl(const std::string& url);
-  const std::string& getServerUrl() const { return current().serverUrl; }
+  const std::string& getServerUrl() const { return serverUrl; }
 
   // Get base URL for API calls (with http:// normalization if no protocol, falls back to default)
   std::string getBaseUrl() const;
 
-  // Server capability profile (profile in effect)
+  // Server capability
   void setServerType(KOReaderServerType type);
-  KOReaderServerType getServerType() const { return current().serverType; }
-  bool supportsExtendedMetadata() const { return current().serverType == KOReaderServerType::OTHER; }
+  KOReaderServerType getServerType() const { return serverType; }
+  bool supportsExtendedMetadata() const { return serverType == KOReaderServerType::OTHER; }
 
   // Whether progress uploads carry document metadata at all
   void setSendMetadata(bool enabled) { sendMetadata = enabled; }

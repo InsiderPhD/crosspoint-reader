@@ -9,7 +9,7 @@ class Epub;
  * Optional document metadata sent alongside a progress upload. Mirrors the
  * metadata object added in KOReader PR #15306 (filename/title/authors); the
  * standard sync server ignores it, custom servers may use it. The remaining
- * fields are only serialized for a profile whose server type is OTHER.
+ * fields are only serialized when the server type is OTHER.
  */
 struct KOReaderMetadata {
   std::string filename;  // e.g. "my_book.epub"

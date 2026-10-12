@@ -516,31 +516,14 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
 
 // ---- KOReaderCredentialStore ----
 
-namespace {
-// koreader.json layout: 1 = single account at the top level (unstamped), 2 = "profiles".
-constexpr uint8_t KOREADER_CONFIG_VERSION = 2;
-}  // namespace
-
 bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const char* path) {
   JsonDocument doc;
-  doc["cfgVersion"] = KOREADER_CONFIG_VERSION;
-  doc["activeProfile"] = store.activeProfile;
-  doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
-  doc["sendMetadata"] = store.getSendMetadata();
-  // Every slot is written, filled or not: the array index is the profile's identity.
-  JsonArray profiles = doc["profiles"].to<JsonArray>();
-  for (const auto& profile : store.profiles) {
-    JsonObject obj = profiles.add<JsonObject>();
-    obj["username"] = profile.username;
-    obj["password_obf"] = obfuscation::obfuscateToBase64(profile.password);
-    obj["serverUrl"] = profile.serverUrl;
-    obj["serverType"] = static_cast<uint8_t>(profile.serverType);
-  }
-  // Pre-profile layout, mirrored from the active profile so a firmware downgrade
-  // keeps syncing to the server in use. Ignored on load when "profiles" exists.
   doc["username"] = store.getUsername();
   doc["password_obf"] = obfuscation::obfuscateToBase64(store.getPassword());
   doc["serverUrl"] = store.getServerUrl();
+  doc["serverType"] = static_cast<uint8_t>(store.getServerType());
+  doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
+  doc["sendMetadata"] = store.getSendMetadata();
 
   String json;
   serializeJson(doc, json);
@@ -556,47 +539,23 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
     return false;
   }
 
-  // One account: the pre-profile top level of the file, or one "profiles" entry.
-  const auto readProfile = [needsResave](JsonVariantConst src, auto& profile) {
-    profile.username = src["username"] | std::string("");
-    bool ok = false;
-    profile.password = obfuscation::deobfuscateFromBase64(src["password_obf"] | "", &ok);
-    if (!ok || profile.password.empty()) {
-      profile.password = src["password"] | std::string("");
-      if (!profile.password.empty() && needsResave) *needsResave = true;
-    }
-    profile.serverUrl = src["serverUrl"] | std::string("");
-    // Absent (older file) or a type this firmware does not implement: standard KOSync.
-    const uint8_t type = src["serverType"] | static_cast<uint8_t>(KOReaderServerType::KOSYNC);
-    profile.serverType = type == static_cast<uint8_t>(KOReaderServerType::OTHER) ? KOReaderServerType::OTHER
-                                                                                 : KOReaderServerType::KOSYNC;
-  };
-
-  for (auto& profile : store.profiles) profile = {};
-  store.activeProfile = 0;
-
-  const JsonArrayConst profiles = doc["profiles"].as<JsonArrayConst>();
-  if (profiles.isNull()) {
-    // Written before profiles existed: the single account becomes profile 0 and
-    // stays the active one, so nothing changes for the user. Resave to stamp it.
-    readProfile(doc.as<JsonVariantConst>(), store.profiles[0]);
-    if (needsResave) *needsResave = true;
-  } else {
-    size_t slot = 0;
-    for (JsonVariantConst entry : profiles) {
-      if (slot >= store.profiles.size()) break;  // file from a build with more slots
-      readProfile(entry, store.profiles[slot++]);
-    }
-    const uint8_t active = doc["activeProfile"] | static_cast<uint8_t>(0);
-    store.activeProfile = active < store.profiles.size() ? active : 0;
+  store.username = doc["username"] | std::string("");
+  bool ok = false;
+  store.password = obfuscation::deobfuscateFromBase64(doc["password_obf"] | "", &ok);
+  if (!ok || store.password.empty()) {
+    store.password = doc["password"] | std::string("");
+    if (!store.password.empty() && needsResave) *needsResave = true;
   }
-
+  store.serverUrl = doc["serverUrl"] | std::string("");
+  // Absent (older file) or a type this firmware does not implement: standard KOSync.
+  const uint8_t type = doc["serverType"] | static_cast<uint8_t>(KOReaderServerType::KOSYNC);
+  store.serverType =
+      type == static_cast<uint8_t>(KOReaderServerType::OTHER) ? KOReaderServerType::OTHER : KOReaderServerType::KOSYNC;
   uint8_t method = doc["matchMethod"] | (uint8_t)0;
   store.matchMethod = static_cast<DocumentMatchMethod>(method);
   store.sendMetadata = doc["sendMetadata"] | false;
 
-  LOG_DBG("KRS", "Loaded KOReader credentials: profile %u, user: %s", static_cast<unsigned>(store.activeProfile) + 1,
-          store.getUsername().c_str());
+  LOG_DBG("KRS", "Loaded KOReader credentials for user: %s", store.username.c_str());
   return true;
 }
 

@@ -85,12 +85,6 @@ bool KOReaderCredentialStore::loadFromBinaryFile() {
     return false;
   }
 
-  // The binary format predates profiles: it is a single account, i.e. profile 0.
-  activeProfile = 0;
-  std::string& username = profiles[0].username;
-  std::string& password = profiles[0].password;
-  std::string& serverUrl = profiles[0].serverUrl;
-
   if (file.available()) {
     serialization::readString(file, username);
   } else {
@@ -122,32 +116,13 @@ bool KOReaderCredentialStore::loadFromBinaryFile() {
   return true;
 }
 
-bool KOReaderCredentialStore::setActiveProfile(const uint8_t index) {
-  if (index >= PROFILE_COUNT) {
-    LOG_ERR("KRS", "Profile index out of range: %u", static_cast<unsigned>(index));
-    return false;
-  }
-  activeProfile = index;
-  LOG_DBG("KRS", "Active profile: %u", static_cast<unsigned>(index) + 1);
-  return true;
-}
-
-bool KOReaderCredentialStore::profileHasCredentials(const uint8_t index) const {
-  return index < PROFILE_COUNT && !profiles[index].username.empty() && !profiles[index].password.empty();
-}
-
-const std::string& KOReaderCredentialStore::getProfileUsername(const uint8_t index) const {
-  return profiles[index < PROFILE_COUNT ? index : activeProfile].username;
-}
-
 void KOReaderCredentialStore::setCredentials(const std::string& user, const std::string& pass) {
-  current().username = user;
-  current().password = pass;
+  username = user;
+  password = pass;
   LOG_DBG("KRS", "Set credentials for user: %s", user.c_str());
 }
 
 std::string KOReaderCredentialStore::getMd5Password() const {
-  const std::string& password = current().password;
   if (password.empty()) {
     return "";
   }
@@ -161,22 +136,21 @@ std::string KOReaderCredentialStore::getMd5Password() const {
   return md5.toString().c_str();
 }
 
-bool KOReaderCredentialStore::hasCredentials() const { return profileHasCredentials(activeProfile); }
+bool KOReaderCredentialStore::hasCredentials() const { return !username.empty() && !password.empty(); }
 
 void KOReaderCredentialStore::clearCredentials() {
-  current().username.clear();
-  current().password.clear();
+  username.clear();
+  password.clear();
   saveToFile();
   LOG_DBG("KRS", "Cleared KOReader credentials");
 }
 
 void KOReaderCredentialStore::setServerUrl(const std::string& url) {
-  current().serverUrl = url;
+  serverUrl = url;
   LOG_DBG("KRS", "Set server URL: %s", url.empty() ? "(default)" : url.c_str());
 }
 
 std::string KOReaderCredentialStore::getBaseUrl() const {
-  const std::string& serverUrl = current().serverUrl;
   std::string url;
   if (serverUrl.empty()) {
     url = DEFAULT_SERVER_URL;
@@ -200,7 +174,7 @@ void KOReaderCredentialStore::setServerType(KOReaderServerType type) {
   if (type != KOReaderServerType::OTHER) {
     type = KOReaderServerType::KOSYNC;
   }
-  current().serverType = type;
+  serverType = type;
   LOG_DBG("KRS", "Set server type: %u", static_cast<unsigned>(type));
 }
 
