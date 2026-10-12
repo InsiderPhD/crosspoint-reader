@@ -512,6 +512,9 @@ TextLayoutOptions CrossPointSettings::readerTextLayout() const {
   if (wordSpacing >= WORD_SPACING_MIN && wordSpacing <= WORD_SPACING_MAX) {
     options.wordSpacingPercent = wordSpacing;
   }
+  if (paragraphIndent < TextLayoutOptions::PARAGRAPH_INDENT_COUNT) {
+    options.paragraphIndent = paragraphIndent;
+  }
   return options;
 }
 

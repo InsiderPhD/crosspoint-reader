@@ -30,6 +30,9 @@ constexpr StrId kCharSpacingLabels[] = {
     StrId::STR_SPACING_PLUS_1,  StrId::STR_SPACING_PLUS_2,  StrId::STR_SPACING_PLUS_3};
 constexpr StrId kAlignLabels[] = {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
                                   StrId::STR_BOOK_S_STYLE};
+// Same order as the persisted index (TextLayoutOptions::PARAGRAPH_INDENT_*).
+constexpr StrId kIndentLabels[] = {StrId::STR_BOOK_S_STYLE, StrId::STR_NONE_OPT, StrId::STR_SMALL,
+                                   StrId::STR_MEDIUM,       StrId::STR_LARGE,    StrId::STR_X_LARGE};
 constexpr StrId kOrientLabels[] = {StrId::STR_PORTRAIT, StrId::STR_LANDSCAPE_CW, StrId::STR_INVERTED,
                                    StrId::STR_LANDSCAPE_CCW};
 
@@ -200,6 +203,8 @@ const FontLayoutPreviewActivity::Row FontLayoutPreviewActivity::kRows[] = {
     {StrId::STR_SCREEN_MARGIN, RowKind::Value, &CrossPointSettings::screenMargin, nullptr, 0, 5, 40, 5, false, false},
     {StrId::STR_EXTRA_SPACING, RowKind::Toggle, &CrossPointSettings::extraParagraphSpacing, nullptr, 0, 0, 0, 0, false,
      false},
+    {StrId::STR_PARAGRAPH_INDENT, RowKind::Enum, &CrossPointSettings::paragraphIndent, kIndentLabels,
+     TextLayoutOptions::PARAGRAPH_INDENT_COUNT, 0, 0, 0, false, false},
     {StrId::STR_BIONIC_READING, RowKind::Toggle, &CrossPointSettings::bionicReading, nullptr, 0, 0, 0, 0, false, false},
     {StrId::STR_TEXT_AA, RowKind::Toggle, &CrossPointSettings::textAntiAliasing, nullptr, 0, 0, 0, 0, false, false},
     {StrId::STR_READER_DARK_MODE, RowKind::Toggle, &CrossPointSettings::darkMode, nullptr, 0, 0, 0, 0, false, false},
@@ -469,7 +474,14 @@ void FontLayoutPreviewActivity::renderPreview(int x, int y, int w, int h) const 
   // The reader's spacing controls, applied the way the layout engine applies them.
   const TextLayoutOptions textLayout = SETTINGS.readerTextLayout();
   const int spaceW = textLayout.scaleSpace(renderer.getSpaceWidth(fontId));
-  const int indentPx = (align == CrossPointSettings::BOOK_STYLE) ? spaceW * 4 : 0;
+  // A chosen Paragraph Indent shows as the reader lays it out: N word spaces on left/justified
+  // text. "Book's Style" depends on each book's CSS, so it keeps the preview's old stand-in.
+  const bool naturalAlign = align == CrossPointSettings::JUSTIFIED || align == CrossPointSettings::LEFT_ALIGN ||
+                            align == CrossPointSettings::BOOK_STYLE;
+  int indentPx = (align == CrossPointSettings::BOOK_STYLE) ? spaceW * 4 : 0;
+  if (textLayout.overridesParagraphIndent()) {
+    indentPx = naturalAlign ? textLayout.paragraphIndentSpaces() * spaceW : 0;
+  }
 
   const int regionBottom = y + h;
   int cursorY = y;

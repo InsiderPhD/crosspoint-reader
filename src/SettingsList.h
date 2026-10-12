@@ -215,6 +215,12 @@ inline void appendReaderTypographySettings(std::vector<SettingInfo>& v) {
                             {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
                              StrId::STR_BOOK_S_STYLE},
                             "paragraphAlignment", StrId::STR_CAT_READER),
+          // Order is the persisted index (TextLayoutOptions::PARAGRAPH_INDENT_*): the book's
+          // own indent, none, then 1..4 word spaces.
+          SettingInfo::Enum(StrId::STR_PARAGRAPH_INDENT, &CrossPointSettings::paragraphIndent,
+                            {StrId::STR_BOOK_S_STYLE, StrId::STR_NONE_OPT, StrId::STR_SMALL, StrId::STR_MEDIUM,
+                             StrId::STR_LARGE, StrId::STR_X_LARGE},
+                            "paragraphIndent", StrId::STR_CAT_READER),
           SettingInfo::Toggle(StrId::STR_EMBEDDED_STYLE, &CrossPointSettings::embeddedStyle, "embeddedStyle",
                               StrId::STR_CAT_READER),
           SettingInfo::Toggle(StrId::STR_HYPHENATION, &CrossPointSettings::hyphenationEnabled, "hyphenationEnabled",
@@ -580,7 +586,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 88;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 89;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

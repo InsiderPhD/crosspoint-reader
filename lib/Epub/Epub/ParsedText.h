@@ -45,6 +45,8 @@ class ParsedText {
   struct LineScratch;
 
   void applyParagraphIndent();
+  // Pixel indent of this paragraph's opening line (negative for a hanging indent).
+  int resolveFirstLineIndent(const GfxRenderer& renderer, int fontId) const;
   std::vector<size_t> computeLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,
                                         std::vector<uint16_t>& wordWidths, std::vector<bool>& continuesVec);
   std::vector<size_t> computeHyphenatedLineBreaks(const GfxRenderer& renderer, int fontId, int pageWidth,

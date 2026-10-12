@@ -560,6 +560,10 @@ class CrossPointSettings {
   static constexpr uint8_t CHARACTER_SPACING_ZERO = 3;
   static constexpr uint8_t CHARACTER_SPACING_COUNT = 7;
   uint8_t characterSpacing = CHARACTER_SPACING_ZERO;
+  // First-line paragraph indent, a TextLayoutOptions::PARAGRAPH_INDENT_* value: 0 = the
+  // book's own indent (the layout before this setting existed), 1 = none, 2..5 = 1..4
+  // word spaces. Persisted, so the mapping must not move.
+  uint8_t paragraphIndent = TextLayoutOptions::PARAGRAPH_INDENT_BOOK;
   uint8_t paragraphAlignment = JUSTIFIED;
   // Auto-sleep timeout setting (default 10 minutes)
   uint8_t sleepTimeout = SLEEP_10_MIN;

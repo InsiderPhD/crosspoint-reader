@@ -369,15 +369,8 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
     return {};
   }
 
-  // Calculate first line indent (only for left/justified text).
-  // Positive text-indent (paragraph indent) is suppressed when extraParagraphSpacing is on.
-  // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
-  // it is structural (positions the bullet/marker), not decorative.
-  const int firstLineIndent =
-      !firstLineConsumed && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
-              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
-          ? blockStyle.textIndent
-          : 0;
+  // First line indent; see resolveFirstLineIndent for the rules.
+  const int firstLineIndent = firstLineConsumed ? 0 : resolveFirstLineIndent(renderer, fontId);
 
   // Ensure any word that would overflow even as the first entry on a line is split using fallback hyphenation.
   for (size_t i = 0; i < wordWidths.size(); ++i) {
@@ -494,10 +487,44 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
   return lineBreakIndices;
 }
 
+// Pixel indent of the paragraph's opening line. Only left/justified text is indented.
+//
+// A negative CSS text-indent is a hanging indent (e.g. margin-left:3em; text-indent:-1em): it
+// is structural (it positions the bullet/marker), not decorative, so it always applies.
+//
+// Otherwise, with the Paragraph Indent setting on "Book's Style", the book's own positive
+// text-indent is used and is suppressed while extraParagraphSpacing is on -- the engine's
+// long-standing rule, where a book with no text-indent gets the em-space from
+// applyParagraphIndent() instead.
+//
+// With any other setting the user's indent replaces a missing or positive CSS indent and no
+// longer depends on extraParagraphSpacing. An explicit CSS zero is still respected: it is how
+// a book marks the paragraphs that must stay flush (the first one after a heading), and how
+// this parser marks table cells. Deviates from upstream 458be7ed2, which overrides zero too.
+int ParsedText::resolveFirstLineIndent(const GfxRenderer& renderer, const int fontId) const {
+  if (blockStyle.alignment != CssTextAlign::Justify && blockStyle.alignment != CssTextAlign::Left) {
+    return 0;
+  }
+  const bool cssIndent = blockStyle.textIndentDefined;
+  if (cssIndent && blockStyle.textIndent < 0) {
+    return blockStyle.textIndent;
+  }
+  if (!layout.overridesParagraphIndent()) {
+    return cssIndent && !extraParagraphSpacing ? blockStyle.textIndent : 0;
+  }
+  if (cssIndent && blockStyle.textIndent == 0) {
+    return 0;
+  }
+  const int spaces = layout.paragraphIndentSpaces();
+  // In word-space units so the indent tracks both the font size and the Word Spacing setting.
+  return spaces == 0 ? 0 : spaces * layout.scaleSpace(renderer.getSpaceWidth(fontId, EpdFontFamily::REGULAR));
+}
+
 void ParsedText::applyParagraphIndent() {
   // firstLineConsumed: these words continue a soft-flushed paragraph, whose real first
   // word already took the em-space; indenting again would land mid-sentence.
-  if (extraParagraphSpacing || firstLineConsumed || words.empty()) {
+  // A user-chosen indent is positioned by resolveFirstLineIndent(), never by an em-space.
+  if (extraParagraphSpacing || firstLineConsumed || words.empty() || layout.overridesParagraphIndent()) {
     return;
   }
 
@@ -514,15 +541,8 @@ void ParsedText::applyParagraphIndent() {
 std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& renderer, const int fontId,
                                                             const int pageWidth, std::vector<uint16_t>& wordWidths,
                                                             std::vector<bool>& continuesVec) {
-  // Calculate first line indent (only for left/justified text).
-  // Positive text-indent (paragraph indent) is suppressed when extraParagraphSpacing is on.
-  // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
-  // it is structural (positions the bullet/marker), not decorative.
-  const int firstLineIndent =
-      !firstLineConsumed && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
-              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
-          ? blockStyle.textIndent
-          : 0;
+  // First line indent; see resolveFirstLineIndent for the rules.
+  const int firstLineIndent = firstLineConsumed ? 0 : resolveFirstLineIndent(renderer, fontId);
 
   std::vector<size_t> lineBreakIndices;
   size_t currentIndex = 0;
@@ -714,16 +734,9 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   }
   const size_t lineWordCount = ew.size();
 
-  // Calculate first line indent (only for left/justified text).
-  // Positive text-indent (paragraph indent) is suppressed when extraParagraphSpacing is on.
-  // Negative text-indent (hanging indent, e.g. margin-left:3em; text-indent:-1em) always applies —
-  // it is structural (positions the bullet/marker), not decorative.
+  // First line indent; see resolveFirstLineIndent for the rules.
   const bool isFirstLine = breakIndex == 0 && !firstLineConsumed;
-  const int firstLineIndent =
-      isFirstLine && blockStyle.textIndentDefined && (blockStyle.textIndent < 0 || !extraParagraphSpacing) &&
-              (blockStyle.alignment == CssTextAlign::Justify || blockStyle.alignment == CssTextAlign::Left)
-          ? blockStyle.textIndent
-          : 0;
+  const int firstLineIndent = isFirstLine ? resolveFirstLineIndent(renderer, fontId) : 0;
 
   // Calculate total word width for this line, count actual word gaps,
   // and accumulate total natural gap widths (including space kerning adjustments).

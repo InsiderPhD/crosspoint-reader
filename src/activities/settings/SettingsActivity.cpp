@@ -83,9 +83,10 @@ void SettingsActivity::onEnter() {
     if (setting.key &&
         (std::strcmp(setting.key, "fontSize") == 0 || std::strcmp(setting.key, "lineSpacing") == 0 ||
          std::strcmp(setting.key, "wordSpacing") == 0 || std::strcmp(setting.key, "characterSpacing") == 0 ||
-         std::strcmp(setting.key, "paragraphAlignment") == 0 || std::strcmp(setting.key, "screenMargin") == 0 ||
-         std::strcmp(setting.key, "extraParagraphSpacing") == 0 || std::strcmp(setting.key, "bionicReading") == 0 ||
-         std::strcmp(setting.key, "textAntiAliasing") == 0 || std::strcmp(setting.key, "orientation") == 0)) {
+         std::strcmp(setting.key, "paragraphIndent") == 0 || std::strcmp(setting.key, "paragraphAlignment") == 0 ||
+         std::strcmp(setting.key, "screenMargin") == 0 || std::strcmp(setting.key, "extraParagraphSpacing") == 0 ||
+         std::strcmp(setting.key, "bionicReading") == 0 || std::strcmp(setting.key, "textAntiAliasing") == 0 ||
+         std::strcmp(setting.key, "orientation") == 0)) {
       continue;
     }
     // Device-only override: the "if found" contact is a free-text field with no
