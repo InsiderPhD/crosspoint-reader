@@ -46,9 +46,17 @@ class ClipSelectionActivity final : public Activity {
   // from the highlighted word to the last one). Everything else (cursor
   // movement, rendering, the range highlight) is deliberately shared, so there
   // is only ever one word selector on the page to keep working.
+  // adoptContact (X4 Pro, the reader's Hold Action modes): the finger that held
+  // initialCursorIdx in the reader is still down and was deliberately NOT
+  // suppressed, so this screen takes that contact over as if it had landed
+  // here: dragging it off the word extends the selection, and lifting it
+  // finishes (lookup: looks the word or phrase up; clip: saves a dragged range,
+  // or leaves the held word anchored when the finger never left it). The
+  // contact is never read as a tap or a hold of this screen's own.
   ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList, int fontId,
                         Section& section, int startPageInSection, int marginTop, int marginLeft,
-                        int initialCursorIdx = 0, bool preAnchored = false, bool lookupMode = false);
+                        int initialCursorIdx = 0, bool preAnchored = false, bool lookupMode = false,
+                        bool adoptContact = false);
 
   void onEnter() override;
   void onExit() override;
@@ -66,7 +74,7 @@ class ClipSelectionActivity final : public Activity {
   // claims the contact once it has become a phrase drag (see handleLookupDrag).
   bool ownsSwipes() const override {
 #if FREEINK_DEVICE_X4PRO
-    return !lookupMode || dragging;
+    return !lookupMode || dragging || contactAdopted;
 #else
     return !lookupMode;
 #endif
@@ -105,6 +113,12 @@ class ClipSelectionActivity final : public Activity {
   // The start was set by a tap or drag here, not inherited from the reader's
   // hold -- decides whether tapping the start word saves it or confirms it.
   bool startTapped = false;
+  // The contact being tracked began in the reader (see the constructor). Set
+  // until that contact ends; while it is set nothing but the drag tracker may
+  // act on input.
+  bool contactAdopted = false;
+  // Runs the drag tracker for an adopted contact. True while it owns the frame.
+  bool handleAdoptedContact();
 
   // Drag and tap-tap range selection. True when it consumed this frame.
   bool handleRangeTouch();

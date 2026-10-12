@@ -172,6 +172,16 @@ Defaults:
 | **Home pad, double tap** | Open reader menu |
 | **Home pad, hold** | Open reader menu *(fixed — see [Hardware Overview](#controls-on-the-x4-pro-experimental))* |
 
+**Hold Action** (in **Reader Controls**, under **Tap zones**) chooses what a touch-and-hold on the page does:
+
+| Hold Action | A hold does |
+| ----------- | ----------- |
+| **Shortcut** *(default)* | The **hold** action bound to that third of the screen. The three hold rows are only listed in this mode. |
+| **Dictionary** | Looks up the word under your finger when you lift it. Keep the finger down and slide to another word to look up the whole phrase instead. |
+| **Highlight** | Starts a clipping at the word under your finger. Keep the finger down and slide to the last word, then lift, to save that passage; lift without sliding and the word stays marked, ready for a tap on the last word (see [Bookmarks & Clippings](#8-bookmarks--clippings)). |
+
+In **Dictionary** and **Highlight** a hold on a margin, a picture or the gap between paragraphs does nothing, and the per-zone hold actions are switched off (your choices are kept and come back when you return to **Shortcut**). Dictionary still needs a dictionary to be chosen first. XTC books have no selectable words, so a hold does nothing there in these two modes.
+
 While a double-tap action is bound, a single tap waits about a third of a second to rule out a second tap; bind the double tap to **None** to make the single tap instant. A **leftward swipe does nothing** on the reading page — it used to open the menu and was too easy to trigger by accident; use the action bar's **Confirm** button (bindable as the Confirm row) or the middle tap zone instead.
 
 ### On-screen button hints

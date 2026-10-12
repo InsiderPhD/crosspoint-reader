@@ -29,7 +29,17 @@ class ReaderControlsActivity final : public Activity {
   // three tap zones, and row 22 picks the axis those zones are cut along.
   // Row 23 is Custom Combos on every board: not an action slot of its own, it
   // opens the chord list. Row 24 is the X4 Pro home key's double tap.
-  static constexpr uint8_t kTotalRows = 25;
+  // Row 25 is the X4 Pro's Hold Action mode (CrossPointSettings::READER_HOLD_MODE),
+  // which decides whether rows 19-21 are listed at all.
+  static constexpr uint8_t kTotalRows = 26;
+
+  // The rows currently listed, as row ids in display order. A member rather
+  // than the constant table it is built from because the X4 Pro hides the three
+  // hold-zone rows unless Hold Action is Shortcut. 26 bytes, alive only while
+  // this screen is open.
+  uint8_t visibleRowIds[kTotalRows] = {};
+  uint8_t visibleRowCount = 0;
+  void rebuildVisibleRows();
 
   uint8_t selectedRow = 0;
   bool isDirty = false;
