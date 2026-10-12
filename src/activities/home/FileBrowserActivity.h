@@ -106,15 +106,17 @@ class FileBrowserActivity final : public Activity {
   // Hold-Confirm delete flow for files[selectorIndex] (confirmation dialog +
   // removal), also fired by a Full Touch long tap on a non-book row.
   void confirmDeleteSelectedEntry();
-  // Hold-Confirm / long tap on a row that is not a book. Folders get a short
-  // action list (sleep folder, delete); anything else goes straight to delete.
+  // Hold-Confirm / long tap on a row that is not a book. Folders and BMP
+  // images get a short action list (sleep folder or boot screen, then delete);
+  // anything else goes straight to delete.
   void openEntryActions();
-  void openFolderActions();
   // Full path of files[selectorIndex], without a folder's trailing '/'.
   std::string selectedEntryPath() const;
   // Makes `path` the folder the Custom sleep screen picks from; empty restores
   // the default /.sleep, /sleep lookup.
   void setSleepFolder(const std::string& path);
+  // Makes `path` the image shown at boot; empty restores the built-in logo.
+  void setBootImage(const std::string& path);
   // Header of the open entry action list. ListPickerActivity keeps only the
   // pointer, so the text has to outlive it.
   std::string entryActionsTitle;

@@ -41,6 +41,10 @@ class CrossPointState {
   // the whole point is to survive the reboot.
   uint32_t lastHardcoverSyncDay = 0;
   bool showBootScreen = true;
+  // BMP shown in place of the built-in boot logo, chosen in the file browser.
+  // Empty (the default) = built-in logo, and the boot path never touches the
+  // card for it. A path that no longer opens or parses also gives the logo.
+  std::string bootImagePath;
 
   // recentSleepAge() result for an index that is not in the history.
   static constexpr uint8_t SLEEP_NOT_RECENT = UINT8_MAX;

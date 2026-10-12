@@ -109,6 +109,7 @@ void JsonSettingsIO::serializeState(const CrossPointState& s, String& json) {
   doc["lastKnownValidTimestamp"] = s.lastKnownValidTimestamp;
   doc["lastHardcoverSyncDay"] = s.lastHardcoverSyncDay;
   doc["showBootScreen"] = s.showBootScreen;
+  doc["bootImagePath"] = s.bootImagePath;
 
   json = "";
   serializeJson(doc, json);
@@ -149,6 +150,7 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.lastKnownValidTimestamp = doc["lastKnownValidTimestamp"] | static_cast<uint32_t>(0);
   s.lastHardcoverSyncDay = doc["lastHardcoverSyncDay"] | static_cast<uint32_t>(0);
   s.showBootScreen = doc["showBootScreen"] | true;
+  s.bootImagePath = doc["bootImagePath"] | std::string("");
   return true;
 }
 

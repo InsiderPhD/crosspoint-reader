@@ -615,23 +615,25 @@ std::string FileBrowserActivity::selectedEntryPath() const {
 void FileBrowserActivity::openEntryActions() {
   if (files.empty()) return;
 
-  if (files[selectorIndex].back() == '/') {
-    openFolderActions();
-  } else {
+  const std::string& entry = files[selectorIndex];
+  const bool isDirectory = entry.back() == '/';
+  if (!isDirectory && !FsHelpers::hasBmpExtension(entry)) {
     confirmDeleteSelectedEntry();
+    return;
   }
-}
 
-void FileBrowserActivity::openFolderActions() {
+  // Row 0 is the one thing this kind of entry can be used for, phrased as its
+  // opposite when it is already in use. Row 1 is Delete.
   const std::string fullPath = selectedEntryPath();
-  const bool isSleepFolder = APP_STATE.preferredSleepFolderPath == fullPath;
-  entryActionsTitle.assign(files[selectorIndex], 0, files[selectorIndex].size() - 1);  // drop the trailing "/"
+  const bool inUse = (isDirectory ? APP_STATE.preferredSleepFolderPath : APP_STATE.bootImagePath) == fullPath;
+  entryActionsTitle.assign(entry, 0, isDirectory ? entry.size() - 1 : entry.size());  // no trailing "/"
 
-  auto labelFn = [isSleepFolder](const int index) -> std::string {
-    if (index == 0) return isSleepFolder ? tr(STR_USE_DEFAULT_SLEEP_FOLDERS) : tr(STR_SET_AS_SLEEP_FOLDER);
-    return tr(STR_DELETE);
+  auto labelFn = [isDirectory, inUse](const int index) -> std::string {
+    if (index != 0) return tr(STR_DELETE);
+    if (isDirectory) return inUse ? tr(STR_USE_DEFAULT_SLEEP_FOLDERS) : tr(STR_SET_AS_SLEEP_FOLDER);
+    return inUse ? tr(STR_CLEAR_BOOT_SCREEN) : tr(STR_SET_AS_BOOT_SCREEN);
   };
-  auto handler = [this, fullPath, isSleepFolder](const ActivityResult& result) {
+  auto handler = [this, fullPath, isDirectory, inUse](const ActivityResult& result) {
     // The picker acts on a button PRESS and this screen on its RELEASE, so the
     // key that closed the picker is still down here. Swallow its release, or
     // Back would also leave the directory and Confirm would also open the row.
@@ -640,17 +642,32 @@ void FileBrowserActivity::openFolderActions() {
       lockLongPressBack = mappedInput.isPressed(MappedInputManager::Button::Back);
       return;
     }
-    if (pick->index == 0) {
-      lockNextConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
-      setSleepFolder(isSleepFolder ? std::string() : fullPath);
-    } else {
+    if (pick->index != 0) {
       // The confirmation dialog ignores Confirm, and is still up when it is released.
       confirmDeleteSelectedEntry();
+      return;
+    }
+    lockNextConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
+    const std::string target = inUse ? std::string() : fullPath;
+    if (isDirectory) {
+      setSleepFolder(target);
+    } else {
+      setBootImage(target);
     }
   };
   startActivityForResult(std::make_unique<ListPickerActivity>(renderer, mappedInput, entryActionsTitle.c_str(), 2, 0,
                                                               std::move(labelFn), nullptr, /*markInitial=*/false),
                          std::move(handler));
+}
+
+void FileBrowserActivity::setBootImage(const std::string& path) {
+  if (APP_STATE.bootImagePath == path) return;
+
+  APP_STATE.bootImagePath = path;
+  if (!APP_STATE.saveToFile()) {
+    LOG_ERR("FileBrowser", "Failed to save boot image: %s", path.c_str());
+  }
+  LOG_INF("FileBrowser", "Boot image: %s", path.empty() ? "<built-in>" : path.c_str());
 }
 
 void FileBrowserActivity::setSleepFolder(const std::string& path) {
@@ -691,6 +708,11 @@ void FileBrowserActivity::confirmDeleteSelectedEntry() {
         if (isDirectory && !sleepFolder.empty() &&
             (sleepFolder == fullPath || sleepFolder.rfind(fullPath + "/", 0) == 0)) {
           setSleepFolder(std::string());
+        }
+        // Likewise the boot image, deleted itself or along with its folder.
+        const std::string& bootImage = APP_STATE.bootImagePath;
+        if (!bootImage.empty() && (bootImage == fullPath || (isDirectory && bootImage.rfind(fullPath + "/", 0) == 0))) {
+          setBootImage(std::string());
         }
         loadFiles();
         if (files.empty()) {
@@ -805,20 +827,18 @@ void FileBrowserActivity::render(RenderLock&&) {
     const char* emptyMsg = (mode == Mode::PickFirmware) ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentRect.y + 20, emptyMsg);
   } else {
-    // The chosen sleep folder as it would be listed here ("name/"), or empty
-    // when it is not a child of this directory. Resolved once per render so the
-    // row callback below is a plain string compare.
-    std::string sleepFolderEntry;
-    {
-      const std::string& sleepFolder = APP_STATE.preferredSleepFolderPath;
-      const auto slash = sleepFolder.rfind('/');
-      if (mode == Mode::Books && slash != std::string::npos) {
-        const std::string parent = (slash == 0) ? "/" : sleepFolder.substr(0, slash);
-        if (parent == basepath || parent + "/" == basepath) {
-          sleepFolderEntry = sleepFolder.substr(slash + 1) + "/";
-        }
-      }
-    }
+    // The chosen sleep folder ("name/") and boot image ("name.bmp") as they
+    // would be listed here, or empty when not a child of this directory.
+    // Resolved once per render so the row callback below is a plain compare.
+    const auto entryInThisDirectory = [this](const std::string& fullPath, const bool isDirectory) -> std::string {
+      const auto slash = fullPath.rfind('/');
+      if (mode != Mode::Books || slash == std::string::npos) return {};
+      const std::string parent = (slash == 0) ? "/" : fullPath.substr(0, slash);
+      if (parent != basepath && parent + "/" != basepath) return {};
+      return fullPath.substr(slash + 1) + (isDirectory ? "/" : "");
+    };
+    const std::string sleepFolderEntry = entryInThisDirectory(APP_STATE.preferredSleepFolderPath, true);
+    const std::string bootImageEntry = entryInThisDirectory(APP_STATE.bootImagePath, false);
     GUI.drawList(
         renderer, contentRect, files.size(), selectorIndex, [this](int index) { return getFileName(files[index]); },
         nullptr,
@@ -829,7 +849,7 @@ void FileBrowserActivity::render(RenderLock&&) {
           if (filesIsBookFusion[index]) return UIIcon::BookFusion;
           return UITheme::getFileIcon(files[index]);
         },
-        [this, &sleepFolderEntry](int index) -> std::string {
+        [this, &sleepFolderEntry, &bootImageEntry](int index) -> std::string {
           // Reading-progress percent, looked up from RECENT_BOOKS at rebuildFilesList().
           // -1 (folders, never-opened books) renders as no value.
           const int8_t progress = filesProgress[index];
@@ -841,6 +861,9 @@ void FileBrowserActivity::render(RenderLock&&) {
           // Flag the folder the Custom sleep screen picks its images from.
           if (!sleepFolderEntry.empty() && files[index] == sleepFolderEntry) {
             return tr(STR_SLEEP);
+          }
+          if (!bootImageEntry.empty() && files[index] == bootImageEntry) {
+            return tr(STR_BOOT_MARK);
           }
           return "";
         },
