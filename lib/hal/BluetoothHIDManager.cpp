@@ -860,9 +860,28 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   const int connectedRssi = pClient->getRssi();
   LOG_INF("BT", "Connected RSSI for %s: %d dBm", address.c_str(), connectedRssi);
 
+  // GATT discovery below blocks on the peer. If the link dies underneath it
+  // (remote goes silent -> supervision timeout, reason 520), every lookup comes
+  // back empty and would be reported as "no HID service" / "no input report" —
+  // i.e. "this is not a remote" — when the truth is the connection was lost.
+  const uint32_t linkUpMs = millis();
+  const auto linkLostDuringSetup = [&]() {
+    if (pClient->isConnected()) {
+      return false;
+    }
+    lastError = "Link dropped during setup";
+    lastStatus = BtStatus::ConnectFailed;
+    LOG_ERR("BT", "Link to %s dropped %lu ms into GATT setup (RSSI was %d dBm)", address.c_str(),
+            static_cast<unsigned long>(millis() - linkUpMs), connectedRssi);
+    return true;
+  };
+
   // Get HID service
   NimBLERemoteService* pService = pClient->getService(HID_SERVICE_UUID);
   if (!pService) {
+    if (linkLostDuringSetup()) {
+      return false;
+    }
     lastError = "HID service not found";
     lastStatus = BtStatus::NoHidService;
     LOG_ERR("BT", "Device %s doesn't have HID service", address.c_str());
@@ -909,6 +928,9 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   }
 
   if (reportChars.empty()) {
+    if (linkLostDuringSetup()) {
+      return false;
+    }
     lastError = "No input report characteristic found";
     lastStatus = BtStatus::NoReportChar;
     LOG_ERR("BT", "No Report characteristic with notify/indicate found");
@@ -940,6 +962,9 @@ bool BluetoothHIDManager::connectToDevice(const std::string& address) {
   }
 
   if (successfulSubscriptions == 0) {
+    if (linkLostDuringSetup()) {
+      return false;
+    }
     lastError = "Failed to subscribe to input reports";
     lastStatus = BtStatus::SubscribeFailed;
     LOG_ERR("BT", "No HID report subscriptions succeeded for %s", address.c_str());
