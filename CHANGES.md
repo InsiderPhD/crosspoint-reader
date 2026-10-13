@@ -4,11 +4,23 @@ A running technical log of what this fork adds on top of upstream CrossPoint, ne
 
 ---
 
-## Unreleased
+## 1.13.0-rc1 — October 2026 (pre-release)
+
+A catch-up release: it pulls in a large batch of upstream CrossPoint and CrossInk changes rather than adding new features of this fork's own. Tested on X3 and X4 Pro; the X4 and X4C images build but have not been run on hardware.
+
+### Sync and settings follow-ups to the port
+
+- **BookFusion sync screen.** Progress cards for BookFusion and This device (percentage, bar, chapter, Ahead badge, bookmark and highlight counts, last sync time). The reader menu's Sync: Push and Sync: Pull rows are one **Sync with BookFusion** / **Sync with KOReader** row that fetches, shows both sides, then offers Apply remote or Upload local.
+- **Bookmarks ride along with BookFusion sync.** Quick Sync and Push send new bookmarks as they already send highlights (`bf_id` kept in the bookmark file). No delete or rename propagation.
+- **Hardcover.** Quick Sync and Push also push the open book to Hardcover when a token is set. A book Hardcover already has as Read is no longer reopened as a re-read by a partial push from the device.
+- **Clock.** Clock format, time zone, daylight saving and sync rows show on every board; boards without an RTC sync over NTP. Header and reader-menu clocks honour the 12/24h format.
+- **Lists.** Hold Up/Down pages the Calibre, BookFusion and KOReader settings lists, the network mode list and Font & Layout. Overflowing tab ribbons (Stats, Settings) keep the selected tab centred.
+- **Bluetooth.** A link that drops during GATT setup is reported as a lost connection, not as "not a remote".
+
 
 ### Upstream and CrossInk feature port (October 2026)
 
-Hand-ported onto this fork's own UI from `upstream/develop` and `crossink/development`, plus integrations between the new features and existing ones. Built and exercised in the desktop simulator (X4 profile, and the X4 Pro profile for touch code); not yet built for or run on hardware. Section cache v48, `book.bin` v13, CSS cache v8, TXT index v4: every book re-indexes once.
+Hand-ported onto this fork's own UI from `upstream/develop` and `crossink/development`, plus integrations between the new features and existing ones. Section cache v48, `book.bin` v13, CSS cache v8, TXT index v4: every book re-indexes once.
 
 - **Reading layout.** Word Spacing (50-200%), Character Spacing (+/-1.5 px) and Paragraph Indent in Font & Layout, applied to EPUB body, tables, on-page footnotes, dictionary pages and TXT. Inline images flow within a line. Publisher borders, shading, page breaks and `white-space: pre`. Heading and block font sizes on PSRAM boards (built-in families only).
 - **Per-book settings.** Reader menu > Book Settings overrides layout settings for one book (sidecar in the book's cache dir, never written to `settings.json`); Use Global Settings clears them. Image Grayscale toggle, global and per book. Go to Page for books with a publisher page list.
@@ -26,7 +38,7 @@ Hand-ported onto this fork's own UI from `upstream/develop` and `crossink/develo
 
 ### Upstream and CrossInk efficiency sync (October 2026)
 
-Hand-ported from `upstream/develop` (to `aad48b40d`) and `crossink/development` (to `67100e666`). No new features; fork features untouched. Built and smoke-tested in the desktop simulator only (`pio run -e simulator`); **not yet built for a device or flashed**.
+Hand-ported from `upstream/develop` (to `aad48b40d`) and `crossink/development` (to `67100e666`). No new features; fork features untouched.
 
 - **SD I/O.** ZIP central directory read in 1KiB chunks instead of ~13 locked reads per entry; page serialization staged in a 2KB buffer (section files byte-identical); `HalFile` block `Print::write` override (no more one locked write per byte through a `Print&`); SdFat separate FAT-sector cache plus a stale-cache-after-failed-read fix (+512B DRAM); NCX/NAV TOC streamed into the parser with no temp file; 50ms per-image delay removed; unchanged `state.json` writes skipped by CRC.
 - **Heap.** Ditherers one nothrow block each (OOM is a handled error, not an abort); SD-font kern class tables streamed from SD instead of resident, interval tables shared across styles, prewarm scan in a fixed array (~2.1KB .bss, zero heap per page), rebuildable SD-font caches released on reader exit; spine size-target lookup chunked to 8KB; settings list reserved at its exact size; `ButtonNavigator` no longer allocates per poll; recents rotate in place; no-op CSS rules not stored (CSS cache v6).
