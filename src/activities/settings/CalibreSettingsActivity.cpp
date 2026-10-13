@@ -52,14 +52,28 @@ void CalibreSettingsActivity::loop() {
     return;
   }
 
-  // Handle navigation
-  buttonNavigator.onNext([this] {
-    selectedIndex = (selectedIndex + 1) % MENU_ITEMS;
+  // A press moves one row, a hold turns a page, as in every other list.
+  const int itemCount = static_cast<int>(MENU_ITEMS);
+  const int pageItems = GUI.listGeometry(listRect(), static_cast<int>(selectedIndex), /*hasSubtitle=*/false).pageItems;
+  buttonNavigator.onNextPress([this, itemCount] {
+    selectedIndex = static_cast<size_t>(ButtonNavigator::nextIndex(static_cast<int>(selectedIndex), itemCount));
     requestUpdate();
   });
 
-  buttonNavigator.onPrevious([this] {
-    selectedIndex = (selectedIndex + MENU_ITEMS - 1) % MENU_ITEMS;
+  buttonNavigator.onPreviousPress([this, itemCount] {
+    selectedIndex = static_cast<size_t>(ButtonNavigator::previousIndex(static_cast<int>(selectedIndex), itemCount));
+    requestUpdate();
+  });
+
+  buttonNavigator.onNextContinuous([this, itemCount, pageItems] {
+    selectedIndex =
+        static_cast<size_t>(ButtonNavigator::nextPageIndex(static_cast<int>(selectedIndex), itemCount, pageItems));
+    requestUpdate();
+  });
+
+  buttonNavigator.onPreviousContinuous([this, itemCount, pageItems] {
+    selectedIndex =
+        static_cast<size_t>(ButtonNavigator::previousPageIndex(static_cast<int>(selectedIndex), itemCount, pageItems));
     requestUpdate();
   });
 }

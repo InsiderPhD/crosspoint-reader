@@ -320,12 +320,21 @@ void FontLayoutPreviewActivity::loop() {
     return;
   }
 
-  buttonNavigator.onNext([this] {
+  // A press moves one row, a hold turns a page, as in every other list.
+  buttonNavigator.onNextPress([this] {
     selectedIndex = ButtonNavigator::nextIndex(selectedIndex, rowCount);
     requestUpdate();
   });
-  buttonNavigator.onPrevious([this] {
+  buttonNavigator.onPreviousPress([this] {
     selectedIndex = ButtonNavigator::previousIndex(selectedIndex, rowCount);
+    requestUpdate();
+  });
+  buttonNavigator.onNextContinuous([this, pageItems] {
+    selectedIndex = ButtonNavigator::nextPageIndex(selectedIndex, rowCount, pageItems);
+    requestUpdate();
+  });
+  buttonNavigator.onPreviousContinuous([this, pageItems] {
+    selectedIndex = ButtonNavigator::previousPageIndex(selectedIndex, rowCount, pageItems);
     requestUpdate();
   });
 }

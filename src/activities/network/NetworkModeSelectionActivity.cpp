@@ -116,15 +116,26 @@ void NetworkModeSelectionActivity::loop() {
     return;
   }
 
-  // Handle navigation
+  // A press moves one row, a hold turns a page, as in every other list.
   const int itemCount = visibleMenuItemCount();
-  buttonNavigator.onNext([this, itemCount] {
+  const int pageItems = GUI.listGeometry(listRect(), selectedIndex, /*hasSubtitle=*/true).pageItems;
+  buttonNavigator.onNextPress([this, itemCount] {
     selectedIndex = ButtonNavigator::nextIndex(selectedIndex, itemCount);
     requestUpdate();
   });
 
-  buttonNavigator.onPrevious([this, itemCount] {
+  buttonNavigator.onPreviousPress([this, itemCount] {
     selectedIndex = ButtonNavigator::previousIndex(selectedIndex, itemCount);
+    requestUpdate();
+  });
+
+  buttonNavigator.onNextContinuous([this, itemCount, pageItems] {
+    selectedIndex = ButtonNavigator::nextPageIndex(selectedIndex, itemCount, pageItems);
+    requestUpdate();
+  });
+
+  buttonNavigator.onPreviousContinuous([this, itemCount, pageItems] {
+    selectedIndex = ButtonNavigator::previousPageIndex(selectedIndex, itemCount, pageItems);
     requestUpdate();
   });
 }
