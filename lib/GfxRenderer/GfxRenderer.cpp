@@ -390,7 +390,7 @@ void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
 
   // Bounds checking against runtime panel dimensions
   if (phyX < 0 || phyX >= panelWidth || phyY < 0 || phyY >= panelHeight) {
-    if (outOfRangePixels++ < MAX_LOGGED_OUT_OF_RANGE) {
+    if (!overhangExpected && outOfRangePixels++ < MAX_LOGGED_OUT_OF_RANGE) {
       LOG_ERR("GFX", "!! Outside range (%d, %d) -> (%d, %d)", x, y, phyX, phyY);
     }
     return;

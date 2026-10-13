@@ -46,6 +46,8 @@ class GfxRenderer {
   // are logged: one misplaced string is hundreds of pixels, and logging each
   // one floods serial and stalls the render.
   mutable uint32_t outOfRangePixels = 0;
+  // Set by ExpectOverhang: off-panel pixels are clipped without being counted.
+  mutable bool overhangExpected = false;
   Orientation orientation;
   bool fadingFix;
   bool imagesSuppressed = false;
@@ -100,6 +102,23 @@ class GfxRenderer {
   explicit GfxRenderer(HalDisplay& halDisplay)
       : display(halDisplay), renderMode(BW), orientation(Portrait), fadingFix(false) {}
   ~GfxRenderer() { freeBwBufferChunks(); }
+
+  // Scope in which draws are EXPECTED to run off the panel, e.g. a scrolling
+  // ribbon whose edge cells are cut by the screen edge. Pixels are clipped as
+  // always, but not reported as a misplaced string.
+  class ExpectOverhang {
+   public:
+    explicit ExpectOverhang(const GfxRenderer& renderer) : renderer(renderer), previous(renderer.overhangExpected) {
+      renderer.overhangExpected = true;
+    }
+    ~ExpectOverhang() { renderer.overhangExpected = previous; }
+    ExpectOverhang(const ExpectOverhang&) = delete;
+    ExpectOverhang& operator=(const ExpectOverhang&) = delete;
+
+   private:
+    const GfxRenderer& renderer;
+    const bool previous;
+  };
 
   static constexpr int VIEWABLE_MARGIN_TOP = 9;
   static constexpr int VIEWABLE_MARGIN_RIGHT = 3;

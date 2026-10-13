@@ -373,8 +373,9 @@ class BaseTheme {
   // drawTabBar or the ribbon and the hit-test disagree.
   virtual int tabCellWidth(const GfxRenderer& renderer, const TabInfo& tab) const;
 
-  // Horizontal scroll offset of the tab ribbon (the PEEK-clamped pass-1 math,
-  // identical in both themes). Shared by drawTabBar and hitTestTabBar.
+  // Horizontal scroll offset of the tab ribbon: an overflowing ribbon centres
+  // the selected tab (identical in both themes). Shared by drawTabBar and
+  // hitTestTabBar.
   int computeTabScrollOffset(const GfxRenderer& renderer, const Rect& rect, const std::vector<TabInfo>& tabs) const;
 
   // Vertical offset of the first drawButtonMenu tile inside its rect: Classic

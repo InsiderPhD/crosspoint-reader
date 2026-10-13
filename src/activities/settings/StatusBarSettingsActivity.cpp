@@ -21,8 +21,7 @@
 namespace {
 using CPS = CrossPointSettings;
 
-// --- Hub rows: the three bars, then everything they share. Clock entries
-// are appended only when the DS3231 RTC is present so X4 devices don't see them.
+// --- Hub rows: the three bars, then everything they share, clock rows last.
 enum HubItem {
   HUB_OUTSIDE_READER = 0,  // The strip along the top of every non-reader screen
   HUB_TOP_BAR,
@@ -31,13 +30,12 @@ enum HubItem {
   HUB_TEXT_SIZE,
   HUB_TOP_MARGIN,
   HUB_XTC_STATUS_BAR,
-  HUB_CLOCK_FORMAT,     // RTC boards only
-  HUB_CLOCK_TIME_ZONE,  // RTC boards only, launches TimeZoneSelectActivity
-  HUB_CLOCK_DST,        // RTC boards only
-  HUB_CLOCK_SYNC,       // RTC boards only, launches ClockSyncActivity
+  HUB_CLOCK_FORMAT,
+  HUB_CLOCK_TIME_ZONE,  // launches TimeZoneSelectActivity
+  HUB_CLOCK_DST,
+  HUB_CLOCK_SYNC,  // launches ClockSyncActivity
   HUB_COUNT
 };
-constexpr int HUB_BASE_ITEMS = HUB_CLOCK_FORMAT;  // Rows shown on every device
 const StrId hubNames[HUB_COUNT] = {
     StrId::STR_SB_OUTSIDE_READER, StrId::STR_SB_READER_TOP,        StrId::STR_SB_READER_BOTTOM,
     StrId::STR_PERCENTAGE_FORMAT, StrId::STR_STATUS_BAR_TEXT_SIZE, StrId::STR_STATUS_BAR_TOP_MARGIN,
@@ -158,7 +156,9 @@ void StatusBarSettingsActivity::onEnter() {
   selectedIndex = 0;
   const bool hasClock = halClock.isAvailable();
   if (page == Page::Hub) {
-    visibleItemCount = hasClock ? HUB_COUNT : HUB_BASE_ITEMS;
+    // The clock rows show on every board: the Outside Reader clock runs off the
+    // NTP-set system clock, so format, zone and DST apply without an RTC too.
+    visibleItemCount = HUB_COUNT;
   } else if (page == Page::OutsideReader) {
     visibleItemCount = HEADER_ITEMS;
   } else {
@@ -387,8 +387,13 @@ std::string StatusBarSettingsActivity::valueText(const int index) const {
         const uint8_t dst = SETTINGS.clockDst < CLOCK_DST_ITEMS ? SETTINGS.clockDst : 0;
         return std::string(I18N.get(clockDstNames[dst]));
       }
-      case HUB_CLOCK_SYNC:
-        return SETTINGS.clockHasBeenSynced ? tr(STR_CLOCK_SYNCED) : tr(STR_NOT_SET);
+      case HUB_CLOCK_SYNC: {
+        // Without an RTC the time dies with the power, so the persisted flag
+        // would lie; report whether the clock has been set this boot instead.
+        const bool synced = halClock.isAvailable() ? SETTINGS.clockHasBeenSynced != 0
+                                                   : (TimeUtils::wasTimeSyncedThisBoot() && TimeUtils::isClockValid());
+        return synced ? tr(STR_CLOCK_SYNCED) : tr(STR_NOT_SET);
+      }
       default:
         return std::string();
     }

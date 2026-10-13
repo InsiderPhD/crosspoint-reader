@@ -241,30 +241,34 @@ void LyraTheme::drawTabBar(const GfxRenderer& renderer, Rect rect, const std::ve
     renderer.fillRectDither(rect.x, rect.y, rect.width, rect.height, Color::LightGray);
   }
 
-  // Pass 1 (measure + PEEK scroll) lives in BaseTheme::computeTabScrollOffset,
+  // Pass 1 (measure + scroll) lives in BaseTheme::computeTabScrollOffset,
   // shared with hitTestTabBar; the Lyra cell width (text + 2*hPaddingInSelection)
   // comes from the tabCellWidth override.
   const int offset = computeTabScrollOffset(renderer, rect, tabs);
 
   // Pass 2: draw shifted by the scroll offset, skipping tabs fully off-view.
-  int currentX = startX - offset;
-  for (const auto& tab : tabs) {
-    const int cellW = tabCellWidth(renderer, tab);
+  // A tab cut by the screen edge is meant to be: it shows the ribbon carries on.
+  {
+    const GfxRenderer::ExpectOverhang overhang(renderer);
+    int currentX = startX - offset;
+    for (const auto& tab : tabs) {
+      const int cellW = tabCellWidth(renderer, tab);
 
-    if (currentX + cellW >= startX && currentX <= viewRight) {
-      if (tab.selected) {
-        if (selected) {
-          renderer.fillRoundedRect(currentX, rect.y + 1, cellW, rect.height - 4, cornerRadius, Color::Black);
-        } else {
-          renderer.fillRectDither(currentX, rect.y, cellW, rect.height - 3, Color::LightGray);
-          renderer.drawLine(currentX, rect.y + rect.height - 3, currentX + cellW, rect.y + rect.height - 3, 2, true);
+      if (currentX + cellW >= startX && currentX <= viewRight) {
+        if (tab.selected) {
+          if (selected) {
+            renderer.fillRoundedRect(currentX, rect.y + 1, cellW, rect.height - 4, cornerRadius, Color::Black);
+          } else {
+            renderer.fillRectDither(currentX, rect.y, cellW, rect.height - 3, Color::LightGray);
+            renderer.drawLine(currentX, rect.y + rect.height - 3, currentX + cellW, rect.y + rect.height - 3, 2, true);
+          }
         }
+        renderer.drawText(UI_10_FONT_ID, currentX + hPaddingInSelection, rect.y + 6, tab.label,
+                          !(tab.selected && selected), EpdFontFamily::REGULAR);
       }
-      renderer.drawText(UI_10_FONT_ID, currentX + hPaddingInSelection, rect.y + 6, tab.label,
-                        !(tab.selected && selected), EpdFontFamily::REGULAR);
-    }
 
-    currentX += cellW + spacing;
+      currentX += cellW + spacing;
+    }
   }
 
   renderer.drawLine(rect.x, rect.y + rect.height - 1, rect.x + rect.width - 1, rect.y + rect.height - 1, true);

@@ -441,8 +441,7 @@ int BaseTheme::computeTabScrollOffset(const GfxRenderer& renderer, const Rect& r
   const int viewRight = rect.x + rect.width - m.contentSidePadding;
 
   // Measure the natural (unscrolled) layout and the selected tab's bounds so
-  // the ribbon can scroll horizontally when the tabs overflow, keeping the
-  // selected tab's full label readable.
+  // the ribbon can scroll horizontally when the tabs overflow.
   int naturalX = startX;
   int selLeft = startX;
   int selRight = startX;
@@ -456,14 +455,13 @@ int BaseTheme::computeTabScrollOffset(const GfxRenderer& renderer, const Rect& r
   }
   const int totalWidth = naturalX - m.tabSpacing - startX;
   const int viewWidth = viewRight - startX;
-  // Keep a sliver of the neighbouring tab visible so it's obvious more tabs
-  // exist. Clamping still makes the genuine first/last tab sit flush.
-  constexpr int PEEK = 28;
 
+  // An overflowing ribbon keeps the selected tab in the middle, so stepping
+  // along it brings the tabs beyond either edge into view. Clamping makes the
+  // genuine first/last tab sit flush instead of leaving a gap beside it.
   int offset = 0;
   if (totalWidth > viewWidth) {
-    if (selRight - offset > viewRight - PEEK) offset = selRight - (viewRight - PEEK);
-    if (selLeft - offset < startX + PEEK) offset = selLeft - (startX + PEEK);
+    offset = (selLeft + selRight) / 2 - (startX + viewRight) / 2;
     const int maxOffset = totalWidth - viewWidth;
     if (offset < 0) offset = 0;
     if (offset > maxOffset) offset = maxOffset;
@@ -865,6 +863,8 @@ void BaseTheme::drawTabBar(const GfxRenderer& renderer, const Rect rect, const s
   const int offset = computeTabScrollOffset(renderer, rect, tabs);
 
   // Pass 2: draw shifted by the scroll offset, skipping tabs fully off-view.
+  // A tab cut by the screen edge is meant to be: it shows the ribbon carries on.
+  const GfxRenderer::ExpectOverhang overhang(renderer);
   int currentX = startX - offset;
   for (const auto& tab : tabs) {
     const int textWidth =
