@@ -66,8 +66,9 @@ inline constexpr Row kRows[] = {
     {19, MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR, Availability::Always},
     {20, MenuAction::NEARBY_POSITION_SYNC, StrId::STR_NEARBY_POSITION_SYNC, Availability::Always},
     {21, MenuAction::AUTOSYNC, StrId::STR_AUTOSYNC, Availability::Always},
-    {22, MenuAction::SYNC_PUSH, StrId::STR_SYNC_PUSH, Availability::Always},
-    {23, MenuAction::SYNC_PULL, StrId::STR_SYNC_PULL, Availability::Always},
+    // Bit 22 was "Sync: Push"; it now covers the single Sync row. Bit 23 was
+    // "Sync: Pull" and is retired - do not reuse it.
+    {22, MenuAction::SYNC, StrId::STR_SYNC_PROGRESS, Availability::Always},
     {24, MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE, Availability::DevMode},
     {25, MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON, Availability::Always},
 };

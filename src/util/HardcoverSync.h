@@ -11,8 +11,10 @@ struct ReadingBookStats;
 // Hardcover sync, driven from the reading-stats store: a book's progress is its
 // stats record (lastProgressPercent, completed), so a push needs no open Epub.
 //
-// Two ways in:
+// Three ways in:
 //   * Settings > Stats > Push to Hardcover, on every device (HardcoverPushActivity).
+//   * BookFusion Quick Sync and Sync: Push in the reader, on every device, for
+//     the open book (pushOpenBookToHardcover in EpubReaderActivity.cpp).
 //   * CROSSPOINT_HARDCOVER_AUTO_SYNC boards only: onSessionWritten(), called by
 //     ReadingStatsStore::endSession, queues a silent push on a background task.
 namespace HardcoverSync {
@@ -73,7 +75,9 @@ inline void finishBeforeSleep(uint32_t = 0) {}
 inline bool isFullSyncDue() { return false; }
 inline int runFullSync(uint32_t, const volatile bool* = nullptr) { return 0; }
 
-// Tight-heap boards (X3/X4) never push from inside the reader. Instead, once
+// Tight-heap boards (X3/X4) never push automatically from inside the reader:
+// the RAM is needed to load the book. (A user-started BookFusion Quick Sync or
+// Push does push there - WiFi is already up for it.) Instead, once
 // the sleep screen is on the panel and the reader's heap is released, push up
 // to three out-of-date books (the one just closed first) on the calling task:
 // silent WiFi to the last network, TLS in the borrowed framebuffer, WiFi off.

@@ -136,11 +136,11 @@ bool pushBookFusion(const ProgressAutoSync::Payload& payload) {
 
   const char* path = payload.epubPath.c_str();
   if (uploaded.updatedAt[0] != '\0') {
-    BookFusionBookIdStore::saveLastSyncAt(path, uploaded.updatedAt);
+    BookFusionBookIdStore::saveLastSyncAt(path, uploaded.updatedAt, true);
   } else {
     char localTs[40];
     if (formatLocalSyncTimestamp(localTs, sizeof(localTs))) {
-      BookFusionBookIdStore::saveLastSyncAt(path, localTs);
+      BookFusionBookIdStore::saveLastSyncAt(path, localTs, true);
     }
   }
   BookFusionStoredPosition stored = storedPositionFromBookFusion(uploaded);

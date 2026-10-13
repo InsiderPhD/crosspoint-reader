@@ -36,8 +36,11 @@ class BookFusionBookIdStore {
   static bool saveBookId(const char* epubPath, uint32_t bookId);
 
   // Load/save the last server reading_position updated_at seen for this EPUB.
-  static bool loadLastSyncAt(const char* epubPath, char* out, size_t maxLen);
-  static bool saveLastSyncAt(const char* epubPath, const char* updatedAt);
+  // pushedByThisDevice records whether that server position was written by an
+  // upload from this device (true) or merely read from the server (false); the
+  // API names no device, so this is the only way to tell "ours" from "theirs".
+  static bool loadLastSyncAt(const char* epubPath, char* out, size_t maxLen, bool* pushedByThisDevice = nullptr);
+  static bool saveLastSyncAt(const char* epubPath, const char* updatedAt, bool pushedByThisDevice = false);
 
   // Load/save the BookFusion position associated with last_sync_at.
   static bool loadLastSyncedPosition(const char* epubPath, BookFusionStoredPosition& out);

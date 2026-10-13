@@ -16,6 +16,10 @@ struct BookmarkEntry {
   // summary. Empty for a bookmark that was never renamed.
   std::string name;
   float percentage = 0.0f;
+  // BookFusion's id for this bookmark once it has been pushed; 0 = not pushed.
+  // BOOKFUSION_ID_UNKNOWN marks a push the server accepted without returning an id.
+  static constexpr uint32_t BOOKFUSION_ID_UNKNOWN = 0xFFFFFFFFu;
+  uint32_t bookFusionId = 0;
 
   // Cached page mapping for faster bookmark list rendering.
   uint16_t computedSpineIndex = 0;

@@ -69,7 +69,7 @@ uint32_t maskFromLegacyToggles(const bool bookmarks, const bool clippings, const
   if (!bookmarks) hide({MenuAction::BOOKMARKS, MenuAction::ADD_BOOKMARK});
   if (!clippings) hide({MenuAction::SAVE_CLIPPING, MenuAction::VIEW_CLIPPINGS});
   if (!bluetooth) hide({MenuAction::TOGGLE_BLUETOOTH});
-  if (!sync) hide({MenuAction::AUTOSYNC, MenuAction::SYNC_PUSH, MenuAction::SYNC_PULL});
+  if (!sync) hide({MenuAction::AUTOSYNC, MenuAction::SYNC});
   return mask;
 }
 

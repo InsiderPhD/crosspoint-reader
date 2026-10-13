@@ -205,6 +205,68 @@ void readBookFusionPosition(JsonDocument& doc, BookFusionPosition& out) {
   strlcpy(out.updatedAt, doc["updated_at"] | "", sizeof(out.updatedAt));
 }
 
+// Counts the entries of a JSON list response as it streams past, buffering
+// nothing: a book's highlights echo their whole quote text and HTML, so the
+// body can run to tens of KB. The list is either the root array or the first
+// array inside a wrapper object; an entry is an object opened directly in it.
+class JsonListCounterStream final : public Stream {
+ public:
+  int count() const { return count_; }
+
+  size_t write(uint8_t byte) override { return write(&byte, 1); }
+
+  size_t write(const uint8_t* buffer, size_t size) override {
+    for (size_t i = 0; i < size; ++i) feed(static_cast<char>(buffer[i]));
+    return size;
+  }
+
+  int available() override { return 0; }
+  int read() override { return -1; }
+  int peek() override { return -1; }
+  void flush() override {}
+
+ private:
+  void feed(const char c) {
+    if (inString_) {
+      if (escaped_) {
+        escaped_ = false;
+      } else if (c == '\\') {
+        escaped_ = true;
+      } else if (c == '"') {
+        inString_ = false;
+      }
+      return;
+    }
+    switch (c) {
+      case '"':
+        inString_ = true;
+        break;
+      case '[':
+        ++depth_;
+        if (listDepth_ == 0) listDepth_ = depth_;  // the first array is the list
+        break;
+      case '{':
+        ++depth_;
+        if (listDepth_ != 0 && depth_ == listDepth_ + 1) ++count_;
+        break;
+      case ']':
+      case '}':
+        // Leaving the list closes it for good: later arrays are not entries.
+        if (c == ']' && depth_ == listDepth_) listDepth_ = -1;
+        --depth_;
+        break;
+      default:
+        break;
+    }
+  }
+
+  int depth_ = 0;
+  int listDepth_ = 0;  // 0 = list not seen yet, -1 = list finished
+  int count_ = 0;
+  bool inString_ = false;
+  bool escaped_ = false;
+};
+
 class BookFusionSearchJsonStream final : public Stream {
  public:
   BookFusionSearchJsonStream(BookFusionSearchResult& out, int page)
@@ -1025,6 +1087,89 @@ BookFusionSyncClient::Error BookFusionSyncClient::trackReadingTime(const uint32_
   if (httpCode == 401) return AUTH_FAILED;
   if (httpCode < 0) return NETWORK_ERROR;
   return SERVER_ERROR;
+}
+
+BookFusionSyncClient::Error BookFusionSyncClient::createBookmark(const uint32_t bookId,
+                                                                 const BookFusionBookmark& bookmark, uint32_t* outId) {
+  if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
+  if (outId) *outId = 0;
+
+  char url[128];
+  snprintf(url, sizeof(url), "%s/api/v2/library/books/%lu/bookmarks", BASE_URL, (unsigned long)bookId);
+
+  // Same JSON shape the web reader posts.
+  JsonDocument body;
+  body["title"] = (bookmark.title != nullptr) ? bookmark.title : "";
+  body["chapter_index"] = bookmark.chapterIndex;
+  body["page_position_in_chapter"] = bookmark.pagePositionInChapter;
+  body["page_position_in_book"] = bookmark.pagePositionInBook;
+  String bodyStr;
+  serializeJson(body, bodyStr);
+
+  ResponseBuffer resp;
+  const int httpCode = performRequest(url, "POST", "application/json", &bodyStr, &resp, nullptr, nullptr, true);
+  LOG_INF("BFS", "createBookmark book=%lu chapter=%d response: %d", (unsigned long)bookId, bookmark.chapterIndex,
+          httpCode);
+
+  if (httpCode < 0) return NETWORK_ERROR;
+  if (httpCode == 401) return AUTH_FAILED;
+  if (httpCode != 200 && httpCode != 201) return SERVER_ERROR;
+
+  // Only the id matters; a response without one still counts as created.
+  if (outId && resp.data) {
+    JsonDocument filter;
+    filter["id"] = true;
+    JsonDocument doc;
+    if (deserializeJson(doc, resp.data, DeserializationOption::Filter(filter)) == DeserializationError::Ok) {
+      *outId = doc["id"] | 0u;
+    }
+  }
+  return OK;
+}
+
+BookFusionSyncClient::Error BookFusionSyncClient::countBookmarks(const uint32_t bookId, int* outCount) {
+  if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
+  if (outCount == nullptr) return JSON_ERROR;
+
+  char url[128];
+  snprintf(url, sizeof(url), "%s/api/v2/library/books/%lu/bookmarks", BASE_URL, (unsigned long)bookId);
+
+  JsonListCounterStream counter;
+  int totalHeader = 0;
+  const int httpCode = performRequest(url, "GET", nullptr, nullptr, nullptr, &counter, &totalHeader, true);
+  LOG_INF("BFS", "countBookmarks book=%lu response: %d (%d listed)", (unsigned long)bookId, httpCode, counter.count());
+
+  if (httpCode < 0) return NETWORK_ERROR;
+  if (httpCode == 401) return AUTH_FAILED;
+  if (httpCode == 404) return NOT_FOUND;
+  if (httpCode != 200) return SERVER_ERROR;
+  // A paged list reports the full size in Total-Count; trust the larger.
+  *outCount = totalHeader > counter.count() ? totalHeader : counter.count();
+  return OK;
+}
+
+BookFusionSyncClient::Error BookFusionSyncClient::countHighlights(const uint32_t bookId, int* outCount) {
+  if (!BF_TOKEN_STORE.hasToken()) return NO_TOKEN;
+  if (outCount == nullptr) return JSON_ERROR;
+
+  char url[128];
+  snprintf(url, sizeof(url), "%s/api/user/highlights/search", BASE_URL);
+
+  JsonDocument body;
+  body["book_id"] = bookId;
+  String bodyStr;
+  serializeJson(body, bodyStr);
+
+  JsonListCounterStream counter;
+  int totalHeader = 0;
+  const int httpCode = performRequest(url, "POST", "application/json", &bodyStr, nullptr, &counter, &totalHeader, true);
+  LOG_INF("BFS", "countHighlights book=%lu response: %d (%d listed)", (unsigned long)bookId, httpCode, counter.count());
+
+  if (httpCode < 0) return NETWORK_ERROR;
+  if (httpCode == 401) return AUTH_FAILED;
+  if (httpCode != 200) return SERVER_ERROR;
+  *outCount = totalHeader > counter.count() ? totalHeader : counter.count();
+  return OK;
 }
 
 BookFusionSyncClient::Error BookFusionSyncClient::createHighlight(const BookFusionHighlight& highlight,

@@ -102,12 +102,13 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   // Reader-to-reader position sync over ESP-NOW. Needs no account and no backend
   // linked to this book, only a second reader in the room with the same EPUB open.
   add(MenuAction::NEARBY_POSITION_SYNC, StrId::STR_NEARBY_POSITION_SYNC);
-  // Sync rows. Gated on the backend that would actually handle a Push/Pull for
+  // Sync row. Gated on the backend that would actually handle a sync for
   // THIS book (ProgressAutoSync::providerFor, resolved by the reader and passed
   // in). A book with no linked backend has nothing to sync to, and the reader's
-  // SYNC_PUSH/SYNC_PULL handler simply falls out of its if/else and returns: the
-  // rows used to be shown anyway and did nothing at all when pressed, with no
-  // error and no log line.
+  // SYNC handler simply falls out of its if/else and returns: the row used to
+  // be shown anyway and did nothing at all when pressed, with no error and no
+  // log line. One row covers both directions: the sync screen compares the two
+  // positions and asks which way to go.
   //
   // Naming the destination also removes the guesswork about WHICH service a
   // generic "Push Local Progress" was about to talk to. Autosync rides the same
@@ -118,8 +119,7 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   if (syncProvider != ProgressAutoSync::Provider::None) {
     const bool isBookFusion = (syncProvider == ProgressAutoSync::Provider::BookFusion);
     add(MenuAction::AUTOSYNC, StrId::STR_AUTOSYNC);
-    add(MenuAction::SYNC_PUSH, isBookFusion ? StrId::STR_SYNC_PUSH_BOOKFUSION : StrId::STR_SYNC_PUSH_KOREADER);
-    add(MenuAction::SYNC_PULL, isBookFusion ? StrId::STR_SYNC_PULL_BOOKFUSION : StrId::STR_SYNC_PULL_KOREADER);
+    add(MenuAction::SYNC, isBookFusion ? StrId::STR_SYNC_BOOKFUSION : StrId::STR_SYNC_KOREADER);
   }
   // Delete Book Cache is a testing aid — only surface it in Dev Mode.
   if (SETTINGS.devMode) {

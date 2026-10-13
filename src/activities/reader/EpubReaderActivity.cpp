@@ -25,6 +25,7 @@
 #include <optional>
 
 #include "BookFusionBookIdStore.h"
+#include "BookFusionBookmarkPush.h"
 #include "BookFusionSyncActivity.h"
 #include "BookFusionSyncClient.h"
 #include "BookFusionTokenStore.h"
@@ -43,6 +44,8 @@
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderUtils.h"
 #include "FootnoteMarkers.h"
+#include "HardcoverBookStore.h"
+#include "HardcoverTokenStore.h"
 #include "JsonSettingsIO.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
@@ -57,6 +60,7 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontGlobals.h"
+#include "TlsFramebufferBorrow.h"
 #include "WifiCredentialStore.h"
 #include "activities/home/ReadingStatsDetailActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
@@ -320,6 +324,86 @@ int countBookFusionHighlightsToPush(const std::shared_ptr<Epub>& epub) {
   if (!epub || CLIPPINGS.getBookFilePath() != epub->getPath()) return 0;
   const auto& clips = CLIPPINGS.getClippings();
   return static_cast<int>(std::count_if(clips.begin(), clips.end(), clipNeedsBookFusionPush));
+}
+
+// All clippings saved for the open book, pushed or not.
+int countBookClippings(const std::shared_ptr<Epub>& epub) {
+  if (!epub || CLIPPINGS.getBookFilePath() != epub->getPath()) return 0;
+  return static_cast<int>(CLIPPINGS.getClippings().size());
+}
+
+// Where the open book stands with Hardcover, as plain ints so the sync screen
+// can share it without a header:
+//   0 = Hardcover not set up (no token)
+//   1 = no stats record for this book (stats off, or never read with them on)
+//   2 = Hardcover already has this progress (or the book has none yet)
+//   3 = a push is due
+//   4 = Hardcover could not match this book (by ISBN, then title + author) and
+//       the client is in its cool-off before looking again
+//   5 = Hardcover has the book as Read, so a partial position is not sent
+//   6 = the stats record has no progress to send yet
+// Reads the SD card, so call it before a TLS window.
+int hardcoverPushState(const std::shared_ptr<Epub>& epub) {
+  if (!epub || !HC_TOKEN_STORE.hasToken()) return 0;
+  const ReadingBookStats* book = READING_STATS.findBook(epub->getPath());
+  if (book == nullptr) return 1;
+  if (!HardcoverSync::isEligible(*book)) return 6;
+  if (!HardcoverSync::isUpToDate(*book)) return 3;
+  // isUpToDate answers true for three different reasons; tell them apart so the
+  // sync can say which one applies instead of a blanket "up to date".
+  HardcoverBookLink link;
+  if (!HardcoverBookStore::load(book->path.c_str(), link)) return 2;
+  LOG_INF("HCS", "Nothing to push: device %u%%%s, Hardcover has %.0f%% (%d/%d pages)%s%s",
+          static_cast<unsigned>(book->lastProgressPercent), book->completed ? " completed" : "", link.syncedPercent,
+          static_cast<int>(link.syncedPages), static_cast<int>(link.pages), link.finished ? ", marked Read" : "",
+          link.bookId == 0 ? ", unmatched" : "");
+  if (link.bookId == 0 && link.lastMissEpoch != 0) return 4;
+  if (link.finished && !book->completed) return 5;
+  return 2;
+}
+
+// Blocking push of the open book's stats progress to Hardcover. WiFi must be
+// up, no other TLS session may be open, and on tight-heap boards the caller
+// holds a TlsFramebufferBorrow. Best effort: a failure is only reported.
+// Returns 1 = updated, 2 = Hardcover has no such book, 0 = failed.
+int pushOpenBookToHardcover(const std::shared_ptr<Epub>& epub) {
+  const ReadingBookStats* book = epub ? READING_STATS.findBook(epub->getPath()) : nullptr;
+  if (book == nullptr) return 0;
+  const auto result = HardcoverSync::pushBook(*book);
+  if (result == HardcoverSyncClient::OK) return 1;
+  LOG_ERR("HCS", "Hardcover push failed: %s", HardcoverSyncClient::errorString(result));
+  return result == HardcoverSyncClient::NOT_FOUND ? 2 : 0;
+}
+
+// The line a sync reports about Hardcover, or nullptr when it is not set up.
+// pushResult is pushOpenBookToHardcover()'s return for state 3, or -1 when no
+// push was attempted.
+const char* hardcoverStatusText(const int state, const int pushResult) {
+  switch (state) {
+    case 1:
+      return tr(STR_HARDCOVER_NO_STATS);
+    case 2:
+      return tr(STR_HARDCOVER_SAME_PROGRESS);
+    case 5:
+      return tr(STR_HARDCOVER_MARKED_READ);
+    case 6:
+      return tr(STR_HARDCOVER_NO_PROGRESS);
+    case 3:
+      if (pushResult == 1) return tr(STR_HARDCOVER_DONE);
+      return pushResult == 2 ? tr(STR_HARDCOVER_BOOK_NOT_FOUND) : tr(STR_HARDCOVER_NOT_UPDATED);
+    case 4:
+      return tr(STR_HARDCOVER_BOOK_NOT_FOUND);
+    default:
+      return nullptr;
+  }
+}
+
+// Clippings of the open book that BookFusion already holds as highlights.
+int countBookFusionHighlightsSynced(const std::shared_ptr<Epub>& epub) {
+  if (!epub || CLIPPINGS.getBookFilePath() != epub->getPath()) return 0;
+  const auto& clips = CLIPPINGS.getClippings();
+  return static_cast<int>(
+      std::count_if(clips.begin(), clips.end(), [](const Clipping& clip) { return clip.bookFusionId != 0; }));
 }
 
 int pushBookFusionHighlights(const std::shared_ptr<Epub>& epub, const uint32_t bookId,
@@ -1534,9 +1618,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           });
       break;
     }
-    case EpubReaderMenuActivity::MenuAction::SYNC_PUSH:
-    case EpubReaderMenuActivity::MenuAction::SYNC_PULL: {
-      const bool isPush = (action == EpubReaderMenuActivity::MenuAction::SYNC_PUSH);
+    case EpubReaderMenuActivity::MenuAction::SYNC: {
+      // An upload also updates Hardcover, which reads the stats record.
+      recordStatsProgress();
       std::string epubPath = epub->getPath();
       uint32_t bookId = BookFusionBookIdStore::loadBookId(epubPath.c_str());
 
@@ -1547,15 +1631,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         const int currentPage = section ? section->currentPage : nextPageNumber;
         const int totalPages = section ? section->pageCount : cachedChapterTotalPageCount;
         const int spineIndex = currentSpineIndex;
-        const auto bfDirection =
-            isPush ? BookFusionSyncActivity::Direction::PUSH : BookFusionSyncActivity::Direction::PULL;
         startActivityForResult(
             std::make_unique<WifiSelectionActivity>(renderer, mappedInput),
-            [this, bookId, spineIndex, currentPage, totalPages, bfDirection](const ActivityResult& result) {
+            [this, bookId, spineIndex, currentPage, totalPages](const ActivityResult& result) {
               if (result.isCancelled) return;
               startActivityForResult(
                   std::make_unique<BookFusionSyncActivity>(renderer, mappedInput, epub, bookId, spineIndex, currentPage,
-                                                           totalPages, bfDirection),
+                                                           totalPages, BookFusionSyncActivity::Direction::ASK),
                   [this](const ActivityResult& syncResult) {
                     if (syncResult.isCancelled) return;
                     const auto& sync = std::get<SyncResult>(syncResult.data);
@@ -1576,8 +1658,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             });
       } else if (KOREADER_STORE.hasCredentials()) {
         // KOReader fallback. KOReaderSyncActivity already runs its own full-
-        // screen WiFi selection — pass the direction so it skips its result
-        // comparison screen and performs the chosen direction immediately.
+        // screen WiFi selection, then shows its comparison screen and asks
+        // which way to sync.
         const int currentPage = section ? section->currentPage : nextPageNumber;
         const int totalPages = section ? section->pageCount : cachedChapterTotalPageCount;
         std::optional<uint16_t> paragraphIndex;
@@ -1588,7 +1670,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             paragraphIndex = *pIdx;
           }
         }
-        const auto direction = isPush ? KOReaderSyncActivity::Direction::PUSH : KOReaderSyncActivity::Direction::PULL;
+        const auto direction = KOReaderSyncActivity::Direction::ASK;
         {
           // KOReaderSyncActivity exits by silent-restarting into the book, which
           // skips onExit(): land the debounced position first.
@@ -1613,7 +1695,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               }
             });
       } else {
-        // Unreachable by design: buildMenuItems() only emits SYNC_PUSH/SYNC_PULL
+        // Unreachable by design: buildMenuItems() only emits SYNC
         // when ProgressAutoSync::providerFor() resolved a backend, which is this
         // same predicate. Reaching here means the two have drifted apart — and
         // the symptom is a menu row that does nothing whatsoever when pressed,
@@ -2019,8 +2101,9 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
     }
   }
 
-  // A live contact is only handed over on a word: a hold on a margin, an image
-  // or the gap between paragraphs does nothing at all (no repaint either).
+  // A live contact is handed over on the word findWordAt resolves it to: the
+  // one under the finger, or the nearest when the hold lands in a margin or the
+  // gap between paragraphs. Only a page with no words does nothing at all.
   // The lookup preconditions are checked after that, so they are only ever
   // reported for a hold that would otherwise have looked something up.
   if (liveContact) {
@@ -3587,7 +3670,7 @@ void EpubReaderActivity::openReaderMenu() {
   }
 
   // Which backend a Push/Pull would actually reach for this book. Resolved with
-  // the same predicate the SYNC_PUSH/SYNC_PULL handler branches on (BookFusion
+  // the same predicate the SYNC handler branches on (BookFusion
   // sidecar + token, else KOReader credentials) so the menu can never offer a
   // sync row that the handler would silently drop on the floor.
   const auto syncProvider = ProgressAutoSync::providerFor(epub->getPath()).provider;
@@ -4195,6 +4278,17 @@ void EpubReaderActivity::connectWifiForSyncWithPopup(std::function<void()> onSuc
   }
 }
 
+namespace {
+constexpr int BF_QUICK_SYNC_STEPS = 5;
+
+// "Step 2 of 5\n<text>" for the Quick Sync popup.
+void formatSyncStep(char* out, const size_t size, const int step, const char* text) {
+  char label[32];
+  snprintf(label, sizeof(label), tr(STR_SYNC_STEP_FORMAT), step, BF_QUICK_SYNC_STEPS);
+  snprintf(out, size, "%s\n%s", label, text);
+}
+}  // namespace
+
 void EpubReaderActivity::performBookFusionSync() {
   // Check if this is a BookFusion book
   // The book in hand, not APP_STATE.openEpubPath: that is only written once a
@@ -4225,16 +4319,23 @@ void EpubReaderActivity::performBookFusionSync() {
   // Show initial sync popup
   {
     RenderLock lock(*this);
-    UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Fetching current time...");
+    char msg[96];
+    formatSyncStep(msg, sizeof(msg), 1, tr(STR_BF_CHECKING_TIME));
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_BF_SYNC), msg);
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
   }
   const bool internetTimeSynced = syncBookFusionTimeWithNTP();
+  // Hardcover reads the stats record, so bring it up to this page first.
+  recordStatsProgress();
 
   // Get current local position. section->currentPage is zero-based, which is
   // the coordinate system used by the reader and the sync mappers.
   const int currentPage = section ? section->currentPage : nextPageNumber;
   const int totalPages = section ? section->pageCount : cachedChapterTotalPageCount;
+
+  BookFusionBookmarkPush bookmarkPush;
+  int pendingBookmarks = 0;
 
   // Convert local position to BookFusion format
   BookFusionPosition localBfPos;
@@ -4262,6 +4363,8 @@ void EpubReaderActivity::performBookFusionSync() {
     if (resolveBookFusionHighlightOffsets(renderer, epub)) {
       renderer.clearScreen();
     }
+    // Bookmarks likewise: read the file and map positions while the book is loaded.
+    pendingBookmarks = bookmarkPush.prepare(epub);
     if (section) {
       nextPageNumber = section->currentPage;
       cachedChapterTotalPageCount = section->pageCount;
@@ -4278,7 +4381,9 @@ void EpubReaderActivity::performBookFusionSync() {
 
   {
     RenderLock lock(*this);
-    UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", "Downloading progress...");
+    char msg[96];
+    formatSyncStep(msg, sizeof(msg), 2, tr(STR_BF_DOWNLOADING_PROGRESS));
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_BF_SYNC), msg);
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
   }
@@ -4362,9 +4467,11 @@ void EpubReaderActivity::performBookFusionSync() {
       // BookFusion (rather than the opposite).
       {
         RenderLock lock(*this);
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Applying remote progress (%.0f%%)...", remoteBfPos.percentage);
-        UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
+        char text[72];
+        snprintf(text, sizeof(text), tr(STR_BF_APPLYING_PROGRESS_FORMAT), remoteBfPos.percentage);
+        char msg[112];
+        formatSyncStep(msg, sizeof(msg), 3, text);
+        UITheme::drawSyncProgressPopup(renderer, tr(STR_BF_SYNC), msg);
         if (SETTINGS.darkMode) renderer.invertScreen();
         renderer.displayBuffer();
       }
@@ -4428,9 +4535,11 @@ void EpubReaderActivity::performBookFusionSync() {
     // Show direction-clear popup so the user can see we're pushing TO BookFusion.
     {
       RenderLock lock(*this);
-      char msg[64];
-      snprintf(msg, sizeof(msg), "Uploading local progress (%.0f%%)...", localBfPos.percentage);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
+      char text[72];
+      snprintf(text, sizeof(text), tr(STR_BF_UPLOADING_PROGRESS_FORMAT), localBfPos.percentage);
+      char msg[112];
+      formatSyncStep(msg, sizeof(msg), 3, text);
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_BF_SYNC), msg);
       if (SETTINGS.darkMode) renderer.invertScreen();
       renderer.displayBuffer();
     }
@@ -4439,11 +4548,11 @@ void EpubReaderActivity::performBookFusionSync() {
     uploadResult = BookFusionSyncClient::setProgress(bookId, localBfPos, &uploadedBfPos);
     if (uploadResult == BookFusionSyncClient::OK) {
       if (uploadedBfPos.updatedAt[0] != '\0') {
-        BookFusionBookIdStore::saveLastSyncAt(epubPath.c_str(), uploadedBfPos.updatedAt);
+        BookFusionBookIdStore::saveLastSyncAt(epubPath.c_str(), uploadedBfPos.updatedAt, true);
       } else if (internetTimeSynced) {
         char localTs[40];
         if (formatLocalSyncTimestamp(localTs, sizeof(localTs))) {
-          BookFusionBookIdStore::saveLastSyncAt(epubPath.c_str(), localTs);
+          BookFusionBookIdStore::saveLastSyncAt(epubPath.c_str(), localTs, true);
           LOG_DBG("BFS", "Recorded local sync timestamp %s (upload omitted updated_at)", localTs);
         }
       }
@@ -4458,57 +4567,120 @@ void EpubReaderActivity::performBookFusionSync() {
   }
 
   // Clippings not yet on BookFusion go up as highlights on the same
-  // connection. Skipped when the progress fetch couldn't reach the server —
-  // every highlight request would fail the same way.
+  // connection, then bookmarks. Skipped when the progress fetch couldn't reach
+  // the server — every request would fail the same way.
   int highlightsPushed = 0;
+  int bookmarksPushed = 0;
   if (downloadResult == BookFusionSyncClient::OK || downloadResult == BookFusionSyncClient::NOT_FOUND) {
+    if (pendingBookmarks > 0) {
+      RenderLock lock(*this);
+      char text[56];
+      if (pendingBookmarks == 1) {
+        strlcpy(text, tr(STR_BF_SYNCING_BOOKMARK_ONE), sizeof(text));
+      } else {
+        snprintf(text, sizeof(text), tr(STR_BF_SYNCING_BOOKMARKS_FORMAT), pendingBookmarks);
+      }
+      char msg[96];
+      formatSyncStep(msg, sizeof(msg), 4, text);
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_BF_SYNC), msg);
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+    bookmarksPushed = bookmarkPush.push(bookId);
     highlightsPushed = pushBookFusionHighlights(
         epub, bookId,
         [](void* ctx, const int current, const int total) {
           auto* self = static_cast<EpubReaderActivity*>(ctx);
           RenderLock lock(*self);
-          char msg[48];
-          snprintf(msg, sizeof(msg), "Syncing highlight %d/%d", current, total);
-          UITheme::drawSyncProgressPopup(self->renderer, "BookFusion Sync", msg);
+          char text[56];
+          snprintf(text, sizeof(text), tr(STR_BF_SYNCING_HIGHLIGHT_FORMAT), current, total);
+          char msg[96];
+          formatSyncStep(msg, sizeof(msg), 4, text);
+          UITheme::drawSyncProgressPopup(self->renderer, tr(STR_BF_SYNC), msg);
           if (SETTINGS.darkMode) self->renderer.invertScreen();
           self->renderer.displayBuffer();
         },
         this);
   }
-  char highlightsLine[40] = {};
-  if (highlightsPushed > 0) {
-    snprintf(highlightsLine, sizeof(highlightsLine), "\n%d highlight%s synced", highlightsPushed,
-             highlightsPushed == 1 ? "" : "s");
+  bookmarkPush.commit();
+
+  // Hardcover, when it is set up: same progress, its own server. The BookFusion
+  // session is closed first so the two never hold TLS buffers at once.
+  const int hardcoverState = hardcoverPushState(epub);
+  int hardcoverResult = -1;  // pushOpenBookToHardcover()'s return; -1 = not attempted
+  if (hardcoverState == 3) {
+    {
+      RenderLock lock(*this);
+      char msg[96];
+      formatSyncStep(msg, sizeof(msg), 5, tr(STR_HARDCOVER_UPDATING));
+      UITheme::drawSyncProgressPopup(renderer, tr(STR_BF_SYNC), msg);
+      if (SETTINGS.darkMode) renderer.invertScreen();
+      renderer.displayBuffer();
+    }
+    BookFusionSyncClient::closeConnection();
+    bool lentFramebuffer = false;
+    {
+      TlsFramebufferBorrow borrow(renderer);
+      lentFramebuffer = borrow.active();
+      hardcoverResult = pushOpenBookToHardcover(epub);
+    }
+    if (lentFramebuffer) {
+      // wolfSSL used the framebuffer as heap; the popup below draws over
+      // whatever is there, and the page is repainted in full when the sync ends.
+      RenderLock lock(*this);
+      renderer.clearScreen();
+    }
+  }
+
+  // Appended to every completion message below, a line per extra thing synced.
+  char extraLines[160] = {};
+  {
+    size_t used = 0;
+    const auto appendLine = [&](const char* text) {
+      if (used >= sizeof(extraLines) - 1) return;
+      const int n = snprintf(extraLines + used, sizeof(extraLines) - used, "\n%s", text);
+      if (n > 0) used = std::min(used + static_cast<size_t>(n), sizeof(extraLines) - 1);
+    };
+    char line[56];
+    if (highlightsPushed == 1) {
+      appendLine(tr(STR_BF_HIGHLIGHT_SYNCED_ONE));
+    } else if (highlightsPushed > 1) {
+      snprintf(line, sizeof(line), tr(STR_BF_HIGHLIGHTS_SYNCED_FORMAT), highlightsPushed);
+      appendLine(line);
+    }
+    if (bookmarksPushed == 1) {
+      appendLine(tr(STR_BF_BOOKMARK_SYNCED_ONE));
+    } else if (bookmarksPushed > 1) {
+      snprintf(line, sizeof(line), tr(STR_BF_BOOKMARKS_SYNCED_FORMAT), bookmarksPushed);
+      appendLine(line);
+    }
+    // Always said when Hardcover is set up, including when there was nothing to send.
+    if (const char* hardcoverLine = hardcoverStatusText(hardcoverState, hardcoverResult)) {
+      appendLine(hardcoverLine);
+    }
   }
 
   // Show completion popup
   {
     RenderLock lock(*this);
+    char msg[288];
+    char detail[64];
     if (appliedRemoteProgress) {
-      char msg[120];
-      snprintf(msg, sizeof(msg), "Pulled from BookFusion\n%.1f%% applied to device%s", remoteBfPos.percentage,
-               highlightsLine);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
+      snprintf(detail, sizeof(detail), tr(STR_BF_APPLIED_FORMAT), remoteBfPos.percentage);
+      snprintf(msg, sizeof(msg), "%s\n%s%s", tr(STR_BF_PULLED), detail, extraLines);
     } else if (alreadyUpToDate) {
-      char msg[80];
-      snprintf(msg, sizeof(msg), "Progress already up to date.%s", highlightsLine);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
+      snprintf(msg, sizeof(msg), "%s%s", tr(STR_BF_UP_TO_DATE), extraLines);
     } else if (skippedUploadForReread) {
-      char msg[100];
-      snprintf(msg, sizeof(msg), "Re-reading detected.\nProgress preserved locally.%s", highlightsLine);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
+      snprintf(msg, sizeof(msg), "%s\n%s%s", tr(STR_BF_REREAD_DETECTED), tr(STR_BF_REREAD_KEPT), extraLines);
     } else if (uploadResult == BookFusionSyncClient::OK) {
       LOG_DBG("BFS", "Progress uploaded successfully");
-      char msg[120];
-      snprintf(msg, sizeof(msg), "Pushed to BookFusion\n%.1f%% uploaded from device%s", localBfPos.percentage,
-               highlightsLine);
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", msg);
+      snprintf(detail, sizeof(detail), tr(STR_BF_UPLOADED_FORMAT), localBfPos.percentage);
+      snprintf(msg, sizeof(msg), "%s\n%s%s", tr(STR_BF_PUSHED), detail, extraLines);
     } else {
       LOG_DBG("BFS", "Upload failed: %s", BookFusionSyncClient::errorString(uploadResult));
-      char errorMsg[128];
-      snprintf(errorMsg, sizeof(errorMsg), "Sync failed:\n%s", BookFusionSyncClient::errorString(uploadResult));
-      UITheme::drawSyncProgressPopup(renderer, "BookFusion Sync", errorMsg);
+      snprintf(msg, sizeof(msg), "%s\n%s", tr(STR_SYNC_FAILED_MSG), BookFusionSyncClient::errorString(uploadResult));
     }
+    UITheme::drawSyncProgressPopup(renderer, tr(STR_BF_SYNC), msg);
     if (SETTINGS.darkMode) renderer.invertScreen();
     renderer.displayBuffer();
   }

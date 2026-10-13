@@ -46,7 +46,7 @@ uint32_t BookFusionBookIdStore::loadBookId(const char* epubPath) {
   return bookId;
 }
 
-bool BookFusionBookIdStore::loadLastSyncAt(const char* epubPath, char* out, size_t maxLen) {
+bool BookFusionBookIdStore::loadLastSyncAt(const char* epubPath, char* out, size_t maxLen, bool* pushedByThisDevice) {
   if (out == nullptr || maxLen == 0) {
     return false;
   }
@@ -76,6 +76,9 @@ bool BookFusionBookIdStore::loadLastSyncAt(const char* epubPath, char* out, size
   }
 
   strlcpy(out, lastSyncAt, maxLen);
+  if (pushedByThisDevice != nullptr) {
+    *pushedByThisDevice = doc["last_sync_pushed"] | false;
+  }
   return true;
 }
 
@@ -148,7 +151,7 @@ bool BookFusionBookIdStore::saveBookId(const char* epubPath, uint32_t bookId) {
   return ok;
 }
 
-bool BookFusionBookIdStore::saveLastSyncAt(const char* epubPath, const char* updatedAt) {
+bool BookFusionBookIdStore::saveLastSyncAt(const char* epubPath, const char* updatedAt, const bool pushedByThisDevice) {
   if (updatedAt == nullptr || updatedAt[0] == '\0') {
     return false;
   }
@@ -166,6 +169,7 @@ bool BookFusionBookIdStore::saveLastSyncAt(const char* epubPath, const char* upd
     }
   }
   doc["last_sync_at"] = updatedAt;
+  doc["last_sync_pushed"] = pushedByThisDevice;
 
   String json;
   serializeJson(doc, json);

@@ -87,6 +87,17 @@ struct BookFusionBookshelfList {
 };
 
 /**
+ * One bookmark to create on BookFusion. Positions use the same conventions as
+ * BookFusionPosition: pagePositionInBook = (chapterIndex + pagePositionInChapter) / spine count.
+ */
+struct BookFusionBookmark {
+  const char* title = nullptr;  // shown in the web reader's bookmark list
+  int chapterIndex = 0;         // spine index, 0-based
+  float pagePositionInChapter = 0.0f;
+  float pagePositionInBook = 0.0f;
+};
+
+/**
  * One highlight to create on BookFusion (POST /api/user/highlights).
  * Pointers are borrowed for the duration of the call.
  */
@@ -167,6 +178,17 @@ class BookFusionSyncClient {
   // durationSeconds must be >= 5 (BookFusion minimum; caller enforces this).
   // loggedAtUtcIso must be UTC ISO-8601: "2026-06-17T14:30:05Z" (trailing Z).
   static Error trackReadingTime(uint32_t bookId, uint32_t durationSeconds, const char* loggedAtUtcIso);
+
+  // --- Bookmarks ---
+  // POST /api/v2/library/books/{id}/bookmarks (the web reader's endpoint). On
+  // success *outId receives the server's bookmark id, or 0 when the response
+  // carried none.
+  static Error createBookmark(uint32_t bookId, const BookFusionBookmark& bookmark, uint32_t* outId);
+  // GET on the same URL lists the book's bookmarks; only their number is kept.
+  static Error countBookmarks(uint32_t bookId, int* outCount);
+  // POST /api/user/highlights/search {book_id}: the number of highlights
+  // BookFusion holds for the book, from any device.
+  static Error countHighlights(uint32_t bookId, int* outCount);
 
   // --- Highlights ---
   // Creates one highlight. On success *outId receives the server's highlight id

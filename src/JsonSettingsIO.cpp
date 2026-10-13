@@ -1011,6 +1011,9 @@ bool JsonSettingsIO::saveBookmarks(const std::vector<BookmarkEntry>& bookmarks, 
     if (!bookmark.name.empty()) {
       obj["name"] = bookmark.name;
     }
+    if (bookmark.bookFusionId != 0) {
+      obj["bf_id"] = bookmark.bookFusionId;
+    }
   }
 
   String json;
@@ -1036,6 +1039,7 @@ bool JsonSettingsIO::loadBookmarks(std::vector<BookmarkEntry>& bookmarks, const 
     bookmark.percentage = obj["percentage"] | static_cast<float>(0);
     bookmark.summary = obj["summary"] | std::string("");
     bookmark.name = obj["name"] | std::string("");
+    bookmark.bookFusionId = obj["bf_id"] | 0u;
     if (bookmark.name.size() > BookmarkEntry::MAX_NAME_LENGTH) {
       bookmark.name.resize(BookmarkEntry::MAX_NAME_LENGTH);
     }
