@@ -590,19 +590,30 @@ Error updateRead(HardcoverBookLink& link, const ProgressStep& step, bool& outSta
 // Writes `steps` in order: the first starts a read if there is no open one,
 // the rest update it. The last step is always the current position, so the
 // read ends on it however many dated replays came before.
+//
+// outAlreadyRead: Hardcover has the book as Read and nothing was written. A
+// device position must never reopen a finished book - starting a read on it is
+// what Hardcover shows as a re-read, and the device's record of an old book is
+// routinely short of "completed" (finished at 97%, marked read by hand, stats
+// switched on later).
 Error pushOnce(HardcoverBookLink& link, const ProgressStep* steps, const size_t stepCount, const bool finished,
-               bool& outStale) {
+               bool& outStale, bool& outAlreadyRead) {
   outStale = false;
+  outAlreadyRead = false;
 
-  if (link.userBookId == 0) {
+  // About to start a read (no open one is known): ask Hardcover where the book
+  // stands first. This also covers a cached user_book id whose read was since
+  // finished on the website.
+  if (link.userBookId == 0 || link.readId == 0) {
     int status = 0;
     Error err = lookupUserBook(link, status);
     if (err != Error::OK) return err;
-    if (finished && status == STATUS_READ) {
-      return Error::OK;  // already Read on Hardcover
+    if (status == STATUS_READ) {
+      outAlreadyRead = true;
+      return Error::OK;
     }
-    // Missing from the shelves, or shelved as Want to Read / Read / DNF:
-    // reading it on the device makes it Currently Reading.
+    // Missing from the shelves, or shelved as Want to Read / DNF: reading it
+    // on the device makes it Currently Reading.
     if (link.userBookId == 0 || status != STATUS_READING) {
       err = setStatus(link, STATUS_READING);
       if (err != Error::OK) return err;
@@ -750,8 +761,9 @@ HardcoverSyncClient::Error HardcoverSyncClient::pushProgress(const HardcoverBook
   // A second attempt only runs when the cached user_book/read ids turned out
   // to be stale; it re-reads them from the server first.
   bool stale = false;
+  bool alreadyRead = false;
   for (int attempt = 0; attempt < 2; attempt++) {
-    err = pushOnce(link, steps, stepCount, finished, stale);
+    err = pushOnce(link, steps, stepCount, finished, stale, alreadyRead);
     if (err != OK || !stale) break;
     LOG_INF("HCS", "Cached Hardcover ids were stale; looking them up again");
     link.userBookId = 0;
@@ -762,7 +774,19 @@ HardcoverSyncClient::Error HardcoverSyncClient::pushProgress(const HardcoverBook
     err = SERVER_ERROR;
   }
 
-  if (err == OK) {
+  if (err == OK && alreadyRead) {
+    // Record it as finished so linkIsUpToDate() stops every later push of a
+    // partial position without asking Hardcover again.
+    link.finished = true;
+    link.syncedPercent = 100.0f;
+    if (link.pages > 0) link.syncedPages = link.pages;
+    if (out) {
+      out->pages = link.pages;
+      out->totalPages = link.pages;
+      out->markedRead = true;
+    }
+    LOG_INF("HCS", "Already Read on Hardcover; left untouched: %s", book.title ? book.title : "");
+  } else if (err == OK) {
     link.syncedPages = pages;
     link.syncedPercent = finished ? 100.0f : percent;
     link.finished = finished;
