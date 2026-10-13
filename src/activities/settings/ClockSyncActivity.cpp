@@ -9,6 +9,7 @@
 #include <cstdio>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -31,21 +32,35 @@ void ClockSyncActivity::runSync() {
     return;
   }
 
-  const bool ok = halClock.syncFromNTP();
-  if (!ok) {
-    state = FAILED;
-    requestUpdate();
-    return;
-  }
+  if (halClock.isAvailable()) {
+    if (!halClock.syncFromNTP()) {
+      state = FAILED;
+      requestUpdate();
+      return;
+    }
 
-  // Mark as synced so the auto-sync hook stops firing on future WiFi connects.
-  SETTINGS.clockHasBeenSynced = 1;
-  SETTINGS.saveToFile();
+    // Mark as synced so the auto-sync hook stops firing on future WiFi connects.
+    SETTINGS.clockHasBeenSynced = 1;
+    SETTINGS.saveToFile();
 
-  // Read the freshly synced time back for the user-facing confirmation.
-  char buf[9];
-  if (TimeUtils::formatClock(buf, sizeof(buf))) {
-    snprintf(syncedTime, sizeof(syncedTime), "%s", buf);
+    // Read the freshly synced time back for the user-facing confirmation.
+    char buf[9];
+    if (TimeUtils::formatClock(buf, sizeof(buf))) {
+      snprintf(syncedTime, sizeof(syncedTime), "%s", buf);
+    }
+  } else {
+    // No RTC: set the system clock, which is what the Outside Reader clock and
+    // the stats dates read. clockHasBeenSynced stays untouched: it means "the
+    // RTC holds a time", and settings.json travels between boards.
+    if (!TimeUtils::syncTimeWithNtp()) {
+      state = FAILED;
+      requestUpdate();
+      return;
+    }
+    const uint32_t now = TimeUtils::getCurrentValidTimestamp();
+    APP_STATE.registerValidTimeSync(now);
+    APP_STATE.saveToFile();
+    snprintf(syncedTime, sizeof(syncedTime), "%s", TimeUtils::formatTime(now).c_str());
   }
   state = SUCCESS;
   requestUpdate();

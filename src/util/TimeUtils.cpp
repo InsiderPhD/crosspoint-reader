@@ -325,8 +325,16 @@ std::string TimeUtils::formatTime(const uint32_t epochSeconds) {
     return "";
   }
 
-  char buffer[8];
-  snprintf(buffer, sizeof(buffer), "%02d:%02d", localTime.tm_hour, localTime.tm_min);
+  // Same two shapes as HalClock::formatTime, so the Clock Format setting reads
+  // the same whether the time comes from the RTC or the system clock.
+  char buffer[12];
+  if (SETTINGS.clockFormat == 1) {
+    int hour12 = localTime.tm_hour % 12;
+    if (hour12 == 0) hour12 = 12;
+    snprintf(buffer, sizeof(buffer), "%d:%02d %s", hour12, localTime.tm_min, localTime.tm_hour >= 12 ? "PM" : "AM");
+  } else {
+    snprintf(buffer, sizeof(buffer), "%02d:%02d", localTime.tm_hour, localTime.tm_min);
+  }
   return buffer;
 }
 
