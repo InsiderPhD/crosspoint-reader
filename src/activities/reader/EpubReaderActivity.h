@@ -3,6 +3,7 @@
 #include <Epub/FootnoteEntry.h>
 #include <Epub/Section.h>
 
+#include <array>
 #include <atomic>
 #include <optional>
 #include <vector>
@@ -155,6 +156,21 @@ class EpubReaderActivity final : public Activity {
   // call site — the copy doubled peak heap on footnote-heavy pages).
   void renderContents(Page& page, int orientedMarginTop, int orientedMarginRight, int orientedMarginBottom,
                       int orientedMarginLeft);
+
+  // Saved-clipping highlights for the page being rendered: one rect per run of consecutive
+  // clipped words on a line. Rebuilt once per page in renderContents and reused across the BW
+  // and grayscale passes; a fixed member array so the render path never allocates.
+  struct ClipHighlightRect {
+    int16_t x, y, w, h;
+  };
+  static constexpr int MAX_CLIP_HIGHLIGHT_RECTS = 48;
+  std::array<ClipHighlightRect, MAX_CLIP_HIGHLIGHT_RECTS> clipHighlightRects{};
+  int clipHighlightRectCount = 0;
+  void computeClippingHighlights(const Page& page, int orientedMarginLeft, int orientedMarginTop);
+  // BW framebuffer pass: a light grey background behind each highlight rect.
+  void drawClippingHighlights() const;
+  // Grayscale-plane pass: drops AA inside highlights so the BW highlight shows through intact.
+  void maskClippingHighlightsInGrayPlane() const;
   void renderStatusBar() const;
   // Footnote-return hint / button-hint strip; drawn even when the bar is hidden.
   void renderStatusBarTail(bool hintsActive) const;
@@ -282,6 +298,7 @@ class EpubReaderActivity final : public Activity {
   // BookFusion sync — bidirectional auto-merge used by the long-press Confirm
   // "quick sync". The reader-menu Push/Pull entries use BookFusionSyncActivity
   // instead (full-screen flow), not this method.
+  void armHeldButtons();
   void performLongPressSync();
   void performKOReaderQuickSync();
   void performBookFusionSync();
@@ -292,6 +309,7 @@ class EpubReaderActivity final : public Activity {
       : Activity("EpubReader", renderer, mappedInput), epub(std::move(epub)) {}
   void onEnter() override;
   void onExit() override;
+  void onResume() override;
   void loop() override;
   void render(RenderLock&& lock) override;
   bool isReaderActivity() const override { return true; }

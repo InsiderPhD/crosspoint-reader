@@ -55,13 +55,29 @@ struct KOReaderProgress {
  */
 class KOReaderSyncClient {
  public:
-  enum Error { OK = 0, NO_CREDENTIALS, NETWORK_ERROR, AUTH_FAILED, SERVER_ERROR, JSON_ERROR, NOT_FOUND };
+  enum Error {
+    OK = 0,
+    NO_CREDENTIALS,
+    NETWORK_ERROR,
+    AUTH_FAILED,
+    SERVER_ERROR,
+    JSON_ERROR,
+    NOT_FOUND,
+    LOW_MEMORY,
+    USER_EXISTS
+  };
 
   /**
    * Authenticate with the sync server (validate credentials).
    * @return OK on success, error code on failure
    */
   static Error authenticate();
+
+  /**
+   * Register the stored username/password as a new account (POST /users/create).
+   * @return OK on success, USER_EXISTS if the username is taken, error code on failure
+   */
+  static Error createUser();
 
   /**
    * Get reading progress for a document.

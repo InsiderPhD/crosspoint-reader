@@ -22,7 +22,20 @@ class EpubReaderClippingListActivity final : public Activity {
                                  const std::vector<Clipping>& clippings)
       : Activity("EpubClippingList", renderer, mappedInput), clippings(clippings) {}
 
+  // Standalone (outside the reader: Stats > Clippings, Book Info). Loads this book's clippings
+  // into the store on enter and unloads them on exit; Open launches the reader at the clipping
+  // instead of returning a result. The store is otherwise unused outside the reader, so
+  // borrowing the singleton costs no extra copy.
+  EpubReaderClippingListActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string bookPath,
+                                 std::string bookTitle, std::string bookAuthor)
+      : Activity("EpubClippingList", renderer, mappedInput),
+        clippings(CLIPPINGS.getClippings()),
+        bookPath(std::move(bookPath)),
+        bookTitle(std::move(bookTitle)),
+        bookAuthor(std::move(bookAuthor)) {}
+
   void onEnter() override;
+  void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
   // Only the list has hit-testable rows: the paged detail view and the empty
@@ -31,6 +44,10 @@ class EpubReaderClippingListActivity final : public Activity {
 
  private:
   const std::vector<Clipping>& clippings;
+  // Non-empty only in standalone mode.
+  std::string bookPath;
+  std::string bookTitle;
+  std::string bookAuthor;
   std::string detailText;
   std::vector<std::string> detailLines;
   ButtonNavigator buttonNavigator;
@@ -40,6 +57,11 @@ class EpubReaderClippingListActivity final : public Activity {
   int detailLinesPerPage = 0;
   bool deleteHoldTriggered = false;
   bool detailMode = false;
+  // Swallow a Confirm still held from the screen that opened us (e.g. Book Info's hold-to-open),
+  // so it can't count toward hold-to-delete.
+  bool waitForConfirmRelease = false;
+
+  bool isStandalone() const { return !bookPath.empty(); }
 
   int getPageItems() const;
   // Band the rows are laid out in; its bottom strip holds the page count.

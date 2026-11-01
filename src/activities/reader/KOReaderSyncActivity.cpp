@@ -15,9 +15,11 @@
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
 #include "SilentRestart.h"
+#include "TlsFramebufferBorrow.h"
 #include "WifiCredentialStore.h"
 #include "activities/ActivityManager.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "clippings/ClippingSync.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/HardcoverSync.h"
@@ -53,6 +55,11 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   }
 
   LOG_DBG("KOSync", "WiFi connected, starting sync");
+
+  // Keep the station fully awake for the short sync transaction: ESP32 modem
+  // sleep can stall the socket for seconds and surface as an HTTP timeout
+  // (upstream #3233). WiFi is torn down when this activity exits.
+  WiFi.setSleep(false);
 
   {
     RenderLock lock(*this);
@@ -91,6 +98,31 @@ void KOReaderSyncActivity::performSync() {
   }
 
   LOG_DBG("KOSync", "Document hash: %s", documentHash.c_str());
+
+  if (KOREADER_STORE.getSyncClippings()) {
+    {
+      RenderLock lock(*this);
+      statusMessage = tr(STR_SYNCING_CLIPPINGS);
+    }
+    requestUpdateAndWait();
+    bool clippingsOk = false;
+    {
+      // One borrow for the whole exchange: it is a run of requests on one
+      // connection with no rendering between them.
+      TlsFramebufferBorrow borrow(renderer);
+      clippingsOk = clippingSync::run(epubPath, epub->getTitle(), epub->getAuthor(), documentHash);
+      framebufferDirty = borrow.active();
+    }
+    if (!clippingsOk) {
+      {
+        RenderLock lock(*this);
+        state = SYNC_FAILED;
+        statusMessage = tr(STR_CLIPPING_SYNC_FAILED);
+      }
+      requestUpdate(true);
+      return;
+    }
+  }
 
   {
     RenderLock lock(*this);
@@ -308,6 +340,11 @@ void KOReaderSyncActivity::onExit() {
 
 void KOReaderSyncActivity::render(RenderLock&&) {
   const auto pageWidth = renderer.getScreenWidth();
+
+  if (framebufferDirty) {
+    renderer.clearScreen();
+    framebufferDirty = false;
+  }
 
   // Use popup for simple status states, preserve background
   if (state == NO_CREDENTIALS) {

@@ -15,10 +15,12 @@
 #include <vector>
 
 #include "../util/ListPickerActivity.h"
+#include "ClippingStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "LibraryActivity.h"
 #include "RecentBooksStore.h"
+#include "activities/reader/EpubReaderClippingListActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/SleepBootImages.h"
@@ -31,7 +33,8 @@ constexpr int ROW_V_PAD = 6;
 constexpr unsigned long OPTIONS_HOLD_MS = 700;  // as the book context menus
 
 // Rows of the options list, in display order.
-enum OptionRow : int { OPTION_RENAME = 0, OPTION_SLEEP_FOLDER, OPTION_COUNT };
+// OPTION_CLIPPINGS is last so it can be left off for a book without any.
+enum OptionRow : int { OPTION_RENAME = 0, OPTION_SLEEP_FOLDER, OPTION_CLIPPINGS, OPTION_COUNT };
 
 std::string fileStem(const std::string& path) {
   const size_t slash = path.find_last_of('/');
@@ -184,6 +187,7 @@ void BookDetailsActivity::resetForBook(const std::string& newPath) {
   tags.clear();
   rating.clear();
   coverPath.clear();
+  clippingCount = 0;
   applyBaseInfoFromPath();
 }
 
@@ -224,6 +228,7 @@ void BookDetailsActivity::loadMetadata() {
   if (!FsHelpers::hasEpubExtension(bookPath)) {
     return;
   }
+  clippingCount = ClippingStore::countForFilePath(bookPath, "epub");
 
   Epub epub(bookPath, "/.crosspoint");
   if (!epub.load(/*buildIfMissing=*/true, /*skipLoadingCss=*/true)) {
@@ -296,6 +301,8 @@ void BookDetailsActivity::openOptions() {
         return tr(STR_RENAME);
       case OPTION_SLEEP_FOLDER:
         return sleepFolderInUse ? tr(STR_USE_DEFAULT_SLEEP_FOLDERS) : tr(STR_USE_FOLDER_FOR_SLEEP);
+      case OPTION_CLIPPINGS:
+        return tr(STR_CLIPPINGS);
       default:
         return "";
     }
@@ -319,13 +326,17 @@ void BookDetailsActivity::openOptions() {
       case OPTION_SLEEP_FOLDER:
         SleepBootImages::setSleepFolder(sleepFolderInUse ? std::string() : folder);
         break;
+      case OPTION_CLIPPINGS:
+        openClippings();
+        break;
       default:
         break;
     }
   };
   startActivityForResult(
-      std::make_unique<ListPickerActivity>(renderer, mappedInput, tr(STR_BOOK_OPTIONS), static_cast<int>(OPTION_COUNT),
-                                           0, std::move(labelFn), nullptr, /*markInitial=*/false),
+      std::make_unique<ListPickerActivity>(renderer, mappedInput, tr(STR_BOOK_OPTIONS),
+                                           clippingCount > 0 ? static_cast<int>(OPTION_COUNT) : OPTION_CLIPPINGS, 0,
+                                           std::move(labelFn), nullptr, /*markInitial=*/false),
       std::move(handler));
 }
 
@@ -470,6 +481,17 @@ void BookDetailsActivity::loop() {
   }
 }
 
+void BookDetailsActivity::openClippings() {
+  startActivityForResult(
+      std::make_unique<EpubReaderClippingListActivity>(renderer, mappedInput, bookPath, title, author),
+      [this](const ActivityResult&) {
+        // The list may have deleted clippings.
+        clippingCount = ClippingStore::countForFilePath(bookPath, "epub");
+        waitForBackRelease = true;
+        requestUpdate();
+      });
+}
+
 void BookDetailsActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pageWidth = renderer.getScreenWidth();
@@ -527,6 +549,10 @@ void BookDetailsActivity::render(RenderLock&&) {
     const std::string progress =
         progressPercent < 0 ? std::string(tr(STR_BOOK_INFO_NOT_STARTED)) : std::to_string(progressPercent) + "%";
     y = drawInfoRow(renderer, textX, y, textWidth, tr(STR_BOOK_INFO_PROGRESS), progress);
+  }
+  if (clippingCount > 0) {
+    const std::string clippings = std::to_string(clippingCount) + " (" + tr(STR_HOLD_OPEN_TO_VIEW) + ")";
+    y = drawInfoRow(renderer, textX, y, textWidth, tr(STR_CLIPPINGS), clippings);
   }
 
   // File facts: straight from the directory entry, so they show for every

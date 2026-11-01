@@ -150,6 +150,7 @@ void ActivityManager::processPendingActions() {
           lock.unlock();  // Handler may acquire its own lock
           handler(pendingResult);
         }
+        currentActivity->onResume();
 
         // Request an update to ensure the popped activity gets re-rendered
         if (pendingAction == PendingAction::None) {

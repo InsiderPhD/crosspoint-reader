@@ -13,6 +13,11 @@ inline constexpr uint8_t BF_OFFSETS_RESOLVED = 0x01;     // offset lookup ran to
 inline constexpr uint8_t BF_OFFSETS_FOUND = 0x02;        // ...and found the text
 inline constexpr uint8_t BF_PUSHED_WITH_OFFSETS = 0x04;  // bookFusionId was created with offsets
 
+// Clipping::id capacity: up to 64 printable ASCII chars + NUL, the range the
+// crosspoint-sync clippings extension accepts. Ids this firmware mints are 32
+// hex chars; the extra room is so a clip minted elsewhere still round-trips.
+inline constexpr size_t CLIPPING_ID_SIZE = 65;
+
 struct Clipping {
   uint16_t spineIndex = 0;
   uint16_t startPage = 0;
@@ -33,6 +38,14 @@ struct Clipping {
   uint32_t bookFusionStart = 0;
   uint32_t bookFusionEnd = 0;
   uint8_t bookFusionFlags = 0;  // BF_* bits above
+  // crosspoint-sync clippings extension (see clippings/ClippingSync.cpp).
+  // id is empty until the first sync mints one.
+  char id[CLIPPING_ID_SIZE] = {};
+  uint64_t syncRevision = 0;  // server revision last seen; 0 = never synced
+  bool pendingUpload = true;  // not yet acknowledged by the server
+  // Page/word anchors came from another device's layout, so they cannot be
+  // trusted to land on the right words here: listed, but not highlighted.
+  bool foreignAnchor = false;
   char chapterTitle[CLIPPING_CHAPTER_TITLE_MAX] = {};
   std::string text;
 };
@@ -70,6 +83,17 @@ class ClippingStore {
   // callers update a batch of clips and then call saveToFile() once.
   bool setBookFusionOffsets(size_t index, bool found, uint32_t start, uint32_t end);
   bool setBookFusionPushed(size_t index, uint32_t id, bool withOffsets);
+  // Clipping sync bookkeeping (clippings/ClippingSync.cpp). Deleting a clip that
+  // has an id queues it in a per-book journal so the server can be told.
+  bool prepareSync();      // mint ids for clips that have none, then save
+  bool finishUploads();    // every pending clip was acknowledged, then save
+  bool finishDeletions();  // every queued deletion was acknowledged
+  // Next queued deletion at or after `offset` (advanced past it) whose id is not
+  // also a live clip; id[0] == '\0' once the journal is exhausted.
+  bool nextDeletion(uint32_t& offset, char (&id)[CLIPPING_ID_SIZE]) const;
+  // Merge one server item: add it, replace the local copy (keeping BookFusion
+  // state), or remove it. A clip over the per-book cap is skipped, not an error.
+  bool applyRemote(const Clipping& clipping, bool deleted);
   bool saveToFile();
   void clearAll();
 
@@ -82,6 +106,8 @@ class ClippingStore {
   static bool getAllClippedBooks(std::vector<ClippedBookEntry>& out);
   // True when a clippings file exists on SD for this book (cheap existence check; nothing loaded).
   static bool hasForFilePath(const std::string& filePath, const std::string& bookType);
+  // Saved-clipping count for this book from its file header only (nothing loaded); 0 if none.
+  static uint16_t countForFilePath(const std::string& filePath, const std::string& bookType);
   static void deleteForFilePath(const std::string& filePath, const std::string& bookType);
   // The book file was renamed or moved: re-key its clippings file and rewrite
   // the path in its header, keeping the stored title/author. Streams the

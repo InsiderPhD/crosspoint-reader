@@ -32,6 +32,7 @@ class BookDetailsActivity final : public Activity {
   std::string tags;
   std::string rating;
   int progressPercent;
+  uint16_t clippingCount = 0;  // from the clippings file header; 0 hides the row
 
   // File facts, read from the directory entry (no EPUB parse): size in bytes
   // and the FAT modification stamp the Library sorts "date added" by.
@@ -47,6 +48,8 @@ class BookDetailsActivity final : public Activity {
   bool loading = false;      // true while loadMetadata() runs (may build cache / cover)
   bool waitForConfirmRelease = false;
   bool waitForBackRelease = false;
+
+  void openClippings();
 
   // Optional sibling navigation: Left/Right step to the prev/next book in the
   // list the user was browsing. Paths are NOT copied for Library/GroupBrowser —

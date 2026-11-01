@@ -1084,6 +1084,10 @@ bool ReadingStatsStore::updateBookPath(const std::string& oldKey, const std::str
 
   rememberBookPath(book, oldKey);
   rememberBookPath(book, normalizedNewPath);
+  // Keep the just-ended session pointing at the book (the sleep screen matches it by path).
+  if (lastSessionSnapshot.valid && lastSessionSnapshot.bookId == book.bookId) {
+    lastSessionSnapshot.path = book.path;
+  }
   if (!title.empty()) {
     book.title = title;
   }

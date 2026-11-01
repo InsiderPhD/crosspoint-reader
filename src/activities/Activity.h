@@ -31,6 +31,10 @@ class Activity {
   virtual void onEnter();
   virtual void onExit();
   virtual void loop() {}
+  // Called when a child started via startActivityForResult() finishes and this
+  // activity is back on top (after the result handler runs). The button that
+  // closed the child may still be held, so its release lands here next.
+  virtual void onResume() {}
 
   virtual void render(RenderLock&&) {}
 

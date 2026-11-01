@@ -62,7 +62,7 @@ void EpubReaderChapterSelectionActivity::activateSelectedChapter() {
     setResult(std::move(result));
     finish();
   } else {
-    setResult(ChapterResult{newSpineIndex});
+    setResult(ChapterResult{newSpineIndex, selectorIndex});
     finish();
   }
 }

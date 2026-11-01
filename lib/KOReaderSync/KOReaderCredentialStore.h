@@ -40,6 +40,9 @@ class KOReaderCredentialStore {
   // series). Off by default: the book you are reading is nobody's business
   // unless you say so.
   bool sendMetadata = false;
+  // Opt-in crosspoint-sync extension: a manual sync also pushes and pulls the
+  // book's clippings. Needs a server with the /api/v1/clippings endpoint.
+  bool syncClippings = false;
 
   // Private constructor for singleton
   KOReaderCredentialStore() = default;
@@ -90,6 +93,15 @@ class KOReaderCredentialStore {
   // Whether progress uploads carry document metadata at all
   void setSendMetadata(bool enabled) { sendMetadata = enabled; }
   bool getSendMetadata() const { return sendMetadata; }
+
+  // Whether a manual sync also syncs clippings
+  void setSyncClippings(bool enabled) { syncClippings = enabled; }
+  bool getSyncClippings() const { return syncClippings; }
+
+  // URL a settings file with no serverUrl used before the default moved to the
+  // CrossPoint server. Loading such a file pins it, so an existing account is
+  // never silently pointed at a server it doesn't exist on.
+  static const char* legacyDefaultServerUrl();
 
   // Document matching method
   void setMatchMethod(DocumentMatchMethod method);

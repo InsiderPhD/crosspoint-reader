@@ -8,6 +8,7 @@
 #include <cstdio>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "activities/ActivityManager.h"
 #include "activities/ActivityResult.h"
@@ -171,6 +172,10 @@ int EpubReaderClippingListActivity::listTopY() const {
 
 void EpubReaderClippingListActivity::onEnter() {
   Activity::onEnter();
+  if (isStandalone() && !CLIPPINGS.loadForBook(bookPath, bookTitle, bookAuthor, "epub")) {
+    LOG_ERR("CLIP", "Failed to load clippings for %s", bookPath.c_str());
+  }
+  waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   selectedIndex = 0;
   detailText.reserve(CLIPPING_TEXT_MAX);
   detailLines.reserve(32);
@@ -209,10 +214,20 @@ void EpubReaderClippingListActivity::closeDetail() {
   requestUpdate();
 }
 
+void EpubReaderClippingListActivity::onExit() {
+  if (isStandalone()) CLIPPINGS.unload();
+  Activity::onExit();
+}
+
 void EpubReaderClippingListActivity::jumpToSelectedClipping() {
   if (clippings.empty() || selectedIndex < 0 || selectedIndex >= static_cast<int>(clippings.size())) return;
 
   const Clipping& clipping = clippings[selectedIndex];
+  if (isStandalone()) {
+    APP_STATE.pendingOpen = {bookPath, clipping.spineIndex, clipping.startPage, clipping.pageCount};
+    activityManager.goToReader(bookPath);
+    return;
+  }
   setResult(ClippingJumpResult{clipping.spineIndex, clipping.startPage, clipping.pageCount, clipping.paragraphIndex,
                                static_cast<uint16_t>(selectedIndex)});
   finish();
@@ -268,6 +283,14 @@ bool EpubReaderClippingListActivity::deleteSelectedClipping() {
 }
 
 void EpubReaderClippingListActivity::loop() {
+  if (waitForConfirmRelease) {
+    if (mappedInput.isPressed(MappedInputManager::Button::Confirm) ||
+        mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      return;
+    }
+    waitForConfirmRelease = false;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     if (detailMode) {
       closeDetail();

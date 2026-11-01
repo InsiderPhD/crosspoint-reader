@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../Activity.h"
+#include "ClippingStore.h"
 #include "util/ButtonNavigator.h"
 #include "util/LibraryReadingStats.h"
 
@@ -41,6 +42,11 @@ class ReadingStatsActivity final : public Activity {
   std::unique_ptr<LibraryReadingStats::Summary> librarySummary;
   bool waitForConfirmRelease = false;
   bool waitForBackRelease = false;
+  // Books that have saved clippings (Clippings tab), sorted by title. Read from the clipping
+  // file headers on enter and after returning from a book's list, never per render.
+  std::vector<ClippedBookEntry> clippedBooks;
+  void loadClippedBooks();
+  void openSelectedClippings();
   // Number of selectable rows on the current page (excluding the ribbon).
   // For Overview/Weekly/Monthly this is 0; for Books/Sessions it's the
   // (capped) visible row count.

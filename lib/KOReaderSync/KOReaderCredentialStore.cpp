@@ -20,8 +20,11 @@ constexpr char KOREADER_FILE_BIN[] = "/.crosspoint/koreader.bin";
 constexpr char KOREADER_FILE_JSON[] = "/.crosspoint/koreader.json";
 constexpr char KOREADER_FILE_BAK[] = "/.crosspoint/koreader.bin.bak";
 
-// Default sync server URL
-constexpr char DEFAULT_SERVER_URL[] = "https://sync.koreader.rocks:443";
+// Default sync server URL. The CrossPoint server speaks standard KOSync and
+// also hosts the clippings extension; it became the default in 1.13 (as it is
+// upstream). Configs saved before then are pinned to the legacy URL on load.
+constexpr char DEFAULT_SERVER_URL[] = "https://sync.crosspointreader.com";
+constexpr char LEGACY_DEFAULT_SERVER_URL[] = "https://sync.koreader.rocks:443";
 
 // Legacy obfuscation key - "KOReader" in ASCII (only used for binary migration)
 constexpr uint8_t LEGACY_OBFUSCATION_KEY[] = {0x4B, 0x4F, 0x52, 0x65, 0x61, 0x64, 0x65, 0x72};
@@ -33,6 +36,8 @@ void legacyDeobfuscate(std::string& data) {
   }
 }
 }  // namespace
+
+const char* KOReaderCredentialStore::legacyDefaultServerUrl() { return LEGACY_DEFAULT_SERVER_URL; }
 
 bool KOReaderCredentialStore::saveToFile() const {
   Storage.mkdir("/.crosspoint");
@@ -110,6 +115,11 @@ bool KOReaderCredentialStore::loadFromBinaryFile() {
     matchMethod = static_cast<DocumentMatchMethod>(method);
   } else {
     matchMethod = DocumentMatchMethod::FILENAME;
+  }
+
+  // The binary format predates the default-server change.
+  if (serverUrl.empty() && !username.empty()) {
+    serverUrl = LEGACY_DEFAULT_SERVER_URL;
   }
 
   LOG_DBG("KRS", "Loaded KOReader credentials from binary for user: %s", username.c_str());

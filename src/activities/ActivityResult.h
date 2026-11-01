@@ -51,6 +51,8 @@ struct ReaderComboResult {
 
 struct ChapterResult {
   int spineIndex = 0;
+  // TOC entry picked; its anchor locates subchapters that share a spine file.
+  int tocIndex = -1;
 };
 
 struct PercentResult {

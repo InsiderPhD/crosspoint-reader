@@ -58,6 +58,7 @@ class XtcReaderActivity final : public Activity {
       : Activity("XtcReader", renderer, mappedInput), xtc(std::move(xtc)) {}
   void onEnter() override;
   void onExit() override;
+  void onResume() override;
   void loop() override;
   void render(RenderLock&&) override;
   bool isReaderActivity() const override { return true; }

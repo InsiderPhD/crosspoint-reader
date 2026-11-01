@@ -20,6 +20,7 @@
 #include "ReadingStatsDetailActivity.h"
 #include "ReadingStatsStore.h"
 #include "SessionDateEditActivity.h"
+#include "activities/reader/EpubReaderClippingListActivity.h"
 #include "activities/settings/HardcoverPushActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/ActionBar.h"
@@ -44,7 +45,7 @@
 
 namespace {
 constexpr unsigned long BOOK_LONG_PRESS_MS = 1000;
-constexpr int TOTAL_STATS_PAGES = 8;
+constexpr int TOTAL_STATS_PAGES = 9;
 constexpr int PAGE_OVERVIEW = 0;
 constexpr int PAGE_PROFILE = 1;
 constexpr int PAGE_STARTED_BOOKS = 2;
@@ -53,6 +54,7 @@ constexpr int PAGE_MONTHLY = 4;
 constexpr int PAGE_SESSIONS = 5;
 constexpr int PAGE_YEAR = 6;
 constexpr int PAGE_LIBRARY = 7;
+constexpr int PAGE_CLIPPINGS = 8;
 
 // Tab labels in display order — index matches the PAGE_* enum values above.
 // The tab bar auto-scrolls to keep the selected tab's full label readable.
@@ -65,6 +67,7 @@ constexpr StrId TAB_NAMES[TOTAL_STATS_PAGES] = {
     StrId::STR_STATS_TAB_SESSIONS,
     StrId::STR_STATS_TAB_YEAR,
     StrId::STR_LIBRARY,
+    StrId::STR_CLIPPINGS,
 };
 
 // Sessions tab is capped at one screenful like the Books tab.
@@ -791,6 +794,7 @@ void ReadingStatsActivity::onEnter() {
   currentPage = PAGE_OVERVIEW;
   selectedItemIndex = 0;
   resolveReferenceMonth(viewedYear, viewedMonth);
+  loadClippedBooks();
 
   waitForConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   waitForBackRelease = false;
@@ -862,8 +866,8 @@ void ReadingStatsActivity::loop() {
   }
 
 #if FREEINK_DEVICE_X4PRO
-  // Full Touch: a tap on a tab selects that category directly; on the Books
-  // and Sessions tabs a tap on a row selects it, and a second tap on the
+  // Full Touch: a tap on a tab selects that category directly; on the Books,
+  // Sessions and Clippings tabs a tap on a row selects it, and a second tap on the
   // selected row opens it. Both hit-tests need the raw point, so this reads
   // wasTapPoint directly instead of the TouchListNav helper (mirrors
   // SettingsActivity).
@@ -906,7 +910,8 @@ void ReadingStatsActivity::loop() {
           return;
         }
       }
-      if (currentPage == PAGE_STARTED_BOOKS || currentPage == PAGE_SESSIONS) {
+      if (currentPage == PAGE_STARTED_BOOKS || currentPage == PAGE_SESSIONS ||
+          (currentPage == PAGE_CLIPPINGS && !clippedBooks.empty())) {
         // selectedItemIndex - 1 mirrors what render() passes to drawList, so
         // the hit-test sees the same visible page (-1 = ribbon focused, no
         // row highlighted).
@@ -918,6 +923,8 @@ void ReadingStatsActivity::loop() {
             requestUpdate();
           } else if (currentPage == PAGE_STARTED_BOOKS) {
             openSelectedBook();
+          } else if (currentPage == PAGE_CLIPPINGS) {
+            openSelectedClippings();
           } else {
             openSelectedSessionEditor();
           }
@@ -960,6 +967,10 @@ void ReadingStatsActivity::loop() {
     }
     if (currentPage == PAGE_SESSIONS) {
       openSelectedSessionEditor();
+      return;
+    }
+    if (currentPage == PAGE_CLIPPINGS) {
+      openSelectedClippings();
       return;
     }
     // Pages without per-item actions (Profile/Weekly/Monthly/Year): no-op on
@@ -1117,6 +1128,10 @@ int ReadingStatsActivity::currentPageItemCount() const {
       const int undated = static_cast<int>(collectUndatedSessionIndices().size());
       return std::min(undated, SESSIONS_PER_PAGE);
     }
+    case PAGE_CLIPPINGS:
+      // Unlike Books/Sessions this list pages (drawList handles it), since the point is
+      // finding a quote in any book.
+      return static_cast<int>(clippedBooks.size());
     default:
       return 0;
   }
@@ -1148,6 +1163,30 @@ void ReadingStatsActivity::openSelectedBook() {
 
   startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, books[bookRow]->path),
                          [this](const ActivityResult&) {
+                           guardBackReturn();
+                           requestUpdate();
+                         });
+}
+
+void ReadingStatsActivity::loadClippedBooks() {
+  clippedBooks.clear();
+  clippedBooks.reserve(16);  // typical library; getAllClippedBooks push_backs one per clipped book
+  ClippingStore::getAllClippedBooks(clippedBooks);
+  std::sort(clippedBooks.begin(), clippedBooks.end(),
+            [](const ClippedBookEntry& a, const ClippedBookEntry& b) { return a.bookTitle < b.bookTitle; });
+}
+
+void ReadingStatsActivity::openSelectedClippings() {
+  const int row = selectedItemIndex - 1;
+  if (row < 0 || row >= static_cast<int>(clippedBooks.size())) return;
+  const auto& book = clippedBooks[static_cast<size_t>(row)];
+  // Open from the list launches the reader (replacing Stats); this handler only runs on Back.
+  startActivityForResult(std::make_unique<EpubReaderClippingListActivity>(renderer, mappedInput, book.bookPath,
+                                                                          book.bookTitle, book.bookAuthor),
+                         [this](const ActivityResult&) {
+                           // Clippings may have been deleted: refresh and keep the cursor valid.
+                           loadClippedBooks();
+                           selectedItemIndex = std::min(selectedItemIndex, static_cast<int>(clippedBooks.size()));
                            guardBackReturn();
                            requestUpdate();
                          });
@@ -1208,7 +1247,7 @@ Rect ReadingStatsActivity::tabBarRect() const {
   return Rect{0, metrics.topPadding + metrics.headerHeight, renderer.getScreenWidth(), metrics.tabBarHeight};
 }
 
-// List body of the two row-list tabs. Only meaningful on Books/Sessions;
+// List body of the row-list tabs. Only meaningful on Books/Sessions/Clippings;
 // mirrors the exact layout math of those tabs' render branches.
 Rect ReadingStatsActivity::listRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -1216,6 +1255,12 @@ Rect ReadingStatsActivity::listRect() const {
   const int contentBottom = renderer.getScreenHeight() - metrics.buttonHintsHeight - 4;
   int listTop;
   int rowsPerPage;
+  if (currentPage == PAGE_CLIPPINGS) {
+    // Clippings paginates through every clipped book, so its list is not
+    // capped to a row count: it runs to contentBottom.
+    listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
+    return Rect{0, listTop, renderer.getScreenWidth(), std::max(0, contentBottom - listTop)};
+  }
   if (currentPage == PAGE_SESSIONS) {
     const int bucketCardsTop = contentTop + LIST_HEADER_HEIGHT + 4;
     const int inboxTop = bucketCardsTop + BUCKET_CARD_HEIGHT + SECTION_GAP;
@@ -1749,6 +1794,19 @@ void ReadingStatsActivity::render(RenderLock&&) {
 
       drawScrollChrome();
     }
+  } else if (currentPage == PAGE_CLIPPINGS) {
+    GUI.drawSubHeader(renderer, Rect{0, contentTop, pageWidth, LIST_HEADER_HEIGHT}, tr(STR_CLIPPINGS), nullptr);
+    const int listTop = contentTop + LIST_HEADER_HEIGHT + LIST_HEADER_BOTTOM_GAP;
+    if (clippedBooks.empty()) {
+      renderer.drawText(UI_10_FONT_ID, sidePadding, listTop + 20, tr(STR_NO_CLIPPINGS));
+    } else {
+      const int highlightedRow = (selectedItemIndex > 0) ? (selectedItemIndex - 1) : -1;
+      GUI.drawList(
+          renderer, listRect(), static_cast<int>(clippedBooks.size()), highlightedRow,
+          [&](const int index) { return clippedBooks[index].bookTitle; },
+          [&](const int index) { return clippedBooks[index].bookAuthor; }, nullptr,
+          [&](const int index) { return std::to_string(clippedBooks[index].count); }, false);
+    }
   }
 
   // Confirm advances the tab whenever the ribbon (selectedItemIndex == 0) is
@@ -1765,7 +1823,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
     btn2 = tr(STR_SELECT);
     btn3 = tr(STR_DIR_UP);
     btn4 = tr(STR_DIR_DOWN);
-  } else if (currentPage == PAGE_STARTED_BOOKS || currentPage == PAGE_SESSIONS) {
+  } else if (currentPage == PAGE_STARTED_BOOKS || currentPage == PAGE_SESSIONS || currentPage == PAGE_CLIPPINGS) {
     btn2 = (selectedItemIndex == 0) ? nextTabName : tr(STR_SELECT);
     btn3 = tr(STR_DIR_UP);
     btn4 = tr(STR_DIR_DOWN);

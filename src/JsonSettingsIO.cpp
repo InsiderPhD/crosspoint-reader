@@ -557,6 +557,11 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
 
 // ---- KOReaderCredentialStore ----
 
+namespace {
+// v2: an empty serverUrl means the CrossPoint server, not sync.koreader.rocks.
+constexpr uint8_t KOREADER_CONFIG_VERSION = 2;
+}  // namespace
+
 bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const char* path) {
   JsonDocument doc;
   doc["username"] = store.getUsername();
@@ -565,6 +570,8 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
   doc["serverType"] = static_cast<uint8_t>(store.getServerType());
   doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
   doc["sendMetadata"] = store.getSendMetadata();
+  doc["syncClippings"] = store.getSyncClippings();
+  doc["configVersion"] = KOREADER_CONFIG_VERSION;
 
   String json;
   serializeJson(doc, json);
@@ -588,6 +595,17 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
     if (!store.password.empty() && needsResave) *needsResave = true;
   }
   store.serverUrl = doc["serverUrl"] | std::string("");
+  // Before v2 an empty serverUrl meant sync.koreader.rocks; the default is now
+  // the CrossPoint server. Pin the old URL so an existing account keeps working.
+  const uint8_t configVersion = doc["configVersion"] | static_cast<uint8_t>(1);
+  if (configVersion < KOREADER_CONFIG_VERSION) {
+    // No account yet means nothing to strand: let it take the new default.
+    if (store.serverUrl.empty() && !store.username.empty()) {
+      store.serverUrl = KOReaderCredentialStore::legacyDefaultServerUrl();
+      LOG_DBG("KRS", "Pre-v2 config used the old default server; pinning %s", store.serverUrl.c_str());
+    }
+    if (needsResave) *needsResave = true;
+  }
   // Absent (older file) or a type this firmware does not implement: standard KOSync.
   const uint8_t type = doc["serverType"] | static_cast<uint8_t>(KOReaderServerType::KOSYNC);
   store.serverType =
@@ -595,6 +613,7 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
   uint8_t method = doc["matchMethod"] | (uint8_t)0;
   store.matchMethod = static_cast<DocumentMatchMethod>(method);
   store.sendMetadata = doc["sendMetadata"] | false;
+  store.syncClippings = doc["syncClippings"] | false;
 
   LOG_DBG("KRS", "Loaded KOReader credentials for user: %s", store.username.c_str());
   return true;

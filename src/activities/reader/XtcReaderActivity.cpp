@@ -26,6 +26,7 @@
 #include "activities/home/ReadingStatsDetailActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/FinishedBookMover.h"
 #include "util/FrontlightToggle.h"
 #include "util/ScreenshotUtil.h"
 
@@ -65,6 +66,22 @@ void XtcReaderActivity::rememberBookOnceRendered(const bool renderLockHeld) {
   RenderedBookGate::rememberOpenBook(xtc->getPath(), xtc->getTitle(), xtc->getAuthor(), xtc->getThumbBmpPath());
 }
 
+// Child screens (e.g. Reading Stats) close on the Back *press*; mark buttons
+// still held as consumed so that press's release doesn't run a reader action.
+void XtcReaderActivity::onResume() {
+  longPressBackFired = mappedInput.isPressed(MappedInputManager::Button::Back);
+#if FREEINK_DEVICE_X4PRO
+  // The Left/Right action slots dispatch on logical Up/Down (swipes) here.
+  longPressLeftFired = mappedInput.isPressed(MappedInputManager::Button::Up);
+  longPressRightFired = mappedInput.isPressed(MappedInputManager::Button::Down);
+#else
+  longPressLeftFired = mappedInput.isPressed(MappedInputManager::Button::Left);
+  longPressRightFired = mappedInput.isPressed(MappedInputManager::Button::Right);
+#endif
+  longPressPageBackFired = mappedInput.isPressed(MappedInputManager::Button::PageBack);
+  longPressPageForwardFired = mappedInput.isPressed(MappedInputManager::Button::PageForward);
+}
+
 void XtcReaderActivity::onExit() {
   Activity::onExit();
 
@@ -84,7 +101,9 @@ void XtcReaderActivity::onExit() {
   }
   READING_STATS.endSession();
 
+  const std::string bookPath = xtc ? xtc->getPath() : "";
   xtc.reset();
+  FinishedBookMover::moveIfFinished(bookPath);
 }
 
 bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION action) {

@@ -72,6 +72,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
+#include "util/FinishedBookMover.h"
 #include "util/FrontlightToggle.h"
 #include "util/HardcoverSync.h"
 #include "util/HeapReport.h"
@@ -607,6 +608,21 @@ void EpubReaderActivity::onEnter() {
     }
   }
 
+  // Opened from a clipping outside the reader: start at the clipping instead of the saved
+  // position. Seeding cachedSpineIndex/cachedChapterTotalPageCount reuses the progress-restore
+  // rescale, so a clipping saved under a different layout still lands proportionally close.
+  auto& pendingOpen = APP_STATE.pendingOpen;
+  if (!pendingOpen.path.empty()) {
+    if (pendingOpen.path == epub->getPath() && pendingOpen.spineIndex < epub->getSpineItemsCount()) {
+      currentSpineIndex = pendingOpen.spineIndex;
+      nextPageNumber = pendingOpen.page;
+      cachedSpineIndex = currentSpineIndex;
+      cachedChapterTotalPageCount = pendingOpen.pageCount;
+      LOG_DBG("ERS", "Opening at clipping: spine %d page %d", currentSpineIndex, nextPageNumber);
+    }
+    pendingOpen = {};
+  }
+
   // APP_STATE.openEpubPath and the recents entry are NOT written here: see
   // rememberBookOnceRendered(), which waits for the first rendered page.
   READING_STATS.beginSession(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
@@ -619,8 +635,23 @@ void EpubReaderActivity::onEnter() {
 
   buildBookPageCache();
 
-  // Pre-arm long-press flags for any buttons already held on entry so that a
-  // button held to wake from sleep doesn't fire a spurious long-press action.
+  // A button held to wake from sleep mustn't fire a spurious action.
+  armHeldButtons();
+
+  HeapReport::logBrief("reader.entered");
+
+  // Trigger first update
+  requestUpdate();
+}
+
+// Child screens (Font & Layout, Reader Controls, ...) close on the Back *press*;
+// without this the reader sees that press's release and runs the short-press
+// Back action (e.g. Home).
+void EpubReaderActivity::onResume() { armHeldButtons(); }
+
+// Marks any button already held as consumed, so its release (or continued hold)
+// doesn't dispatch a reader action for a press that began elsewhere.
+void EpubReaderActivity::armHeldButtons() {
   longPressFeedbackShown = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   longPressBackFired = mappedInput.isPressed(MappedInputManager::Button::Back);
 #if FREEINK_DEVICE_X4PRO
@@ -633,11 +664,6 @@ void EpubReaderActivity::onEnter() {
 #endif
   longPressPageBackFired = mappedInput.isPressed(MappedInputManager::Button::PageBack);
   longPressPageForwardFired = mappedInput.isPressed(MappedInputManager::Button::PageForward);
-
-  HeapReport::logBrief("reader.entered");
-
-  // Trigger first update
-  requestUpdate();
 }
 
 void EpubReaderActivity::rememberBookOnceRendered(const bool renderLockHeld) {
@@ -698,6 +724,7 @@ void EpubReaderActivity::onExit() {
   // Belt and braces: the render guard already frees this at the end of every
   // page render, but the autosync push below wants every spare byte for TLS.
   ImageBlock::releaseRenderCache();
+  const std::string bookPath = epub ? epub->getPath() : "";
   section.reset();
   epub.reset();
 
@@ -725,6 +752,10 @@ void EpubReaderActivity::onExit() {
     fcm->releaseSdFontCaches();
   }
   LOG_INF("MEM", "reader exit: free=%u max_block=%u", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+
+  // After everything else: the epub must be closed, and the push above writes sync
+  // sidecars under the old path that the move then carries across.
+  FinishedBookMover::moveIfFinished(bookPath);
 }
 
 void EpubReaderActivity::loop() {
@@ -1376,9 +1407,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResult(
           std::make_unique<EpubReaderChapterSelectionActivity>(renderer, mappedInput, epub, path, spineIdx),
           [this](const ActivityResult& result) {
-            if (!result.isCancelled && currentSpineIndex != std::get<ChapterResult>(result.data).spineIndex) {
+            if (!result.isCancelled) {
+              // Always reload, even for the current spine: re-selecting the chapter you're in
+              // should go to its start, and subchapters in the same file differ only by anchor.
+              const auto& chapter = std::get<ChapterResult>(result.data);
               RenderLock lock(*this);
-              currentSpineIndex = std::get<ChapterResult>(result.data).spineIndex;
+              pendingAnchor = chapter.tocIndex >= 0 ? epub->getTocItem(chapter.tocIndex).anchor : std::string();
+              currentSpineIndex = chapter.spineIndex;
               nextPageNumber = 0;
               section.reset();
             }
@@ -2254,6 +2289,121 @@ void EpubReaderActivity::handleClippingJump(const ClippingJumpResult& jump) {
   requestUpdate();
 }
 
+void EpubReaderActivity::computeClippingHighlights(const Page& page, const int orientedMarginLeft,
+                                                   const int orientedMarginTop) {
+  clipHighlightRectCount = 0;
+  if (!section || !CLIPPINGS.hasClippings()) return;
+
+  // Word ranges of the clippings that touch this page, as indices into the page's selectable
+  // words. Clippings saved under a different layout (page count changed: font, margins,
+  // orientation) are skipped, since their page/word anchors no longer line up. So are clips
+  // synced in from another firmware's layout (foreignAnchor): a matching page count there
+  // is coincidence, not a guarantee the word indices mean the same words.
+  struct WordRange {
+    uint16_t from, to;
+  };
+  static constexpr int MAX_RANGES = 8;
+  std::array<WordRange, MAX_RANGES> ranges{};
+  int rangeCount = 0;
+  const auto pageNum = static_cast<uint16_t>(section->currentPage);
+  for (const auto& clip : CLIPPINGS.getClippings()) {
+    if (clip.foreignAnchor || clip.spineIndex != currentSpineIndex || clip.pageCount != section->pageCount) continue;
+    if (pageNum < clip.startPage || pageNum > clip.endPage) continue;
+    if (rangeCount == MAX_RANGES) {
+      LOG_DBG("CLIP", "More than %d clippings on page %u; highlighting the first %d", MAX_RANGES, pageNum, MAX_RANGES);
+      break;
+    }
+    ranges[rangeCount++] = {clip.startPage == pageNum ? clip.startWordIndex : static_cast<uint16_t>(0),
+                            clip.endPage == pageNum ? clip.endWordIndex : static_cast<uint16_t>(UINT16_MAX)};
+  }
+  if (rangeCount == 0) return;
+
+  // Walk the page's words with exactly the same filter startClipSelection uses to number them
+  // (non-blank, positive advance), so the saved indices map back onto the same words.
+  const int readerFontId = SETTINGS.getReaderFontId();
+  const int lineHeight = renderer.getLineHeight(readerFontId);
+  uint16_t wordIdx = 0;
+  bool extendLast = false;
+  for (const auto& element : page.elements) {
+    if (element->getTag() != TAG_PageLine) continue;
+    const auto& line = static_cast<const PageLine&>(*element);
+    if (!line.getBlock()) continue;
+
+    const auto& block = *line.getBlock();
+    const uint16_t count = block.wordCount();
+    // Measured as startClipSelection measures them: the line's own font and letter spacing.
+    const int blockFontOverride = block.getBlockStyle().fontOverride;
+    const int wordFontId = blockFontOverride != 0 ? blockFontOverride : readerFontId;
+    const int wordLineHeight = blockFontOverride != 0 ? renderer.getLineHeight(wordFontId) : lineHeight;
+    const auto charSpacing = block.getBlockStyle().characterSpacing;
+    extendLast = false;  // a new line always starts a new rect
+    for (uint16_t i = 0; i < count; ++i) {
+      const char* wordText = block.wordText(i);
+      const char* visible = clipVisibleText(wordText);
+      if (clipword::isBlank(visible)) continue;
+      const auto textStyle = static_cast<EpdFontFamily::Style>(block.wordStyle(i) & ~EpdFontFamily::UNDERLINE);
+      int wordWidth = renderer.getTextAdvanceX(wordFontId, wordText, textStyle, charSpacing);
+      if (wordWidth <= 0) continue;
+
+      const uint16_t idx = wordIdx++;
+      const bool clipped = std::any_of(ranges.begin(), ranges.begin() + rangeCount,
+                                       [idx](const WordRange& r) { return idx >= r.from && idx <= r.to; });
+      if (!clipped) {
+        extendLast = false;
+        continue;
+      }
+
+      if (i + 1 < count && block.wordXpos(i + 1) > block.wordXpos(i)) {
+        wordWidth = std::min(wordWidth, static_cast<int>(block.wordXpos(i + 1) - block.wordXpos(i)));
+      }
+      // Don't paint the paragraph-indent em space in front of the first word.
+      const int skipX =
+          visible != wordText ? renderer.getTextAdvanceX(wordFontId, "\xe2\x80\x83", textStyle, charSpacing) : 0;
+      const int x = orientedMarginLeft + line.xPos + block.wordXpos(i) + skipX;
+      const int w = wordWidth - skipX;
+      if (w <= 0) continue;
+
+      if (extendLast) {
+        // Consecutive clipped word on the same line: stretch the rect over the gap too, so the
+        // run reads as one continuous highlighter stroke.
+        auto& rect = clipHighlightRects[clipHighlightRectCount - 1];
+        rect.w = static_cast<int16_t>(x + w - rect.x);
+        continue;
+      }
+      if (clipHighlightRectCount == MAX_CLIP_HIGHLIGHT_RECTS) {
+        LOG_DBG("CLIP", "Highlight rect limit (%d) reached on page %u", MAX_CLIP_HIGHLIGHT_RECTS, pageNum);
+        return;
+      }
+      clipHighlightRects[clipHighlightRectCount++] = {static_cast<int16_t>(x),
+                                                      static_cast<int16_t>(orientedMarginTop + line.yPos),
+                                                      static_cast<int16_t>(w), static_cast<int16_t>(wordLineHeight)};
+      extendLast = true;
+    }
+  }
+}
+
+void EpubReaderActivity::drawClippingHighlights() const {
+  for (int r = 0; r < clipHighlightRectCount; ++r) {
+    const auto& rect = clipHighlightRects[r];
+    // 25% grey (the LightGray dither lattice), but only ever setting pixels black: unlike
+    // fillRectDither it never whitens the glyph pixels already drawn, so it can go on top.
+    for (int y = rect.y + (rect.y & 1); y < rect.y + rect.h; y += 2) {
+      for (int x = rect.x + (rect.x & 1); x < rect.x + rect.w; x += 2) {
+        renderer.drawPixel(x, y, true);
+      }
+    }
+  }
+}
+
+void EpubReaderActivity::maskClippingHighlightsInGrayPlane() const {
+  // Plane bit 0 = "no gray here"; fillRect(true) clears it. Highlighted words therefore stay
+  // crisp BW instead of having AA computed for black-on-white laid over the highlight.
+  for (int r = 0; r < clipHighlightRectCount; ++r) {
+    const auto& rect = clipHighlightRects[r];
+    renderer.fillRect(rect.x, rect.y, rect.w, rect.h, true);
+  }
+}
+
 void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& orientedMarginRight,
                                                 int& orientedMarginBottom, int& orientedMarginLeft) const {
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
@@ -3125,6 +3275,8 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
     // Without the defer, restore's ~5s retry re-enables into the same tight heap.
     btMgr.deferAutoRestore(BT_GUARD_RESTORE_DEFER_MS);
   }
+  // After the prewarm so the advance-width lookups hit the warmed glyph cache.
+  computeClippingHighlights(page, orientedMarginLeft, orientedMarginTop);
   const uint32_t heapAfter = esp_get_free_heap_size();
   fcm->logStats("prewarm");
   const auto tPrewarm = millis();
@@ -3213,6 +3365,7 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   if (ReaderUtils::footnotesOnPage())
     page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth,
                          SETTINGS.readerTextLayout());
+  drawClippingHighlights();
   renderStatusBar();
   fcm->logStats("bw_render");
   const auto tBwRender = millis();
@@ -3252,10 +3405,12 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
 
       // Re-render page content to restore images into the blanked area
       // Status bar is not re-rendered here to avoid reading stale dynamic values (e.g. battery %)
+      // The highlight only adds black pixels, so reapplying it over the re-render is harmless.
       page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
       if (ReaderUtils::footnotesOnPage())
         page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth,
                              SETTINGS.readerTextLayout());
+      drawClippingHighlights();
       renderStatusBar();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     } else {
@@ -3313,6 +3468,7 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
         renderGrayscalePass();
+        maskClippingHighlightsInGrayPlane();
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(true, scratch.get(), y, rows);
       }
@@ -3325,6 +3481,7 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
         renderer.beginStripTarget(scratch.get(), y, rows);
         renderer.clearScreen(absoluteImageGrayscale ? 0xFF : 0x00);
         renderGrayscalePass();
+        maskClippingHighlightsInGrayPlane();
         renderer.endStripTarget();
         renderer.writeGrayscalePlaneStrip(false, scratch.get(), y, rows);
       }

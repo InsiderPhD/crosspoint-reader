@@ -300,6 +300,14 @@ class CrossPointSettings {
     SEAMLESS_SLEEP_SCREEN_COUNT
   };
 
+  // Folder a book is moved into once it's finished (see FinishedBookMover).
+  enum FINISHED_BOOK_FOLDER {
+    FINISHED_FOLDER_OFF = 0,
+    FINISHED_FOLDER_READ = 1,
+    FINISHED_FOLDER_COMPLETED = 2,
+    FINISHED_BOOK_FOLDER_COUNT
+  };
+
   // Reading stat selectable on the sleep screen (one per picker slot).
   enum SLEEP_STAT {
     SLEEP_STAT_NONE = 0,
@@ -666,6 +674,8 @@ class CrossPointSettings {
   uint8_t embeddedStyle = 1;
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // Move a book to /Read or /Completed when a reading session finishes it (FINISHED_BOOK_FOLDER)
+  uint8_t finishedBookFolder = FINISHED_FOLDER_OFF;
   // BLE bonded remote identity, so the firmware can auto-reconnect after reboot
   char bleBondedDeviceAddr[18] = "";
   char bleBondedDeviceName[32] = "";

@@ -22,13 +22,15 @@ enum Row : int {
   ROW_SERVER_TYPE,
   ROW_DOCUMENT_MATCHING,
   ROW_SEND_METADATA,
+  ROW_SYNC_CLIPPINGS,
+  ROW_SIGN_UP,
   ROW_AUTHENTICATE,
   MENU_ITEMS
 };
-constexpr StrId menuNames[MENU_ITEMS] = {StrId::STR_USERNAME,          StrId::STR_PASSWORD,
-                                         StrId::STR_SYNC_SERVER_URL,   StrId::STR_KOSYNC_SERVER_TYPE,
-                                         StrId::STR_DOCUMENT_MATCHING, StrId::STR_KOSYNC_SEND_METADATA,
-                                         StrId::STR_AUTHENTICATE};
+constexpr StrId menuNames[MENU_ITEMS] = {
+    StrId::STR_USERNAME,           StrId::STR_PASSWORD,          StrId::STR_SYNC_SERVER_URL,
+    StrId::STR_KOSYNC_SERVER_TYPE, StrId::STR_DOCUMENT_MATCHING, StrId::STR_KOSYNC_SEND_METADATA,
+    StrId::STR_SYNC_CLIPPINGS,     StrId::STR_REGISTER,          StrId::STR_AUTHENTICATE};
 }  // namespace
 
 void KOReaderSettingsActivity::onEnter() {
@@ -141,6 +143,10 @@ void KOReaderSettingsActivity::handleSelection() {
     KOREADER_STORE.setSendMetadata(!KOREADER_STORE.getSendMetadata());
     KOREADER_STORE.saveToFile();
     requestUpdate();
+  } else if (selectedIndex == ROW_SYNC_CLIPPINGS) {
+    KOREADER_STORE.setSyncClippings(!KOREADER_STORE.getSyncClippings());
+    KOREADER_STORE.saveToFile();
+    requestUpdate();
   } else if (selectedIndex == ROW_DOCUMENT_MATCHING) {
     // Document Matching - toggle between Filename and Binary
     const auto current = KOREADER_STORE.getMatchMethod();
@@ -149,6 +155,11 @@ void KOReaderSettingsActivity::handleSelection() {
     KOREADER_STORE.setMatchMethod(newMethod);
     KOREADER_STORE.saveToFile();
     requestUpdate();
+  } else if (selectedIndex == ROW_SIGN_UP) {
+    if (!KOREADER_STORE.hasCredentials()) return;
+    startActivityForResult(
+        std::make_unique<KOReaderAuthActivity>(renderer, mappedInput, KOReaderAuthActivity::Mode::SIGN_UP),
+        [](const ActivityResult&) {});
   } else if (selectedIndex == ROW_AUTHENTICATE) {
     // Authenticate
     if (!KOREADER_STORE.hasCredentials()) {
@@ -201,6 +212,9 @@ void KOReaderSettingsActivity::render(RenderLock&&) {
           case ROW_DOCUMENT_MATCHING:
             return KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME ? std::string(tr(STR_FILENAME))
                                                                                     : std::string(tr(STR_BINARY));
+          case ROW_SYNC_CLIPPINGS:
+            return std::string(KOREADER_STORE.getSyncClippings() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
+          case ROW_SIGN_UP:
           case ROW_AUTHENTICATE:
             return KOREADER_STORE.hasCredentials() ? "" : std::string("[") + tr(STR_SET_CREDENTIALS_FIRST) + "]";
           default:

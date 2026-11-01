@@ -53,6 +53,16 @@ class CrossPointState {
   // SLEEP_NOT_RECENT when idx is not in the history.
   uint8_t recentSleepAge(uint16_t idx) const;
 
+  // One-shot "open this EPUB at this spot" request, set when a clipping is opened from outside
+  // the reader (Stats > Clippings, Book Info). Memory only, never persisted; consumed by
+  // EpubReaderActivity::onEnter when the path matches, so it can't leak into a later open.
+  struct PendingOpen {
+    std::string path;
+    uint16_t spineIndex = 0;
+    uint16_t page = 0;
+    uint16_t pageCount = 0;
+  } pendingOpen;
+
   // Returns true if idx was shown within the last checkCount picks.
   // Walks backwards from the most recently written slot.
   bool isRecentSleep(uint16_t idx, uint8_t checkCount) const;

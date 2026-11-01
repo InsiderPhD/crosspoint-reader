@@ -18,6 +18,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/FinishedBookMover.h"
 
 namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
@@ -83,7 +84,9 @@ void TxtReaderActivity::onExit() {
                                progressPercent >= READING_COMPLETED_PERCENT);
   READING_STATS.endSession();
 
+  const std::string bookPath = txt ? txt->getPath() : "";
   txt.reset();
+  FinishedBookMover::moveIfFinished(bookPath);
 }
 
 void TxtReaderActivity::loop() {

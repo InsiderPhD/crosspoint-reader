@@ -4,6 +4,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Serialization.h>
+#include <esp_random.h>
 
 #include <algorithm>
 #include <cstring>
@@ -13,14 +14,44 @@
 
 namespace {
 // v2 appended bookFusionId after each record's timestamp; v3 follows it with
-// the BookFusion start/end offsets and flags. Older files still load (missing
-// fields read as 0) and are rewritten as v3 on the next save.
-constexpr uint8_t VERSION = 3;
+// the BookFusion start/end offsets and flags; v4 then adds the clipping-sync
+// fields (flags byte, server revision, id string). Older files still load
+// (missing fields take their defaults, so every old clip is pending upload) and
+// are rewritten as v4 on the next save.
+constexpr uint8_t VERSION = 4;
 constexpr uint8_t VERSION_V1 = 1;
 constexpr uint8_t VERSION_V2 = 2;
+constexpr uint8_t VERSION_V3 = 3;
 
-bool isReadableVersion(const uint8_t version) {
-  return version == VERSION || version == VERSION_V2 || version == VERSION_V1;
+bool isReadableVersion(const uint8_t version) { return version >= VERSION_V1 && version <= VERSION; }
+
+// v4 record flags byte
+constexpr uint8_t SYNC_PENDING_UPLOAD = 0x01;
+constexpr uint8_t SYNC_FOREIGN_ANCHOR = 0x02;
+
+// Ids of synced clips deleted on this device, queued until the server has been
+// told. Fixed-size records, so a torn append is detectable and trimmed.
+std::string deletionJournalPath(const std::string& storePath) { return storePath + ".deleted"; }
+
+bool trimDeletionJournalTail(FsFile& journal) {
+  const size_t size = journal.size();
+  const size_t tail = size % CLIPPING_ID_SIZE;
+  if (tail == 0) return true;
+  if (!journal.truncate(size - tail)) {
+    LOG_ERR("CLIP", "Failed to recover clipping deletion journal");
+    return false;
+  }
+  return true;
+}
+
+void moveDeletionJournal(const std::string& oldStorePath, const std::string& newStorePath) {
+  const std::string from = deletionJournalPath(oldStorePath);
+  if (!Storage.exists(from.c_str())) return;
+  const std::string to = deletionJournalPath(newStorePath);
+  if (Storage.exists(to.c_str())) Storage.remove(to.c_str());
+  if (!Storage.rename(from.c_str(), to.c_str())) {
+    LOG_ERR("CLIP", "Failed to move clipping deletion journal: %s", from.c_str());
+  }
 }
 constexpr size_t INITIAL_CLIPPING_RESERVE = 4;
 constexpr char CLIPPINGS_DIR[] = "/.crosspoint/clippings";
@@ -147,6 +178,24 @@ ClippingStore::AddResult ClippingStore::addClipping(const uint16_t spineIndex, c
 
 bool ClippingStore::removeClippingAt(const size_t index) {
   if (index >= clippings.size()) return false;
+  // A clip the server knows about must be tombstoned there too, so queue its id
+  // before dropping it. If the journal write fails, nothing is removed.
+  if (clippings[index].id[0]) {
+    FsFile journal = Storage.open(deletionJournalPath(storeFilePath).c_str(), O_WRONLY | O_CREAT | O_APPEND);
+    if (!journal || !trimDeletionJournalTail(journal)) {
+      LOG_ERR("CLIP", "Failed to open clipping deletion journal");
+      return false;
+    }
+    const size_t originalSize = journal.size();
+    if (journal.write(reinterpret_cast<const uint8_t*>(clippings[index].id), CLIPPING_ID_SIZE) != CLIPPING_ID_SIZE) {
+      if (!journal.truncate(originalSize)) LOG_ERR("CLIP", "Failed to roll back clipping deletion journal");
+      journal.close();
+      LOG_ERR("CLIP", "Failed to queue clipping deletion");
+      return false;
+    }
+    journal.flush();
+    journal.close();
+  }
   Clipping clipping = std::move(clippings[index]);
   clippings.erase(clippings.begin() + index);
   dirty = true;
@@ -185,6 +234,114 @@ bool ClippingStore::setBookFusionPushed(const size_t index, const uint32_t id, c
   return true;
 }
 
+bool ClippingStore::prepareSync() {
+  static constexpr char HEX_DIGITS[] = "0123456789abcdef";
+  for (auto& clipping : clippings) {
+    if (clipping.id[0]) continue;
+    uint8_t bytes[16];
+    esp_fill_random(bytes, sizeof(bytes));
+    for (size_t i = 0; i < sizeof(bytes); ++i) {
+      clipping.id[i * 2] = HEX_DIGITS[bytes[i] >> 4];
+      clipping.id[i * 2 + 1] = HEX_DIGITS[bytes[i] & 0x0F];
+    }
+    clipping.id[sizeof(bytes) * 2] = '\0';
+    dirty = true;
+  }
+  return saveToFile();
+}
+
+bool ClippingStore::finishUploads() {
+  for (auto& clipping : clippings) {
+    if (!clipping.pendingUpload) continue;
+    clipping.pendingUpload = false;
+    dirty = true;
+  }
+  return saveToFile();
+}
+
+bool ClippingStore::nextDeletion(uint32_t& offset, char (&id)[CLIPPING_ID_SIZE]) const {
+  id[0] = '\0';
+  const std::string path = deletionJournalPath(storeFilePath);
+  if (!Storage.exists(path.c_str())) return true;
+  FsFile journal = Storage.open(path.c_str(), O_RDWR);
+  if (!journal || !trimDeletionJournalTail(journal)) return false;
+  if (offset % CLIPPING_ID_SIZE != 0 || !journal.seek(offset)) {
+    LOG_ERR("CLIP", "Invalid clipping deletion journal");
+    return false;
+  }
+  while (offset < journal.size()) {
+    if (journal.read(reinterpret_cast<uint8_t*>(id), CLIPPING_ID_SIZE) != static_cast<int>(CLIPPING_ID_SIZE)) {
+      LOG_ERR("CLIP", "Failed to read clipping deletion");
+      id[0] = '\0';
+      return false;
+    }
+    offset += CLIPPING_ID_SIZE;
+    id[CLIPPING_ID_SIZE - 1] = '\0';
+    // Skip an id that is live again (re-pulled before the deletion went up).
+    const bool live = std::any_of(clippings.begin(), clippings.end(),
+                                  [&](const Clipping& clipping) { return strcmp(clipping.id, id) == 0; });
+    if (!live && id[0]) {
+      journal.close();
+      return true;
+    }
+  }
+  journal.close();
+  id[0] = '\0';
+  return true;
+}
+
+bool ClippingStore::finishDeletions() {
+  const std::string path = deletionJournalPath(storeFilePath);
+  if (!Storage.exists(path.c_str()) || Storage.remove(path.c_str())) return true;
+  LOG_ERR("CLIP", "Failed to clear acknowledged clipping deletions");
+  return false;
+}
+
+bool ClippingStore::applyRemote(const Clipping& remote, const bool deleted) {
+  const auto it = std::find_if(clippings.begin(), clippings.end(),
+                               [&](const Clipping& clipping) { return strcmp(clipping.id, remote.id) == 0; });
+  if (it == clippings.end()) {
+    if (deleted) return true;
+    if (clippings.size() >= CLIPPING_MAX_PER_BOOK) {
+      LOG_ERR("CLIP", "Remote clipping %s skipped: local limit (%u) reached", remote.id, CLIPPING_MAX_PER_BOOK);
+      return true;
+    }
+    clippings.push_back(remote);
+    dirty = true;
+    if (!saveToFile()) {
+      clippings.pop_back();
+      dirty = false;
+      return false;
+    }
+    return true;
+  }
+
+  const size_t index = static_cast<size_t>(it - clippings.begin());
+  if (!deleted && it->syncRevision == remote.syncRevision && !it->pendingUpload) return true;
+
+  Clipping previous = *it;
+  if (deleted) {
+    clippings.erase(it);
+  } else {
+    // BookFusion state is this device's alone; the server never sees it.
+    Clipping merged = remote;
+    merged.bookFusionId = previous.bookFusionId;
+    merged.bookFusionStart = previous.bookFusionStart;
+    merged.bookFusionEnd = previous.bookFusionEnd;
+    merged.bookFusionFlags = previous.bookFusionFlags;
+    clippings[index] = std::move(merged);
+  }
+  dirty = true;
+  if (saveToFile()) return true;
+  if (deleted) {
+    clippings.insert(clippings.begin() + index, std::move(previous));
+  } else {
+    clippings[index] = std::move(previous);
+  }
+  dirty = false;
+  return false;
+}
+
 bool ClippingStore::hasClippingForPage(const uint16_t spineIndex, const uint16_t page) const {
   return std::any_of(clippings.begin(), clippings.end(), [&](const Clipping& clipping) {
     return clipping.spineIndex == spineIndex && page >= clipping.startPage && page <= clipping.endPage;
@@ -205,6 +362,10 @@ void ClippingStore::clearAll() {
   dirty = false;
   if (!storeFilePath.empty() && Storage.exists(storeFilePath.c_str())) {
     Storage.remove(storeFilePath.c_str());
+  }
+  const std::string journal = deletionJournalPath(storeFilePath);
+  if (!storeFilePath.empty() && Storage.exists(journal.c_str())) {
+    Storage.remove(journal.c_str());
   }
 }
 
@@ -245,12 +406,25 @@ bool ClippingStore::readFromFile(const std::string& path, std::vector<Clipping>&
         !serialization::tryReadPod(f, clipping.endWordIndex) || !serialization::tryReadPod(f, clipping.wordCount) ||
         !serialization::tryReadPod(f, clipping.paragraphIndex) || !serialization::tryReadPod(f, clipping.timestamp) ||
         (version >= VERSION_V2 && !serialization::tryReadPod(f, clipping.bookFusionId)) ||
-        (version >= VERSION && (!serialization::tryReadPod(f, clipping.bookFusionStart) ||
-                                !serialization::tryReadPod(f, clipping.bookFusionEnd) ||
-                                !serialization::tryReadPod(f, clipping.bookFusionFlags)))) {
+        (version >= VERSION_V3 && (!serialization::tryReadPod(f, clipping.bookFusionStart) ||
+                                   !serialization::tryReadPod(f, clipping.bookFusionEnd) ||
+                                   !serialization::tryReadPod(f, clipping.bookFusionFlags)))) {
       f.close();
       LOG_ERR("CLIP", "Clipping file truncated at record %u: %s", i, path.c_str());
       return false;
+    }
+    if (version >= VERSION) {
+      uint8_t syncFlags = 0;
+      std::string id;
+      if (!serialization::tryReadPod(f, syncFlags) || !serialization::tryReadPod(f, clipping.syncRevision) ||
+          !serialization::tryReadString(f, id)) {
+        f.close();
+        LOG_ERR("CLIP", "Clipping file truncated at sync fields, record %u: %s", i, path.c_str());
+        return false;
+      }
+      clipping.pendingUpload = (syncFlags & SYNC_PENDING_UPLOAD) != 0;
+      clipping.foreignAnchor = (syncFlags & SYNC_FOREIGN_ANCHOR) != 0;
+      copyBounded(clipping.id, sizeof(clipping.id), id.c_str());
     }
     if (f.read(reinterpret_cast<uint8_t*>(clipping.chapterTitle), sizeof(clipping.chapterTitle)) !=
         sizeof(clipping.chapterTitle)) {
@@ -304,6 +478,10 @@ bool ClippingStore::writeToFile() const {
         !serialization::tryWritePod(f, clipping.bookFusionStart) ||
         !serialization::tryWritePod(f, clipping.bookFusionEnd) ||
         !serialization::tryWritePod(f, clipping.bookFusionFlags) ||
+        !serialization::tryWritePod(f, static_cast<uint8_t>((clipping.pendingUpload ? SYNC_PENDING_UPLOAD : 0) |
+                                                            (clipping.foreignAnchor ? SYNC_FOREIGN_ANCHOR : 0))) ||
+        !serialization::tryWritePod(f, clipping.syncRevision) ||
+        !serialization::tryWriteString(f, std::string(clipping.id)) ||
         f.write(reinterpret_cast<const uint8_t*>(clipping.chapterTitle), sizeof(clipping.chapterTitle)) !=
             sizeof(clipping.chapterTitle) ||
         !serialization::tryWriteString(f, clipping.text)) {
@@ -351,10 +529,21 @@ bool ClippingStore::hasForFilePath(const std::string& filePath, const std::strin
   return Storage.exists(storeFilePathForBook(filePath, bookType).c_str());
 }
 
+uint16_t ClippingStore::countForFilePath(const std::string& filePath, const std::string& bookType) {
+  const std::string storePath = storeFilePathForBook(filePath, bookType);
+  if (!Storage.exists(storePath.c_str())) return 0;
+  ClippingFileHeader header;
+  return readClippingFileHeader(storePath, nullptr, header) ? header.count : 0;
+}
+
 void ClippingStore::deleteForFilePath(const std::string& filePath, const std::string& bookType) {
   const std::string path = storeFilePathForBook(filePath, bookType);
   if (Storage.exists(path.c_str())) {
     Storage.remove(path.c_str());
+  }
+  const std::string journal = deletionJournalPath(path);
+  if (Storage.exists(journal.c_str())) {
+    Storage.remove(journal.c_str());
   }
 }
 
@@ -413,6 +602,7 @@ bool ClippingStore::moveForFilePath(const std::string& oldFilePath, const std::s
     return false;
   }
   Storage.remove(oldStorePath.c_str());
+  moveDeletionJournal(oldStorePath, newStorePath);
   return true;
 }
 
@@ -441,5 +631,6 @@ bool ClippingStore::migrateForFilePath(const std::string& oldFilePath, const std
   }
 
   Storage.remove(oldStorePath.c_str());
+  moveDeletionJournal(oldStorePath, writer.storeFilePath);
   return true;
 }
