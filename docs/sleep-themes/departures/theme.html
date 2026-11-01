@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html data-kp-orientation="portrait" data-kp-dither="threshold">
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family: Inter; font-weight: 400; src: url(Inter-Regular.ttf); }
+  @font-face { font-family: Inter; font-weight: 700; src: url(Inter-Bold.ttf); }
+
+  body { background: #000; color: #fff; font-family: Inter, sans-serif; }
+  .page { padding: 40px 36px; }
+  h1 { margin: 0 0 28px; font-size: 34px; font-weight: 700; letter-spacing: 6px; }
+  .board { display: flex; gap: 8px; }
+  .tile {
+    position: relative; width: 74px; height: 104px; background: #fff; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  /* the split line across every tile */
+  .tile::after { content: ""; position: absolute; left: 0; right: 0; top: 51px; height: 3px; background: #000; }
+  .digit { width: 74px; text-align: center; font-size: 88px; font-weight: 700; line-height: 104px; color: #000; }
+  .label { margin: 10px 0 24px; font-size: 20px; font-weight: 700; letter-spacing: 5px; }
+  .next-label { margin-top: 36px; font-size: 18px; font-weight: 700; letter-spacing: 6px; }
+  .next {
+    width: 280px; font-size: 44px; font-weight: 700; line-height: 50px; text-transform: uppercase;
+  }
+  .moon { position: absolute; right: 20px; bottom: 24px; width: 120px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>DEPARTURES 出発</h1>
+
+  <div class="board">
+    <div class="tile"><span class="digit" data-var="stats.total_hours" data-digit="3" data-glyphs="digits">0</span></div>
+    <div class="tile"><span class="digit" data-var="stats.total_hours" data-digit="2" data-glyphs="digits">0</span></div>
+    <div class="tile"><span class="digit" data-var="stats.total_hours" data-digit="1" data-glyphs="digits">6</span></div>
+    <div class="tile"><span class="digit" data-var="stats.total_hours" data-digit="0" data-glyphs="digits">1</span></div>
+  </div>
+  <div class="label">HOURS READ</div>
+
+  <div class="board">
+    <div class="tile"><span class="digit" data-var="stats.streak" data-digit="3" data-glyphs="digits"></span></div>
+    <div class="tile"><span class="digit" data-var="stats.streak" data-digit="2" data-glyphs="digits"></span></div>
+    <div class="tile"><span class="digit" data-var="stats.streak" data-digit="1" data-glyphs="digits">1</span></div>
+    <div class="tile"><span class="digit" data-var="stats.streak" data-digit="0" data-glyphs="digits">2</span></div>
+  </div>
+  <div class="label">DAY STREAK</div>
+
+  <div class="board">
+    <div class="tile"><span class="digit" data-var="stats.week_minutes" data-digit="3" data-glyphs="digits"></span></div>
+    <div class="tile"><span class="digit" data-var="stats.week_minutes" data-digit="2" data-glyphs="digits">1</span></div>
+    <div class="tile"><span class="digit" data-var="stats.week_minutes" data-digit="1" data-glyphs="digits">9</span></div>
+    <div class="tile"><span class="digit" data-var="stats.week_minutes" data-digit="0" data-glyphs="digits">4</span></div>
+  </div>
+  <div class="label">MINUTES THIS WEEK</div>
+
+  <div class="next-label">NEXT</div>
+  <div class="next" data-var="book.title" data-max-lines="2" data-overflow="ellipsis" data-hide-if-empty>One more chapter</div>
+</div>
+<img class="moon" src="moon.svg" alt="">
+</body>
+</html>

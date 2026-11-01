@@ -23,6 +23,74 @@ int dayOfWeek(int y, unsigned m, unsigned d) {
 }
 }  // namespace
 
+bool estimateBookTimeLeftMs(uint64_t& outMs) {
+  if (APP_STATE.openEpubPath.empty()) return false;
+  // Prefer the reader's own pages-left × pace figure, stashed at reader
+  // exit — the same estimate the status bar / reader menu show, and it
+  // doesn't hide after short sessions the way percent-based pace does.
+  if (APP_STATE.readerTimeLeftSeconds > 0 && APP_STATE.readerTimeLeftBookPath == APP_STATE.openEpubPath) {
+    outMs = static_cast<uint64_t>(APP_STATE.readerTimeLeftSeconds) * 1000ULL;
+    return true;
+  }
+  // Fallback: "read (end-start)% of the book in sessionMs, so (100-end)%
+  // remaining takes remaining/pace". Recent-reading only, so it survives a
+  // stats reset, unlike extrapolating lifetime time vs. progress.
+  const ReadingSessionSnapshot& snap = READING_STATS.getLastSessionSnapshot();
+  if (snap.valid && snap.path == APP_STATE.openEpubPath && snap.sessionMs != 0 &&
+      snap.endProgressPercent > snap.startProgressPercent && snap.endProgressPercent < 100) {
+    const uint32_t gainedPct = snap.endProgressPercent - snap.startProgressPercent;
+    const uint32_t remainingPct = 100 - snap.endProgressPercent;
+    outMs = static_cast<uint64_t>(snap.sessionMs) * remainingPct / gainedPct;
+    return true;
+  }
+  return false;
+}
+
+bool currentWeekGoalMask(uint8_t& outMask) {
+  // Future days this week simply stay unset.
+  const uint32_t todayOrd = TimeUtils::getLocalDayOrdinal(READING_STATS.getDisplayTimestamp());
+  int ty = 0;
+  unsigned tm = 0, tdd = 0;
+  if (!TimeUtils::getDateFromDayOrdinal(todayOrd, ty, tm, tdd)) return false;  // clock not set
+  const int dow = dayOfWeek(ty, tm, tdd);                                      // 0 = Sunday
+  const uint32_t mondayOrd = todayOrd - static_cast<uint32_t>((dow + 6) % 7);
+  const uint64_t goalMs = SETTINGS.getDailyGoalMs();
+  uint8_t mask = 0;
+  for (uint8_t d = 0; d < 7; d++) {  // Monday..Sunday
+    const uint32_t ord = mondayOrd + d;
+    uint64_t ms = 0;
+    for (const auto& rd : READING_STATS.getReadingDays()) {
+      if (rd.dayOrdinal == ord) {
+        ms = rd.readingMs;
+        break;
+      }
+    }
+    if (ms >= goalMs) mask = static_cast<uint8_t>(mask | (1u << d));
+  }
+  outMask = mask;
+  return true;
+}
+
+bool daysReadThisMonth(uint32_t& outDays) {
+  // Count reading days whose (year, month) matches the reference date —
+  // mirrors buildMonthSummary() in ReadingStatsActivity.
+  const uint32_t refOrdinal = TimeUtils::getLocalDayOrdinal(READING_STATS.getDisplayTimestamp());
+  int refYear = 0;
+  unsigned refMonth = 0, refDay = 0;
+  if (!TimeUtils::getDateFromDayOrdinal(refOrdinal, refYear, refMonth, refDay)) return false;  // clock not set
+  uint32_t daysRead = 0;
+  for (const auto& d : READING_STATS.getReadingDays()) {
+    if (d.readingMs == 0) continue;
+    int y = 0;
+    unsigned m = 0, dd = 0;
+    if (TimeUtils::getDateFromDayOrdinal(d.dayOrdinal, y, m, dd) && y == refYear && m == refMonth) {
+      daysRead++;
+    }
+  }
+  outDays = daysRead;
+  return true;
+}
+
 uint8_t buildLines(StatLine lines[MAX_STAT_LINES], bool previewMode) {
   const uint8_t slots[3] = {SETTINGS.sleepStatSlot1, SETTINGS.sleepStatSlot2, SETTINGS.sleepStatSlot3};
   constexpr size_t N = STAT_LINE_LEN;
@@ -108,31 +176,9 @@ uint8_t buildLines(StatLine lines[MAX_STAT_LINES], bool previewMode) {
         break;
       }
       case CrossPointSettings::SLEEP_STAT_BOOK_TIME_LEFT: {
-        // Prefer the reader's own pages-left × pace figure, stashed at reader
-        // exit — the same estimate the status bar / reader menu show, and it
-        // doesn't hide after short sessions the way percent-based pace does.
-        // Fallback: pace of the just-finished session. Preview: a sample value.
+        // Preview: a sample value when there is no estimate.
         uint64_t timeLeftMs = 0;
-        bool haveEstimate = false;
-        if (!APP_STATE.openEpubPath.empty()) {
-          if (APP_STATE.readerTimeLeftSeconds > 0 && APP_STATE.readerTimeLeftBookPath == APP_STATE.openEpubPath) {
-            timeLeftMs = static_cast<uint64_t>(APP_STATE.readerTimeLeftSeconds) * 1000ULL;
-            haveEstimate = true;
-          } else {
-            // "read (end-start)% of the book in sessionMs, so (100-end)% remaining
-            // takes remaining/pace". Recent-reading only, so it survives a stats
-            // reset, unlike extrapolating lifetime time vs. progress.
-            const ReadingSessionSnapshot& snap = READING_STATS.getLastSessionSnapshot();
-            if (snap.valid && snap.path == APP_STATE.openEpubPath && snap.sessionMs != 0 &&
-                snap.endProgressPercent > snap.startProgressPercent && snap.endProgressPercent < 100) {
-              const uint32_t gainedPct = snap.endProgressPercent - snap.startProgressPercent;
-              const uint32_t remainingPct = 100 - snap.endProgressPercent;
-              timeLeftMs = static_cast<uint64_t>(snap.sessionMs) * remainingPct / gainedPct;
-              haveEstimate = true;
-            }
-          }
-        }
-        if (!haveEstimate) {
+        if (!estimateBookTimeLeftMs(timeLeftMs)) {
           if (!previewMode) continue;                   // no recent forward progress to estimate a pace from
           timeLeftMs = 2ULL * 60ULL * 60ULL * 1000ULL;  // sample: 2h
         }
@@ -156,56 +202,26 @@ uint8_t buildLines(StatLine lines[MAX_STAT_LINES], bool previewMode) {
                  ReadingStatsAnalytics::formatDurationHm(READING_STATS.getRecentReadingMs(7) / 7).c_str());
         break;
       case CrossPointSettings::SLEEP_STAT_DAYS_MONTH: {
-        // Count reading days whose (year, month) matches the reference date —
-        // mirrors buildMonthSummary() in ReadingStatsActivity.
-        const uint32_t refOrdinal = TimeUtils::getLocalDayOrdinal(READING_STATS.getDisplayTimestamp());
-        int refYear = 0;
-        unsigned refMonth = 0, refDay = 0;
-        if (!TimeUtils::getDateFromDayOrdinal(refOrdinal, refYear, refMonth, refDay)) {
+        uint32_t daysRead = 0;
+        if (!daysReadThisMonth(daysRead)) {
           if (!previewMode) continue;                                // clock not set -> can't scope to a month
           snprintf(buf, N, "%s: %u", tr(STR_STAT_DAYS_MONTH), 12u);  // sample
           break;
-        }
-        uint32_t daysRead = 0;
-        for (const auto& d : READING_STATS.getReadingDays()) {
-          if (d.readingMs == 0) continue;
-          int y = 0;
-          unsigned m = 0, dd = 0;
-          if (TimeUtils::getDateFromDayOrdinal(d.dayOrdinal, y, m, dd) && y == refYear && m == refMonth) {
-            daysRead++;
-          }
         }
         snprintf(buf, N, "%s: %u", tr(STR_STAT_DAYS_MONTH), static_cast<unsigned>(daysRead));
         break;
       }
       case CrossPointSettings::SLEEP_STAT_WEEK_STREAK: {
         // Mon-Sun of the current week. Bit d (0 = Monday .. 6 = Sunday) is set when
-        // that weekday met the daily goal. Future days this week simply stay unset.
-        const uint32_t todayOrd = TimeUtils::getLocalDayOrdinal(READING_STATS.getDisplayTimestamp());
-        int ty = 0;
-        unsigned tm = 0, tdd = 0;
-        if (!TimeUtils::getDateFromDayOrdinal(todayOrd, ty, tm, tdd)) {
+        // that weekday met the daily goal.
+        uint8_t mask = 0;
+        if (!currentWeekGoalMask(mask)) {
           if (!previewMode) continue;  // clock not set -> can't anchor the week
           lines[count].weekDots = true;
           lines[count].weekMask = 0b0011111;  // sample: Mon-Fri met
           lines[count].weekCount = 7;
           lines[count].text[0] = '\0';
           break;
-        }
-        const int dow = dayOfWeek(ty, tm, tdd);  // 0 = Sunday
-        const uint32_t mondayOrd = todayOrd - static_cast<uint32_t>((dow + 6) % 7);
-        const uint64_t goalMs = SETTINGS.getDailyGoalMs();
-        uint8_t mask = 0;
-        for (uint8_t d = 0; d < 7; d++) {  // Monday..Sunday
-          const uint32_t ord = mondayOrd + d;
-          uint64_t ms = 0;
-          for (const auto& rd : READING_STATS.getReadingDays()) {
-            if (rd.dayOrdinal == ord) {
-              ms = rd.readingMs;
-              break;
-            }
-          }
-          if (ms >= goalMs) mask = static_cast<uint8_t>(mask | (1u << d));
         }
         lines[count].weekDots = true;
         lines[count].weekMask = mask;

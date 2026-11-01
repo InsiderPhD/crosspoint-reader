@@ -38,6 +38,7 @@
 #include "SettingsList.h"
 #include "SilentRestart.h"
 #include "SleepStatsSettingsActivity.h"
+#include "SleepThemeSelectActivity.h"
 #include "StatsDataActivity.h"
 #include "StatusBarSettingsActivity.h"
 #include "TimeZoneSelectActivity.h"
@@ -96,6 +97,10 @@ void SettingsActivity::onEnter() {
     // on-device keyboard entry path, so it is edited from the web UI only. The
     // web UI iterates getSettingsList() directly, so it still sees this entry.
     if (setting.key && std::strcmp(setting.key, "returnContact") == 0) continue;
+    // Device-only override: the theme folder is a free-text field too; on the
+    // device it is picked from the installed themes by the SleepTheme action row
+    // inserted below.
+    if (setting.key && std::strcmp(setting.key, "sleepTheme") == 0) continue;
     // Device-only override: the three sleep-stat slots are edited on-device from
     // the dedicated Sleep Screen Stats screen (with a live preview) launched by
     // the action row below, so they are hidden from this flat Stats list. They
@@ -136,6 +141,18 @@ void SettingsActivity::onEnter() {
                            SettingInfo::Action(StrId::STR_FRONTLIGHT_SCHEDULE, SettingAction::FrontlightSchedule));
   }
 #endif
+
+  // Sleep Theme sits right under the Sleep Screen mode it belongs to.
+  {
+    auto after = displaySettings.end();
+    for (auto it = displaySettings.begin(); it != displaySettings.end(); ++it) {
+      if (it->valuePtr == &CrossPointSettings::sleepScreen) {
+        after = it + 1;
+        break;
+      }
+    }
+    displaySettings.insert(after, SettingInfo::Action(StrId::STR_SLEEP_THEME, SettingAction::SleepTheme));
+  }
 
   // Append device-only ACTION items — button remap goes first in System
 #if !FREEINK_DEVICE_X4PRO
@@ -548,6 +565,9 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::Dictionary:
         startActivityForResult(std::make_unique<DictionarySelectActivity>(renderer, mappedInput), resultHandler);
         break;
+      case SettingAction::SleepTheme:
+        startActivityForResult(std::make_unique<SleepThemeSelectActivity>(renderer, mappedInput), resultHandler);
+        break;
       case SettingAction::FontDownload:
         startActivityForResult(std::make_unique<FontDownloadActivity>(renderer, mappedInput),
                                [this](const ActivityResult&) { ensureSdFontLoaded(); });
@@ -647,6 +667,8 @@ void SettingsActivity::render(RenderLock&&) {
         } else if (setting.type == SettingType::ACTION && setting.action == SettingAction::TimeZone) {
           char buf[TimeZoneRegistry::OFFSET_BUFFER_SIZE];
           valueText = TimeUtils::getCurrentTimeZoneLabel(buf, sizeof(buf));
+        } else if (setting.type == SettingType::ACTION && setting.action == SettingAction::SleepTheme) {
+          valueText = SETTINGS.sleepTheme[0] != '\0' ? SETTINGS.sleepTheme : tr(STR_NONE_OPT);
         } else if (setting.type == SettingType::ACTION && setting.action == SettingAction::FontFamily) {
           if (SETTINGS.sdFontFamilyName[0] != '\0') {
             valueText = SETTINGS.sdFontFamilyName;

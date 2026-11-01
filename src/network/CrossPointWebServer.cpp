@@ -252,6 +252,10 @@ void CrossPointWebServer::begin() {
   server->on("/api/fonts/upload", HTTP_POST, [this] { handleFontUpload(); }, [this] { handleFontUploadData(); });
   server->on("/api/fonts/delete", HTTP_POST, [this] { handleFontDelete(); });
 
+  // Sleep themes (CrossPointWebServerSleepThemes.cpp)
+  server->on("/sleep-themes", HTTP_GET, [this] { handleSleepThemesPage(); });
+  server->on("/api/sleep-theme/vars", HTTP_GET, [this] { handleSleepThemeVars(); });
+
   // SD-card plugins (docs/sd-plugins.md). The page itself is served on every
   // board so the nav tab never 404s; the boards that build no plugin support
   // get a one-line explanation instead of the host page.

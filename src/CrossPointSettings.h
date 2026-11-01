@@ -28,6 +28,9 @@ class CrossPointSettings {
     // The screen that was showing stays up, with a transparent image from the
     // SD card composited over it. See SleepActivity::renderOverlaySleepScreen.
     OVERLAY = 6,
+    // A compiled HTML/CSS theme from /sleep-themes/<sleepTheme>/. See
+    // src/sleeptheme/SleepThemeRenderer.h.
+    THEME = 7,
     SLEEP_SCREEN_MODE_COUNT
   };
   enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1, SLEEP_SCREEN_COVER_MODE_COUNT };
@@ -471,6 +474,8 @@ class CrossPointSettings {
   uint8_t sleepScreenCoverFilter = NO_FILTER;
   // Sleep screen orientation
   uint8_t sleepScreenOrientation = PORTRAIT;
+  // Folder name under /sleep-themes/ drawn by SLEEP_SCREEN_MODE::THEME. Empty = unset.
+  char sleepTheme[32] = "";
   // Reading stats shown on the sleep screen (one SLEEP_STAT per slot; NONE = hidden).
   // Master switch for reading statistics. Off: no session is opened, so nothing
   // is recorded, saved or pushed (ReadingStatsStore::beginSession), and the

@@ -25,6 +25,17 @@ struct StatLine {
   uint8_t weekCount;
 };
 
+// Stat computations shared with the sleep themes (src/sleeptheme). Each returns
+// false when the value cannot be known (no book open, clock not set, ...).
+
+// Reading time left in the open book: the reader's pages-left x pace figure,
+// else the pace of the last session.
+bool estimateBookTimeLeftMs(uint64_t& outMs);
+// Mon..Sun of the current week; bit d (0 = Monday) set when that day met the goal.
+bool currentWeekGoalMask(uint8_t& outMask);
+// Days with any reading in the current calendar month.
+bool daysReadThisMonth(uint32_t& outDays);
+
 // Formats the user-selected sleep-screen stats (slots 1-3) into `lines`,
 // skipping any slot set to SLEEP_STAT_NONE (and the "if found" slot when no
 // contact is set). Most stats are one line; the "if found" stat emits two (a

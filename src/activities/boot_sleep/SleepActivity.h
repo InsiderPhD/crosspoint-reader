@@ -19,6 +19,8 @@ class SleepActivity final : public Activity {
   void renderBitmapSleepScreen(const Bitmap& bitmap) const;
   void renderLastScreenSleepScreen() const;
   void renderBlankSleepScreen() const;
+  // Compiled HTML/CSS theme (SETTINGS.sleepTheme); default screen when unusable.
+  void renderThemeSleepScreen() const;
   // Page Overlay: keeps the framebuffer as the outgoing screen left it and
   // composites a transparent image from the SD card over it.
   void renderOverlaySleepScreen() const;

@@ -517,3 +517,103 @@ struct PageListBin {
 
 Entries with an empty label, a target outside the spine or an anchor of 50 bytes or more are
 skipped; a label longer than 11 bytes is cut on a UTF-8 boundary; at most 8000 entries are kept.
+
+## Clippings: `/.crosspoint/clippings/epub_<hash>.bin`
+
+Saved clippings for one book, keyed by `std::hash` of the book path. Owned by
+`src/ClippingStore.cpp`. Strings are `u32` length + bytes (`lib/Serialization`).
+Versions 1-3 still load; missing fields take their defaults (every clip pending upload,
+no sync id) and the file is rewritten as version 4 on the next save.
+
+### Version 4
+
+```c++
+struct ClippingsBin {
+    u8     version;  // 4
+    u16    count;    // <= CLIPPING_MAX_PER_BOOK (64)
+    string title;
+    string author;
+    string bookPath;
+    struct {
+        u16  spineIndex, startPage, endPage, pageCount;
+        u16  startWordIndex, endWordIndex, wordCount, paragraphIndex;  // 0xFFFF = none
+        u32  timestamp;        // UTC epoch seconds, 0 = clock unset
+        u32  bookFusionId;     // v2+; 0 = not pushed
+        u32  bookFusionStart, bookFusionEnd;  // v3+
+        u8   bookFusionFlags;  // v3+; BF_* bits
+        u8   syncFlags;        // v4; 0x01 pending upload, 0x02 foreign layout anchor
+        u64  syncRevision;     // v4; server revision, 0 = never synced
+        string id;             // v4; clipping-sync id, empty until first sync (<= 64 chars)
+        char chapterTitle[48]; // NUL padded
+        string text;           // <= 512 bytes
+    } clippings[count];
+};
+```
+
+### Deletion journal: `epub_<hash>.bin.deleted`
+
+Ids of synced clips deleted on this device, waiting to be sent to the clipping-sync
+server: back-to-back 65-byte NUL-padded records. A torn trailing record is trimmed on the
+next open; the file is removed once the server has acknowledged every entry.
+
+## Sleep themes: `/sleep-themes/<name>/`
+
+Written by the browser compiler on the web UI's Sleep Themes page
+(`src/network/html/SleepThemesPage.html`), read by `src/sleeptheme/SleepThemeRenderer.cpp`.
+A theme folder holds:
+
+- `theme.bin`: the layout below.
+- `bg.bmp`: 1-bit BMP, exactly `screenWidth` x `screenHeight`, everything static baked in.
+- `f0.cpfont` .. `f3.cpfont`: v4 `.cpfont` files (no kerning or ligatures) holding the
+  glyphs live text can need, one file per font family + pixel size. The format is 2-bit,
+  but the compiler only writes levels 0 and 3, cut at 50% coverage: themes draw in black
+  and white, where any non-zero level is ink, so this keeps live text the weight the
+  preview shows.
+- `source/`: the uploaded HTML folder, so the theme can be recompiled.
+
+### `theme.bin` version 1
+
+Little-endian, fixed-size records (see `src/sleeptheme/SleepThemeFormat.h`).
+
+```c++
+struct ThemeBin {
+    char magic[8];           // "KPTHEME\0"
+    u16  version;            // 1
+    u16  screenWidth;        // logical size the theme was laid out at
+    u16  screenHeight;
+    u8   orientation;        // GfxRenderer::Orientation
+    u8   elementCount;       // <= 64
+    u8   fontCount;          // <= 4
+    u8   flags;              // 0x01 cover elements store their template (older themes: 0,
+                             //      and every cover shows the open book)
+    u16  stringTableSize;    // <= 4096
+    u8   reserved[12];
+    struct {                 // 48 bytes
+        u8   kind;           // 0 text, 1 cover (book.cover or recent.N.cover), 2 bar
+        u8   fontIndex;      // fN.cpfont
+        u8   fontStyle;      // 0 regular, 1 bold, 2 italic, 3 bold italic
+        u8   align;          // 0 left, 1 centre, 2 right
+        u8   flags;          // 0x01 white ink, 0x02 hide if a value is empty, 0x04 transformed,
+                             // 0x08 ellipsis, 0x10 contain (cover), 0x20 opaque (cover)
+        u8   textTransform;  // 0 none, 1 upper, 2 lower, 3 capitalize
+        u8   maxLines;       // 0/1 single line; wrapped text is clamped to 8
+        i8   digitIndex;     // >= 0: only the nth digit from the right
+        i8   tracking;       // letter-spacing, half-pixel steps
+        u8   reserved0;
+        u16  width, height;  // content box in the element's own coordinates
+        u16  templateOffset; // into the string table; 0xFFFF none (a cover with none is book.cover)
+        i32  matrix[6];      // a b c d e f, 16.16: screen = (a*x + c*y + e, b*x + d*y + f)
+        u16  lineHeight;     // pixels between baselines, 0 = font default
+        u16  barMax;         // (bar) the value that fills it; 0 = 100, a percentage
+        u8   reserved[4];
+    } elements[elementCount];
+    char strings[stringTableSize];  // NUL-terminated templates: "Day {{stats.streak:000}}"
+                                    // or expressions: {{stats.streak == 1 ? "day" : "days"}}
+                                    // (src/sleeptheme/SleepThemeExpr.h). icon("x") calls are
+                                    // already replaced by private-use characters (U+E000 up)
+                                    // whose glyphs the compiler added to the element's font.
+};
+```
+
+Template names are the ones `GET /api/sleep-theme/vars` lists (`src/sleeptheme/SleepThemeVars.h`).
+A version or screen-size mismatch makes the device fall back to the default sleep screen.

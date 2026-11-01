@@ -134,6 +134,10 @@ class CrossPointWebServer {
   void handleFontUploadData();
   void handleFontDelete();
 
+  // Sleep themes (CrossPointWebServerSleepThemes.cpp)
+  void handleSleepThemesPage() const;  // GET /sleep-themes
+  void handleSleepThemeVars() const;   // GET /api/sleep-theme/vars
+
   // SD-card plugins page. Serves the browser plugin host on the boards that
   // build plugin support (CROSSPOINT_SD_PLUGINS) and a short explanation on
   // the others, so the nav tab every page carries never 404s.

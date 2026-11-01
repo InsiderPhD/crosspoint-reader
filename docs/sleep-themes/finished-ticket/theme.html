@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html data-kp-orientation="portrait">
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family: Inter; font-weight: 400; src: url(Inter-Regular.ttf); }
+  @font-face { font-family: Inter; font-weight: 700; src: url(Inter-Bold.ttf); }
+
+  body { background: #fff; color: #000; font-family: Inter, sans-serif; }
+  .card {
+    position: absolute; left: 70px; top: 40px; width: 300px; padding: 16px 16px 24px;
+    border: 3px solid #000; border-radius: 14px; background: #fff; transform: rotate(-4deg);
+  }
+  .cover { display: block; width: 268px; height: 380px; object-fit: contain; }
+  .title { margin-top: 12px; width: 190px; font-size: 26px; font-weight: 700; line-height: 32px; }
+  /* Live content draws over static art, so the stamp sits beside the cover, not on it. */
+  .stamp {
+    position: absolute; left: 300px; top: 420px; width: 150px; height: 150px; border: 4px double #000;
+    border-radius: 50%; background: #fff; transform: rotate(-24deg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .stamp b { font-size: 34px; letter-spacing: 4px; }
+  .stamp span { font-size: 20px; font-weight: 700; }
+  .ticket {
+    position: absolute; left: 40px; top: 560px; width: 380px; padding: 18px 20px; border: 3px solid #000;
+    border-radius: 6px; transform: rotate(2deg);
+  }
+  .lead { font-size: 18px; }
+  .grid { display: flex; justify-content: space-between; margin: 14px 0; text-align: center; }
+  .grid b { display: block; font-size: 30px; }
+  .grid small { font-size: 16px; }
+  .line { border-top: 2px solid #000; padding-top: 10px; font-size: 20px; font-weight: 700; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <img class="cover" data-var="book.cover" src="sample-cover.svg" alt="">
+    <div class="title" data-var="book.title" data-max-lines="2" data-hide-if-empty>Trollkarlens hatt</div>
+  </div>
+
+  <div class="stamp">
+    <b>READ</b>
+    <span data-var="time.now" data-format="yyyy.MM.dd" data-hide-if-empty>2026.10.17</span>
+  </div>
+
+  <div class="ticket">
+    <div class="lead" data-template="Your {{stats.books_finished}}th book">Your 14th book</div>
+    <div class="grid">
+      <div><b data-var="book.time">7h 48m</b><small>reading time</small></div>
+      <div><b data-var="book.days_reading">12</b><small>days reading</small></div>
+      <div><b data-var="stats.streak">9</b><small>day streak</small></div>
+    </div>
+    <div class="line" data-template="{{book.clippings}} passages saved">31 passages saved</div>
+  </div>
+</body>
+</html>

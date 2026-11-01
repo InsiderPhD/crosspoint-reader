@@ -46,6 +46,7 @@ enum class SettingAction {
   FontLayoutPreview,
   SleepStats,
   Dictionary,
+  SleepTheme,          // compiled HTML/CSS sleep theme picker
   FrontlightSchedule,  // frontlight boards only
   About,               // device diagnostics + support export
 };

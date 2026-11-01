@@ -463,6 +463,43 @@ curl -X POST -H "Content-Type: application/json" \
 
 ---
 
+### GET `/sleep-themes` - Sleep Themes Page
+
+Serves the sleep-theme compiler: it lays out an uploaded HTML/CSS theme in the browser,
+bakes the static parts into a 1-bit background, and installs the result under
+`/sleep-themes/<name>/` with `/mkdir` and `/upload`. It lists installed themes with
+`/api/files`, switches between them with `/api/settings`, and deletes one with `/delete`
+(clearing `sleepTheme` when it was the selected one). See [file-formats.md](file-formats.md#sleep-themes-sleep-themesname).
+
+**Response:** HTML page (200 OK)
+
+---
+
+### GET `/api/sleep-theme/vars` - Sleep Theme Values
+
+Everything a theme can show, with the user's current values (the page previews with them),
+plus the limits the compiler checks against.
+
+**Response (200 OK):**
+```json
+{
+  "panelWidth": 800, "panelHeight": 480, "themesDir": "/sleep-themes", "formatVersion": 1,
+  "limits": { "elements": 64, "fonts": 4, "strings": 4096 },
+  "active": "departures",
+  "vars": [
+    { "name": "stats.total_hours", "kind": "number", "value": "61", "raw": 61 },
+    { "name": "time.now", "kind": "timestamp", "value": "21:04", "raw": 1792530240 },
+    { "name": "book.title", "kind": "text", "value": "Trollkarlens hatt" }
+  ]
+}
+```
+
+`kind` is `number`, `text`, `timestamp` or `image` (`book.cover`). An empty `value` means
+unknown right now (no book open, clock not set). Installing a theme as the sleep screen
+is a `POST /api/settings` with `{"sleepScreen": 7, "sleepTheme": "<name>"}`.
+
+---
+
 ## WebSocket Endpoint
 
 ### Port 81 - Fast Binary Upload

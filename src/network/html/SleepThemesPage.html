@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CrossPoint Reader - Sleep Themes</title>
+    <style>
+      :root {
+        --font-color: #333;
+        --bg: #f5f5f5;
+        --title-color: #2c3e50;
+        --card-bg: #FFF;
+        --label-color: #7f8c8d;
+        --border-color: #eee;
+        --accent-color: rgb(110, 154, 130);
+        --accent-hover-color: #5a8c73;
+        --danger-color: #e74c3c;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --font-color: #f5f5f5;
+          --bg: #333;
+          --title-color: #ecf0f1;
+          --card-bg: #444;
+          --label-color: #bdc3c7;
+          --border-color: #555;
+          color-scheme: dark;
+        }
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: var(--bg);
+        color: var(--font-color);
+      }
+      h1 {
+        color: var(--title-color);
+        border-bottom: 2px solid var(--accent-color);
+        padding-bottom: 10px;
+      }
+      h2 { color: var(--title-color); margin-top: 0; }
+      .card {
+        background: var(--card-bg);
+        border-radius: 8px;
+        padding: 20px;
+        margin: 15px 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      .nav-links { margin: 20px 0; display: flex; gap: 10px; flex-wrap: wrap; }
+      .nav-links a {
+        padding: 10px 20px;
+        color: var(--font-color);
+        text-decoration: none;
+        border-radius: 4px;
+      }
+      .nav-links a.active { background-color: var(--accent-color); color: white; }
+      .nav-links a:not(.active):hover { background-color: var(--accent-hover-color); color: white; }
+      .btn {
+        padding: 6px 16px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9em;
+        background: var(--accent-color);
+        color: white;
+      }
+      .btn:hover { background: var(--accent-hover-color); }
+      .btn:disabled { opacity: 0.5; cursor: default; }
+      .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+      .row input[type="text"] {
+        padding: 6px 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg);
+        color: var(--font-color);
+      }
+      .muted { color: var(--label-color); font-size: 0.9em; }
+      #log { white-space: pre-wrap; font-family: monospace; font-size: 0.85em; margin: 0; }
+      .err { color: var(--danger-color); }
+      .previews { display: flex; gap: 16px; flex-wrap: wrap; }
+      .previews figure { margin: 0; }
+      .previews canvas { border: 1px solid var(--border-color); max-width: 360px; height: auto; image-rendering: pixelated; }
+      #stage { position: fixed; left: -20000px; top: 0; border: 0; }
+      code { font-size: 0.9em; }
+      table { border-collapse: collapse; width: 100%; font-size: 0.85em; }
+      td { border-bottom: 1px solid var(--border-color); padding: 3px 6px; vertical-align: top; }
+      details summary { cursor: pointer; }
+      #themes td { vertical-align: middle; padding: 6px; font-size: 1.1em; }
+      #themes td:last-child { text-align: right; white-space: nowrap; }
+      #themes .btn { margin-left: 6px; }
+      .btn.danger { background: var(--danger-color); }
+      .tag { font-size: 0.8em; color: var(--label-color); margin-left: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>Sleep Themes</h1>
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a href="/files">File Manager</a>
+      <a href="/fonts">Fonts</a>
+      <a href="/sleep-themes" class="active">Sleep Themes</a>
+      <a href="/settings">Settings</a>
+      <a href="/plugins">Plugins</a>
+    </div>
+
+    <div class="card">
+      <h2>Install a theme</h2>
+      <p class="muted">
+        Pick a theme folder (or a .zip of one) containing <code>theme.html</code> and its fonts and images.
+        Your browser lays it out, bakes everything static into a black-and-white background, and keeps the
+        <code>data-var</code> elements live: the device fills them with your current stats every time it sleeps.
+        Use a desktop Chrome or Firefox.
+      </p>
+      <div class="row">
+        <input type="file" id="folder" webkitdirectory multiple />
+        <span class="muted">or</span>
+        <input type="file" id="zip" accept=".zip" />
+      </div>
+      <div class="row">
+        <label for="name">Theme name</label>
+        <input type="text" id="name" maxlength="31" placeholder="departures" />
+        <label><input type="checkbox" id="activate" checked /> Use it as my sleep screen</label>
+      </div>
+      <div class="row">
+        <button class="btn" id="compile" disabled>Compile &amp; preview</button>
+        <button class="btn" id="install" disabled>Install on device</button>
+      </div>
+      <pre id="log"></pre>
+      <div class="previews" id="previews"></div>
+    </div>
+
+    <div class="card">
+      <h2>Installed themes</h2>
+      <p class="muted" id="themesEmpty">No themes installed yet.</p>
+      <table id="themes"></table>
+      <p class="muted" id="themesMsg"></p>
+    </div>
+
+    <div class="card">
+      <details>
+        <summary><strong>Writing a theme</strong></summary>
+        <p class="muted">
+          <code>theme.html</code> is laid out at the screen size (the page is the screen). Any CSS works for the static
+          parts. Mark live parts with attributes; their content is only a preview sample.
+        </p>
+        <ul class="muted">
+          <li><code>data-var="stats.streak"</code> - one value. Add <code>data-format="000"</code> to zero-pad numbers or
+            <code>data-format="dd.MM.yyyy HH:mm"</code> for dates (Unicode patterns: <code>MM</code> is the month, <code>mm</code> minutes).</li>
+          <li><code>data-template="Your {{stats.books_finished}}th book"</code> - mixed text and values.</li>
+          <li>Expressions inside <code>{{ }}</code>: <code>{{stats.streak == 1 ? "day" : "days"}}</code>,
+            <code>{{round(stats.week_minutes / 60)}}</code>, <code>{{book.title || "Nothing open"}}</code>. Operators
+            <code>+ - * / % == != &lt; &lt;= &gt; &gt;= &amp;&amp; || ! ?:</code> and <code>round floor ceil abs min max upper
+            lower pad plural date</code>.</li>
+          <li><code>icon("star")</code> in an expression draws <code>icons/star.svg</code> from the theme folder as part of
+            the text: <code>{{stats.week_met_1 ? icon("star-filled") : icon("star")}}</code>.</li>
+          <li><code>data-digit="0"</code> - only the nth digit from the right (flip-board tiles).</li>
+          <li><code>data-var="book.cover"</code> on an <code>&lt;img&gt;</code> or <code>&lt;div&gt;</code> - the open
+            book's cover. <code>object-fit: contain</code> keeps its shape.</li>
+          <li><code>data-kind="bar"</code> - fills the box from the left by a 0-100 value.</li>
+          <li><code>data-max-lines="2"</code>, <code>data-overflow="ellipsis"</code>, <code>data-hide-if-empty</code>,
+            <code>data-glyphs="digits"</code> (character sets to include for live text: latin, digits, greek,
+            cyrillic, kana, cjk, hangul; default latin).</li>
+          <li>Live content is drawn on top of everything static, so don't put art over a live element (a stamp
+            over the cover would end up underneath it).</li>
+          <li>Live text keeps its font, size, weight, colour (black or white), alignment, letter-spacing,
+            <code>text-transform</code> and any 2D <code>transform</code> (rotate, scale, skew).</li>
+          <li><code>&lt;html data-kp-orientation="landscape"&gt;</code> for a landscape theme;
+            <code>data-kp-dither="threshold"</code> for crisp line art instead of dithering.</li>
+        </ul>
+        <table id="vars"></table>
+      </details>
+    </div>
+
+    <iframe id="stage" title="layout"></iframe>
+
+    <script>
+      'use strict';
+      const $ = (id) => document.getElementById(id);
+      const logEl = $('log');
+      function log(msg, isErr) {
+        const line = document.createElement('div');
+        line.textContent = msg;
+        if (isErr) line.className = 'err';
+        logEl.appendChild(line);
+      }
+      const tick = () => new Promise((r) => setTimeout(r, 0));
+
+      // ---- Device info ---------------------------------------------------
+      let device = null;
+      let varsByName = new Map();
+      async function loadDevice() {
+        const res = await fetch('/api/sleep-theme/vars');
+        device = await res.json();
+        varsByName = new Map(device.vars.map((v) => [v.name, v]));
+        const table = $('vars');
+        for (const v of device.vars) {
+          const tr = table.insertRow();
+          tr.insertCell().innerHTML = '<code>' + v.name + '</code>';
+          tr.insertCell().textContent = v.kind;
+          tr.insertCell().textContent = v.value;
+        }
+      }
+
+      // ---- Input files ---------------------------------------------------
+      // files: Map of relative path (no leading theme folder) -> Blob
+      let files = null;
+      function stripRoot(paths) {
+        // Drop a common leading folder so theme.html sits at the root.
+        const first = paths[0].split('/');
+        if (first.length < 2) return (p) => p;
+        const root = first[0] + '/';
+        return paths.every((p) => p.startsWith(root)) ? (p) => p.slice(root.length) : (p) => p;
+      }
+      function sanitizeName(n) {
+        return n.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 31);
+      }
+      function setFiles(map, suggestedName) {
+        if (!map.has('theme.html')) {
+          log('No theme.html at the top of that folder.', true);
+          files = null;
+          $('compile').disabled = true;
+          return;
+        }
+        files = map;
+        if (!$('name').value) $('name').value = sanitizeName(suggestedName || 'theme');
+        $('compile').disabled = false;
+        $('install').disabled = true;
+        log('Loaded ' + map.size + ' files.');
+      }
+      $('folder').addEventListener('change', (e) => {
+        const list = [...e.target.files];
+        if (!list.length) return;
+        const paths = list.map((f) => f.webkitRelativePath || f.name);
+        const strip = stripRoot(paths);
+        const map = new Map();
+        list.forEach((f, i) => map.set(strip(paths[i]), f));
+        setFiles(map, paths[0].split('/')[0]);
+      });
+      $('zip').addEventListener('change', async (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        if (!window.JSZip) await loadScript('/js/jszip.min.js');
+        const zip = await JSZip.loadAsync(f);
+        const entries = Object.values(zip.files).filter((z) => !z.dir);
+        const strip = stripRoot(entries.map((z) => z.name));
+        const map = new Map();
+        for (const z of entries) map.set(strip(z.name), await z.async('blob'));
+        setFiles(map, f.name.replace(/\.zip$/i, ''));
+      });
+      function loadScript(src) {
+        return new Promise((ok, fail) => {
+          const s = document.createElement('script');
+          s.src = src;
+          s.onload = ok;
+          s.onerror = fail;
+          document.head.appendChild(s);
+        });
+      }
+
+      // ---- Resource inlining ---------------------------------------------
+      const MIME = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+        svg: 'image/svg+xml', bmp: 'image/bmp', ttf: 'font/ttf', otf: 'font/otf', woff: 'font/woff',
+        woff2: 'font/woff2', css: 'text/css',
+      };
+      function blobToDataUrl(blob, path) {
+        const ext = (path.split('.').pop() || '').toLowerCase();
+        const typed = MIME[ext] ? new Blob([blob], { type: MIME[ext] }) : blob;
+        return new Promise((ok) => {
+          const r = new FileReader();
+          r.onload = () => ok(r.result);
+          r.readAsDataURL(typed);
+        });
+      }
+      function resolvePath(base, rel) {
+        if (/^(data:|https?:|blob:|#)/i.test(rel)) return null;
+        const parts = (base ? base.split('/').slice(0, -1) : []).concat(rel.split('?')[0].split('#')[0].split('/'));
+        const out = [];
+        for (const p of parts) {
+          if (p === '..') out.pop();
+          else if (p !== '.' && p !== '') out.push(p);
+        }
+        return out.join('/');
+      }
+      const dataUrlCache = new Map();
+      async function dataUrlFor(path) {
+        if (!files.has(path)) return null;
+        if (!dataUrlCache.has(path)) dataUrlCache.set(path, await blobToDataUrl(files.get(path), path));
+        return dataUrlCache.get(path);
+      }
+      async function inlineCss(css, basePath) {
+        const re = /url\(\s*(['"]?)([^'")]+)\1\s*\)/g;
+        let out = '';
+        let last = 0;
+        let m;
+        while ((m = re.exec(css))) {
+          const path = resolvePath(basePath, m[2]);
+          const url = path && (await dataUrlFor(path));
+          out += css.slice(last, m.index) + (url ? 'url("' + url + '")' : m[0]);
+          last = re.lastIndex;
+        }
+        return out + css.slice(last);
+      }
+
+      // Returns theme.html as one self-contained document string (every
+      // stylesheet, image and font as a data: URL), sized to the screen.
+      async function buildDocument(width, height) {
+        const html = await files.get('theme.html').text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        for (const link of [...doc.querySelectorAll('link[rel~="stylesheet"][href]')]) {
+          const path = resolvePath('theme.html', link.getAttribute('href'));
+          if (path && files.has(path)) {
+            const style = doc.createElement('style');
+            style.textContent = await inlineCss(await files.get(path).text(), path);
+            link.replaceWith(style);
+          }
+        }
+        for (const style of doc.querySelectorAll('style')) {
+          style.textContent = await inlineCss(style.textContent, 'theme.html');
+        }
+        for (const el of doc.querySelectorAll('[style]')) {
+          el.setAttribute('style', await inlineCss(el.getAttribute('style'), 'theme.html'));
+        }
+        for (const el of doc.querySelectorAll('img[src], image[href], source[src]')) {
+          const attr = el.hasAttribute('src') ? 'src' : 'href';
+          const path = resolvePath('theme.html', el.getAttribute(attr));
+          const url = path && (await dataUrlFor(path));
+          if (url) el.setAttribute(attr, url);
+        }
+        for (const s of doc.querySelectorAll('script')) s.remove();
+        const base = doc.createElement('style');
+        base.textContent =
+          'html,body{margin:0;padding:0;width:' + width + 'px;height:' + height +
+          'px;overflow:hidden;background:#fff}';
+        doc.head.prepend(base);
+        return { doc, text: '<!DOCTYPE html>' + doc.documentElement.outerHTML };
+      }
+
+      // ---- Layout ----------------------------------------------------------
+      const ORIENTATIONS = { portrait: 0, landscape: 1, 'portrait-inverted': 2, 'landscape-ccw': 3 };
+      async function layout(text, width, height) {
+        const frame = $('stage');
+        frame.style.width = width + 'px';
+        frame.style.height = height + 'px';
+        await new Promise((ok) => {
+          frame.onload = ok;
+          frame.srcdoc = text;
+        });
+        const d = frame.contentDocument;
+        await d.fonts.ready;
+        await Promise.all([...d.images].map((img) => (img.decode ? img.decode().catch(() => {}) : null)));
+        return d;
+      }
+
+      // Live <img> elements become empty boxes of the same size, so probes can
+      // be placed inside them and nothing sampled is baked.
+      function replaceLiveImages(d) {
+        for (const img of [...d.querySelectorAll('img[data-var],img[data-template]')]) {
+          const cs = d.defaultView.getComputedStyle(img);
+          const div = d.createElement('div');
+          for (const a of img.attributes) if (a.name !== 'src' && a.name !== 'alt') div.setAttribute(a.name, a.value);
+          div.style.width = cs.width;
+          div.style.height = cs.height;
+          div.style.display = cs.display === 'inline' ? 'inline-block' : cs.display;
+          div.style.objectFit = cs.objectFit;
+          div.style.backgroundImage = 'url("' + img.src + '")';
+          div.style.backgroundSize = cs.objectFit === 'contain' ? 'contain' : '100% 100%';
+          div.style.backgroundRepeat = 'no-repeat';
+          div.style.backgroundPosition = 'center';
+          img.replaceWith(div);
+        }
+      }
+
+      // The element's content box in screen coordinates, through every
+      // ancestor transform: probes at three corners give the affine matrix.
+      function measureMatrix(d, el) {
+        const view = d.defaultView;
+        const cs = view.getComputedStyle(el);
+        const savedPosition = el.style.position;
+        if (cs.position === 'static') el.style.position = 'relative';
+        const pl = parseFloat(cs.paddingLeft), pt = parseFloat(cs.paddingTop);
+        const w = el.clientWidth - pl - parseFloat(cs.paddingRight);
+        const h = el.clientHeight - pt - parseFloat(cs.paddingBottom);
+        const probe = (x, y) => {
+          const p = d.createElement('i');
+          p.style.cssText = 'position:absolute;margin:0;padding:0;border:0;width:0;height:0;left:' + x + 'px;top:' + y + 'px';
+          el.appendChild(p);
+          const r = p.getBoundingClientRect();
+          p.remove();
+          return [r.left, r.top];
+        };
+        const p0 = probe(pl, pt), px = probe(pl + Math.max(w, 1), pt), py = probe(pl, pt + Math.max(h, 1));
+        el.style.position = savedPosition;
+        const sw = Math.max(w, 1), sh = Math.max(h, 1);
+        return {
+          w: Math.round(w), h: Math.round(h),
+          m: [(px[0] - p0[0]) / sw, (px[1] - p0[1]) / sw, (py[0] - p0[0]) / sh, (py[1] - p0[1]) / sh, p0[0], p0[1]],
+        };
+      }
+
+      function isCentredByParent(view, el) {
+        const parent = el.parentElement;
+        if (!parent) return false;
+        const ps = view.getComputedStyle(parent);
+        if (ps.display.includes('flex')) {
+          const column = ps.flexDirection.startsWith('column');
+          const self = view.getComputedStyle(el).alignSelf;
+          return column ? (self === 'center' || (self === 'auto' && ps.alignItems === 'center'))
+                        : ps.justifyContent === 'center';
+        }
+        return ps.textAlign === 'center' && view.getComputedStyle(el).display === 'inline-block';
+      }
+
+      function luminanceOf(color) {
+        const m = color.match(/[\d.]+/g) || ['0', '0', '0'];
+        return 0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2];
+      }
+
+      // ---- Template expressions -------------------------------------------
+      // Mirrors src/sleeptheme/SleepThemeExpr.cpp: {{name}}, {{name:format}},
+      // or an expression. Values are {t:'e'} (empty), {t:'n', v}, {t:'s', v}.
+      const ThemeExpr = (() => {
+        const EMPTY = { t: 'e' };
+        const num = (v) => ({ t: 'n', v });
+        const str = (v) => ({ t: 's', v: String(v) });
+        // The "}}" closing each {{, skipping any inside a quoted string.
+        function blocks(tpl) {
+          const out = [];
+          for (let i = 0; i < tpl.length; i++) {
+            if (tpl[i] !== '{' || tpl[i + 1] !== '{') continue;
+            let q = '';
+            let j = i + 2;
+            for (; j < tpl.length; j++) {
+              const c = tpl[j];
+              if (q) {
+                if (c === '\\') j++;
+                else if (c === q) q = '';
+              } else if (c === '"' || c === "'") q = c;
+              else if (c === '}' && tpl[j + 1] === '}') break;
+            }
+            if (j >= tpl.length) break;
+            out.push({ start: i, end: j + 2, src: tpl.slice(i + 2, j) });
+            i = j + 1;
+          }
+          return out;
+        }
+        const plainMatch = (src) => /^ *([A-Za-z_][A-Za-z0-9_.]*) *(?::([\s\S]*))?$/.exec(src);
+        function formatNum(d) {
+          if (Math.abs(d) < 1e15 && Number.isInteger(d)) return String(d);
+          return d.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+        }
+        const toStr = (v) => (v.t === 's' ? v.v : v.t === 'n' ? formatNum(v.v) : '');
+        const truthy = (v) => (v.t === 'n' ? v.v !== 0 : v.t === 's' ? v.v.length > 0 : false);
+        function toNum(v) {
+          if (v.t === 'n') return v.v;
+          if (v.t === 's' && v.v !== '' && /^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(v.v)) return Number(v.v);
+          return null;
+        }
+        const OPS = [['||', 1], ['&&', 2], ['==', 3], ['!=', 3], ['<=', 4], ['>=', 4], ['<', 4], ['>', 4],
+          ['+', 5], ['-', 5], ['*', 6], ['/', 6], ['%', 6]];
+
+        // Parses to a tree; throws Error(message, at) on a syntax error.
+        function parse(src) {
+          let p = 0;
+          let depth = 0;
+          const fail = (m) => { const e = new Error(m); e.at = p; throw e; };
+          const skip = () => { while (p < src.length && /\s/.test(src[p])) p++; };
+          const eat = (t) => { skip(); if (src.startsWith(t, p)) { p += t.length; return true; } return false; };
+          const enter = () => { if (++depth > 32) fail('too deeply nested'); };
+          function ternary() {
+            enter();
+            const c = binary(1);
+            let node = c;
+            if (eat('?')) {
+              const a = ternary();
+              if (!eat(':')) fail("expected ':'");
+              node = { k: 'tern', c, a, b: ternary() };
+            }
+            depth--;
+            return node;
+          }
+          function binary(min) {
+            enter();
+            let lhs = unary();
+            for (;;) {
+              skip();
+              const op = OPS.find(([o]) => src.startsWith(o, p));
+              if (!op || op[1] < min) break;
+              p += op[0].length;
+              lhs = { k: 'bin', op: op[0], a: lhs, b: binary(op[1] + 1) };
+            }
+            depth--;
+            return lhs;
+          }
+          function unary() {
+            enter();
+            let node;
+            if (eat('!')) node = { k: 'not', a: unary() };
+            else if (eat('-')) node = { k: 'neg', a: unary() };
+            else node = primary();
+            depth--;
+            return node;
+          }
+          function primary() {
+            skip();
+            if (p >= src.length) fail('expected a value');
+            if (eat('(')) {
+              const v = ternary();
+              if (!eat(')')) fail("expected ')'");
+              return v;
+            }
+            const c = src[p];
+            if (c === '"' || c === "'") {
+              p++;
+              let s = '';
+              while (p < src.length && src[p] !== c) {
+                if (src[p] === '\\' && p + 1 < src.length) p++;
+                s += src[p++];
+              }
+              if (p >= src.length) fail('unclosed string');
+              p++;
+              return { k: 'str', v: s };
+            }
+            const m = /^(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?/.exec(src.slice(p));
+            if (m) { p += m[0].length; return { k: 'num', v: Number(m[0]) }; }
+            const n = /^[A-Za-z_][A-Za-z0-9_.]*/.exec(src.slice(p));
+            if (!n) fail('unexpected character');
+            p += n[0].length;
+            skip();
+            if (src[p] === '(') {
+              p++;
+              const args = [];
+              if (!eat(')')) {
+                do {
+                  if (args.length === 3) fail('too many arguments');
+                  args.push(ternary());
+                } while (eat(','));
+                if (!eat(')')) fail("expected ')'");
+              }
+              return { k: 'call', name: n[0], args };
+            }
+            if (n[0] === 'true') return { k: 'num', v: 1 };
+            if (n[0] === 'false') return { k: 'num', v: 0 };
+            return { k: 'var', name: n[0] };
+          }
+          const tree = ternary();
+          skip();
+          if (p !== src.length) fail('unexpected text');
+          return tree;
+        }
+
+        // Value names, functions and icon("…") names a tree uses.
+        function walk(node, out = { names: new Set(), calls: new Set(), icons: new Set(), strings: [] }) {
+          if (!node) return out;
+          if (node.k === 'var') out.names.add(node.name);
+          if (node.k === 'str') out.strings.push(node.v);
+          if (node.k === 'call') {
+            out.calls.add(node.name);
+            if (node.name === 'icon' && node.args[0] && node.args[0].k === 'str') out.icons.add(node.args[0].v);
+          }
+          for (const key of ['a', 'b', 'c']) walk(node[key], out);
+          for (const a of node.args || []) walk(a, out);
+          return out;
+        }
+
+        const FUNCTIONS = new Set(['round', 'floor', 'ceil', 'abs', 'min', 'max', 'upper', 'lower', 'pad', 'plural', 'date', 'icon']);
+        // env: { lookup(name) -> value, date(epoch, fmt) -> string, icon(name) -> string }
+        function evaluate(node, env) {
+          const ev = (n) => evaluate(n, env);
+          switch (node.k) {
+            case 'num': return num(node.v);
+            case 'str': return str(node.v);
+            case 'var': return env.lookup(node.name);
+            case 'not': return num(truthy(ev(node.a)) ? 0 : 1);
+            case 'neg': { const x = toNum(ev(node.a)); return x === null ? EMPTY : num(-x); }
+            case 'tern': { const c = ev(node.c), a = ev(node.a), b = ev(node.b); return truthy(c) ? a : b; }
+            case 'bin': {
+              const a = ev(node.a), b = ev(node.b);
+              switch (node.op) {
+                case '||': return truthy(a) ? a : b;
+                case '&&': return truthy(a) ? b : a;
+                case '==': case '!=': case '<=': case '>=': case '<': case '>': {
+                  if (a.t === 'e' || b.t === 'e') {
+                    const both = a.t === b.t;
+                    return num(node.op === '==' ? +both : node.op === '!=' ? +!both : 0);
+                  }
+                  const x = toNum(a), y = toNum(b);
+                  let cmp;
+                  if (x !== null && y !== null) cmp = x < y ? -1 : x > y ? 1 : 0;
+                  else { const sa = toStr(a), sb = toStr(b); cmp = sa < sb ? -1 : sa > sb ? 1 : 0; }
+                  const r = { '==': cmp === 0, '!=': cmp !== 0, '<=': cmp <= 0, '>=': cmp >= 0, '<': cmp < 0, '>': cmp > 0 }[node.op];
+                  return num(r ? 1 : 0);
+                }
+                case '+':
+                  if (a.t === 's' || b.t === 's') return str(toStr(a) + toStr(b));
+                  break;
+                default: break;
+              }
+              const x = toNum(a), y = toNum(b);
+              if (x === null || y === null) return EMPTY;
+              switch (node.op) {
+                case '+': return num(x + y);
+                case '-': return num(x - y);
+                case '*': return num(x * y);
+                case '/': return y === 0 ? EMPTY : num(x / y);
+                default: return y === 0 ? EMPTY : num(x % y);
+              }
+            }
+            case 'call': {
+              const args = node.args.map(ev);
+              const x = args[0] ? toNum(args[0]) : null;
+              const y = args[1] ? toNum(args[1]) : null;
+              switch (node.name) {
+                case 'round': {
+                  if (x === null) return EMPTY;
+                  const scale = y === null ? 1 : 10 ** Math.max(0, Math.min(6, Math.floor(y)));
+                  const r = Math.floor(Math.abs(x) * scale + 0.5) / scale;
+                  return num(x < 0 ? -r : r);
+                }
+                case 'floor': return x === null ? EMPTY : num(Math.floor(x));
+                case 'ceil': return x === null ? EMPTY : num(Math.ceil(x));
+                case 'abs': return x === null ? EMPTY : num(Math.abs(x));
+                case 'min': return x === null || y === null ? EMPTY : num(Math.min(x, y));
+                case 'max': return x === null || y === null ? EMPTY : num(Math.max(x, y));
+                case 'upper': return args[0] && args[0].t !== 'e' ? str(toStr(args[0]).toUpperCase()) : EMPTY;
+                case 'lower': return args[0] && args[0].t !== 'e' ? str(toStr(args[0]).toLowerCase()) : EMPTY;
+                case 'pad': {
+                  if (x === null) return EMPTY;
+                  const w = y === null ? 0 : Math.max(0, Math.min(12, y));
+                  const t = Math.trunc(x);
+                  return str((t < 0 ? '-' : '') + String(Math.abs(t)).padStart(t < 0 ? w - 1 : w, '0'));
+                }
+                case 'plural': return x === null ? EMPTY : x === 1 ? (args[1] || EMPTY) : (args[2] || EMPTY);
+                case 'date': {
+                  if (x === null || !args[1] || args[1].t !== 's') return EMPTY;
+                  const s = env.date(x, args[1].v);
+                  return s ? str(s) : EMPTY;
+                }
+                case 'icon': return args[0] && args[0].t === 's' && env.icon ? str(env.icon(args[0].v)) : EMPTY;
+                default: throw new Error('unknown function ' + node.name);
+              }
+            }
+            default: return EMPTY;
+          }
+        }
+
+        // Checks one template: { names, icons, strings, errors } for the
+        // compiler and the editor's checks.
+        function inspect(tpl, knownName) {
+          const res = { names: new Set(), icons: new Set(), strings: [], errors: [] };
+          for (const b of blocks(tpl)) {
+            const m = plainMatch(b.src);
+            if (m) { res.names.add(m[1]); continue; }
+            try {
+              const info = walk(parse(b.src));
+              info.names.forEach((n) => res.names.add(n));
+              info.icons.forEach((n) => res.icons.add(n));
+              res.strings.push(...info.strings);
+              for (const c of info.calls) if (!FUNCTIONS.has(c)) res.errors.push('{{' + b.src + '}}: unknown function ' + c + '()');
+              if (info.calls.has('icon') && !info.icons.size) res.errors.push('{{' + b.src + '}}: icon() needs a name in quotes, like icon("star")');
+            } catch (e) {
+              res.errors.push('{{' + b.src + '}}: ' + e.message + (e.at !== undefined ? ' at character ' + (e.at + 1) : ''));
+            }
+          }
+          if (knownName) for (const n of res.names) if (!knownName(n)) res.errors.push('Unknown value "' + n + '"');
+          return res;
+        }
+
+        // Expands a template. plain(name, fmt) formats the {{name:fmt}} form
+        // ('' when unknown); env is as for evaluate(). ok is false when any
+        // block came out empty (hide-if-empty).
+        function expand(tpl, plain, env) {
+          let text = '';
+          let ok = true;
+          let last = 0;
+          for (const b of blocks(tpl)) {
+            text += tpl.slice(last, b.start);
+            last = b.end;
+            const m = plainMatch(b.src);
+            let v = '';
+            if (m) v = plain(m[1], m[2]);
+            else {
+              try { v = toStr(evaluate(parse(b.src), env)); } catch (e) { v = ''; }
+            }
+            if (v === '') ok = false;
+            text += v;
+          }
+          return { text: text + tpl.slice(last), ok };
+        }
+
+        return { blocks, plainMatch, parse, walk, evaluate, inspect, expand, toStr, EMPTY, num, str };
+      })();
+
+      const VAR_RE = /\{\{\s*([a-z0-9_.]+)(?::([^}]*))?\s*\}\}/g;
+      function templateOf(el) {
+        if (el.hasAttribute('data-template')) return el.getAttribute('data-template');
+        const fmt = el.getAttribute('data-format');
+        return '{{' + el.getAttribute('data-var') + (fmt ? ':' + fmt : '') + '}}';
+      }
+      // Mirrors SleepThemeVars.cpp: zero-padded numbers, date/time patterns.
+      function formatValue(v, fmt) {
+        if (!v) return '';
+        if (!fmt || v.raw === undefined) return v.value;
+        if (v.kind === 'number') return /^0+$/.test(fmt) ? String(v.raw).padStart(fmt.length, '0') : v.value;
+        if (v.kind !== 'timestamp') return v.value;
+        const t = new Date(v.raw * 1000);
+        const p2 = (n) => String(n).padStart(2, '0');
+        const h12 = t.getHours() % 12 || 12;
+        const tokens = {
+          yyyy: t.getFullYear(), yy: p2(t.getFullYear() % 100), MM: p2(t.getMonth() + 1), M: t.getMonth() + 1,
+          dd: p2(t.getDate()), d: t.getDate(), HH: p2(t.getHours()), H: t.getHours(), hh: p2(h12), h: h12,
+          mm: p2(t.getMinutes()), ss: p2(t.getSeconds()), a: t.getHours() < 12 ? 'AM' : 'PM',
+        };
+        // Unicode patterns; YYYY YY DD D A are the first format's aliases.
+        const alias = { YYYY: 'yyyy', YY: 'yy', DD: 'dd', D: 'd', A: 'a' };
+        return fmt.replace(/yyyy|YYYY|yy|YY|MM|M|dd|DD|d|D|HH|H|hh|h|mm|ss|a|A/g, (k) => tokens[alias[k] || k]);
+      }
+      // "dd-mm-yyyy": mm (minutes) where a month was surely meant: not after a
+      // ':' and no hour in the pattern.
+      function monthLikeMinutes(fmt) {
+        return /(^|[^:])mm/.test(fmt) && !/[Hh]/.test(fmt);
+      }
+      // icon("name") -> its private-use character, assigned per compile.
+      let iconChars = new Map();
+      const exprEnv = {
+        lookup(name) {
+          const v = varsByName.get(name);
+          if (!v) throw new Error('unknown value ' + name);
+          if (v.kind === 'number' || v.kind === 'timestamp') return v.raw === undefined ? ThemeExpr.EMPTY : ThemeExpr.num(v.raw);
+          if (v.kind === 'text') return v.value ? ThemeExpr.str(v.value) : ThemeExpr.EMPTY;
+          return ThemeExpr.EMPTY;
+        },
+        date: (epoch, fmt) => formatValue({ kind: 'timestamp', raw: epoch, value: '' }, fmt),
+        icon: (name) => (iconChars.has(name) ? String.fromCodePoint(iconChars.get(name).cp) : ''),
+      };
+      function expandSample(tpl) {
+        return ThemeExpr.expand(tpl, (name, fmt) => formatValue(varsByName.get(name), fmt), exprEnv).text;
+      }
+      // The SVG file for icon("name"): icons/name.svg, or name.svg anywhere.
+      function iconPath(name) {
+        if (files.has('icons/' + name + '.svg')) return 'icons/' + name + '.svg';
+        for (const path of files.keys()) if (path === name + '.svg' || path.endsWith('/' + name + '.svg')) return path;
+        return null;
+      }
+      function loadImage(src) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error('Could not load ' + src.slice(0, 60)));
+          img.src = src;
+        });
+      }
+
+      // Collects every live element with its geometry and computed style.
+      function collectLive(d) {
+        const view = d.defaultView;
+        const live = [];
+        const errors = [];
+        for (const el of d.querySelectorAll('[data-var],[data-template]')) {
+          const cs = view.getComputedStyle(el);
+          if (cs.display === 'inline') el.style.display = 'inline-block';
+          const tpl = templateOf(el);
+          const info = ThemeExpr.inspect(tpl, (n) => varsByName.has(n));
+          errors.push(...info.errors);
+          const names = [...info.names];
+          const isCover = names.length === 1 && varsByName.get(names[0])?.kind === 'image';
+          const isBar = el.getAttribute('data-kind') === 'bar';
+          // An empty block has no height; a no-break space gives it its line box.
+          if (!isCover && !isBar && el.textContent === '') el.textContent = '\u00a0';
+          live.push({ el, tpl, kind: isCover ? 1 : isBar ? 2 : 0, icons: info.icons, strings: info.strings });
+        }
+        // Measure after every display fix-up so later boxes see the final layout.
+        for (const item of live) {
+          const cs = view.getComputedStyle(item.el);
+          Object.assign(item, measureMatrix(d, item.el));
+          const weight = parseInt(cs.fontWeight, 10) || 400;
+          const italic = cs.fontStyle !== 'normal';
+          item.family = cs.fontFamily.split(',')[0].trim().replace(/^["']|["']$/g, '');
+          item.size = Math.round(parseFloat(cs.fontSize));
+          item.style = (weight >= 600 ? 1 : 0) | (italic ? 2 : 0);
+          item.cssWeight = cs.fontWeight;
+          item.cssStyle = cs.fontStyle;
+          item.white = luminanceOf(cs.color) >= 128;
+          const ta = cs.textAlign;
+          item.align = ta === 'center' ? 1 : ta === 'right' || ta === 'end' ? 2 : 0;
+          // A shrink-wrapped box centred by its parent should grow both ways
+          // when the live value is wider than the sample.
+          if (item.align === 0 && (ta === 'start' || ta === 'left') && isCentredByParent(view, item.el)) item.align = 1;
+          const ls = cs.letterSpacing === 'normal' ? 0 : parseFloat(cs.letterSpacing);
+          item.tracking = Math.max(-127, Math.min(127, Math.round(ls * 2)));
+          item.transform = { none: 0, uppercase: 1, lowercase: 2, capitalize: 3 }[cs.textTransform] || 0;
+          item.lineHeight = cs.lineHeight === 'normal' ? 0 : Math.round(parseFloat(cs.lineHeight));
+          // A bar fills at data-max (default 100: the value is a percentage).
+          item.barMax = Math.max(0, Math.min(65535, parseInt(item.el.getAttribute('data-max'), 10) || 0));
+          item.maxLines = Math.min(8, parseInt(item.el.getAttribute('data-max-lines') || cs.webkitLineClamp || '1', 10) || 1);
+          item.ellipsis = item.el.getAttribute('data-overflow') === 'ellipsis' || cs.textOverflow === 'ellipsis';
+          item.hideIfEmpty = item.el.hasAttribute('data-hide-if-empty');
+          item.digit = item.el.hasAttribute('data-digit') ? parseInt(item.el.getAttribute('data-digit'), 10) : -1;
+          item.contain = item.el.style.objectFit === 'contain' || cs.objectFit === 'contain';
+          item.glyphs = item.el.getAttribute('data-glyphs') || '';
+          const [a, b, c, dd] = item.m;
+          item.transformed = Math.abs(a - 1) > 1e-3 || Math.abs(dd - 1) > 1e-3 || Math.abs(b) > 1e-3 || Math.abs(c) > 1e-3;
+          if (item.w <= 0 || item.h <= 0) errors.push('A live element has no size: ' + item.tpl);
+        }
+        return { live, errors };
+      }
+
+      function hideLiveContent(d, it) {
+        const el = it.el;
+        const cs = d.defaultView.getComputedStyle(el);
+        for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+          el.style['border' + side + 'Color'] = cs['border' + side + 'Color'];
+        }
+        el.style.outlineColor = cs.outlineColor;
+        if (it.kind === 1) {
+          el.style.backgroundImage = 'none';
+          return;
+        }
+        el.style.color = 'transparent';
+        el.style.textShadow = 'none';
+        el.style.webkitTextStrokeColor = 'transparent';
+        el.style.textDecorationColor = 'transparent';
+        // Nested markup inside a live element is sample content too.
+        for (const child of el.querySelectorAll('*')) child.style.visibility = 'hidden';
+      }
+
+      // ---- Rasterising -----------------------------------------------------
+      // The document (with live elements as they are) drawn onto a canvas via
+      // SVG foreignObject, then converted to 1-bit.
+      async function loadImage(url) {
+        const img = new Image();
+        img.decoding = 'sync';
+        await new Promise((ok, fail) => {
+          img.onload = ok;
+          img.onerror = () => fail(new Error('The browser could not render the theme as an image.'));
+          img.src = url;
+        });
+        if (img.decode) await img.decode().catch(() => {});
+        return img;
+      }
+      function pixelHash(ctx, width, height) {
+        const px = new Uint32Array(ctx.getImageData(0, 0, width, height).data.buffer);
+        let h = 2166136261;
+        for (let i = 0; i < px.length; i++) h = Math.imul(h ^ px[i], 16777619);
+        return h >>> 0;
+      }
+      async function rasterize(d, width, height) {
+        const xhtml = new XMLSerializer().serializeToString(d.documentElement);
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '">' +
+          '<foreignObject x="0" y="0" width="100%" height="100%">' + xhtml + '</foreignObject></svg>';
+        const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        // The SVG's own document loads the theme's fonts after it reports
+        // loaded, and text in a font still loading draws invisible. Redraw until
+        // two passes agree, so the first image isn't missing its text.
+        let previous = null;
+        for (let pass = 0; pass < 6; pass++) {
+          const img = await loadImage(url);
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0);
+          const hash = pixelHash(ctx, width, height);
+          if (hash === previous) break;
+          previous = hash;
+          await new Promise((r) => setTimeout(r, 150));
+        }
+        return canvas;
+      }
+
+      // Luminance -> 1 bit (true = black). Floyd-Steinberg by default.
+      function toBits(canvas, threshold) {
+        const { width, height } = canvas;
+        const px = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+        const lum = new Float32Array(width * height);
+        for (let i = 0; i < lum.length; i++) lum[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+        const black = new Uint8Array(width * height);
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const i = y * width + x;
+            const old = lum[i];
+            const isBlack = old < 128;
+            black[i] = isBlack ? 1 : 0;
+            if (threshold) continue;
+            const err = old - (isBlack ? 0 : 255);
+            if (x + 1 < width) lum[i + 1] += (err * 7) / 16;
+            if (y + 1 < height) {
+              if (x > 0) lum[i + width - 1] += (err * 3) / 16;
+              lum[i + width] += (err * 5) / 16;
+              if (x + 1 < width) lum[i + width + 1] += err / 16;
+            }
+          }
+        }
+        return black;
+      }
+
+      function bitsToCanvas(black, width, height) {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        const img = ctx.createImageData(width, height);
+        for (let i = 0; i < black.length; i++) {
+          const v = black[i] ? 0 : 255;
+          img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
+          img.data[i * 4 + 3] = 255;
+        }
+        ctx.putImageData(img, 0, 0);
+        return canvas;
+      }
+
+      // 1-bit BMP, bottom-up, palette 0 = black, 1 = white.
+      function encodeBmp(black, width, height) {
+        const rowBytes = Math.ceil(width / 32) * 4;
+        const dataOffset = 14 + 40 + 8;
+        const size = dataOffset + rowBytes * height;
+        const buf = new ArrayBuffer(size);
+        const v = new DataView(buf);
+        v.setUint8(0, 0x42);
+        v.setUint8(1, 0x4d);
+        v.setUint32(2, size, true);
+        v.setUint32(10, dataOffset, true);
+        v.setUint32(14, 40, true);
+        v.setInt32(18, width, true);
+        v.setInt32(22, height, true);
+        v.setUint16(26, 1, true);
+        v.setUint16(28, 1, true);
+        v.setUint32(34, rowBytes * height, true);
+        v.setUint32(46, 2, true);
+        v.setUint32(54, 0x00000000, true);
+        v.setUint32(58, 0x00ffffff, true);
+        const bytes = new Uint8Array(buf);
+        for (let y = 0; y < height; y++) {
+          const row = dataOffset + (height - 1 - y) * rowBytes;
+          for (let x = 0; x < width; x++) {
+            if (!black[y * width + x]) bytes[row + (x >> 3)] |= 0x80 >> (x & 7);
+          }
+        }
+        return bytes;
+      }
+
+      // ---- Fonts (.cpfont v4, see lib/EpdFont/scripts/fontconvert_sdcard.py) --
+      const GLYPH_PRESETS = {
+        latin: [[0x20, 0x7e], [0xa0, 0xff], [0x100, 0x17f], [0x2010, 0x2027], [0x2030, 0x203a], [0x20ac, 0x20ac]],
+        greek: [[0x370, 0x3ff]],
+        cyrillic: [[0x400, 0x4ff]],
+        cjk: [[0x3000, 0x303f], [0x3040, 0x309f], [0x30a0, 0x30ff], [0x4e00, 0x9fff], [0xff00, 0xffef]],
+        kana: [[0x3000, 0x303f], [0x3040, 0x309f], [0x30a0, 0x30ff], [0xff00, 0xffef]],
+        hangul: [[0xac00, 0xd7af], [0x1100, 0x11ff], [0x3130, 0x318f]],
+        digits: [[0x30, 0x39]],
+      };
+      function rangesToSet(ranges, set) {
+        for (const [a, b] of ranges) for (let c = a; c <= b; c++) set.add(c);
+      }
+
+      // Rasterises one style of a font family at a pixel size in the layout
+      // frame's document (so the theme's @font-face fonts are available).
+      function rasterStyle(d, family, size, weight, fontStyle, codepoints, progress, iconImages = new Map()) {
+        const canvas = d.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const font = (fam) => fontStyle + ' ' + weight + ' ' + size + 'px ' + fam;
+        // Generic families must stay bare: quoted, "sans-serif" names a font
+        // that doesn't exist and every glyph would read as missing.
+        const generic = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-(sans-serif|serif|monospace|rounded))$/i;
+        const quoted = generic.test(family) ? family : '"' + family.replace(/"/g, '') + '"';
+        ctx.font = font(quoted + ', serif');
+        const probe = ctx.measureText('Hg|');
+        const ascent = Math.ceil(probe.fontBoundingBoxAscent);
+        const descent = Math.ceil(probe.fontBoundingBoxDescent);
+        const glyphs = [];
+        for (const cp of codepoints) {
+          const ch = String.fromCodePoint(cp);
+          // icon("…") glyphs: the SVG drawn into an em square sitting 80% above
+          // the baseline, the same box the preview gives an inline icon.
+          if (iconImages.has(cp)) {
+            const S = Math.max(1, Math.round(size));
+            if (S > 255) throw new Error('Icons over 255px are not supported; use a smaller font size');
+            canvas.width = S;
+            canvas.height = S;
+            ctx.clearRect(0, 0, S, S);
+            ctx.drawImage(iconImages.get(cp), 0, 0, S, S);
+            const alpha = ctx.getImageData(0, 0, S, S).data;
+            const data = new Uint8Array(Math.ceil((S * S) / 4));
+            for (let i = 0; i < S * S; i++) if (alpha[i * 4 + 3] >= 128) data[i >> 2] |= 3 << ((3 - (i & 3)) * 2);
+            glyphs.push({ cp, w: S, h: S, adv: Math.round(S * 16), left: 0, top: Math.round(S * 0.8), data });
+            continue;
+          }
+          // A glyph the font lacks falls back to the generic family; measuring
+          // with two different fallbacks tells them apart. Space always counts.
+          ctx.font = font(quoted + ', serif');
+          const m = ctx.measureText(ch);
+          if (cp !== 0x20) {
+            ctx.font = font(quoted + ', monospace');
+            if (Math.abs(ctx.measureText(ch).width - m.width) > 0.01) continue;
+            ctx.font = font(quoted + ', serif');
+          }
+          const x0 = Math.floor(-m.actualBoundingBoxLeft);
+          const x1 = Math.ceil(m.actualBoundingBoxRight);
+          const top = Math.ceil(m.actualBoundingBoxAscent);
+          const y1 = Math.ceil(m.actualBoundingBoxDescent);
+          let w = Math.max(0, x1 - x0), h = Math.max(0, top + y1);
+          if (w > 255 || h > 255) throw new Error(family + ' ' + size + 'px: glyph "' + ch + '" is over 255px; use a smaller size');
+          let data = new Uint8Array(0);
+          if (w > 0 && h > 0 && cp !== 0x20) {
+            canvas.width = w;
+            canvas.height = h;
+            ctx.font = font(quoted + ', serif');
+            ctx.fillStyle = '#000';
+            ctx.textBaseline = 'alphabetic';
+            ctx.fillText(ch, -x0, top);
+            const alpha = ctx.getImageData(0, 0, w, h).data;
+            data = new Uint8Array(Math.ceil((w * h) / 4));
+            // Themes draw in black and white, where the device inks any non-zero
+            // level. Cut at 50% coverage, the same threshold the preview and the
+            // baked background use, so live text keeps its designed weight.
+            for (let i = 0; i < w * h; i++) {
+              if (alpha[i * 4 + 3] >= 128) data[i >> 2] |= 3 << ((3 - (i & 3)) * 2);
+            }
+          } else {
+            w = 0;
+            h = 0;
+          }
+          glyphs.push({ cp, w, h, adv: Math.round(m.width * 16), left: x0, top, data });
+          if (progress && glyphs.length % 500 === 0) progress(glyphs.length);
+        }
+        if (!glyphs.some((g) => g.cp > 0x20 && g.cp < 0x7f) && codepoints.some((cp) => cp > 0x20 && cp < 0x7f)) {
+          throw new Error('Font "' + family + '" did not load. Is it declared with @font-face and included in the folder?');
+        }
+        if (ascent + descent > 255) throw new Error(family + ' ' + size + 'px is too large (line height over 255px)');
+        return { glyphs, ascent, descent };
+      }
+
+      function packCpfont(styles) {
+        // styles: Map styleId -> {glyphs, ascent, descent}
+        const ids = [...styles.keys()].sort();
+        const sections = ids.map((id) => {
+          const st = styles.get(id);
+          const glyphs = st.glyphs.slice().sort((a, b) => a.cp - b.cp);
+          const intervals = [];
+          glyphs.forEach((g, i) => {
+            const last = intervals[intervals.length - 1];
+            if (last && g.cp === last[1] + 1) last[1] = g.cp;
+            else intervals.push([g.cp, g.cp, i]);
+          });
+          const bitmapSize = glyphs.reduce((n, g) => n + g.data.length, 0);
+          const buf = new ArrayBuffer(intervals.length * 12 + glyphs.length * 16 + bitmapSize);
+          const v = new DataView(buf);
+          let o = 0;
+          for (const [a, b, off] of intervals) {
+            v.setUint32(o, a, true); v.setUint32(o + 4, b, true); v.setUint32(o + 8, off, true);
+            o += 12;
+          }
+          let dataOffset = 0;
+          for (const g of glyphs) {
+            v.setUint8(o, g.w); v.setUint8(o + 1, g.h); v.setUint16(o + 2, g.adv, true);
+            v.setInt16(o + 4, g.left, true); v.setInt16(o + 6, g.top, true);
+            v.setUint16(o + 8, g.data.length, true); v.setUint32(o + 12, dataOffset, true);
+            dataOffset += g.data.length;
+            o += 16;
+          }
+          const bytes = new Uint8Array(buf);
+          for (const g of glyphs) {
+            bytes.set(g.data, o);
+            o += g.data.length;
+          }
+          return { id, st, intervals, glyphs, bytes };
+        });
+        const header = 32, tocSize = 32 * ids.length;
+        let total = header + tocSize;
+        const offsets = sections.map((s) => { const at = total; total += s.bytes.length; return at; });
+        const out = new Uint8Array(total);
+        const v = new DataView(out.buffer);
+        'CPFONT'.split('').forEach((c, i) => v.setUint8(i, c.charCodeAt(0)));
+        v.setUint16(8, 4, true);         // CPFONT_VERSION
+        v.setUint16(10, 1, true);        // 2-bit
+        v.setUint8(12, ids.length);
+        sections.forEach((s, i) => {
+          const t = header + i * 32;
+          v.setUint8(t, s.id);
+          v.setUint32(t + 4, s.intervals.length, true);
+          v.setUint32(t + 8, s.glyphs.length, true);
+          v.setUint8(t + 12, s.st.ascent + s.st.descent);
+          v.setInt16(t + 13, s.st.ascent, true);
+          v.setInt16(t + 15, -s.st.descent, true);
+          // kern entry/class counts and ligature count stay 0
+          v.setUint32(t + 24, offsets[i], true);
+          out.set(s.bytes, offsets[i]);
+        });
+        return out;
+      }
+
+      // ---- theme.bin -------------------------------------------------------
+      function packTheme(meta, live, fontIndexOf) {
+        const enc = new TextEncoder();
+        const strings = [];
+        let stringBytes = 0;
+        const offsetOf = new Map();
+        function addString(s) {
+          if (offsetOf.has(s)) return offsetOf.get(s);
+          const b = enc.encode(s + '\0');
+          offsetOf.set(s, stringBytes);
+          strings.push(b);
+          stringBytes += b.length;
+          return offsetOf.get(s);
+        }
+        // Covers keep their template too: it says which book (book.cover, recent.N.cover).
+        const elements = live.map((it) => ({ it, tplOffset: addString(it.tplDevice || it.tpl) }));
+        if (stringBytes > device.limits.strings) throw new Error('Templates are too long (' + stringBytes + ' bytes)');
+        const buf = new ArrayBuffer(32 + elements.length * 48 + stringBytes);
+        const v = new DataView(buf);
+        'KPTHEME'.split('').forEach((c, i) => v.setUint8(i, c.charCodeAt(0)));
+        v.setUint16(8, device.formatVersion, true);
+        v.setUint16(10, meta.width, true);
+        v.setUint16(12, meta.height, true);
+        v.setUint8(14, meta.orientation);
+        v.setUint8(15, elements.length);
+        v.setUint8(16, meta.fontCount);
+        v.setUint8(17, 0x01); // HEADER_FLAG_COVER_TEMPLATES: covers say which book they show
+        v.setUint16(18, stringBytes, true);
+        const fp = (x) => Math.round(x * 65536);
+        elements.forEach(({ it, tplOffset }, i) => {
+          const o = 32 + i * 48;
+          let flags = 0;
+          if (it.white) flags |= 0x01;
+          if (it.hideIfEmpty) flags |= 0x02;
+          if (it.transformed) flags |= 0x04;
+          if (it.ellipsis) flags |= 0x08;
+          if (it.contain) flags |= 0x10;
+          if (it.kind === 1) flags |= 0x20;
+          v.setUint8(o, it.kind);
+          v.setUint8(o + 1, it.kind === 0 ? fontIndexOf(it) : 0);
+          v.setUint8(o + 2, it.style);
+          v.setUint8(o + 3, it.align);
+          v.setUint8(o + 4, flags);
+          v.setUint8(o + 5, it.transform);
+          v.setUint8(o + 6, Math.min(255, it.maxLines));
+          v.setInt8(o + 7, it.digit);
+          v.setInt8(o + 8, it.tracking);
+          v.setUint16(o + 10, it.w, true);
+          v.setUint16(o + 12, it.h, true);
+          v.setUint16(o + 14, tplOffset, true);
+          it.m.forEach((x, k) => v.setInt32(o + 16 + k * 4, fp(x), true));
+          v.setUint16(o + 40, Math.min(65535, it.lineHeight), true);
+          v.setUint16(o + 42, it.kind === 2 ? it.barMax : 0, true);
+        });
+        const bytes = new Uint8Array(buf);
+        let o = 32 + elements.length * 48;
+        for (const s of strings) {
+          bytes.set(s, o);
+          o += s.length;
+        }
+        return bytes;
+      }
+
+      // ---- Compile ---------------------------------------------------------
+      let compiled = null;
+      async function compile() {
+        logEl.textContent = '';
+        $('previews').textContent = '';
+        $('install').disabled = true;
+        compiled = null;
+        const htmlText = await files.get('theme.html').text();
+        const orientName = (htmlText.match(/data-kp-orientation\s*=\s*["']([a-z-]+)["']/i) || [, 'portrait'])[1];
+        const orientation = ORIENTATIONS[orientName] ?? 0;
+        const landscape = orientation === 1 || orientation === 3;
+        const pw = device.panelWidth, ph = device.panelHeight;
+        const width = landscape ? Math.max(pw, ph) : Math.min(pw, ph);
+        const height = landscape ? Math.min(pw, ph) : Math.max(pw, ph);
+        const threshold = /data-kp-dither\s*=\s*["']threshold["']/i.test(htmlText);
+        log('Laying out at ' + width + 'x' + height + ' (' + orientName + ')...');
+
+        const { text } = await buildDocument(width, height);
+        const d = await layout(text, width, height);
+        replaceLiveImages(d);
+        const { live, errors } = collectLive(d);
+        for (const it of live) {
+          for (const m of it.tpl.matchAll(VAR_RE)) {
+            if (m[2] && varsByName.get(m[1])?.kind === 'timestamp' && monthLikeMinutes(m[2])) {
+              log('In "' + m[2] + '", mm is minutes. For the month use MM, e.g. ' + m[2].replace(/(^|[^:])mm/g, '$1MM') + '.', true);
+            }
+          }
+        }
+        if (live.length > device.limits.elements) errors.push('Too many live elements (' + live.length + ', max ' + device.limits.elements + ')');
+
+        // icon("name"): each SVG becomes a private-use glyph (U+E000 up) in
+        // the fonts of the elements that use it, and the device template gets
+        // that character in place of the call.
+        iconChars = new Map();
+        for (const it of live) {
+          for (const name of it.icons || []) {
+            if (iconChars.has(name)) continue;
+            const path = iconPath(name);
+            if (!path) { errors.push('icon("' + name + '") needs icons/' + name + '.svg in the theme folder'); continue; }
+            const svg = await files.get(path).text();
+            const src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+            try {
+              iconChars.set(name, { cp: 0xe000 + iconChars.size, src, svg, img: await loadImage(src) });
+            } catch (e) {
+              errors.push('icon("' + name + '"): ' + path + ' is not a usable SVG');
+            }
+          }
+        }
+        const iconImages = new Map([...iconChars.values()].map((ic) => [ic.cp, ic.img]));
+        for (const it of live) {
+          it.tplDevice = it.tpl.replace(/icon\(\s*(["'])(.*?)\1\s*\)/g, (m, q, name) =>
+            iconChars.has(name) ? JSON.stringify(String.fromCodePoint(iconChars.get(name).cp)) : m);
+        }
+        if (iconChars.size) log('Icons: ' + [...iconChars.keys()].join(', '));
+
+        // Fonts: one file per (family, size), with the styles used.
+        const groups = new Map();
+        for (const it of live.filter((x) => x.kind === 0)) {
+          const key = it.family + '|' + it.size;
+          if (!groups.has(key)) groups.set(key, { family: it.family, size: it.size, styles: new Map(), chars: new Set() });
+          const g = groups.get(key);
+          if (!g.styles.has(it.style)) g.styles.set(it.style, { weight: it.cssWeight, fontStyle: it.cssStyle });
+          // Latin unless the element names its own sets (data-glyphs="digits"
+          // keeps a big display font small).
+          const presets = it.glyphs.split(/[\s,]+/).filter(Boolean);
+          for (const name of presets.length ? presets : ['latin']) {
+            if (GLYPH_PRESETS[name]) rangesToSet(GLYPH_PRESETS[name], g.chars);
+            else errors.push('Unknown data-glyphs preset "' + name + '"');
+          }
+          // The device's glyph loader always asks for U+FFFD too.
+          g.chars.add(0xfffd);
+          // Every string an expression can show (both sides of a ?:), not just
+          // today's result; and its icons.
+          for (const ch of it.el.textContent + expandSample(it.tpl) + (it.strings || []).join('')) {
+            const cp = ch.codePointAt(0);
+            if (cp >= 0x20 && !(cp >= 0xe000 && cp <= 0xf8ff)) g.chars.add(cp);
+          }
+          for (const name of it.icons || []) if (iconChars.has(name)) g.chars.add(iconChars.get(name).cp);
+        }
+        if (groups.size > device.limits.fonts) errors.push('Live text uses ' + groups.size + ' font/size pairs; the device allows ' + device.limits.fonts);
+        if (errors.length) {
+          [...new Set(errors)].forEach((e) => log(e, true));
+          return;
+        }
+
+        const fontFiles = [];
+        const lineHeights = new Map();
+        const keys = [...groups.keys()];
+        for (const [i, key] of keys.entries()) {
+          const g = groups.get(key);
+          const styles = new Map();
+          for (const [styleId, s] of g.styles) {
+            log('Font f' + i + ': ' + g.family + ' ' + g.size + 'px style ' + styleId + ', ' + g.chars.size + ' characters...');
+            await tick();
+            styles.set(styleId, rasterStyle(d, g.family, g.size, s.weight, s.fontStyle, [...g.chars].sort((a, b) => a - b), null, iconImages));
+          }
+          // The device takes line metrics from the lowest style in the file.
+          const first = styles.get(Math.min(...styles.keys()));
+          lineHeights.set(key, first.ascent + first.descent);
+          const bytes = packCpfont(styles);
+          log('  f' + i + '.cpfont ' + Math.round(bytes.length / 1024) + ' KB');
+          fontFiles.push(bytes);
+        }
+        const fontIndexOf = (it) => keys.indexOf(it.family + '|' + it.size);
+        // A wrapped element needs room for every line it may draw, not just the
+        // sample's. The box grows downward, through its own transform.
+        for (const it of live) {
+          if (it.kind !== 0 || it.maxLines <= 1) continue;
+          const lineH = it.lineHeight || lineHeights.get(it.family + '|' + it.size);
+          it.h = Math.max(it.h, it.maxLines * lineH);
+        }
+
+        // Preview: live elements showing your real values.
+        for (const it of live) {
+          if (it.kind === 2) {
+            const full = it.barMax || 100;
+            const pct = Math.max(0, Math.min(100, ((parseInt(expandSample(it.tpl), 10) || 0) * 100) / full));
+            it.el.style.backgroundImage = 'linear-gradient(to right, currentColor ' + pct + '%, transparent ' + pct + '%)';
+            continue;
+          }
+          if (it.kind !== 0) continue;
+          let value = expandSample(it.tpl);
+          if (it.digit >= 0) value = value.replace(/\D/g, '').split('').reverse()[it.digit] || '';
+          // Icons show inline, sized and placed like their glyphs, in the text
+          // colour (inline SVG, so currentColor follows it).
+          it.el.textContent = '';
+          const byCp = new Map([...iconChars.values()].map((ic) => [ic.cp, ic.svg]));
+          let run = '';
+          for (const ch of value) {
+            const svg = byCp.get(ch.codePointAt(0));
+            if (!svg) { run += ch; continue; }
+            if (run) { it.el.appendChild(d.createTextNode(run)); run = ''; }
+            const holder = d.createElement('span');
+            holder.innerHTML = svg;
+            const icon = holder.querySelector('svg');
+            if (icon) {
+              icon.setAttribute('style', 'width:1em;height:1em;vertical-align:-0.2em');
+              it.el.appendChild(icon);
+            }
+          }
+          if (run) it.el.appendChild(d.createTextNode(run));
+        }
+        const previewBits = toBits(await rasterize(d, width, height), threshold);
+
+        // Background: everything except the live content. A live element's
+        // own box (border, background) stays as art; only its text or sample
+        // image goes. Border colours default to currentColor, so pin them first.
+        for (const it of live) {
+          if (it.kind === 2) it.el.style.backgroundImage = '';
+          hideLiveContent(d, it);
+        }
+        const bgBits = toBits(await rasterize(d, width, height), threshold);
+
+        const themeBin = packTheme({ width, height, orientation, fontCount: fontFiles.length }, live, fontIndexOf);
+        compiled = { themeBin, bmp: encodeBmp(bgBits, width, height), fontFiles };
+
+        const figs = [['Background', bgBits], ['Preview (your stats right now)', previewBits]];
+        for (const [label, bits] of figs) {
+          const fig = document.createElement('figure');
+          fig.appendChild(bitsToCanvas(bits, width, height));
+          const cap = document.createElement('figcaption');
+          cap.className = 'muted';
+          cap.textContent = label;
+          fig.appendChild(cap);
+          $('previews').appendChild(fig);
+        }
+        const covers = live.filter((it) => it.kind === 1).map((it) => it.tpl.replace(/[{}]/g, ''));
+        if (covers.length) log('Covers: ' + covers.join(', '));
+        log('Compiled ' + live.length + ' live elements. The device draws live text itself, so it can differ slightly from the preview.');
+        $('install').disabled = false;
+      }
+
+      // ---- Installed themes -----------------------------------------------
+      async function setSleepTheme(name, useIt) {
+        const body = useIt ? { sleepScreen: 7, sleepTheme: name } : { sleepTheme: name };
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error('Could not change the sleep screen setting');
+        device.active = name;
+      }
+      async function loadThemes() {
+        const table = $('themes');
+        table.textContent = '';
+        let list = [];
+        try {
+          const res = await fetch('/api/files?path=' + encodeURIComponent(device.themesDir) + '&_=' + Date.now());
+          if (res.ok) list = await res.json();
+        } catch (e) {
+          // No themes folder yet.
+        }
+        const names = (Array.isArray(list) ? list : list.items || [])
+          .filter((f) => f.isDirectory)
+          .map((f) => f.name)
+          .sort((a, b) => a.localeCompare(b));
+        $('themesEmpty').hidden = names.length > 0;
+        for (const name of names) {
+          const tr = table.insertRow();
+          const label = tr.insertCell();
+          label.textContent = name;
+          if (name === device.active) {
+            const tag = document.createElement('span');
+            tag.className = 'tag';
+            tag.textContent = 'selected';
+            label.appendChild(tag);
+          }
+          const actions = tr.insertCell();
+          const use = document.createElement('button');
+          use.className = 'btn';
+          use.textContent = 'Use';
+          use.disabled = name === device.active;
+          use.addEventListener('click', async () => {
+            try {
+              await setSleepTheme(name, true);
+              $('themesMsg').textContent = name + ' shows the next time the device sleeps.';
+            } catch (e) {
+              $('themesMsg').textContent = e.message;
+            }
+            loadThemes();
+          });
+          // Deleting takes a second click, so a slip can't remove a theme.
+          const del = document.createElement('button');
+          del.className = 'btn danger';
+          del.textContent = 'Delete';
+          let armed = null;
+          del.addEventListener('click', async () => {
+            if (!armed) {
+              del.textContent = 'Delete ' + name + '?';
+              armed = setTimeout(() => {
+                armed = null;
+                del.textContent = 'Delete';
+              }, 4000);
+              return;
+            }
+            clearTimeout(armed);
+            del.disabled = true;
+            try {
+              const res = await fetch('/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'path=' + encodeURIComponent(device.themesDir + '/' + name),
+              });
+              if (!res.ok) throw new Error(await res.text());
+              // A deleted theme can't stay selected; the device falls back to
+              // its default sleep screen.
+              if (name === device.active) await setSleepTheme('', false);
+              $('themesMsg').textContent = 'Deleted ' + name + '.';
+            } catch (e) {
+              $('themesMsg').textContent = 'Could not delete ' + name + ': ' + e.message;
+            }
+            loadThemes();
+          });
+          actions.append(use, del);
+        }
+      }
+
+      // ---- Install ---------------------------------------------------------
+      async function mkdir(parent, name) {
+        const body = new URLSearchParams({ name, path: parent });
+        const res = await fetch('/mkdir', { method: 'POST', body });
+        if (!res.ok && res.status !== 400) throw new Error('Could not create ' + parent + '/' + name);
+      }
+      async function upload(dir, name, data) {
+        const form = new FormData();
+        form.append('file', data instanceof Blob ? data : new Blob([data]), name);
+        const res = await fetch('/upload?path=' + encodeURIComponent(dir), { method: 'POST', body: form });
+        if (!res.ok) throw new Error('Upload of ' + name + ' failed: ' + (await res.text()));
+      }
+      async function install() {
+        const name = sanitizeName($('name').value);
+        if (!name) {
+          log('Give the theme a name.', true);
+          return;
+        }
+        $('install').disabled = true;
+        try {
+          const root = device.themesDir;
+          const dir = root + '/' + name;
+          await mkdir('/', root.slice(1));
+          await mkdir(root, name);
+          log('Uploading to ' + dir + '...');
+          await upload(dir, 'bg.bmp', compiled.bmp);
+          for (const [i, f] of compiled.fontFiles.entries()) await upload(dir, 'f' + i + '.cpfont', f);
+          // Kept so the theme can be recompiled after a firmware update.
+          await mkdir(dir, 'source');
+          const made = new Set();
+          for (const [path, blob] of files) {
+            const parts = path.split('/');
+            let parent = dir + '/source';
+            for (const p of parts.slice(0, -1)) {
+              if (!made.has(parent + '/' + p)) {
+                await mkdir(parent, p);
+                made.add(parent + '/' + p);
+              }
+              parent += '/' + p;
+            }
+            await upload(parent, parts[parts.length - 1], blob);
+          }
+          // Last, so a half-finished install is never picked up as complete.
+          await upload(dir, 'theme.bin', compiled.themeBin);
+          if ($('activate').checked) await setSleepTheme(name, true);
+          log('Installed. ' + ($('activate').checked ? 'It shows the next time the device sleeps.' : ''));
+          loadThemes();
+        } catch (e) {
+          log(e.message, true);
+        }
+        $('install').disabled = false;
+      }
+
+      $('compile').addEventListener('click', async () => {
+        $('compile').disabled = true;
+        try {
+          await compile();
+        } catch (e) {
+          log(e.message || String(e), true);
+        }
+        $('compile').disabled = false;
+      });
+      $('install').addEventListener('click', install);
+      loadDevice()
+        .then(loadThemes)
+        .catch(() => log('Could not reach the device.', true));
+    </script>
+  </body>
+</html>
