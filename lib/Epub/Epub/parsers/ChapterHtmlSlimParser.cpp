@@ -1654,6 +1654,12 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   }
 
   if (matches(name, HEADER_TAGS, NUM_HEADER_TAGS)) {
+    // Text running straight into a block ("text<h3>...") is still in the part-word
+    // buffer; flush it into the block it belongs to before that block is replaced
+    // (startNewTextBlock reuses an empty block, which would otherwise take it).
+    if (self->partWordBufferIndex > 0) {
+      self->flushPartWordBuffer();
+    }
     self->currentCssStyle = cssStyle;
     auto headerBlockStyle =
         BlockStyle::fromCssStyle(cssStyle, emSize, CssTextAlign::Center, self->viewportWidth, self->viewportHeight);
@@ -1677,6 +1683,10 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       }
       self->startNewTextBlock(self->blockStyleStack.back().withoutBottom());
     } else {
+      // Flush pending text before the new block, as the header and <br/> branches do.
+      if (self->partWordBufferIndex > 0) {
+        self->flushPartWordBuffer();
+      }
       self->currentCssStyle = cssStyle;
       BlockStyle ownBlockStyle = userAlignmentBlockStyle;
       ownBlockStyle.fontOverride = blockFontOverride;
