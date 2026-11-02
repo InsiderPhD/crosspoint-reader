@@ -1,6 +1,5 @@
 #include "CssParser.h"
 
-#include <Arduino.h>
 #include <Logging.h>
 
 #include <algorithm>
@@ -40,10 +39,6 @@ constexpr size_t READ_BUFFER_SIZE = 512;
 // Maximum number of CSS rules to store in the selector map
 // Prevents unbounded memory growth from pathological CSS files
 constexpr size_t MAX_RULES = 1500;
-
-// Minimum free heap required to apply CSS during rendering
-// If below this threshold, we skip CSS to avoid display artifacts.
-constexpr size_t MIN_FREE_HEAP_FOR_CSS = 48 * 1024;
 
 // Maximum length for a single selector string
 // Prevents parsing of extremely long or malformed selectors
@@ -876,16 +871,9 @@ bool CssParser::loadFromStream(FsFile& source) {
 // Style resolution
 
 CssStyle CssParser::resolveStyle(std::string_view tagName, std::string_view classAttr) const {
-  static bool lowHeapWarningLogged = false;
-  if (ESP.getFreeHeap() < MIN_FREE_HEAP_FOR_CSS) {
-    if (!lowHeapWarningLogged) {
-      lowHeapWarningLogged = true;
-      LOG_DBG("CSS", "Warning: low heap (%u bytes) below MIN_FREE_HEAP_FOR_CSS (%u), returning empty style",
-              ESP.getFreeHeap(), static_cast<unsigned>(MIN_FREE_HEAP_FOR_CSS));
-    }
-    return CssStyle{};
-  }
-
+  // Lookup borrows the stored rules and merges scalar fields without allocating
+  // (transparent CompositeKey lookups, no concatenated selector strings), so it
+  // is safe at any free-heap level; no low-heap gate is needed.
   CssStyle result;
 
   // 1. Apply element-level style (lowest priority). The map's hash/equal are
