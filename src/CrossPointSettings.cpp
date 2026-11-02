@@ -205,6 +205,10 @@ uint8_t& CrossPointSettings::statusBarPosRef(const uint8_t element, const STATUS
         return topBar ? statusBarTopBookmarkPos : statusBarBookmarkPos;
       case SB_ELEM_BLUETOOTH:
         return topBar ? statusBarTopBluetoothPos : statusBarBluetoothPos;
+      case SB_ELEM_CHAPTER_PERCENT:
+        return topBar ? statusBarTopChapterPercentPos : statusBarChapterPercentPos;
+      case SB_ELEM_DATE:
+        return topBar ? statusBarTopDatePos : statusBarDatePos;
       default:
         break;
     }

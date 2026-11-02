@@ -1307,7 +1307,7 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     const uint8_t* icon = nullptr;  // kind 3 only
   };
   std::vector<SbItem> items;
-  items.reserve(11);
+  items.reserve(13);  // every element at most once, plus the auto-turn banner
 
   auto addText = [&](const uint8_t element, std::string s) {
     const uint8_t pos = posOf(element);
@@ -1355,6 +1355,11 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     char b[16];
     snprintf(b, sizeof(b), "%.*f%%", precision, bookProgress);
     addText(CPS::SB_ELEM_BOOK_PERCENT, b);
+    // Chapter progress, same arithmetic as the Chapter fill bar.
+    if (pageCount > 0 && posOf(CPS::SB_ELEM_CHAPTER_PERCENT) != CPS::SB_POS_HIDE) {
+      snprintf(b, sizeof(b), "%.*f%%", precision, 100.0f * static_cast<float>(currentPage) / pageCount);
+      addText(CPS::SB_ELEM_CHAPTER_PERCENT, b);
+    }
   }
   // Time-left (book and chapter are independent elements)
   if (bookTimeLeftSeconds > 0) addText(CPS::SB_ELEM_BOOK_TIME_LEFT, formatTimeLeft(bookTimeLeftSeconds));
@@ -1364,6 +1369,14 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     char timeBuf[9];
     if (TimeUtils::formatClock(timeBuf, sizeof(timeBuf))) {
       addText(CPS::SB_ELEM_CLOCK, timeBuf);
+    }
+  }
+  // Date: the Outside Reader bar's text ("?" first while it is only the last
+  // known date), from the system clock, so on every board.
+  if (posOf(CPS::SB_ELEM_DATE) != CPS::SB_POS_HIDE) {
+    char date[14];
+    if (HeaderDateUtils::formatDate(HeaderDateUtils::getDisplayDateInfo(), date, sizeof(date))) {
+      addText(CPS::SB_ELEM_DATE, date);
     }
   }
   // Bluetooth remote state, shown as an icon:

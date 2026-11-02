@@ -695,10 +695,12 @@ There are three status bars, each customised on its own page: **Outside Reader**
 | **Book Title** | Hide | Hide |
 | **Book Progress %** | Right | Hide |
 | **Chapter Page Count** | Right | Hide |
+| **Chapter Progress %** — how far through the chapter you are | Hide | Hide |
 | **Book Time Left** | Hide | Hide |
 | **Chapter Time Left** | Hide | Hide |
 | **Clock** | Hide | Hide |
 | **Bluetooth** — Off / On (no remote) / Connected | Hide | Hide |
+| **Date** — the device date, with a `?` while it is only the last known one | Hide | Hide |
 
 Each bar's page also has its own **Progress Bar** (Book / Chapter / Hide) and **Progress Bar Thickness** (Thin / Medium / Thick): the bottom bar's fill bar runs along the bottom edge, the top bar's along the top edge above its text.
 

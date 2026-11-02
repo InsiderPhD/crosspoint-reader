@@ -46,10 +46,17 @@ const StrId hubNames[HUB_COUNT] = {
 // --- Bar rows: the positionable elements in display order, then the bar's own
 // fill bar, then the clock (X3 only). Every element row carries a Hide / Left /
 // Center / Right picker for this bar only.
-constexpr uint8_t barElements[] = {
-    CPS::SB_ELEM_BATTERY,           CPS::SB_ELEM_BOOK_TITLE,   CPS::SB_ELEM_CHAPTER_TITLE,
-    CPS::SB_ELEM_BOOK_PERCENT,      CPS::SB_ELEM_CHAPTER_PAGE, CPS::SB_ELEM_BOOK_TIME_LEFT,
-    CPS::SB_ELEM_CHAPTER_TIME_LEFT, CPS::SB_ELEM_BOOKMARK,     CPS::SB_ELEM_BLUETOOTH};
+constexpr uint8_t barElements[] = {CPS::SB_ELEM_BATTERY,
+                                   CPS::SB_ELEM_BOOK_TITLE,
+                                   CPS::SB_ELEM_CHAPTER_TITLE,
+                                   CPS::SB_ELEM_BOOK_PERCENT,
+                                   CPS::SB_ELEM_CHAPTER_PERCENT,
+                                   CPS::SB_ELEM_CHAPTER_PAGE,
+                                   CPS::SB_ELEM_BOOK_TIME_LEFT,
+                                   CPS::SB_ELEM_CHAPTER_TIME_LEFT,
+                                   CPS::SB_ELEM_BOOKMARK,
+                                   CPS::SB_ELEM_BLUETOOTH,
+                                   CPS::SB_ELEM_DATE};
 constexpr int BAR_ELEMENT_ROWS = sizeof(barElements) / sizeof(barElements[0]);
 constexpr int BAR_PROGRESS_BAR = BAR_ELEMENT_ROWS;
 constexpr int BAR_PROGRESS_BAR_THICKNESS = BAR_ELEMENT_ROWS + 1;
@@ -58,16 +65,19 @@ constexpr int BAR_LAYOUT = BAR_ELEMENT_ROWS + 3;         // Center Status Bar + 
 constexpr int BAR_CLOCK = BAR_ELEMENT_ROWS + 4;          // X3 only
 constexpr int BAR_BASE_ITEMS = BAR_CLOCK;
 constexpr int BAR_FULL_ITEMS = BAR_CLOCK + 1;
+static_assert(BAR_ELEMENT_ROWS == 11, "barNames lists one name per barElements row, then the fixed rows");
 const StrId barNames[BAR_FULL_ITEMS] = {
     StrId::STR_BATTERY,
     StrId::STR_BOOK_TITLE,
     StrId::STR_CHAPTER_TITLE,
     StrId::STR_BOOK_PROGRESS_PERCENTAGE,
+    StrId::STR_CHAPTER_PROGRESS_PERCENTAGE,
     StrId::STR_CHAPTER_PAGE_COUNT,
     StrId::STR_BOOK_TIME_LEFT,
     StrId::STR_CHAPTER_TIME_LEFT,
     StrId::STR_BOOKMARK,
     StrId::STR_BLUETOOTH,
+    StrId::STR_DATE,
     StrId::STR_PROGRESS_BAR,
     StrId::STR_PROGRESS_BAR_THICKNESS,
     StrId::STR_BATTERY_STYLE,

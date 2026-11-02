@@ -578,6 +578,9 @@ inline void appendStatusBarSettings(SettingSink& v) {
   v.push_back(SettingInfo::Enum(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarChapterPagePos,
                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                 "statusBarChapterPagePos", StrId::STR_BOTTOM_STATUS_BAR));
+  v.push_back(SettingInfo::Enum(StrId::STR_CHAPTER_PROGRESS_PERCENTAGE, &CrossPointSettings::statusBarChapterPercentPos,
+                                {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                "statusBarChapterPercentPos", StrId::STR_BOTTOM_STATUS_BAR));
   v.push_back(SettingInfo::Enum(StrId::STR_BOOK_TIME_LEFT, &CrossPointSettings::statusBarBookTimeLeftPos,
                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                 "statusBarBookTimeLeftPos", StrId::STR_BOTTOM_STATUS_BAR));
@@ -590,6 +593,9 @@ inline void appendStatusBarSettings(SettingSink& v) {
   v.push_back(SettingInfo::Enum(StrId::STR_BLUETOOTH, &CrossPointSettings::statusBarBluetoothPos,
                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                 "statusBarBluetoothPos", StrId::STR_BOTTOM_STATUS_BAR));
+  v.push_back(SettingInfo::Enum(StrId::STR_DATE, &CrossPointSettings::statusBarDatePos,
+                                {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                "statusBarDatePos", StrId::STR_BOTTOM_STATUS_BAR));
   v.push_back(SettingInfo::Enum(StrId::STR_CLOCK, &CrossPointSettings::statusBarClockPos,
                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                 "statusBarClockPos", StrId::STR_BOTTOM_STATUS_BAR));
@@ -625,6 +631,10 @@ inline void appendStatusBarSettings(SettingSink& v) {
   v.push_back(SettingInfo::Enum(StrId::STR_CHAPTER_PAGE_COUNT, &CrossPointSettings::statusBarTopChapterPagePos,
                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                 "statusBarTopChapterPagePos", StrId::STR_TOP_STATUS_BAR));
+  v.push_back(SettingInfo::Enum(StrId::STR_CHAPTER_PROGRESS_PERCENTAGE,
+                                &CrossPointSettings::statusBarTopChapterPercentPos,
+                                {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                "statusBarTopChapterPercentPos", StrId::STR_TOP_STATUS_BAR));
   v.push_back(SettingInfo::Enum(StrId::STR_BOOK_TIME_LEFT, &CrossPointSettings::statusBarTopBookTimeLeftPos,
                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                 "statusBarTopBookTimeLeftPos", StrId::STR_TOP_STATUS_BAR));
@@ -637,6 +647,9 @@ inline void appendStatusBarSettings(SettingSink& v) {
   v.push_back(SettingInfo::Enum(StrId::STR_BLUETOOTH, &CrossPointSettings::statusBarTopBluetoothPos,
                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                 "statusBarTopBluetoothPos", StrId::STR_TOP_STATUS_BAR));
+  v.push_back(SettingInfo::Enum(StrId::STR_DATE, &CrossPointSettings::statusBarTopDatePos,
+                                {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
+                                "statusBarTopDatePos", StrId::STR_TOP_STATUS_BAR));
   v.push_back(SettingInfo::Enum(StrId::STR_CLOCK, &CrossPointSettings::statusBarTopClockPos,
                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                 "statusBarTopClockPos", StrId::STR_TOP_STATUS_BAR));
@@ -653,7 +666,7 @@ inline void appendStatusBarSettings(SettingSink& v) {
 // more (the list is visited, never stored); forEachSetting() logs a mismatch so a
 // helper that stops emitting an entry (and so stops persisting it) shows up on
 // the serial log. Recount when adding or removing an entry.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 104;  // includes tiltPageTurn + tiltNextPageOnly
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 108;  // includes tiltPageTurn + tiltNextPageOnly
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

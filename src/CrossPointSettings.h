@@ -95,7 +95,8 @@ class CrossPointSettings {
     SB_ELEM_CLOCK,
     SB_ELEM_BOOKMARK,
     SB_ELEM_BLUETOOTH,
-    SB_ELEM_DATE,  // Outside Reader bar only; the reader bars have no slot for it
+    SB_ELEM_DATE,             // every bar (reader bars since 2026-11)
+    SB_ELEM_CHAPTER_PERCENT,  // reader bars only: progress through this chapter
     STATUS_BAR_ELEMENT_COUNT
   };
   // The three configurable bars. BOTTOM and TOP are the reader's; HEADER is the
@@ -504,6 +505,9 @@ class CrossPointSettings {
   // Bluetooth remote state: reports Down (stack off) / Up (on, no remote linked)
   // / Connected. Hidden by default — opt-in for page-turner users.
   uint8_t statusBarBluetoothPos = SB_POS_HIDE;
+  // Chapter progress % and the date, both opt-in.
+  uint8_t statusBarChapterPercentPos = SB_POS_HIDE;
+  uint8_t statusBarDatePos = SB_POS_HIDE;
   // Top bar: the same elements, placed independently. Empty by default so the
   // top strip is only reserved once something is put there.
   uint8_t statusBarTopBatteryPos = SB_POS_HIDE;
@@ -516,6 +520,8 @@ class CrossPointSettings {
   uint8_t statusBarTopClockPos = SB_POS_HIDE;
   uint8_t statusBarTopBookmarkPos = SB_POS_HIDE;
   uint8_t statusBarTopBluetoothPos = SB_POS_HIDE;
+  uint8_t statusBarTopChapterPercentPos = SB_POS_HIDE;
+  uint8_t statusBarTopDatePos = SB_POS_HIDE;
   // Battery element style per bar (STATUS_BAR_BATTERY_STYLE). These replace the
   // global Hide Battery % setting: a file without them is migrated from it on
   // load (migrateStatusBarBatteryStyles), so existing screens do not change.
