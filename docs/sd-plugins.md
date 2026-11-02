@@ -50,6 +50,12 @@ still listed and can explain how to use it from the web UI. A README over
 pointing at the web Plugins tab. `title`/`description` are read from
 `manifest.json`, with `device.json` overriding when present.
 
+**Uninstalling.** Holding Confirm for one second on a picker row (or a touch
+long-press on the row) asks to uninstall that plugin; confirming deletes its
+whole folder (`<root>/<name>`, only ever a direct child of a plugin root),
+including its token and config files. Because the picker uses the hold,
+Confirm opens a row on release there.
+
 `<root>` is any of `/.crosspoint/plugins`, `/plugins`, or `/.plugins` — the
 first two-dot-free options exist so plugins are easy to copy onto the card
 from a computer. All three roots are scanned; on a name collision the earlier

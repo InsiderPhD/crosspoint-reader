@@ -27,6 +27,7 @@ class SecureHttpClient;
 // web interface.
 struct PluginRef {
   std::string name;          // folder name
+  std::string dir;           // "<root>/<name>", where discovery found it
   std::string title;         // from device.json or manifest.json (falls back to name)
   std::string description;   // one-line summary, if provided
   std::string manifestPath;  // device.json path, "" for a web-only plugin
@@ -206,6 +207,9 @@ class PluginCatalogActivity final : public Activity {
   // Picker state: the installed device.json plugins.
   std::vector<PluginRef> installedPlugins;
   int pickerReturnRow = 0;  // picker row to reselect after leaving a catalog
+  // A Confirm press that began on the picker. The picker activates on release
+  // (a hold uninstalls), so a press that opened this screen is not one of ours.
+  bool pickerConfirmDown = false;
   // A PluginInfoActivity (web-only plugin info, a list notice, item details)
   // is pushed on top; this screen's input is parked until it returns.
   bool infoOpen = false;
@@ -312,6 +316,11 @@ class PluginCatalogActivity final : public Activity {
   // ButtonNavigator step/page bindings.
   void handleListInput();
   void onBackButton();
+  // Picker input: Confirm activates on release, a 1s hold (or a touch
+  // long-press on the row) offers to uninstall the plugin.
+  bool handlePickerHold();
+  // Asks, then deletes the picker row's plugin folder (upstream CrossPoint #4100).
+  void confirmUninstallPlugin(int index);
   // Row dispatch: pager rows page, picker rows pick, item rows open/download.
   void activateIndex(int index);
   void activateItem(int itemIndex);  // XML list: navigate into a folder, else download

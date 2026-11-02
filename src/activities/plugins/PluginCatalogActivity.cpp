@@ -27,6 +27,7 @@
 #include "PluginInfoActivity.h"
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -67,6 +68,7 @@ constexpr size_t MAX_BROWSE_LIST_INDEX_RESPONSE = 16 * 1024;
 constexpr size_t MAX_BROWSE_LISTS = 64;
 constexpr int MAX_PAGE_SIZE = 16;
 constexpr int DOWNLOAD_PROGRESS_STEP_PERCENT = 5;
+constexpr unsigned long PLUGIN_UNINSTALL_HOLD_MS = 1000;
 constexpr unsigned long DOWNLOAD_PROGRESS_MIN_UPDATE_MS = 5000;
 
 // Builds an ArduinoJson deserialization filter keeping only one dotted path.
@@ -455,6 +457,7 @@ std::vector<PluginRef> discoverPlugins() {
   for (const auto& e : entries) {
     PluginRef ref;
     ref.name = e.name;
+    ref.dir = e.dir;
     ref.title = e.name;
     // Browser-only plugins (no device.json) stay listed so an install is
     // visibly installed, but carry no manifest to open (empty manifestPath);
@@ -768,6 +771,7 @@ void PluginCatalogActivity::enterPluginPicker() {
   errorMessage.clear();
   session.reset();  // no TLS while only picking
   selectedIndex = 0;
+  pickerConfirmDown = false;
   state = State::PLUGIN_PICKER;
   if (pickerReturnRow > 0 && pickerReturnRow < rowCount()) selectedIndex = pickerReturnRow;
   requestUpdate();
@@ -1656,6 +1660,8 @@ void PluginCatalogActivity::handleListInput() {
     }
   }
 
+  if (state == State::PLUGIN_PICKER && handlePickerHold()) return;
+
   int tappedIndex;
   switch (TouchListNav::tapRow(mappedInput, listRect(), total, selectedIndex, rowsHaveSubtitle(), tappedIndex)) {
     case TouchListNav::TapResult::SelectionMoved:
@@ -1673,7 +1679,7 @@ void PluginCatalogActivity::handleListInput() {
   // Press, not release, like Settings and the BookFusion browser: the press
   // that opened this screen from the Settings row is already consumed there,
   // so its release cannot open the first plugin on its own.
-  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+  if (state != State::PLUGIN_PICKER && mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     if (total > 0) activateIndex(selectedIndex);
     return;
   }
@@ -1702,6 +1708,79 @@ void PluginCatalogActivity::handleListInput() {
     selectedIndex = ButtonNavigator::previousPageIndex(selectedIndex, total, pageItems);
     requestUpdate();
   });
+}
+
+bool PluginCatalogActivity::handlePickerHold() {
+  // Touch: a long-press on a row offers the uninstall. It fires while the
+  // finger is down, so the rest of the contact is dropped (its lift would
+  // otherwise also arrive as a tap on the row).
+  int lx = 0;
+  int ly = 0;
+  if (mappedInput.wasScreenLongPress(lx, ly)) {
+    const int index = GUI.hitTestList(listRect(), rowCount(), selectedIndex, rowsHaveSubtitle(), lx, ly);
+    if (index >= 0) {
+      mappedInput.suppressTouchContact();
+      selectedIndex = index;
+      confirmUninstallPlugin(index);
+      return true;
+    }
+  }
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+    pickerConfirmDown = true;
+    return true;
+  }
+  if (!pickerConfirmDown) return false;
+  if (mappedInput.isPressed(MappedInputManager::Button::Confirm)) {
+    if (mappedInput.getHeldTime(MappedInputManager::Button::Confirm) >= PLUGIN_UNINSTALL_HOLD_MS) {
+      pickerConfirmDown = false;  // the release that follows is not a tap
+      confirmUninstallPlugin(selectedIndex);
+    }
+    return true;
+  }
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    pickerConfirmDown = false;
+    if (rowCount() > 0) activateIndex(selectedIndex);
+    return true;
+  }
+  pickerConfirmDown = false;  // released between frames without a release edge
+  return false;
+}
+
+void PluginCatalogActivity::confirmUninstallPlugin(const int index) {
+  if (state != State::PLUGIN_PICKER || index < 0 || index >= static_cast<int>(installedPlugins.size())) return;
+  const PluginRef plugin = installedPlugins[index];
+  // Only ever a direct child of a plugin root, named like the folder.
+  bool safeDir = !plugin.name.empty() && plugin.name != "." && plugin.name != ".." &&
+                 plugin.name.find_first_of("/\\") == std::string::npos;
+  if (safeDir) {
+    safeDir = false;
+    for (const char* root : PluginLocations::kRoots) {
+      if (plugin.dir == std::string(root) + "/" + plugin.name) safeDir = true;
+    }
+  }
+  if (!safeDir) {
+    LOG_ERR("PCAT", "Refusing unsafe plugin uninstall: %s", plugin.dir.c_str());
+    return;
+  }
+  infoOpen = true;  // parks the picker's input under the dialog
+  startActivityForResult(
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_PLUGIN_UNINSTALL_CONFIRM), plugin.title),
+      [this, plugin, index](const ActivityResult& result) {
+        infoOpen = false;
+        if (result.isCancelled) {
+          requestUpdate();
+          return;
+        }
+        const bool removed = !Storage.exists(plugin.dir.c_str()) || Storage.removeDir(plugin.dir.c_str());
+        if (removed) {
+          LOG_INF("PCAT", "Uninstalled plugin %s", plugin.dir.c_str());
+        } else {
+          LOG_ERR("PCAT", "Failed to uninstall plugin: %s", plugin.dir.c_str());
+        }
+        // Keep the cursor near where it was: the next row moves up into it.
+        pickerReturnRow = index > 0 && index >= static_cast<int>(installedPlugins.size()) - 1 ? index - 1 : index;
+        enterPluginPicker();
+      });
 }
 
 // Back on the picker leaves the activity. The catalog states route their Back
