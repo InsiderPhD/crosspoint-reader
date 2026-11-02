@@ -10,11 +10,13 @@
 
 #include "MappedInputManager.h"
 #include "ProgressMapper.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "activities/util/ListPickerActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
+#include "util/SwipeToDelete.h"
 #include "util/TouchListNav.h"
 
 namespace {
@@ -119,6 +121,27 @@ bool EpubReaderBookmarksActivity::deleteSelectedBookmark() {
 
   requestUpdate();
   return true;
+}
+
+void EpubReaderBookmarksActivity::confirmDeleteSelectedBookmark() {
+  if (bookmarks.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(bookmarks.size())) {
+    return;
+  }
+  const auto& bookmark = bookmarks[selectorIndex];
+  // Heap: one small activity object and the two strings, gone when it closes.
+  auto confirm = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE) + std::string("?"),
+                                                         bookmark.name.empty() ? bookmark.summary : bookmark.name);
+  if (!confirm) {
+    LOG_ERR("EPB", "OOM: bookmark delete confirmation");
+    return;
+  }
+  const int deleteIndex = selectorIndex;
+  startActivityForResult(std::move(confirm), [this, deleteIndex](const ActivityResult& result) {
+    armStaleReleaseGuard();
+    if (result.isCancelled || deleteIndex >= static_cast<int>(bookmarks.size())) return;
+    selectorIndex = deleteIndex;
+    deleteSelectedBookmark();
+  });
 }
 
 void EpubReaderBookmarksActivity::armStaleReleaseGuard() {
@@ -241,6 +264,23 @@ void EpubReaderBookmarksActivity::loop() {
   }
 #endif
 
+  // X4 Pro: swipe a bookmark left for its Delete button.
+  {
+    int row;
+    switch (swipeDelete.handle(mappedInput, listRect(), static_cast<int>(bookmarks.size()), selectorIndex,
+                               /*hasSubtitle=*/true, row)) {
+      case SwipeToDelete::Event::Delete:
+        selectorIndex = row;
+        confirmDeleteSelectedBookmark();
+        return;
+      case SwipeToDelete::Event::Consumed:
+        requestUpdate();
+        return;
+      case SwipeToDelete::Event::None:
+        break;
+    }
+  }
+
   int tappedIndex;
   switch (TouchListNav::tapRow(mappedInput, listRect(), static_cast<int>(bookmarks.size()), selectorIndex,
                                /*hasSubtitle=*/true, tappedIndex)) {
@@ -352,6 +392,7 @@ void EpubReaderBookmarksActivity::render(RenderLock&&) {
   if (!bookmarks.empty()) {
     GUI.drawList(renderer, listRect(), static_cast<int>(bookmarks.size()), selectorIndex, getBookmarkTitle,
                  getBookmarkSubtitle, getBookmarkIcon);
+    swipeDelete.draw(renderer, listRect(), static_cast<int>(bookmarks.size()), selectorIndex, /*hasSubtitle=*/true);
 
     GUI.drawHelpText(renderer, Rect{contentX, pageHeight - hintGutterBottom, contentWidth, LINE_HEIGHT},
                      tr(STR_HOLD_CONFIRM_FOR_ACTIONS));

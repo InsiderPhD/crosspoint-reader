@@ -8,6 +8,7 @@
 #include "BookmarkEntry.h"
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
+#include "util/SwipeToDelete.h"
 
 struct Rect;
 
@@ -25,6 +26,7 @@ class EpubReaderBookmarksActivity final : public Activity {
   // button's release then lands here and would open a bookmark or leave the
   // list. Set when one of them returns with Confirm/Back still down.
   bool swallowStaleRelease = false;
+  SwipeToDelete swipeDelete;
 
  public:
   explicit EpubReaderBookmarksActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -54,4 +56,6 @@ class EpubReaderBookmarksActivity final : public Activity {
   void armStaleReleaseGuard();
   // Returns true when a bookmark was actually removed.
   bool deleteSelectedBookmark();
+  // The X4 Pro row swipe's Delete: asks first, then deleteSelectedBookmark().
+  void confirmDeleteSelectedBookmark();
 };
