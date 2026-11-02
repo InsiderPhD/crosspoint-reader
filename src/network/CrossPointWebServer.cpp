@@ -292,8 +292,13 @@ void CrossPointWebServer::begin() {
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
 
-  // Collect WebDAV headers (and Host for the AP captive-portal check) and register handler
-  const char* davHeaders[] = {"Depth", "Destination", "Overwrite", "If", "Lock-Token", "Timeout", "Host"};
+  // Collect WebDAV headers (and Host for the AP captive-portal check, and on
+  // plugin boards If-None-Match for plugin file revalidation) and register handler
+  const char* davHeaders[] = {"Depth",        "Destination", "Overwrite", "If", "Lock-Token", "Timeout", "Host",
+#if CROSSPOINT_SD_PLUGINS
+                              "If-None-Match"
+#endif
+  };
   server->collectHeaders(davHeaders, sizeof(davHeaders) / sizeof(davHeaders[0]));
   server->addHandler(new WebDAVHandler());  // Note: WebDAVHandler will be deleted by WebServer when server is stopped
   LOG_DBG("WEB", "WebDAV handler initialized");

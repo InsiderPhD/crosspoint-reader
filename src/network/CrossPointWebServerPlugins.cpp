@@ -10,6 +10,7 @@
 #include <ArduinoJson.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <MD5Builder.h>
 #include <Memory.h>
 #include <SecureHttpClient.h>
 #include <esp_task_wdt.h>
@@ -106,6 +107,35 @@ void CrossPointWebServer::handlePluginFile() const {
     return;
   }
 
+  // ETag from a content hash, not size and date: without a set clock files can
+  // share a timestamp, and a plugin update can keep the same size. no-cache
+  // keeps the file in the browser but revalidates it on every load, so an
+  // unchanged plugin.js costs one MD5 pass over the SD file and a 304 instead
+  // of the whole transfer (upstream CrossPoint #4193). The hash streams through
+  // a 512-byte stack chunk; nothing is buffered.
+  MD5Builder md5;
+  md5.begin();
+  uint8_t chunk[512];
+  int got;
+  while ((got = f.read(chunk, sizeof(chunk))) > 0) {
+    md5.add(chunk, static_cast<size_t>(got));
+    esp_task_wdt_reset();
+  }
+  if (got < 0 || !f.seek(0)) {
+    LOG_ERR("WEB", "Plugin file read failed: %s", path.c_str());
+    f.close();
+    server->send(500, "text/plain", "Failed to read file");
+    return;
+  }
+  md5.calculate();
+  const String etag = "\"" + md5.toString() + "\"";
+  server->sendHeader("ETag", etag);
+  server->sendHeader("Cache-Control", "no-cache");
+  if (server->header("If-None-Match") == etag) {
+    f.close();
+    server->send(304);
+    return;
+  }
   server->setContentLength(f.size());
   server->send(200, pluginContentType(file), "");
   streamFileToClient(f);

@@ -81,6 +81,11 @@ PKCS#7 padded on encrypt), `keygen` (RSA-1024, SPKI + PKCS#8), `pubencrypt`
 because a page served over plain HTTP has no `crypto.subtle`. See the
 sd-plugins repository for the JS contract.
 
+Plugin files are served by `GET /plugin?name=&file=` with an `ETag` (MD5 of
+the file's content) and `Cache-Control: no-cache`: the browser keeps the file
+and revalidates it on every page load, and an unchanged file answers
+`304 Not Modified` instead of being sent again.
+
 ## Surface 2: the plugin job queue (external automation)
 
 External systems (a companion app, a script) can trigger plugin actions
