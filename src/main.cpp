@@ -697,10 +697,21 @@ void setup() {
       break;
   }
 
-  // Recovery firmware mode: hold left side button (BTN_UP) together with the power button at
-  // boot to skip directly to the SD-card firmware update screen. Useful on devices where USB
-  // flashing has been locked down (e.g. recent X3 firmware).
+  // Recovery firmware mode: hold a side button together with the power button at boot to skip
+  // directly to the SD-card firmware update screen. Useful on devices where USB flashing has been
+  // locked down (e.g. recent X3 firmware).
+  //
+  // The C3 boards (X3/X4) use Up. The S3 boards (X4 Pro, X4C) wire Up to GPIO0, the ESP32-S3
+  // boot strap, so holding it at reset lands in the ROM bootloader instead; they use the
+  // non-strap Down key, matching upstream CrossPoint 2.0 and CrossInk.
   bool recoveryFirmwareMode = false;
+#if FREEINK_MCU_S3
+  constexpr auto recoveryButton = HalGPIO::BTN_DOWN;
+  constexpr const char* recoveryButtonName = "DOWN";
+#else
+  constexpr auto recoveryButton = HalGPIO::BTN_UP;
+  constexpr const char* recoveryButtonName = "UP";
+#endif
   if (wakeupReason == HalGPIO::WakeupReason::PowerButton) {
     // Refresh the cached button state a few times — isPressed() needs ~half a second to settle
     // after boot per the HalGPIO contract. Use a millis-based deadline so we always wait the full
@@ -710,9 +721,9 @@ void setup() {
       gpio.update();
       delay(10);
     }
-    if (gpio.isPressed(HalGPIO::BTN_UP)) {
+    if (gpio.isPressed(recoveryButton)) {
       recoveryFirmwareMode = true;
-      LOG_INF("MAIN", "Recovery firmware mode (UP + POWER held at boot)");
+      LOG_INF("MAIN", "Recovery firmware mode (%s + POWER held at boot)", recoveryButtonName);
     }
   }
   BOOT_PHASE("bt cfg + btn settle");
@@ -1052,8 +1063,8 @@ void loop() {
   // taken on any screen, including mid-render states no menu can reach.
   //
   // Deliberately NOT POWER + UP: that is the recovery-firmware chord checked
-  // during setup() (see above), and putting a second meaning on it invites a
-  // mis-press near the SD firmware update path. Confirm is resolved through
+  // during setup() on the C3 boards (see above), and putting a second meaning
+  // on it invites a mis-press near the SD firmware update path. Confirm is resolved through
   // MappedInputManager so the chord follows the user's front-button remapping.
   static bool heapReportButtonsReleased = true;
   static bool heapReportComboActive = false;
