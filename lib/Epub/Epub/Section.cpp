@@ -19,6 +19,13 @@
 #include "parsers/VoidTagCloser.h"
 
 namespace {
+// Fork namespace. Every section.bin starts with this 4-byte magic (bytes 0xFF 'K' 'P' 'S'),
+// then the uint8 version below. Upstream CrossPoint starts the file with a bare uint8
+// version that never reaches 0xFF (its partial-build marker counts DOWN from 0xFE), and
+// CrossInk starts with 0xFF 'C' 'X' 'S'; so a section.bin from either fork - or from a
+// KatiePoint build before v50 - fails the magic check and is rebuilt instead of parsed,
+// whatever its version number. Our files fail their checks the same way. Never change it.
+constexpr uint32_t SECTION_CACHE_MAGIC = 0x53504BFF;  // bytes: 0xFF, "KPS"
 // 41: TextBlock word data stored as one flat arena (offset table + NUL-terminated
 //     text blob) instead of length-prefixed strings and per-field arrays.
 // 44: tables render as PageTableFragment grids (new page element TAG_PageTable = 4);
@@ -36,7 +43,8 @@ namespace {
 // 49: content-based reading positions (upstream #2805): a fifth trailing header offset and a
 //     uint32_t per page giving the visible-text offset where the page starts. Also stops
 //     rendering <style>/<script>/<title>/<rp> found inside <body>.
-constexpr uint8_t SECTION_FILE_VERSION = 49;
+// 50: header gains the SECTION_CACHE_MAGIC prefix (fork namespace); body unchanged.
+constexpr uint8_t SECTION_FILE_VERSION = 50;
 // Staging buffer for page serialization, one per section build (not per page). 2KB is four
 // SD sectors: a typical text page (~3-6KB serialized) goes out in two to four writes, and a
 // field larger than the buffer (a long line's word arena) bypasses it. Heap, not stack: 2KB
@@ -47,11 +55,11 @@ constexpr size_t PAGE_WRITE_BUFFER_SIZE = 2048;
 // same panel (X4 and X4C) rebuilds instead of showing the other board's layout.
 constexpr uint8_t LAYOUT_FEATURE_BLOCK_FONT_SIZES = 0x01;
 constexpr uint8_t LAYOUT_FEATURES = CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? LAYOUT_FEATURE_BLOCK_FONT_SIZES : 0;
-constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
-                                 sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
-                                 sizeof(uint8_t) + sizeof(uint8_t) + sizeof(bool) + sizeof(int8_t) + sizeof(uint8_t) +
-                                 sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                 sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
+constexpr uint32_t HEADER_SIZE =
+    sizeof(uint32_t) + sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
+    sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) + sizeof(uint8_t) +
+    sizeof(uint8_t) + sizeof(bool) + sizeof(int8_t) + sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint8_t) +
+    sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
 // The header ends with the page count and five uint32_t offsets, patched once the build ends.
 // Each offset is addressed from the end of the header, in this order.
 constexpr uint32_t TRAILING_OFFSETS = 5;
@@ -108,14 +116,16 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
     LOG_DBG("SCT", "File not open for writing header");
     return;
   }
-  static_assert(HEADER_SIZE == sizeof(SECTION_FILE_VERSION) + sizeof(fontId) + sizeof(lineCompression) +
-                                   sizeof(extraParagraphSpacing) + sizeof(paragraphAlignment) + sizeof(viewportWidth) +
-                                   sizeof(viewportHeight) + sizeof(pageCount) + sizeof(hyphenationEnabled) +
-                                   sizeof(embeddedStyle) + sizeof(imageRendering) + sizeof(footnoteDisplay) +
-                                   sizeof(bionicReadingEnabled) + sizeof(textLayout.characterSpacing) +
-                                   sizeof(textLayout.wordSpacingPercent) + sizeof(textLayout.paragraphIndent) +
-                                   sizeof(LAYOUT_FEATURES) + sizeof(uint32_t) * TRAILING_OFFSETS,
+  static_assert(HEADER_SIZE == sizeof(SECTION_CACHE_MAGIC) + sizeof(SECTION_FILE_VERSION) + sizeof(fontId) +
+                                   sizeof(lineCompression) + sizeof(extraParagraphSpacing) +
+                                   sizeof(paragraphAlignment) + sizeof(viewportWidth) + sizeof(viewportHeight) +
+                                   sizeof(pageCount) + sizeof(hyphenationEnabled) + sizeof(embeddedStyle) +
+                                   sizeof(imageRendering) + sizeof(footnoteDisplay) + sizeof(bionicReadingEnabled) +
+                                   sizeof(textLayout.characterSpacing) + sizeof(textLayout.wordSpacingPercent) +
+                                   sizeof(textLayout.paragraphIndent) + sizeof(LAYOUT_FEATURES) +
+                                   sizeof(uint32_t) * TRAILING_OFFSETS,
                 "Header size mismatch");
+  serialization::writePod(file, SECTION_CACHE_MAGIC);
   serialization::writePod(file, SECTION_FILE_VERSION);
   serialization::writePod(file, fontId);
   serialization::writePod(file, lineCompression);
@@ -151,12 +161,13 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
 
   // Match parameters
   {
-    uint8_t version;
-    serialization::readPod(file, version);
-    if (version != SECTION_FILE_VERSION) {
+    uint32_t magic = 0;
+    uint8_t version = 0;
+    if (!serialization::tryReadPod(file, magic) || magic != SECTION_CACHE_MAGIC ||
+        !serialization::tryReadPod(file, version) || version != SECTION_FILE_VERSION) {
       // Explicit close() required: member variable persists beyond function scope
       file.close();
-      LOG_ERR("SCT", "Deserialization failed: Unknown version %u", version);
+      LOG_ERR("SCT", "Deserialization failed: magic %08lx version %u", static_cast<unsigned long>(magic), version);
       clearCache();
       return false;
     }
@@ -517,8 +528,10 @@ uint16_t Section::readCachedPageCount(const std::string& path) {
   if (!Storage.openFileForRead("SCT", path, f)) {
     return 0;
   }
+  uint32_t magic = 0;
   uint8_t version = 0;
-  if (f.read(&version, sizeof(version)) != sizeof(version) || version != SECTION_FILE_VERSION) {
+  if (!serialization::tryReadPod(f, magic) || magic != SECTION_CACHE_MAGIC || !serialization::tryReadPod(f, version) ||
+      version != SECTION_FILE_VERSION) {
     f.close();
     return 0;
   }
@@ -656,9 +669,10 @@ std::optional<uint32_t> Section::getVisibleTextOffsetForPage(const uint16_t page
     return std::nullopt;
   }
 
-  uint8_t version;
-  serialization::readPod(f, version);
-  if (version != SECTION_FILE_VERSION) {
+  uint32_t magic = 0;
+  uint8_t version = 0;
+  if (!serialization::tryReadPod(f, magic) || magic != SECTION_CACHE_MAGIC || !serialization::tryReadPod(f, version) ||
+      version != SECTION_FILE_VERSION) {
     return std::nullopt;
   }
 
@@ -690,9 +704,10 @@ std::optional<uint16_t> Section::getPageForVisibleTextOffset(const uint32_t offs
     return std::nullopt;
   }
 
-  uint8_t version;
-  serialization::readPod(f, version);
-  if (version != SECTION_FILE_VERSION) {
+  uint32_t magic = 0;
+  uint8_t version = 0;
+  if (!serialization::tryReadPod(f, magic) || magic != SECTION_CACHE_MAGIC || !serialization::tryReadPod(f, version) ||
+      version != SECTION_FILE_VERSION) {
     return std::nullopt;
   }
 

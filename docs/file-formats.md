@@ -1,8 +1,43 @@
 # File Formats
 
+## Fork namespace (`book.bin`, `section.bin`, TXT `index.bin`)
+
+Upstream CrossPoint and CrossInk keep walking their own `book.bin` / `section.bin`
+version numbers with layouts that differ from ours, so a bare version byte cannot tell
+a KatiePoint file from another firmware's file of the same number (a card swapped between
+firmwares would then be parsed against the wrong layout). Each of these three files
+therefore starts with a 4-byte fork magic, written as a little-endian `u32`, followed by
+the `u8` version:
+
+| File | Magic bytes | `u32` constant | Version constant |
+|------|-------------|----------------|------------------|
+| `book.bin` | `FF 'K' 'P' 'B'` | `0x42504BFF` | `BOOK_CACHE_VERSION` (from v14) |
+| `sections/<n>.bin` | `FF 'K' 'P' 'S'` | `0x53504BFF` | `SECTION_FILE_VERSION` (from v50) |
+| TXT `index.bin` | `FF 'K' 'P' 'T'` | `0x54504BFF` | `CACHE_VERSION` in `TxtReaderActivity.cpp` (from v5) |
+
+Why this cannot collide in either direction:
+
+- **Upstream CrossPoint** starts `book.bin` and `section.bin` with a bare `u8` version.
+  Its section versions climb from 28 while its partial-build marker counts *down* from
+  `0xFE`, so byte 0 is never `0xFF`; our reader rejects its files on the magic, and its
+  reader rejects ours on the version byte. (Were it ever to reach 255, the next field it
+  checks, `fontId`, would read `'K' 'P' 'S' <version>` and still mismatch.)
+- **CrossInk** uses the same idea with its own magics, `FF 'C' 'X' 'B'` / `FF 'C' 'X' 'S'`,
+  and the plain `"TXTI"` magic for its TXT index. Bytes 1-3 differ from ours, so each side
+  rejects the other's file on the magic regardless of version.
+- **Older KatiePoint builds** wrote byte 0 = version (13 / 48) and `"TXTI"`; they reject the
+  new files on byte 0 / the magic, and the new build rejects theirs the same way.
+
+A rejected file is rebuilt, never parsed. Never change these magics; bump the version byte
+after them as before. `progress.bin` is not part of this scheme and keeps its own layout.
+The CSS rule cache (`css_rules.cache`) is separately namespaced by bit 7 of its version byte.
+
 ## `book.bin`
 
-> **Current version: 13** (`BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`).
+> **Current version: 14** (`BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`).
+> v14 prepends the fork magic `FF 'K' 'P' 'B'` (see *Fork namespace* above) before the version
+> byte; everything after it, including the absolute offsets in the LUTs, is laid out as before
+> (offsets simply include the 4 extra bytes).
 > v13 did not change the layout either: the metadata build now also writes the publisher page
 > list to a `pagelist.bin` sidecar (see below), and the bump makes existing books rebuild so
 > they gain it.
@@ -128,7 +163,9 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-> **Current version: 49** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> **Current version: 50** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> v50 prepends the fork magic `FF 'K' 'P' 'S'` (see *Fork namespace* above) before the version
+> byte; the rest of the header and the body are unchanged (header offsets shift by 4).
 > The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
 > v30 inline ("on page") footnotes; v31–v33 KOReader xpath/paragraph sync data and
 > nested block styles; v34 `<pre>` blocks carry a monospace font override; v35 hanging

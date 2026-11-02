@@ -12,12 +12,19 @@
 #include "FsHelpers.h"
 
 namespace {
+// Fork namespace. Every book.bin starts with this 4-byte magic (bytes 0xFF 'K' 'P' 'B'),
+// then the uint8 version below. Upstream CrossPoint starts book.bin with a bare uint8
+// version (10 in 2.0) and CrossInk with 0xFF 'C' 'X' 'B', so a book.bin from either fork -
+// or from a KatiePoint build before v14 - fails the magic check and is rebuilt instead of
+// parsed, whatever its version number. Our files fail their checks the same way.
+constexpr uint32_t BOOK_CACHE_MAGIC = 0x42504BFF;  // bytes: 0xFF, "KPB"
 // v12: multiple <dc:creator> authors are now joined with " & " (was ", ") so the Authors
 // folder view can split co-authors without breaking "Last, First" names. Bumping forces a
 // rebuild of stale book.bin so the fix applies without a manual recache.
 // v13: the publisher page list is written to pagelist.bin during the TOC pass (PageList.h).
 // book.bin itself is unchanged; the bump only makes existing books rebuild so they gain it.
-constexpr uint8_t BOOK_CACHE_VERSION = 13;
+// v14: header gains the BOOK_CACHE_MAGIC prefix (fork namespace); body unchanged.
+constexpr uint8_t BOOK_CACHE_VERSION = 14;
 constexpr char bookBinFile[] = "/book.bin";
 // Cap on the in-RAM cumulative spine size table: 1024 x 4 bytes = 4KB, held for
 // the reading session. Books with more spine items keep the on-disk lookup.
@@ -148,8 +155,8 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
     return false;
   }
 
-  constexpr uint32_t headerASize =
-      sizeof(BOOK_CACHE_VERSION) + /* LUT Offset */ sizeof(uint32_t) + sizeof(spineCount) + sizeof(tocCount);
+  constexpr uint32_t headerASize = sizeof(BOOK_CACHE_MAGIC) + sizeof(BOOK_CACHE_VERSION) +
+                                   /* LUT Offset */ sizeof(uint32_t) + sizeof(spineCount) + sizeof(tocCount);
   const uint32_t metadataSize = metadata.title.size() + metadata.author.size() + metadata.language.size() +
                                 metadata.coverItemHref.size() + metadata.textReferenceHref.size() +
                                 metadata.tags.size() + metadata.seriesName.size() + metadata.seriesIndex.size() +
@@ -159,6 +166,7 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   const uint32_t lutOffset = headerASize + metadataSize;
 
   // Header A
+  serialization::writePod(bookFile, BOOK_CACHE_MAGIC);
   serialization::writePod(bookFile, BOOK_CACHE_VERSION);
   serialization::writePod(bookFile, lutOffset);
   serialization::writePod(bookFile, spineCount);
@@ -438,8 +446,10 @@ bool BookMetadataCache::isCurrent(const std::string& cachePath) {
   if (!Storage.exists(path.c_str())) return false;
   FsFile file;
   if (!Storage.openFileForRead("BMC", path, file)) return false;
+  uint32_t magic = 0;
   uint8_t version = 0;
-  const bool ok = file.read(&version, 1) == 1 && version == BOOK_CACHE_VERSION;
+  const bool ok = serialization::tryReadPod(file, magic) && magic == BOOK_CACHE_MAGIC &&
+                  serialization::tryReadPod(file, version) && version == BOOK_CACHE_VERSION;
   file.close();
   return ok;
 }
@@ -453,10 +463,13 @@ bool BookMetadataCache::load() {
   cumulativeSizeCount = 0;
   cumulativeSizesTried = false;
 
-  uint8_t version;
-  serialization::readPod(bookFile, version);
-  if (version != BOOK_CACHE_VERSION) {
-    LOG_DBG("BMC", "Cache version mismatch: expected %d, got %d", BOOK_CACHE_VERSION, version);
+  uint32_t magic = 0;
+  uint8_t version = 0;
+  if (!serialization::tryReadPod(bookFile, magic) || magic != BOOK_CACHE_MAGIC ||
+      !serialization::tryReadPod(bookFile, version) || version != BOOK_CACHE_VERSION) {
+    LOG_DBG("BMC", "Cache mismatch: expected magic %08lx v%d, got %08lx v%d",
+            static_cast<unsigned long>(BOOK_CACHE_MAGIC), BOOK_CACHE_VERSION, static_cast<unsigned long>(magic),
+            version);
     // Explicit close() required: member variable persists beyond function scope
     bookFile.close();
     return false;

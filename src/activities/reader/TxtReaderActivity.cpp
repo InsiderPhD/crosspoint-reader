@@ -23,10 +23,14 @@
 
 namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
-// Cache file magic and version
-constexpr uint32_t CACHE_MAGIC = 0x54585449;  // "TXTI"
+// Cache file magic and version. The magic is this fork's own (bytes 0xFF 'K' 'P' 'T'), not
+// the "TXTI" that CrossInk still uses with its own, different, version numbering: an index.bin
+// written by another firmware - or by a KatiePoint build before v5 - fails the magic check and
+// is rebuilt instead of parsed, whatever its version number. Never change it.
+constexpr uint32_t CACHE_MAGIC = 0x54504BFF;  // bytes: 0xFF, "KPT"
 // 4: header gains characterSpacing + wordSpacingPercent (they move the wrap points).
-constexpr uint8_t CACHE_VERSION = 4;  // Increment when cache format changes
+// 5: magic moves from "TXTI" to the fork-namespaced value above; layout unchanged.
+constexpr uint8_t CACHE_VERSION = 5;  // Increment when cache format changes
 }  // namespace
 
 void TxtReaderActivity::onEnter() {
@@ -541,7 +545,7 @@ void TxtReaderActivity::loadProgress() {
 
 bool TxtReaderActivity::loadPageIndexCache() {
   // Cache file format (using serialization module):
-  // - uint32_t: magic "TXTI"
+  // - uint32_t: magic (bytes 0xFF "KPT", see CACHE_MAGIC)
   // - uint8_t: cache version
   // - uint32_t: file size (to validate cache)
   // - int32_t: viewport width
