@@ -10,6 +10,7 @@
 #include "components/SortMenu.h"
 #include "sorting/SortMode.h"
 #include "util/ButtonNavigator.h"
+#include "util/SwipeToDelete.h"
 
 struct Rect;
 
@@ -56,6 +57,7 @@ class GroupBrowserActivity final : public Activity {
   ButtonNavigator buttonNavigator;
   BookContextMenu contextMenu;
   FileRenameFlow renameFlow;
+  SwipeToDelete swipeDelete;
   // A book was renamed (context menu or Book Info): rows are titled by file
   // name, so re-path it, re-sort the list on screen and follow it with the
   // selector. The book's tags/author/series are unchanged, so no regrouping.

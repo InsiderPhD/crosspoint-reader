@@ -30,6 +30,7 @@
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/SwipeToDelete.h"
 #include "util/TouchListNav.h"
 #include "util/WifiTimeSync.h"
 
@@ -722,6 +723,32 @@ void GroupBrowserActivity::loop() {
     return;
   }
 
+  // --- Shared: swipe a book row left for its Delete button (X4 Pro) ---
+  // Folder rows (the tag/author/series groups) are not files and never get one.
+  {
+    const int rowCount = atGroupList() ? static_cast<int>(rootListSize()) : static_cast<int>(groupBookIdx.size());
+    int row;
+    switch (swipeDelete.handle(
+        mappedInput, listRect(), rowCount, static_cast<int>(selectorIndex), false, row,
+        [](const void* ctx, const int index) {
+          const auto* self = static_cast<const GroupBrowserActivity*>(ctx);
+          return !(self->atGroupList() && self->isFolderRow(static_cast<size_t>(index)));
+        },
+        this)) {
+      case SwipeToDelete::Event::Delete: {
+        selectorIndex = static_cast<size_t>(row);
+        const std::string path = selectedBookPath();
+        if (!path.empty()) dispatchBookAction(BookContextMenu::Action::Delete, path, stemOf(path));
+        return;
+      }
+      case SwipeToDelete::Event::Consumed:
+        requestUpdate();
+        return;
+      case SwipeToDelete::Event::None:
+        break;
+    }
+  }
+
   // --- Shared: long-press on the selected book opens its context menu ---
   // Skipped while the entry Confirm is still being swallowed (see lockNextConfirmRelease).
   if (!lockNextConfirmRelease) {
@@ -935,6 +962,7 @@ void GroupBrowserActivity::render(RenderLock&&) {
           return "";
         },
         false);
+    swipeDelete.draw(renderer, contentRect, static_cast<int>(rootListSize()), static_cast<int>(selectorIndex), false);
   } else {
     GUI.drawList(
         renderer, contentRect, groupBookIdx.size(), selectorIndex,
@@ -950,6 +978,8 @@ void GroupBrowserActivity::render(RenderLock&&) {
           return "";
         },
         false);
+    swipeDelete.draw(renderer, contentRect, static_cast<int>(groupBookIdx.size()), static_cast<int>(selectorIndex),
+                     false);
   }
 
   const char* backLabel = atGroupList() ? tr(STR_HOME) : tr(STR_BACK);
