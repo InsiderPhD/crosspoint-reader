@@ -664,6 +664,34 @@ void Dictionary::stemVariants(const std::string& word, std::vector<std::string>&
     return n > len && word.compare(n - len, len, suffix) == 0;
   };
 
+  // French elision (CrossInk 1babd9da9): l'histoire, d'abord, qu'après,
+  // j'aime, c'est... The exact headword was already tried by the caller, so an
+  // entry like "d'accord" still wins. The remainder is returned on its own:
+  // French accents and endings are not English stems. cleanWord() has already
+  // lowercased the ASCII prefix. Accepts ', U+2019 and U+02BC apostrophes.
+  {
+    size_t prefixLen = 0;
+    if (n >= 3 && word[0] == 'q' && word[1] == 'u') {
+      prefixLen = 2;
+    } else if (n >= 3 && word[0] != '\0' && strchr("cdjlmnst", word[0]) != nullptr) {
+      prefixLen = 1;
+    }
+    if (prefixLen != 0) {
+      size_t apostropheLen = 0;
+      if (word[prefixLen] == '\'') {
+        apostropheLen = 1;
+      } else if (word.compare(prefixLen, 3, "\xE2\x80\x99") == 0) {  // U+2019
+        apostropheLen = 3;
+      } else if (word.compare(prefixLen, 2, "\xCA\xBC") == 0) {  // U+02BC
+        apostropheLen = 2;
+      }
+      if (apostropheLen != 0 && prefixLen + apostropheLen < n) {
+        add(word.substr(prefixLen + apostropheLen));
+        return;
+      }
+    }
+  }
+
   if (endsWith("'s")) add(word.substr(0, n - 2));
   if (endsWith("\xE2\x80\x99s")) add(word.substr(0, n - 4));  // U+2019 apostrophe
   if (endsWith("ies")) add(word.substr(0, n - 3) + "y");      // stories -> story

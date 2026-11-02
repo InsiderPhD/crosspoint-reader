@@ -223,7 +223,7 @@ Two things that look like faults but are not:
 
 A phrase (up to eight words on the page) is looked up as written, so dictionary entries with spaces in them — idioms, phrasal verbs, compound terms — can be found. If the whole phrase is not an entry, its leading words are tried, longest first (`gave up the` → `gave up` → `gave`); the heading of the definition shows which form matched.
 
-If a word is not found as written, the lookup automatically retries the dictionary's own synonyms (`oxen` → `ox`) and then common word endings (`dogs` → `dog`, `running` → `run`) before reporting a miss.
+If a word is not found as written, the lookup automatically retries the dictionary's own synonyms (`oxen` → `ox`) and then common word endings (`dogs` → `dog`, `running` → `run`) before reporting a miss. French elisions are dropped too (`l'histoire` → `histoire`, `qu’après` → `après`), and so are brackets and guillemets around the word (`「読む」`, `«mot»`).
 
 ### Bionic Reading
 
