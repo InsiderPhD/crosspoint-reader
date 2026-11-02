@@ -100,7 +100,8 @@ constexpr SameKey SAME_KEYS[] = {
 };
 
 // Folder names, the same on both sides.
-constexpr const char* SAME_STRING_KEYS[] = {"dictionaryName", "language"};
+// opdsDownloadFolder: the shared OPDS download folder ("" = SD root) on both.
+constexpr const char* SAME_STRING_KEYS[] = {"dictionaryName", "language", "opdsDownloadFolder"};
 
 // Keys only upstream writes into settings.json in its own numbering: no
 // KatiePoint build ever wrote one of them there (older builds kept their own

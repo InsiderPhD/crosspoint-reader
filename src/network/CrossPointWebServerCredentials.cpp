@@ -13,6 +13,7 @@
 #include "CrossPointWebServer.h"
 #include "OpdsServerStore.h"
 #include "WifiCredentialStore.h"
+#include "util/OpdsDownloadFolder.h"
 
 namespace {
 // The body of a JSON POST, parsed into `doc`; false (after answering 400) when
@@ -69,6 +70,8 @@ void CrossPointWebServer::handleGetOpdsServers() const {
     doc["url"] = servers[i].url;
     doc["username"] = servers[i].username;
     doc["hasPassword"] = !servers[i].password.empty();
+    // CrossInk's extension: "" = shared default, "/" = SD root.
+    doc["downloadFolder"] = servers[i].downloadFolder;
     JsonArray headers = doc["headers"].to<JsonArray>();
     for (const auto& header : servers[i].customHeaders) {
       JsonObject h = headers.add<JsonObject>();
@@ -94,6 +97,12 @@ void CrossPointWebServer::handlePostOpdsServer() {
   entry.username = doc["username"] | std::string("");
   const bool hasPassword = hasString(doc["password"]);
   const std::string password = doc["password"] | std::string("");
+  // Optional (upstream's clients do not send it): absent keeps the stored one.
+  const bool hasFolder = hasString(doc["downloadFolder"]);
+  if (hasFolder && !OpdsDownloadFolder::normalize(doc["downloadFolder"].as<const char*>(), entry.downloadFolder)) {
+    server->send(400, "text/plain", "Invalid download folder");
+    return;
+  }
 
   const bool hasHeaders = doc["headers"].is<JsonArrayConst>();
   std::array<std::string, OpdsServer::MAX_CUSTOM_HEADERS> headerNames;
@@ -119,6 +128,7 @@ void CrossPointWebServer::handlePostOpdsServer() {
     }
     entry.password = hasPassword ? password : existing->password;
     entry.filenameFormat = existing->filenameFormat;
+    if (!hasFolder) entry.downloadFolder = existing->downloadFolder;
     for (size_t i = 0; i < OpdsServer::MAX_CUSTOM_HEADERS; i++) {
       if (!hasHeaders) {
         entry.customHeaders[i] = existing->customHeaders[i];

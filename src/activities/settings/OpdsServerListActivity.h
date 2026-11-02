@@ -7,8 +7,9 @@ struct Rect;
 
 /**
  * Settings > OPDS Browser: the saved catalogs (OpdsServerStore), one row each,
- * then "Add Server". Confirm opens OpdsServerEditActivity for that catalog, or
- * for a new one. Each edit is saved by the editor when it closes.
+ * then "Add Server" and the shared download folder. Confirm opens
+ * OpdsServerEditActivity for that catalog, or for a new one. Each edit is
+ * saved by the editor when it closes.
  */
 class OpdsServerListActivity final : public Activity {
  public:
@@ -21,9 +22,12 @@ class OpdsServerListActivity final : public Activity {
   bool handlesDirectTouch() const override { return true; }
 
  private:
-  // Server rows, plus the Add row while the store has room.
+  // Server rows, the Add row while the store has room, then the shared
+  // download folder.
   int rowCount() const;
   bool isAddRow(int row) const;
+  bool isFolderRow(int row) const { return row == rowCount() - 1; }
+  void editDefaultFolder();
   void activateRow(int row);
   Rect listRect() const;
 

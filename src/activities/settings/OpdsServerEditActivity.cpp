@@ -10,11 +10,17 @@
 #include "MappedInputManager.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
+#include "util/OpdsDownloadFolder.h"
 #include "util/TouchListNav.h"
 
 namespace {
-constexpr StrId kRowLabels[] = {StrId::STR_OPDS_SERVER_NAME,  StrId::STR_CALIBRE_WEB_URL, StrId::STR_USERNAME,
-                                StrId::STR_PASSWORD,          StrId::STR_CUSTOM_HEADER_1, StrId::STR_CUSTOM_HEADER_2,
+constexpr StrId kRowLabels[] = {StrId::STR_OPDS_SERVER_NAME,
+                                StrId::STR_CALIBRE_WEB_URL,
+                                StrId::STR_USERNAME,
+                                StrId::STR_PASSWORD,
+                                StrId::STR_CUSTOM_HEADER_1,
+                                StrId::STR_CUSTOM_HEADER_2,
+                                StrId::STR_OPDS_DOWNLOAD_FOLDER,
                                 StrId::STR_DELETE_OPDS_SERVER};
 }  // namespace
 
@@ -66,6 +72,28 @@ void OpdsServerEditActivity::editText(const StrId title, std::string& field, con
       });
 }
 
+// Typed as a path ("Books/OPDS" or "/Books/OPDS"); empty uses the shared
+// default, "/" the SD root. A name FAT cannot hold is refused and the old
+// value kept.
+void OpdsServerEditActivity::editDownloadFolder() {
+  startActivityForResult(
+      std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_OPDS_DOWNLOAD_FOLDER), draft.downloadFolder,
+                                              OpdsDownloadFolder::MAX_LENGTH, InputType::Text),
+      [this](const ActivityResult& result) {
+        if (result.isCancelled) return;
+        std::string folder;
+        if (!OpdsDownloadFolder::normalize(std::get<KeyboardResult>(result.data).text, folder)) {
+          LOG_ERR("OPDS", "Invalid download folder");
+          folderError = true;
+          return;
+        }
+        folderError = false;
+        if (folder == draft.downloadFolder) return;
+        draft.downloadFolder = std::move(folder);
+        dirty = true;
+      });
+}
+
 void OpdsServerEditActivity::confirmDelete() {
   startActivityForResult(
       std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_OPDS_SERVER_CONFIRM), draft.label()),
@@ -108,6 +136,9 @@ void OpdsServerEditActivity::handleSelection() {
                              });
       break;
     }
+    case ROW_DOWNLOAD_FOLDER:
+      editDownloadFolder();
+      break;
     case ROW_DELETE:
       confirmDelete();
       break;
@@ -131,6 +162,15 @@ std::string OpdsServerEditActivity::rowValue(const int row) const {
     case ROW_HEADER_2: {
       const std::string line = formatHttpHeaderLine(draft.customHeaders[row == ROW_HEADER_1 ? 0 : 1], true);
       return orNotSet(line);
+    }
+    case ROW_DOWNLOAD_FOLDER: {
+      if (folderError) return std::string(tr(STR_OPDS_INVALID_FOLDER));
+      if (draft.downloadFolder == "/") return std::string(tr(STR_OPDS_SD_ROOT));
+      if (!draft.downloadFolder.empty()) return draft.downloadFolder;
+      char buf[96];
+      snprintf(buf, sizeof(buf), tr(STR_OPDS_USE_DEFAULT_FOLDER),
+               SETTINGS.opdsDownloadFolder[0] ? SETTINGS.opdsDownloadFolder : tr(STR_OPDS_SD_ROOT));
+      return std::string(buf);
     }
     default:
       return std::string();

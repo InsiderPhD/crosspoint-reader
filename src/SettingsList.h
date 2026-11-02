@@ -519,6 +519,10 @@ inline void appendHardcoverSettings(SettingSink& v) {
 inline void appendOpdsSettings(SettingSink& v) {
   v.push_back(SettingInfo::Toggle(StrId::STR_OPDS_SERVER_FILENAMES, &CrossPointSettings::opdsUseServerFilename,
                                   "opdsUseServerFilename", StrId::STR_OPDS_BROWSER));
+  // Normalised where it is used (OpdsDownloadFolder::normalize), so a web
+  // edit without the leading '/' still works.
+  v.push_back(SettingInfo::String(StrId::STR_OPDS_DEFAULT_DOWNLOAD_FOLDER, SETTINGS.opdsDownloadFolder,
+                                  sizeof(SETTINGS.opdsDownloadFolder), "opdsDownloadFolder", StrId::STR_OPDS_BROWSER));
 }
 
 // --- Status Bar Settings (web-only, uses StatusBarSettingsActivity) ---
@@ -671,7 +675,7 @@ inline void appendStatusBarSettings(SettingSink& v) {
 // more (the list is visited, never stored); forEachSetting() logs a mismatch so a
 // helper that stops emitting an entry (and so stops persisting it) shows up on
 // the serial log. Recount when adding or removing an entry.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 106;  // includes tiltPageTurn, tiltNextPageOnly, pluginsEnabled
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 107;  // includes tiltPageTurn, tiltNextPageOnly, pluginsEnabled, opdsDownloadFolder
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

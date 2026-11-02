@@ -25,6 +25,11 @@ struct OpdsServer {
   // setting decides), only carried so a swap back to CrossInk keeps it.
   std::string filenameFormat;
 
+  // Where this catalog's books are saved (CrossInk's per-server
+  // "downloadFolder"): empty = the shared default (settings
+  // opdsDownloadFolder), "/" = SD root, else a normalised "/A/B".
+  std::string downloadFolder;
+
   // Display name: the given name, else the URL.
   const std::string& label() const { return name.empty() ? url : name; }
 

@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "CrossPointSettings.h"
+#include "util/OpdsDownloadFolder.h"
 
 OpdsServerStore OpdsServerStore::instance;
 
@@ -69,6 +70,12 @@ bool OpdsServerStore::loadFromFile() {
     server.username = obj["username"] | std::string("");
     server.password = readSecret(obj, "password_obf", "password", resave);
     server.filenameFormat = obj["filenameFormat"] | std::string("");
+    // An unusable folder from a hand edit falls back to the shared default
+    // rather than dropping the catalog.
+    if (!OpdsDownloadFolder::normalize(obj["downloadFolder"] | "", server.downloadFolder)) {
+      LOG_ERR("OPS", "Ignoring invalid download folder for %s", server.name.c_str());
+      server.downloadFolder.clear();
+    }
     size_t slot = 0;
     for (JsonObjectConst headerObj : obj["headers"].as<JsonArrayConst>()) {
       if (slot >= OpdsServer::MAX_CUSTOM_HEADERS) break;
@@ -105,6 +112,7 @@ bool OpdsServerStore::saveToFile() const {
       headerObj["value_obf"] = obfuscation::obfuscateToBase64(header.value);
     }
     if (!server.filenameFormat.empty()) obj["filenameFormat"] = server.filenameFormat;
+    obj["downloadFolder"] = server.downloadFolder;
   }
 
   String json;

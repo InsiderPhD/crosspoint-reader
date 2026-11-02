@@ -437,6 +437,7 @@ values are never returned, only whether one is set.
     "url": "http://calibre.local:8080/opds",
     "username": "reader",
     "hasPassword": true,
+    "downloadFolder": "",
     "headers": [{"name": "CF-Access-Client-Id", "hasValue": true}, {"name": "", "hasValue": false}]
   }
 ]
@@ -448,7 +449,9 @@ values are never returned, only whether one is set.
 
 JSON body (`Content-Type: application/json`). Without `index` it adds a server (400 once 8 are saved); with
 `index` it replaces that one. On an update an omitted `password`, or an omitted header `value`, keeps the
-stored secret; a header with an empty `name` clears that slot.
+stored secret; a header with an empty `name` clears that slot. `downloadFolder` (CrossInk's extension, optional) is
+where that catalog's books are saved: `""` uses the shared default (`opdsDownloadFolder` setting), `"/"` the SD root,
+anything else a folder such as `/Books/OPDS` (400 if FAT cannot hold the name); omitted on an update, it is kept.
 
 ```bash
 curl -X POST -H "Content-Type: application/json" \

@@ -27,11 +27,21 @@ class OpdsServerEditActivity final : public Activity {
   bool handlesDirectTouch() const override { return true; }
 
  private:
-  enum Row : int { ROW_NAME, ROW_URL, ROW_USERNAME, ROW_PASSWORD, ROW_HEADER_1, ROW_HEADER_2, ROW_DELETE };
+  enum Row : int {
+    ROW_NAME,
+    ROW_URL,
+    ROW_USERNAME,
+    ROW_PASSWORD,
+    ROW_HEADER_1,
+    ROW_HEADER_2,
+    ROW_DOWNLOAD_FOLDER,
+    ROW_DELETE
+  };
 
   int rowCount() const { return index < 0 ? ROW_DELETE : ROW_DELETE + 1; }
   void handleSelection();
   void editText(StrId title, std::string& field, size_t maxLength, InputType inputType);
+  void editDownloadFolder();
   void confirmDelete();
   void saveAndFinish();
   std::string rowValue(int row) const;
@@ -40,6 +50,8 @@ class OpdsServerEditActivity final : public Activity {
   int index;
   OpdsServer draft;
   bool dirty = false;
+  // The last folder typed was refused; shown in the row until a valid one.
+  bool folderError = false;
   int selectedRow = 0;
   ButtonNavigator buttonNavigator;
 };

@@ -60,7 +60,7 @@ constexpr const char* UPSTREAM = R"({
   "shortPwrBtn": 2, "tiltPageTurn": 1, "pwrBtnFootnoteBack": 1, "backShortToFileBrowser": 0,
   "pluginsEnabled": 0, "pluginHubPromptHidden": 0, "sleepTimeoutMinutes": 12, "showHiddenFiles": 1,
   "libraryUseMetadata": 1, "removeReadBooksFromRecents": 0, "moveFinishedToReadFolder": 1,
-  "opdsDownloadFolder": "", "opdsFilenameFormat": 0, "frontlightBrightness": 40, "frontlightOn": 0,
+  "opdsDownloadFolder": "/Books/OPDS", "opdsFilenameFormat": 0, "frontlightBrightness": 40, "frontlightOn": 0,
   "statusBarChapterPageCount": 0, "statusBarBookProgressPercentage": 1, "statusBarProgressBar": 0,
   "statusBarProgressBarThickness": 2, "statusBarTitle": 0, "statusBarBattery": 1, "xtcStatusBarMode": 2,
   "statusBarClock": 2, "clockUtcOffsetQ": 52, "clockFormat": 1, "clockTimezone": 37, "clockDst": 2,
@@ -145,6 +145,7 @@ void testImport() {
   expectInt(k, "frontButtonConfirm", 0, L);
   expectStr(k, "dictionaryName", "en-en", L);
   expectStr(k, "language", "DE", L);
+  expectStr(k, "opdsDownloadFolder", "/Books/OPDS", L);
   // Reader actions: side buttons Next/Prev with long-press chapter skip,
   // power = page turn, long-press Confirm = bookmark.
   expectInt(k, "readerShortPressSideUp", 1, L);
@@ -178,7 +179,7 @@ constexpr const char* KATIEPOINT = R"({
   "frontButtonLeft": 2, "frontButtonRight": 3, "readerShortPressSideUp": 2, "readerShortPressSideDown": 1,
   "readerLongPressSideUp": 4, "readerLongPressSideDown": 3, "readerShortPressPower": 11,
   "readerLongPressConfirm": 11, "frontlightBrightness": 0, "frontlightLastBrightness": 35,
-  "readerActionsMigrated": 1, "statusBarHeaderDatePos": 1, "sortMode": 3
+  "readerActionsMigrated": 1, "statusBarHeaderDatePos": 1, "sortMode": 3, "opdsDownloadFolder": "/Downloads"
 })";
 
 void testExport() {
@@ -191,6 +192,7 @@ void testExport() {
 
   expectStr(u, "language", "FR", L);
   expectInt(u, "pluginsEnabled", 1, L);
+  expectStr(u, "opdsDownloadFolder", "/Downloads", L);
   expectInt(u, "sleepScreen", 5, L);  // blank
   expectInt(u, "quickResumeSleepScreen", 0, L);
   expectInt(u, "refreshFrequency", 2, L);

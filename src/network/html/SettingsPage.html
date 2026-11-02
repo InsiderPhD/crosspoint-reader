@@ -561,7 +561,8 @@
     let rows = textRow('Name', 'opds-name-' + idx, srv.name) +
       textRow('URL', 'opds-url-' + idx, srv.url) +
       textRow('Username', 'opds-user-' + idx, srv.username) +
-      textRow('Password', 'opds-pass-' + idx, '', 'password', srv.hasPassword ? '(unchanged)' : '');
+      textRow('Password', 'opds-pass-' + idx, '', 'password', srv.hasPassword ? '(unchanged)' : '') +
+      textRow('Download folder', 'opds-folder-' + idx, srv.downloadFolder, 'text', 'Default folder (/ = SD root)');
     const headers = srv.headers || [];
     for (let i = 0; i < OPDS_HEADER_SLOTS; i++) {
       const h = headers[i] || {name: '', hasValue: false};
@@ -662,6 +663,8 @@
     }
     const pass = document.getElementById('opds-pass-' + idx).value;
     if (pass) data.password = pass;
+    // Empty = the shared default folder, "/" = SD root.
+    data.downloadFolder = document.getElementById('opds-folder-' + idx).value.trim();
     data.headers = [];
     for (let i = 0; i < OPDS_HEADER_SLOTS; i++) {
       const name = document.getElementById('opds-h' + i + '-name-' + idx).value.trim();

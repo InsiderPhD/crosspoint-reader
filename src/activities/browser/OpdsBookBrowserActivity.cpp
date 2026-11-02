@@ -22,6 +22,7 @@
 #include "fontIds.h"
 #include "network/HttpDownloadFilename.h"
 #include "network/HttpDownloader.h"
+#include "util/OpdsDownloadFolder.h"
 #include "util/OpdsFeedError.h"
 #include "util/StringUtils.h"
 #include "util/TouchListNav.h"
@@ -490,7 +491,10 @@ std::string applyServerFilename(const std::string& downloadedPath, const std::st
   }
   // Same 100-byte budget as the generated names; the stem is cut on a UTF-8
   // codepoint boundary and the extension kept.
-  std::string target = "/" + StringUtils::sanitizeFilenamePreservingExtension(serverName);
+  // Same folder as the generated name.
+  const size_t slash = downloadedPath.rfind('/');
+  std::string target =
+      downloadedPath.substr(0, slash + 1) + StringUtils::sanitizeFilenamePreservingExtension(serverName);
   if (target == downloadedPath || !FsHelpers::hasEpubExtension(target)) return downloadedPath;
   if (Storage.exists(target.c_str())) {
     LOG_INF("OPDS", "%s already exists, keeping %s", target.c_str(), downloadedPath.c_str());
@@ -515,8 +519,32 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   // Build full download URL relative to the current feed, not the root server URL
   const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
   std::string downloadUrl = UrlUtils::resolveReference(feedUrl, book.href);
+  // The catalog's own folder, else the shared default; both re-validated here
+  // (the shared one may have been typed on the web page).
+  std::string folder;
+  if (!OpdsDownloadFolder::normalize(OpdsDownloadFolder::effective(server.downloadFolder, SETTINGS.opdsDownloadFolder),
+                                     folder)) {
+    LOG_ERR("OPDS", "Invalid download folder");
+    state = BrowserState::ERROR;
+    errorMessage = tr(STR_OPDS_INVALID_FOLDER);
+    requestUpdate();
+    return;
+  }
+  // normalize() gives "" (SD root) or "/A/B" without a trailing slash.
+  if (folder.empty() || folder == "/") {
+    folder = "/";
+  } else {
+    if (!Storage.exists(folder.c_str()) && !Storage.mkdir(folder.c_str())) {
+      LOG_ERR("OPDS", "Could not create download folder %s", folder.c_str());
+      state = BrowserState::ERROR;
+      errorMessage = tr(STR_DOWNLOAD_FAILED);
+      requestUpdate();
+      return;
+    }
+    folder += '/';
+  }
   std::string filename =
-      "/" + StringUtils::sanitizeFilename((book.author.empty() ? "" : book.author + " - ") + book.title) + ".epub";
+      folder + StringUtils::sanitizeFilename((book.author.empty() ? "" : book.author + " - ") + book.title) + ".epub";
   LOG_DBG("OPDS", "Downloading: %s -> %s", downloadUrl.c_str(), filename.c_str());
 
   auto result = HttpDownloader::HTTP_ERROR;
@@ -549,8 +577,8 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
 
   if (result == HttpDownloader::OK) {
     Epub(filename, "/.crosspoint").clearCache();
-    // New file lands in the SD root; force the library to re-scan on next open
-    // (its dir-mtime cache validation can't see root additions on FAT).
+    // Force the library to re-scan on next open (its dir-mtime cache
+    // validation can't see root additions on FAT, nor a new folder).
     LibraryActivity::invalidateIndexCache();
     state = BrowserState::BROWSING;
   } else {
