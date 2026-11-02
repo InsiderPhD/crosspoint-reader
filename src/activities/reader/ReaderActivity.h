@@ -5,6 +5,7 @@
 #include <string>
 
 #include "../Activity.h"
+#include "BookLoadingFeedback.h"
 #include "activities/home/FileBrowserActivity.h"
 
 class Epub;
@@ -46,6 +47,8 @@ class RenderedBookGate {
 class ReaderActivity final : public Activity {
   std::string initialBookPath;
   std::string currentBookPath;  // Track current book path for navigation
+  // Cached-EPUB opens skip the up-front popup; this shows it late if they turn out slow.
+  BookLoadingFeedback openingFeedback;
   std::unique_ptr<Epub> loadEpub(const std::string& path) const;
   static std::unique_ptr<Xtc> loadXtc(const std::string& path);
   static std::unique_ptr<Txt> loadTxt(const std::string& path);

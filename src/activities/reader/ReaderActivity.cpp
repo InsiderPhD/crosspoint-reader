@@ -120,7 +120,8 @@ void ReaderActivity::goToLibrary(const std::string& fromBookPath) {
 void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
   const auto epubPath = epub->getPath();
   currentBookPath = epubPath;
-  activityManager.replaceActivity(std::make_unique<EpubReaderActivity>(renderer, mappedInput, std::move(epub)));
+  activityManager.replaceActivity(
+      std::make_unique<EpubReaderActivity>(renderer, mappedInput, std::move(epub), openingFeedback));
 }
 
 void ReaderActivity::onGoToBmpViewer(const std::string& path) {
@@ -178,6 +179,10 @@ void ReaderActivity::onEnter() {
                               Epub::hasCache(initialBookPath, "/.crosspoint", SETTINGS.embeddedStyle == 0);
   if (!epubCacheReady) {
     GUI.drawPopup(renderer, tr(STR_LOADING));
+  } else if (!isXtcFile(initialBookPath) && !isTxtFile(initialBookPath)) {
+    // ...unless it turns out slow anyway: then the popup appears after
+    // BookLoadingFeedback::DELAY_MS, at the next loading stage that checks.
+    openingFeedback.start(millis());
   }
 
   // Per-book reader settings go live here, before the book is loaded: a book
@@ -189,6 +194,7 @@ void ReaderActivity::onEnter() {
     BookSettings::begin(Epub::cachePathFor(initialBookPath, "/.crosspoint"));
     if (BookSettings::hasOverrides()) ensureSdFontLoaded();
   }
+  openingFeedback.showIfDue(renderer);
 
   if (isXtcFile(initialBookPath)) {
     auto xtc = loadXtc(initialBookPath);
@@ -206,6 +212,7 @@ void ReaderActivity::onEnter() {
     onGoToTxtReader(std::move(txt));
   } else {
     auto epub = loadEpub(initialBookPath);
+    openingFeedback.showIfDue(renderer);  // after loadEpub() has handed the framebuffer back
     if (!epub) {
       BookSettings::end();
       onGoBack();

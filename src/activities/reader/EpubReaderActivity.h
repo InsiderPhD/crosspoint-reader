@@ -8,6 +8,7 @@
 #include <optional>
 #include <vector>
 
+#include "BookLoadingFeedback.h"
 #include "BookmarkEntry.h"
 #include "CrossPointPosition.h"
 #include "CrossPointSettings.h"
@@ -28,6 +29,10 @@ class EpubReaderActivity final : public Activity {
   // Cleared on the next render after the new section loads and resolves it to a page.
   std::string pendingAnchor;
   int pagesUntilFullRefresh = 0;
+  // Late "Loading" popup for a cached open that turns out slow (see the class).
+  // Checked between onEnter()'s stages and the first render()'s; finished by
+  // whatever that first render() puts on the panel.
+  BookLoadingFeedback openingFeedback;
   int cachedSpineIndex = 0;
   int cachedChapterTotalPageCount = 0;
   // progress.bin + Recent Books write debounce. render() notes the position on
@@ -312,8 +317,9 @@ class EpubReaderActivity final : public Activity {
   void connectWifiForSyncWithPopup(std::function<void()> onSuccess, const char* syncTitle = "BookFusion Sync");
 
  public:
-  explicit EpubReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Epub> epub)
-      : Activity("EpubReader", renderer, mappedInput), epub(std::move(epub)) {}
+  explicit EpubReaderActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::unique_ptr<Epub> epub,
+                              const BookLoadingFeedback openingFeedback = {})
+      : Activity("EpubReader", renderer, mappedInput), epub(std::move(epub)), openingFeedback(openingFeedback) {}
   void onEnter() override;
   void onExit() override;
   void onResume() override;

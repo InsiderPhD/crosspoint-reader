@@ -629,13 +629,15 @@ void EpubReaderActivity::onEnter() {
   // rememberBookOnceRendered(), which waits for the first rendered page.
   READING_STATS.beginSession(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
   CLIPPINGS.loadForBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), "epub");
+  openingFeedback.showIfDue(renderer);
 
   readingSessionStartMs = millis();
   sessionPageTurns = 0;
   // New book: forget the previous book's autosync baseline and provider.
   ProgressAutoSync::resetSessionBaseline();
 
-  buildBookPageCache();
+  buildBookPageCache();  // the per-spine scan: the slowest part of a cached open
+  openingFeedback.showIfDue(renderer);
 
   // A button held to wake from sleep mustn't fire a spurious action.
   armHeldButtons();
@@ -2532,6 +2534,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (!epub) {
     return;
   }
+  // Whatever this render puts on the panel replaces the opening feedback, so
+  // it must never pop up over a later page.
+  struct FinishFeedbackOnExit {
+    BookLoadingFeedback& feedback;
+    ~FinishFeedbackOnExit() { feedback.finish(); }
+  } finishFeedback{openingFeedback};
 
   // Busy-popup fast path: the page under the popup has not changed, so draw the
   // popup straight onto the framebuffer and drive the panel once. The full path
@@ -2592,6 +2600,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     const auto filepath = epub->getSpineItem(currentSpineIndex).href;
     LOG_DBG("ERS", "Loading file: %s, index: %d", filepath.c_str(), currentSpineIndex);
     section = std::unique_ptr<Section>(new Section(epub, currentSpineIndex, renderer));
+    openingFeedback.showIfDue(renderer);
 
     if (!section->loadSectionFile(SETTINGS.getReaderFontId(), SETTINGS.getReaderLineCompression(),
                                   SETTINGS.extraParagraphSpacing, SETTINGS.paragraphAlignment, viewportWidth,
@@ -2622,7 +2631,10 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         blePause.emplace();
       }
 
-      const auto popupFn = [this]() { GUI.drawPopup(renderer, tr(STR_INDEXING)); };
+      const auto popupFn = [this]() {
+        openingFeedback.finish();  // Indexing supersedes Loading
+        GUI.drawPopup(renderer, tr(STR_INDEXING));
+      };
 
       // Page-turn presses made from here until the chapter is on screen are dropped
       // (requestPageTurn). Cleared on every way out of this block.
@@ -2647,6 +2659,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
       }
     } else {
       LOG_DBG("ERS", "Cache found, skipping build...");
+      openingFeedback.showIfDue(renderer);
     }
     HeapReport::logBrief("reader.section");
 
