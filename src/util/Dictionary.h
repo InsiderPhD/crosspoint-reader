@@ -23,15 +23,17 @@ struct DictLocation {
 inline constexpr char DICTIONARY_PLAIN_HEADWORD_MARKER = '\x01';
 
 // The entries one looked-up word resolves to, with the headword each is filed
-// under. A .syn can point one synonym at several headwords (よんで -> 読む and
-// 呼ぶ), so a word can map to several definitions.
+// under. A .idx can list one headword several times (one entry per part of
+// speech) and a .syn can point one synonym at several headwords (よんで -> 読む
+// and 呼ぶ), so a word can map to several definitions.
 //
 // Fixed capacity, no growth: how many entries a word has is unknown until the
 // index has been scanned, and a container that doubles while it scans is three
 // heap operations per growth on the C3. Allocated once per lookup (~1.4KB),
 // freed when the lookup returns. A longer group is cut at MAX_ENTRIES (or when
 // the headword pool is full) and logged; 32 definitions of one word is already
-// far more than anyone pages through on e-ink.
+// far more than anyone pages through on e-ink (upstream measured 14 .idx
+// entries for one headword in a real dictionary).
 class DictEntryList {
  public:
   static constexpr size_t MAX_ENTRIES = 32;
@@ -205,13 +207,17 @@ class Dictionary {
   bool openSynonyms(LookupSession& session);
 
   // Bisect a sampled-offset sidecar (.qidx over .idx, .sidx over .syn) to the
-  // byte offset of the last sampled entry whose word is <= target, so the caller
-  // only has to linear-scan at most SAMPLE_INTERVAL entries from there. Returns
+  // byte offset of the last sampled entry whose word is strictly below target,
+  // so the caller's scan starts before any run of entries sharing the word and
+  // sees all of them (a scan of roughly SAMPLE_INTERVAL entries). Returns
   // 0 — scan source from the start — when sampleCount is 0 or a sample is
   // unreadable. Clobbers wordBuf.
   uint32_t bisectSamples(HalFile& sidecar, HalFile& source, uint32_t sampleCount, const char* target);
 
-  DictLocation locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
+  // Every .idx entry whose headword matches target (case-insensitively),
+  // appended to out. *readError is set when the scan was cut short by an IO
+  // failure, which is a read failure rather than a miss.
+  void locateAll(LookupSession& session, const char* target, DictEntryList& out, bool* readError);
 
   // Resolve an ordinal (the N-th .idx entry, 0-based) to its .dict location via
   // the .qidx samples. Used to follow a .syn synonym back to its headword,

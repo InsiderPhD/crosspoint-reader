@@ -438,9 +438,9 @@ bool Dictionary::openSynonyms(LookupSession& session) {
   return true;
 }
 
-// Shared by locate() (.qidx over .idx) and locateSynonyms() (.sidx over .syn):
-// both sidecars have the same layout and both sources are sorted word-first, so
-// the descent is identical and only the file pair differs.
+// Shared by locateAll() (.qidx over .idx) and locateSynonyms() (.sidx over
+// .syn): both sidecars have the same layout and both sources are sorted
+// word-first, so the descent is identical and only the file pair differs.
 uint32_t Dictionary::bisectSamples(HalFile& sidecar, HalFile& source, uint32_t sampleCount, const char* target) {
   uint32_t startByte = 0;
   if (sampleCount == 0) return startByte;  // no usable sidecar: scan from the start
@@ -455,7 +455,12 @@ uint32_t Dictionary::bisectSamples(HalFile& sidecar, HalFile& source, uint32_t s
       lo = 0;  // unreadable sample: abandon the descent and scan from the start
       break;
     }
-    if (StringUtils::asciiCaseCmp(wordBuf, target) <= 0) {
+    // Strictly below the target: a headword can be listed several times (one
+    // entry per part of speech, or "Polish" and "polish", which compare equal),
+    // and that run may begin before the last sample that is <= target. Landing
+    // on a sample INSIDE the run would scan from its middle and miss the
+    // entries before it, so the descent stops at the last sample below it.
+    if (StringUtils::asciiCaseCmp(wordBuf, target) < 0) {
       lo = mid;
     } else {
       hi = mid - 1;
@@ -467,18 +472,18 @@ uint32_t Dictionary::bisectSamples(HalFile& sidecar, HalFile& source, uint32_t s
 
 // Both files stay open across the stem-variant probes; every read below seeks
 // absolutely first, so a shared handle carries no position state between calls.
-DictLocation Dictionary::locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut) {
-  DictLocation result;
+void Dictionary::locateAll(LookupSession& session, const char* target, DictEntryList& out, bool* readError) {
+  *readError = false;
 
-  // Bisect the sampled offsets to the last sample whose headword <= target.
+  // Bisect the sampled offsets to the last sample whose headword is below target.
   const uint32_t startByte = bisectSamples(session.qidx, session.idx, session.sampleCount, target);
 
-  // Linear scan of at most SAMPLE_INTERVAL entries: headword NUL, BE32 offset,
-  // BE32 size. The index is sorted, so stop at the first headword > target.
+  // Linear scan: headword NUL, BE32 offset, BE32 size. The index is sorted, so
+  // every entry for target is adjacent: take them all, stop at the first > target.
   if (!session.idx.seekSet(startByte)) {
     LOG_ERR("DICT", "Index seek to %lu failed", static_cast<unsigned long>(startByte));
-    result.readError = true;
-    return result;
+    *readError = true;
+    return;
   }
   while (static_cast<uint32_t>(session.idx.position()) < session.idxSize) {
     // Not flagged as readError: readWordInto returns -1 for EOF and IO error
@@ -490,16 +495,14 @@ DictLocation Dictionary::locate(LookupSession& session, const char* target, std:
     if (session.idx.read(suffix, 8) != 8) break;
 
     const int cmp = StringUtils::asciiCaseCmp(wordBuf, target);
-    if (cmp == 0) {
-      result.offset = readBe32(suffix);
-      result.size = readBe32(suffix + 4);
-      result.found = true;
-      if (matchedHeadwordOut) *matchedHeadwordOut = wordBuf;
-      return result;
-    }
     if (cmp > 0) break;
+    if (cmp != 0) continue;
+    DictLocation location;
+    location.offset = readBe32(suffix);
+    location.size = readBe32(suffix + 4);
+    location.found = true;
+    if (!out.appendUnique(wordBuf, location)) break;
   }
-  return result;
 }
 
 DictLocation Dictionary::locateByOrdinal(LookupSession& session, uint32_t ordinal) {
@@ -851,13 +854,22 @@ bool Dictionary::lookup(const char* word, std::string& definitionOut, std::strin
   const std::string cleaned = cleanWord(word);
   if (cleaned.empty() || !isOpen()) return false;
 
+  // Every entry the word resolves to: the .idx can list one headword several
+  // times (one entry per part of speech) and a .syn can point at several
+  // headwords. Fixed capacity, so the probes below never grow a container;
+  // freed when lookup() returns.
+  auto group = makeUniqueNoThrow<DictEntryList>();
+  if (!group) {
+    LOG_ERR("DICT", "OOM: %u byte entry list", static_cast<unsigned>(sizeof(DictEntryList)));
+    setResult(LookupResult::LowMemory);
+    return false;
+  }
+  bool fromSynonyms = false;
+  bool searchFailed = false;
+
   // One set of open handles for the exact-match probe, the synonym probe and
   // every stem variant, scoped so .idx/.qidx (and .syn/.sidx) close before
   // readDefinition() opens the data file.
-  DictLocation location;
-  // Only allocated when the synonym probe runs; freed when lookup() returns.
-  std::unique_ptr<DictEntryList> synonyms;
-  bool searchFailed = false;
   {
     LookupSession session;
     // Couldn't open .idx: the search never reached a verdict, so this is a read
@@ -867,41 +879,30 @@ bool Dictionary::lookup(const char* word, std::string& definitionOut, std::strin
       return false;
     }
 
-    location = locate(session, cleaned.c_str(), &matchedHeadwordOut);
-    searchFailed = location.readError;
+    bool readError = false;
+    locateAll(session, cleaned.c_str(), *group, &readError);
+    searchFailed = readError;
 
     // Dictionary-authored synonyms (alternate spellings, irregular forms) take
     // precedence over the English-only stemmer, and are language-agnostic. A
     // synonym can point at several headwords, so every record is collected.
-    if (!location.found && hasSyn) {
-      synonyms = makeUniqueNoThrow<DictEntryList>();
-      if (!synonyms) {
-        LOG_ERR("DICT", "OOM: %u byte entry list", static_cast<unsigned>(sizeof(DictEntryList)));
-        setResult(LookupResult::LowMemory);
-        return false;
-      }
-      bool synReadError = false;
-      locateSynonyms(session, cleaned.c_str(), *synonyms, &synReadError);
-      searchFailed = searchFailed || synReadError;
-      if (synonyms->size() == 1) {
-        location = synonyms->location(0);
-        matchedHeadwordOut = synonyms->headword(0);
-      } else if (synonyms->size() > 1) {
-        location.found = true;
-      }
+    if (group->empty() && hasSyn) {
+      locateSynonyms(session, cleaned.c_str(), *group, &readError);
+      searchFailed = searchFailed || readError;
+      fromSynonyms = !group->empty();
     }
 
-    if (!location.found) {
+    if (group->empty()) {
       std::vector<std::string> variants;
       stemVariants(cleaned, variants);
       for (const auto& variant : variants) {
-        location = locate(session, variant.c_str(), &matchedHeadwordOut);
-        searchFailed = searchFailed || location.readError;
-        if (location.found) break;
+        locateAll(session, variant.c_str(), *group, &readError);
+        searchFailed = searchFailed || readError;
+        if (!group->empty()) break;
       }
     }
   }
-  if (!location.found) {
+  if (group->empty()) {
     // A search that never reached a verdict (couldn't open or seek .idx) is a
     // read failure, not a miss — reporting "Not found" is the bug this PR exists
     // for. Otherwise the word is genuinely not in the dictionary.
@@ -909,20 +910,23 @@ bool Dictionary::lookup(const char* word, std::string& definitionOut, std::strin
     return false;
   }
 
-  // Several headwords behind one synonym: show them all, each labelled, under
-  // the word the reader actually looked up.
-  if (synonyms && synonyms->size() > 1) {
-    matchedHeadwordOut = cleaned;
-    if (readLabelledGroup(*synonyms, definitionOut, outResult)) {
+  // One entry: shown on its own under its headword.
+  if (group->size() == 1) {
+    matchedHeadwordOut = group->headword(0);
+    // Found in the index — propagate the precise failure reason from
+    // readDefinition (decompression / low memory / read error).
+    if (readDefinition(group->location(0), definitionOut, outResult)) {
       setResult(LookupResult::Found);
       return true;
     }
     return false;
   }
 
-  // Found in the index — propagate the precise failure reason from readDefinition
-  // (decompression / low memory / read error) so the caller can name it.
-  if (readDefinition(location, definitionOut, outResult)) {
+  // Several entries (homographs, or a synonym of several headwords): combined,
+  // each labelled with its headword. The heading is the headword for
+  // homographs, and the word the reader looked up for synonyms.
+  matchedHeadwordOut = fromSynonyms ? cleaned : std::string(group->headword(0));
+  if (readLabelledGroup(*group, definitionOut, outResult)) {
     setResult(LookupResult::Found);
     return true;
   }
