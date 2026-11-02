@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <Utf8.h>
 
 #include <algorithm>
 #include <cctype>
@@ -63,6 +64,38 @@ uint32_t readBe32(const uint8_t* p) {
 // Word characters for cleaning: ASCII alphanumerics plus any UTF-8
 // continuation/lead byte, so accented words keep their edges.
 bool isWordByte(unsigned char c) { return c >= 0x80 || std::isalnum(c) != 0; }
+
+// Non-ASCII punctuation that wraps or ends a word in CJK and European text but
+// is never part of a headword: guillemets, CJK brackets and full stops, and the
+// fullwidth ASCII forms. isWordByte() keeps every byte >= 0x80, so without this
+// a selection like 「読む」 or «mot» never matches. (Upstream #4177 reuses its
+// CjkBreaks no-break tables; we have no CjkBreaks, so the union of those two
+// tables lives here. Either side is stripped from either edge.)
+constexpr uint32_t EDGE_PUNCTUATION[] = {
+    0x00AB, 0x00BB,                                                  // « »
+    0x3001, 0x3002,                                                  // 、 。
+    0x3008, 0x3009, 0x300A, 0x300B, 0x300C, 0x300D, 0x300E, 0x300F,  // 〈〉《》「」『』
+    0x3010, 0x3011, 0x3014, 0x3015, 0x3016, 0x3017, 0x3018, 0x3019,  // 【】〔〕〖〗〘〙
+    0x301A, 0x301B,                                                  // 〚〛
+    0xFF01, 0xFF08, 0xFF09, 0xFF0C, 0xFF0E, 0xFF1A, 0xFF1B, 0xFF1F,  // ！（），．：；？
+    0xFF3B, 0xFF3D, 0xFF5B, 0xFF5D,                                  // ［］｛｝
+};
+
+constexpr bool isEdgePunctuation(const uint32_t cp) {
+  for (const uint32_t p : EDGE_PUNCTUATION) {
+    if (p == cp) return true;
+  }
+  return false;
+}
+
+// Byte length of the edge-punctuation codepoint starting at b[pos], or 0.
+size_t edgePunctuationAt(const unsigned char* b, const size_t pos, const size_t end) {
+  if (b[pos] < 0xC0) return 0;  // ASCII (isWordByte handles it) or a stray continuation byte
+  const unsigned char* p = b + pos;
+  const uint32_t cp = utf8NextCodepoint(&p);
+  const auto len = static_cast<size_t>(p - (b + pos));
+  return pos + len <= end && isEdgePunctuation(cp) ? len : 0;
+}
 
 // Facts read from the .ifo at open time. Only the first 2KB is scanned — .ifo
 // headers are tiny and both keys always appear early when present.
@@ -585,20 +618,30 @@ std::string Dictionary::cleanWord(const char* word) {
   // are all >= 0x80, so isWordByte keeps them; strip those 3-byte codepoints
   // from the edges too, or EPUB text like garage.” never matches a headword.
   while (start < end) {
-    if (!isWordByte(b[start]))
+    if (!isWordByte(b[start])) {
       start++;
-    else if (end - start >= 3 && b[start] == 0xE2 && (b[start + 1] == 0x80 || b[start + 1] == 0x81))
+    } else if (end - start >= 3 && b[start] == 0xE2 && (b[start + 1] == 0x80 || b[start + 1] == 0x81)) {
       start += 3;
-    else
+    } else if (const size_t len = edgePunctuationAt(b, start, end)) {
+      start += len;
+    } else {
       break;
+    }
   }
   while (end > start) {
-    if (!isWordByte(b[end - 1]))
+    if (!isWordByte(b[end - 1])) {
       end--;
-    else if (end - start >= 3 && b[end - 3] == 0xE2 && (b[end - 2] == 0x80 || b[end - 2] == 0x81))
+      continue;
+    }
+    if (end - start >= 3 && b[end - 3] == 0xE2 && (b[end - 2] == 0x80 || b[end - 2] == 0x81)) {
       end -= 3;
-    else
-      break;
+      continue;
+    }
+    // Back up to the lead byte of the last codepoint.
+    size_t last = end - 1;
+    while (last > start && (b[last] & 0xC0) == 0x80) last--;
+    if (edgePunctuationAt(b, last, end) != end - last) break;
+    end = last;
   }
   if (start >= end) return "";
 
