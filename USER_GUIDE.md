@@ -179,8 +179,9 @@ Defaults:
 | **Shortcut** *(default)* | The **hold** action bound to that third of the screen. The three hold rows are only listed in this mode. |
 | **Dictionary** | Looks up the word under your finger when you lift it. Keep the finger down and slide to another word to look up the whole phrase instead. |
 | **Highlight** | Starts a clipping at the word under your finger. Keep the finger down and slide to the last word, then lift, to save that passage; lift without sliding and the word stays marked, ready for a tap on the last word (see [Bookmarks & Clippings](#8-bookmarks--clippings)). |
+| **Select Text** | Selects the word under your finger; keep the finger down and slide to select more. When you lift, the selection stays with a handle at each end and a small toolbar: **Look Up** (shown only when a dictionary is chosen) and **Clip**. Drag either handle to change the selection, tap **Clip** to save it as a clipping (no dictionary needed) or **Look Up** to look it up. Hold another word to start again there; tap anywhere off the selection, or **Back**, to cancel. The selection stays on the visible page. |
 
-In **Dictionary** and **Highlight** a hold on a margin, a picture or the gap between paragraphs does nothing, and the per-zone hold actions are switched off (your choices are kept and come back when you return to **Shortcut**). Dictionary still needs a dictionary to be chosen first. XTC books have no selectable words, so a hold does nothing there in these two modes.
+In **Dictionary**, **Highlight** and **Select Text** a hold on a margin, a picture or the gap between paragraphs does nothing, and the per-zone hold actions are switched off (your choices are kept and come back when you return to **Shortcut**). Dictionary still needs a dictionary to be chosen first. XTC books have no selectable words, so a hold does nothing there in these modes.
 
 While a double-tap action is bound, a single tap waits about a third of a second to rule out a second tap; bind the double tap to **None** to make the single tap instant. A **leftward swipe does nothing** on the reading page — it used to open the menu and was too easy to trigger by accident; use the action bar's **Confirm** button (bindable as the Confirm row) or the middle tap zone instead.
 
@@ -295,6 +296,7 @@ A file/folder browser over the SD card.
 - **Progress column:** each row shows a right-aligned marker — `X` (finished, ≥90%), a percentage like `21%` (in progress), or blank (unopened / directory).
 - A **`& `** prefix marks books linked to your BookFusion account.
 - *(X4 Pro)* A long **hold on a book row** opens the same Book Options popup; a hold on a folder starts the delete prompt.
+- *(X4 Pro)* **Swipe a file row to the left** to reveal a **Delete** button; tap it, then confirm, to delete the file. A tap anywhere else, Back, or a page swipe hides the button again. Folders do not get one. The same swipe works on book rows in the Tags/Authors/Series lists and on bookmarks in the reader's Bookmarks list.
 
 <img src="docs/images/user-guide/browse-files.png" alt="Browse Files list showing books with right-aligned progress percentages and the Sort tab" width="300">
 
