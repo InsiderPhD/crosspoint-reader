@@ -4,6 +4,7 @@
 #include <HalGPIO.h>
 #include <HardcoverTokenStore.h>
 #include <I18n.h>
+#include <KOReaderCredentialStore.h>
 #include <Logging.h>
 #include <Memory.h>
 
@@ -39,6 +40,7 @@
 #include "components/icons/recent.h"
 #include "components/icons/streak24.h"
 #include "fontIds.h"
+#include "sync/CombinedStreak.h"
 #include "util/HardcoverSync.h"
 #include "util/ReadingStatsAnalytics.h"
 #include "util/TimeUtils.h"
@@ -1414,9 +1416,25 @@ void ReadingStatsActivity::render(RenderLock&&) {
     const char* rowLabels[SUMMARY_ROW_COUNT] = {tr(STR_STREAK),       tr(STR_MAX_STREAK),      tr(STR_DAILY_GOAL),
                                                 tr(STR_READING_TIME), tr(STR_BOOKS_FINISHED),  tr(STR_BOOKS_STARTED),
                                                 tr(STR_AVG_SESSION),  tr(STR_LONGEST_SESSION), tr(STR_SESSIONS_TODAY)};
+    // With Reading Stats sync on, the streak rows also show the CrossPoint
+    // Sync streak across every reader on the account, kept separate from this
+    // reader's own (goal-based) streak: "3  (all devices 5)".
+    std::string streakValue = std::to_string(READING_STATS.getCurrentStreakDays());
+    std::string maxStreakValue = std::to_string(READING_STATS.getMaxStreakDays());
+    if (KOREADER_STORE.getSyncStats() && CombinedStreak::get().valid) {
+      const uint32_t now = TimeUtils::getCurrentValidTimestamp();
+      const uint32_t today = TimeUtils::isClockValid(now) ? TimeUtils::getLocalDayOrdinal(now) : 0;
+      char combined[48];
+      snprintf(combined, sizeof(combined), "  (%s %u)", tr(STR_ALL_DEVICES),
+               static_cast<unsigned>(CombinedStreak::currentAsOf(today)));
+      streakValue += combined;
+      snprintf(combined, sizeof(combined), "  (%s %u)", tr(STR_ALL_DEVICES),
+               static_cast<unsigned>(CombinedStreak::get().longest));
+      maxStreakValue += combined;
+    }
     const std::string rowValues[SUMMARY_ROW_COUNT] = {
-        std::to_string(READING_STATS.getCurrentStreakDays()),
-        std::to_string(READING_STATS.getMaxStreakDays()),
+        streakValue,
+        maxStreakValue,
         dailyGoalValue,
         ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTotalReadingMs()),
         std::to_string(READING_STATS.getBooksFinishedCount()),

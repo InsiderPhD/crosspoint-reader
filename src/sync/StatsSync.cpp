@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 
+#include "CombinedStreak.h"
 #include "ReadingStatsStore.h"
 #include "StatsPayload.h"
 #include "activities/reader/TlsFramebufferBorrow.h"
@@ -172,6 +173,33 @@ Result uploadBooks(GfxRenderer& renderer, char* buffer, const char* deviceId, un
   if (!send()) return result == Result::Ok ? Result::Failed : result;
   return Result::Ok;
 }
+// GET /api/v1/stats/summary into the step's buffer (its device list makes it
+// longer than the PUT replies), keeping only the streak fields.
+void downloadStreak(GfxRenderer& renderer, char* buffer) {
+  KOReaderSyncClient::Error err;
+  {
+    TlsFramebufferBorrow borrow(renderer);
+    err = KOReaderSyncClient::extensionRequest("/api/v1/stats/summary", nullptr, buffer, PAYLOAD_CAPACITY);
+  }
+  if (err != KOReaderSyncClient::OK) {
+    LOG_ERR("STATSYNC", "Summary download failed: %s", KOReaderSyncClient::errorString(err));
+    return;
+  }
+  JsonDocument filter;
+  filter["streak"] = true;
+  filter["current_streak"] = true;
+  filter["anchor_day"] = true;
+  JsonDocument doc;
+  if (deserializeJson(doc, buffer, DeserializationOption::Filter(filter)) != DeserializationError::Ok ||
+      !doc["anchor_day"].is<uint32_t>()) {
+    LOG_ERR("STATSYNC", "Summary has no streak");
+    return;
+  }
+  const uint32_t anchorDay = doc["anchor_day"].as<uint32_t>();
+  if (anchorDay == 0 || anchorDay > 36524) return;  // unset, or not a date
+  CombinedStreak::save(doc["current_streak"] | 0u, doc["streak"] | 0u,
+                       anchorDay + StatsPayload::SERVER_EPOCH_OFFSET_DAYS);
+}
 }  // namespace
 
 Result upload(GfxRenderer& renderer, unsigned& booksSent) {
@@ -189,6 +217,9 @@ Result upload(GfxRenderer& renderer, unsigned& booksSent) {
 
   Result result = uploadGlobal(renderer, buffer.get(), deviceId);
   if (result == Result::Ok) result = uploadBooks(renderer, buffer.get(), deviceId, booksSent);
+  // Read back only after this reader's own days are on the server, so the
+  // combined streak includes them. A failure here never fails the upload.
+  if (result == Result::Ok) downloadStreak(renderer, buffer.get());
   LOG_INF("STATSYNC", "Stats upload: result %d, %u books (heap %u)", static_cast<int>(result), booksSent,
           (unsigned)ESP.getFreeHeap());
   return result;
