@@ -788,7 +788,9 @@ KOReaderPosition ProgressMapper::toKOReader(const std::shared_ptr<Epub>& epub, c
     result.xpath = ChapterXPathResolver::findXPathForParagraph(epub, pos.spineIndex, pos.paragraphIndex);
   }
   if (result.xpath.empty()) {
+    LOG_INF("PM", "No structural XPath for spine %d; using a paragraph-count guess", pos.spineIndex);
     result.xpath = generateXPath(epub, pos.spineIndex, intra);
+    result.structural = false;
   }
   LOG_DBG("PM", "-> KO: spine=%d page=%d/%d %.2f%% %s", pos.spineIndex, pos.pageNumber, pos.totalPages,
           result.percentage * 100, result.xpath.c_str());

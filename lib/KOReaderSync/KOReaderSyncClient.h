@@ -59,6 +59,10 @@ struct KOReaderProgress {
   int64_t timestamp = 0;                         // Unix timestamp of last update
   std::optional<KOReaderMetadata> metadata;      // Upload only; never filled by getProgress
   std::optional<KOReaderRichPosition> position;  // Rich position, both directions, when supported
+  // Upload only: `progress` is a guessed XPath (KOReaderPosition::structural
+  // was false). Refused for a strict KOSync server; a crosspoint-sync server
+  // still takes it, since its receivers fall back to the rich position.
+  bool progressIsGuess = false;
 };
 
 /**
@@ -86,7 +90,8 @@ class KOReaderSyncClient {
     JSON_ERROR,
     NOT_FOUND,
     LOW_MEMORY,
-    USER_EXISTS
+    USER_EXISTS,
+    POSITION_UNRESOLVED  // upload refused: the local position has no structural XPath
   };
 
   /**

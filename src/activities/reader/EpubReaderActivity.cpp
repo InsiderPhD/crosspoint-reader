@@ -3090,6 +3090,7 @@ std::unique_ptr<ProgressAutoSync::Payload> EpubReaderActivity::buildAutosyncPayl
   const CrossPointPosition localPos = koSyncLocalPosition(currentPage, totalPages);
   const KOReaderPosition koPos = ProgressMapper::toKOReader(epub, localPos);
   payload->koXpath = koPos.xpath;
+  payload->koXpathIsGuess = !koPos.structural;
   payload->koPercentage = koPos.percentage;
   payload->koPosition = ProgressMapper::toRichPosition(localPos, koPos);
   payload->bookPercent = koPos.percentage * 100.0f;
@@ -4267,6 +4268,7 @@ void EpubReaderActivity::performKOReaderQuickSync() {
     uploadProgress.document = documentHash;
     uploadProgress.progress = localKoPos.xpath;
     uploadProgress.percentage = localKoPos.percentage;
+    uploadProgress.progressIsGuess = !localKoPos.structural;
     uploadProgress.position = ProgressMapper::toRichPosition(localPos, localKoPos);
     uploadProgress.metadata = KOReaderMetadata::fromBook(*epub);
     uploadResult = KOReaderSyncClient::updateProgress(uploadProgress);

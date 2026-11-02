@@ -57,6 +57,7 @@ struct Payload {
   // KOReader
   std::string koDocumentHash;  // empty => resolved during the push
   std::string koXpath;
+  bool koXpathIsGuess = false;                     // see KOReaderProgress::progressIsGuess
   float koPercentage = 0.0f;                       // 0.0-1.0
   std::optional<KOReaderMetadata> koMetadata;      // set only when Send Book Details is on
   std::optional<KOReaderRichPosition> koPosition;  // dropped by the client for a strict KOSync server

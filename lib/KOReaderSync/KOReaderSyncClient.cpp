@@ -293,6 +293,13 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
     return NO_CREDENTIALS;
   }
 
+  // A guessed /body/p[N] can send KOReader to the start of the book. Better to
+  // upload nothing than a position that moves the reader backwards.
+  if (progress.progressIsGuess && !KOREADER_STORE.supportsRichProgress()) {
+    LOG_ERR("KOSync", "Not uploading a guessed XPath to a KOSync server: %s", progress.progress.c_str());
+    return POSITION_UNRESOLVED;
+  }
+
   std::string url = KOREADER_STORE.getBaseUrl() + "/syncs/progress";
   LOG_DBG("KOSync", "Updating progress: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
   if (insufficientHeap()) return LOW_MEMORY;
@@ -385,6 +392,8 @@ const char* KOReaderSyncClient::errorString(Error error) {
       return "Not enough memory for sync, please retry";
     case USER_EXISTS:
       return "Username is already registered";
+    case POSITION_UNRESOLVED:
+      return "Position could not be mapped for KOReader";
     default:
       return "Unknown error";
   }

@@ -187,6 +187,7 @@ bool pushKOReader(const ProgressAutoSync::Payload& payload) {
   KOReaderProgress progress;
   progress.document = hash;
   progress.progress = payload.koXpath;
+  progress.progressIsGuess = payload.koXpathIsGuess;
   progress.percentage = payload.koPercentage;
   progress.metadata = payload.koMetadata;
   progress.position = payload.koPosition;

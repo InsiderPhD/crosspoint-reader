@@ -296,6 +296,7 @@ void KOReaderSyncActivity::performUpload() {
   progress.document = documentHash;
   progress.progress = koPos.xpath;
   progress.percentage = koPos.percentage;
+  progress.progressIsGuess = !koPos.structural;
   // The client drops it again for a strict KOSync server.
   progress.position = ProgressMapper::toRichPosition(localPos, koPos);
   if (epub) {

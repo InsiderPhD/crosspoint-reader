@@ -16,6 +16,13 @@ class GfxRenderer;
 struct KOReaderPosition {
   std::string xpath;  // XPath-like progress string
   float percentage;   // Progress percentage (0.0 to 1.0)
+  // False when no structural resolver could place the position and xpath is
+  // the /body/DocFragment[N]/body/p[K] guess from generateXPath(). The guess
+  // drops wrappers such as <section>/<div>, so KOReader can fail to resolve it
+  // and jump to the start of the book; it must not be uploaded to a strict
+  // KOSync server (see KOReaderProgress::progressIsGuess). Local consumers
+  // (bookmarks, nearby sync) still get the guess as a coarse anchor.
+  bool structural = true;
 };
 
 /**
@@ -24,9 +31,9 @@ struct KOReaderPosition {
  * CrossPoint tracks position as (spineIndex, pageNumber).
  * KOReader uses XPath-like strings + percentage.
  *
- * Since CrossPoint discards HTML structure during parsing, we generate
- * synthetic XPath strings based on spine index, using percentage as the
- * primary sync mechanism.
+ * Outgoing positions carry the chapter's real HTML ancestry (visible-text
+ * offset, then progress, then paragraph index). Only when all of those fail is
+ * a paragraph-count guess produced, flagged with structural = false.
  */
 class ProgressMapper {
  public:
