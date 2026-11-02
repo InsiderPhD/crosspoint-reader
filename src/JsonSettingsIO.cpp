@@ -626,6 +626,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
 namespace {
 // v2: an empty serverUrl means the CrossPoint server, not sync.koreader.rocks.
 // v3: the CrossPoint server type exists (v2 files could only say Standard/Extended).
+// Same numbering and key names ("cfgVersion", "headers") as upstream CrossPoint
+// and CrossInk, which share /.crosspoint/koreader.json: a file one of them wrote
+// must not look like v1 here, or the v1 migration pins sync.koreader.rocks.
 constexpr uint8_t KOREADER_CONFIG_VERSION = 3;
 }  // namespace
 
@@ -639,14 +642,14 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
   doc["sendMetadata"] = store.getSendMetadata();
   doc["syncClippings"] = store.getSyncClippings();
   doc["syncBehavior"] = static_cast<uint8_t>(store.getSyncBehavior());
-  JsonArray headers = doc["customHeaders"].to<JsonArray>();
+  JsonArray headers = doc["headers"].to<JsonArray>();
   for (const auto& header : store.getCustomHeaders()) {
     if (header.name.empty()) continue;
     JsonObject obj = headers.add<JsonObject>();
     obj["name"] = header.name;
     obj["value_obf"] = obfuscation::obfuscateToBase64(header.value);
   }
-  doc["configVersion"] = KOREADER_CONFIG_VERSION;
+  doc["cfgVersion"] = KOREADER_CONFIG_VERSION;
 
   String json;
   serializeJson(doc, json);
@@ -672,7 +675,8 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
   store.serverUrl = doc["serverUrl"] | std::string("");
   // Before v2 an empty serverUrl meant sync.koreader.rocks; the default is now
   // the CrossPoint server. Pin the old URL so an existing account keeps working.
-  const uint8_t configVersion = doc["configVersion"] | static_cast<uint8_t>(1);
+  // "configVersion" was this fork's pre-release spelling.
+  const uint8_t configVersion = doc["cfgVersion"] | (doc["configVersion"] | static_cast<uint8_t>(1));
   if (configVersion < 2) {
     // No account yet means nothing to strand: let it take the new default.
     if (store.serverUrl.empty() && !store.username.empty()) {
@@ -680,7 +684,7 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
       LOG_DBG("KRS", "Pre-v2 config used the old default server; pinning %s", store.serverUrl.c_str());
     }
   }
-  if (configVersion < KOREADER_CONFIG_VERSION && needsResave) *needsResave = true;
+  if ((configVersion < KOREADER_CONFIG_VERSION || doc["cfgVersion"].isNull()) && needsResave) *needsResave = true;
   // Absent: the CrossPoint type for the CrossPoint server, standard KOSync for
   // anything else (as upstream). A v2 file could not say CrossPoint, so its
   // Standard on the CrossPoint server becomes CrossPoint (the server takes both).
@@ -709,7 +713,12 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
   if (behaviorValue.isNull() && needsResave) *needsResave = true;
   for (auto& header : store.customHeaders) header = HttpHeader{};
   size_t headerIndex = 0;
-  for (JsonObjectConst headerObj : doc["customHeaders"].as<JsonArrayConst>()) {
+  // "customHeaders" was this fork's pre-release spelling.
+  const JsonArrayConst headerArray = doc["headers"].is<JsonArrayConst>() ? doc["headers"].as<JsonArrayConst>()
+                                                                         : doc["customHeaders"].as<JsonArrayConst>();
+  if (!doc["headers"].is<JsonArrayConst>() && doc["customHeaders"].is<JsonArrayConst>() && needsResave)
+    *needsResave = true;
+  for (JsonObjectConst headerObj : headerArray) {
     if (headerIndex >= store.customHeaders.size()) break;
     store.customHeaders[headerIndex].name = headerObj["name"] | "";
     store.customHeaders[headerIndex].value = obfuscation::deobfuscateFromBase64(headerObj["value_obf"] | "");
