@@ -31,9 +31,11 @@ class HalPowerManager {
   mutable bool gaugeCapacityLoadDone = false;     // terminal for this boot, whatever the outcome
   mutable unsigned long gaugeCapacityLoadStartMs = 0;
 
-  enum LockMode { None, NormalSpeed };
-  LockMode currentLockMode = None;
-  SemaphoreHandle_t modeMutex = nullptr;  // Protect access to currentLockMode
+  // Number of live Lock instances. Counted, not a flag: the render task, the
+  // BLE manager and sleep preparation can each hold one at once, and the CPU
+  // must stay at full speed until the LAST of them is released.
+  uint32_t lockCount = 0;
+  SemaphoreHandle_t modeMutex = nullptr;  // Protect access to lockCount and the CPU mode
 
  public:
 #if FREEINK_MCU_S3
@@ -63,7 +65,7 @@ class HalPowerManager {
   void setPowerSaving(bool enabled);
 
   // Setup wake up GPIO and enter deep sleep
-  // Should be called inside main loop() to handle the currentLockMode
+  // Should be called inside main loop() to handle the lockCount
   // Does not return: if the SoC rejects sleep entry this restarts the device
   // rather than falling back into loop() (see the implementation).
   [[noreturn]] void startDeepSleep(HalGPIO& gpio) const;
@@ -99,10 +101,10 @@ class HalPowerManager {
 
   // RAII helper class to manage power saving locks
   // Usage: create an instance of Lock in a scope to disable power saving, for example when running a task that needs
-  // full performance. When the Lock instance is destroyed (goes out of scope), power saving will be re-enabled.
+  // full performance. Locks nest and may overlap across tasks; power saving is allowed again only after the last
+  // live Lock instance is destroyed.
   class Lock {
     friend class HalPowerManager;
-    bool valid = false;
 
    public:
     explicit Lock();

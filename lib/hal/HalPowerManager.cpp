@@ -167,7 +167,7 @@ void HalPowerManager::setPowerSaving(bool enabled) {
       esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE ? LOW_POWER_FREQ : BLE_LOW_POWER_FREQ;
 
   // Serialised, including the setCpuFrequencyMhz() call itself. This used to run
-  // lock-free ("a slightly stale currentLockMode doesn't matter"), which held on
+  // lock-free ("a slightly stale lock state doesn't matter"), which held on
   // the single-core C3. It does not hold on the dual-core X4 Pro: a page turn
   // coming out of idle has the loop task on core 0 (main.cpp, on user input) and
   // the render task on core 1 (ActivityManager's HalPowerManager::Lock) both call
@@ -175,9 +175,9 @@ void HalPowerManager::setPowerSaving(bool enabled) {
   // setCpuFrequencyMhz(). That reconfigures the PLL and walks Arduino's
   // APB-change callback list, neither of which is cross-core safe.
   xSemaphoreTake(modeMutex, portMAX_DELAY);
-  const LockMode mode = currentLockMode;
+  const bool locked = lockCount > 0;
 
-  if (mode == None && enabled && (!isLowPower || appliedLowFreq != lowFreq)) {
+  if (!locked && enabled && (!isLowPower || appliedLowFreq != lowFreq)) {
     LOG_DBG("PWR", "Going to low-power mode (%d MHz)", lowFreq);
     if (setCpuFrequencyMhz(lowFreq)) {
       isLowPower = true;
@@ -186,7 +186,7 @@ void HalPowerManager::setPowerSaving(bool enabled) {
       LOG_DBG("PWR", "Failed to set CPU frequency = %d MHz", lowFreq);
     }
 
-  } else if ((!enabled || mode != None) && isLowPower) {
+  } else if ((!enabled || locked) && isLowPower) {
     LOG_DBG("PWR", "Restoring normal CPU frequency");
     if (setCpuFrequencyMhz(normalFreq)) {
       isLowPower = false;
@@ -390,25 +390,26 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
 
 HalPowerManager::Lock::Lock() {
   xSemaphoreTake(powerManager.modeMutex, portMAX_DELAY);
-  // Current limitation: only one lock at a time
-  if (powerManager.currentLockMode != None) {
-    LOG_ERR("PWR", "Lock already held, ignore");
-    valid = false;
-  } else {
-    powerManager.currentLockMode = NormalSpeed;
-    valid = true;
-  }
+  ++powerManager.lockCount;
   xSemaphoreGive(powerManager.modeMutex);
-  if (valid) {
-    // Immediately restore normal CPU frequency if currently in low-power mode
-    powerManager.setPowerSaving(false);
-  }
+  // Immediately restore normal CPU frequency if currently in low-power mode.
+  // Harmless when another lock already holds full speed (no-op branch).
+  powerManager.setPowerSaving(false);
 }
 
 HalPowerManager::Lock::~Lock() {
   xSemaphoreTake(powerManager.modeMutex, portMAX_DELAY);
-  if (valid) {
-    powerManager.currentLockMode = None;
+  // Lock is non-copyable and non-movable, so every destructor pairs with exactly
+  // one constructor and the count cannot underflow. Guard anyway: an unsigned
+  // wrap would pin the CPU at full speed for the rest of the boot.
+  bool underflow = false;
+  if (powerManager.lockCount > 0) {
+    --powerManager.lockCount;
+  } else {
+    underflow = true;
   }
   xSemaphoreGive(powerManager.modeMutex);
+  if (underflow) {
+    LOG_ERR("PWR", "Lock released with no lock held, ignored");
+  }
 }
