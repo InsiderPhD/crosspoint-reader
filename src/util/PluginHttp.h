@@ -66,8 +66,14 @@ std::string escapeUrl(const std::string& url);
 
 // --- token / config files ---
 
+// A manifest file path: relative paths live in the plugin's own folder
+// (`pluginDir`), absolute paths are used as they are (upstream CrossPoint 2.0).
+std::string inPluginDir(const std::string& pluginDir, const char* path);
+
 // Reads the token at `path` (dotted) from the JSON file at `file`.
 // An empty `file` means a token-less plugin: returns true with `out` empty.
+// A credential store (wifi / koreader / settings ...) is refused, for reading
+// and writing, so a manifest cannot point the firmware at one.
 bool loadTokenFromFile(const std::string& file, const std::string& path, std::string& out);
 
 // Writes `value` at `path` into `file`, building the nesting the read path

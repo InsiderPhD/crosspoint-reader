@@ -235,13 +235,15 @@ Two browse formats:
 {
   "title": "Service Name",                  // menu label; defaults to folder name
 
+  // Relative paths are in the plugin's own folder; absolute paths work too.
+  // The credential stores (wifi/opds/koreader/settings .json) are refused.
   "token": {                                // omit for token-less catalogs
-    "file": "/.crosspoint/<name>.json",     // written by auth (either side)
+    "file": "token.json",                   // written by auth (either side)
     "path": "token"                         // dotted JSON path inside the file
   },
 
   "config": {                               // optional: flat JSON of {cfg.KEY} values,
-    "file": "/.crosspoint/<name>-cfg.json"  // e.g. a user-entered server URL + credentials
+    "file": "config.json"                   // e.g. a user-entered server URL + credentials
   },
 
   "browse": {                               // required

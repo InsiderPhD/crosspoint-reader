@@ -493,9 +493,11 @@ bool PluginCatalogActivity::loadManifest() {
   JsonDocument doc;
   if (deserializeJson(doc, raw) != DeserializationError::Ok) return false;
 
-  manifest.tokenFile = doc["token"]["file"] | "";
+  // Relative token / config paths live in the plugin's own folder.
+  const std::string pluginDir = manifestPath.substr(0, manifestPath.rfind('/'));
+  manifest.tokenFile = pluginhttp::inPluginDir(pluginDir, doc["token"]["file"] | "");
   manifest.tokenPath = doc["token"]["path"] | "token";
-  manifest.configFile = doc["config"]["file"] | "";
+  manifest.configFile = pluginhttp::inPluginDir(pluginDir, doc["config"]["file"] | "");
 
   JsonVariantConst browse = doc["browse"];
   manifest.browseFormat = browse["format"] | "json";
