@@ -1871,10 +1871,19 @@
     // Fetch CrossPoint version
     fetchVersion();
 
-    // Close modals when clicking overlay - call proper cleanup functions
+    // Close modals when clicking overlay - call proper cleanup functions.
+    // Only a click that also STARTED on the overlay closes: a text-selection
+    // drag begun in an input that ends outside the dialog fires its click on
+    // the overlay and used to close the dialog mid-edit (upstream #3931).
     document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
+      let pressTarget = null;
+      overlay.addEventListener('mousedown', function(e) {
+        pressTarget = e.target;
+      });
       overlay.addEventListener('click', function(e) {
-        if (e.target === overlay) {
+        const startedOnOverlay = pressTarget === overlay;
+        pressTarget = null;
+        if (startedOnOverlay && e.target === overlay) {
           // Call the appropriate close function for each modal to ensure cleanup
           if (overlay.id === 'uploadModal') return closeUploadModal();
           if (overlay.id === 'folderModal') return closeFolderModal();
