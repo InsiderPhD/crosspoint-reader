@@ -687,7 +687,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Orientation** — Portrait / Landscape CW / Inverted / Landscape CCW.
 - **Extra Paragraph Spacing** — space between paragraphs vs. first-line indent.
 - **Text Anti-Aliasing** — smooth grey edges on text (slightly slower page turns).
-- **Images** — Display / Placeholder / Suppress.
+- **Images** — Display / Placeholder / Suppress. JPG, PNG and GIF images (and covers) are shown; an animated GIF shows its first frame, and an interlaced GIF (or one the device has no memory for at that moment) shows the outlined image placeholder.
 - **Image Grayscale** — On (default) draws book images in four gray levels, which costs an extra panel refresh on every image page. Off dithers them to plain black and white and turns the page as fast as a text page. Can also be set per book (reader menu → **Book Settings**).
 - **Footnotes** — On page / In menu.
 - **Bionic Reading** — bold word-starts (see **[Bionic Reading](#bionic-reading)**).

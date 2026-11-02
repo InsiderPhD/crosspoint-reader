@@ -2,6 +2,10 @@
 
 #include <Bitmap.h>
 #include <FsHelpers.h>
+#include <GifCommon.h>
+#include <GifImageLayout.h>
+#include <GifLimitedWriter.h>
+#include <GifToBmpConverter.h>
 #include <HalStorage.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
@@ -31,6 +35,41 @@ bool coverBmpIsReadable(const std::string& path) {
     return false;
   }
   return true;
+}
+
+// GIF cover -> BMP at outPath: the GIF is copied out of the zip (capped at 16 MB, so a lying
+// directory entry cannot fill the card) and decoded from that temp file, as the JPEG and PNG
+// covers are. `thumbHeight` 0 converts the full 2-bit cover, otherwise a 1-bit thumbnail.
+bool convertGifCover(const Epub& epub, const std::string& href, const std::string& outPath, const bool cropped,
+                     const int thumbHeight) {
+  const auto gifTempPath = epub.getCachePath() + "/.cover.gif";
+  FsFile gifFile;
+  if (!Storage.openFileForWrite("EBP", gifTempPath, gifFile)) return false;
+  GifLimitedWriter limited(gifFile, GifCommon::MAX_FILE_BYTES);
+  const bool extracted = epub.readItemContentsToStream(href, limited, 1024);
+  gifFile.close();
+  if (!extracted || !Storage.openFileForRead("EBP", gifTempPath, gifFile)) {
+    LOG_ERR("EBP", "GIF cover extraction failed or exceeded %u bytes",
+            static_cast<unsigned>(GifCommon::MAX_FILE_BYTES));
+    Storage.remove(gifTempPath.c_str());
+    return false;
+  }
+
+  FsFile bmpFile;
+  if (!Storage.openFileForWrite("EBP", outPath, bmpFile)) {
+    gifFile.close();
+    Storage.remove(gifTempPath.c_str());
+    return false;
+  }
+  const bool success = thumbHeight > 0 ? GifToBmpConverter::gifFileTo1BitBmpStreamWithSize(
+                                             gifFile, bmpFile, static_cast<int>(thumbHeight * 0.6), thumbHeight)
+                                       : GifToBmpConverter::gifFileToBmpStream(gifFile, bmpFile, cropped);
+  gifFile.close();
+  bmpFile.flush();
+  bmpFile.close();
+  Storage.remove(gifTempPath.c_str());
+  if (!success) Storage.remove(outPath.c_str());
+  return success;
 }
 
 }  // namespace
@@ -854,6 +893,25 @@ bool Epub::generateCoverBmp(bool cropped) const {
     return true;
   }
 
+  if (FsHelpers::hasGifExtension(coverImageHref)) {
+    LOG_DBG("EBP", "Generating BMP from GIF cover image (%s mode)", cropped ? "cropped" : "fit");
+    if (!GifToBmpConverter::hasHeapForDecoder()) {
+      LOG_ERR("EBP", "Not enough heap for the GIF decoder now; cover left for a later attempt");
+      return false;
+    }
+    if (!convertGifCover(*this, coverImageHref, coverBmpPath, cropped, 0)) {
+      LOG_ERR("EBP", "Failed to generate BMP from GIF cover image");
+      return false;
+    }
+    if (!coverBmpIsReadable(coverBmpPath)) {
+      LOG_ERR("EBP", "Generated cover BMP is invalid, removing: %s", coverBmpPath.c_str());
+      Storage.remove(coverBmpPath.c_str());
+      return false;
+    }
+    LOG_DBG("EBP", "Generated BMP from GIF cover image, success: yes");
+    return true;
+  }
+
   LOG_ERR("EBP", "Cover image is not a supported format, skipping");
   return false;
 }
@@ -1018,6 +1076,16 @@ bool Epub::generateThumbBmp(int height) const {
     }
     LOG_DBG("EBP", "Generated thumb BMP from PNG cover image, success: %s", success ? "yes" : "no");
     if (success) return true;
+  } else if (FsHelpers::hasGifExtension(coverImageHref)) {
+    LOG_DBG("EBP", "Generating thumb BMP from GIF cover image");
+    // Low heap is transient: return before the empty-thumb sentinel below, which would hide
+    // this cover for good.
+    if (!GifToBmpConverter::hasHeapForDecoder()) {
+      LOG_ERR("EBP", "Not enough heap for the GIF decoder now; thumbnail left for a later attempt");
+      return false;
+    }
+    if (convertGifCover(*this, coverImageHref, getThumbBmpPath(height), false, height)) return true;
+    LOG_ERR("EBP", "Failed to generate thumb BMP from GIF cover image");
   } else {
     LOG_ERR("EBP", "Cover image format not supported for thumbnail: %s", coverImageHref.c_str());
   }
