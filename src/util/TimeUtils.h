@@ -25,6 +25,11 @@ uint32_t getLocalDayOrdinal(uint32_t epochSeconds);
 // Local wall-clock hour (0-23) for an epoch timestamp. False when the clock is
 // not trustworthy, in which case hourOut is untouched.
 bool getLocalHour(uint32_t epochSeconds, uint8_t& hourOut);
+// Real seconds elapsed since the most recent local midnight for an epoch
+// timestamp (timezone and DST aware: on a 23- or 25-hour day this is elapsed
+// time, not wall-clock seconds). False when the clock is not trustworthy, in
+// which case secondsOut is untouched.
+bool getSecondsSinceLocalMidnight(uint32_t epochSeconds, uint32_t& secondsOut);
 // Local wall-clock minute of the day (0-1439) for the system clock right now.
 // False when the clock is not trustworthy, in which case minuteOut is untouched.
 bool getLocalMinuteOfDay(uint16_t& minuteOut);

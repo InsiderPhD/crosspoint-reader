@@ -112,12 +112,20 @@ class ReadingStatsStore {
     // then restores the real position and reports it, and that jump must
     // rebase the start, not count as progress read this session.
     bool startProgressRebased = false;
-    // How much of accumulatedMs is currently written into a per-day bucket, and
-    // under which day. Lets flushActiveSessionToBuckets() checkpoint the session
-    // durably mid-read (so an ungraceful shutdown doesn't lose it) while moving
-    // it to a single day if the resolved date changes.
+    // How much of accumulatedMs is currently written into per-day buckets
+    // (bucketedMs), the day of the latest checkpoint and how much of the session
+    // sits under that day (bucketedDayMs; less than bucketedMs once a session
+    // has been split across midnight). Lets flushActiveSessionToBuckets()
+    // checkpoint the session durably mid-read (so an ungraceful shutdown doesn't
+    // lose it), split it at local midnight, and move the current day's share if
+    // the clock is corrected.
     uint32_t bucketedDay = 0;
     uint64_t bucketedMs = 0;
+    uint64_t bucketedDayMs = 0;
+    // Wall clock and uptime at the latest checkpoint, to tell a day change from
+    // time passing (split) apart from a clock correction (move).
+    uint32_t bucketedAtTimestamp = 0;
+    unsigned long bucketedAtMillis = 0;
     // Same idea for the time-of-day buckets, tracked separately: those are
     // credited to whichever bucket the clock is in at each checkpoint and are
     // never moved afterwards, so they cannot share bucketedMs.
@@ -162,8 +170,8 @@ class ReadingStatsStore {
   uint32_t getReferenceDayOrdinal() const;
   void updateBookReadTimestamp(ReadingBookStats& book, uint32_t preferredTimestamp);
   // Checkpoint the active session's accumulated time into the per-day buckets,
-  // attributing the whole session to a single day (moving it if the resolved
-  // day changed). No-op while the clock is invalid. Called periodically for
+  // splitting it at local midnight and moving the current day's share if the
+  // clock was corrected. No-op while the clock is invalid. Called periodically for
   // crash-safety and once more at endSession().
   void flushActiveSessionToBuckets();
   // bookId may be empty (legacy paths) and dayOrdinal may be 0 (no date yet).

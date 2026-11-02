@@ -242,6 +242,39 @@ bool TimeUtils::getLocalHour(const uint32_t epochSeconds, uint8_t& hourOut) {
   return true;
 }
 
+bool TimeUtils::getSecondsSinceLocalMidnight(const uint32_t epochSeconds, uint32_t& secondsOut) {
+  configureTimezone();
+
+  if (!isClockValid(epochSeconds)) {
+    return false;
+  }
+
+  time_t currentTime = static_cast<time_t>(epochSeconds);
+  tm localTime = {};
+  if (localtime_r(&currentTime, &localTime) == nullptr) {
+    return false;
+  }
+  const uint32_t wallSeconds = static_cast<uint32_t>(localTime.tm_hour) * 3600u +
+                               static_cast<uint32_t>(localTime.tm_min) * 60u + static_cast<uint32_t>(localTime.tm_sec);
+
+  // Resolve today's local midnight back to an epoch so a DST change earlier in
+  // the day is accounted for. tm_isdst = -1 lets mktime work out which offset
+  // applied at midnight.
+  tm midnight = localTime;
+  midnight.tm_hour = 0;
+  midnight.tm_min = 0;
+  midnight.tm_sec = 0;
+  midnight.tm_isdst = -1;
+  const time_t midnightEpoch = mktime(&midnight);
+  if (midnightEpoch == static_cast<time_t>(-1) || midnightEpoch > currentTime ||
+      currentTime - midnightEpoch > 26 * 3600) {
+    secondsOut = wallSeconds;  // fall back to wall-clock seconds
+    return true;
+  }
+  secondsOut = static_cast<uint32_t>(currentTime - midnightEpoch);
+  return true;
+}
+
 uint32_t TimeUtils::getDayOrdinalForDate(const int year, const unsigned month, const unsigned day) {
   return static_cast<uint32_t>(daysFromCivil(year, month, day));
 }

@@ -874,6 +874,9 @@ void ReadingStatsStore::beginSession(const std::string& path, const std::string&
   activeSession.accumulatedMs = 0;
   activeSession.bucketedDay = 0;
   activeSession.bucketedMs = 0;
+  activeSession.bucketedDayMs = 0;
+  activeSession.bucketedAtTimestamp = 0;
+  activeSession.bucketedAtMillis = 0;
   activeSession.startProgressRebased = false;
 
   markDirty();
@@ -897,8 +900,9 @@ void ReadingStatsStore::noteActivity() {
     // ungraceful shutdown (battery death / crash before endSession) doesn't lose
     // it — pruneToCurrentMonth recomputes book.totalReadingMs from the buckets on
     // the next load, so time that never reached a bucket would otherwise vanish.
-    // This attributes the whole session to one day and moves it if the resolved
-    // day changes, so a mid-session NTP sync can't scatter it across days.
+    // Reading across local midnight is split between the two days; a resolved
+    // day that changes because the clock was corrected moves the session
+    // instead, so a mid-session NTP sync can't scatter it across days.
     flushActiveSessionToBuckets();
     markDirty();
   }
@@ -941,22 +945,58 @@ void ReadingStatsStore::flushActiveSessionToBuckets() {
   }
 
   auto& book = books[activeSession.bookIndex];
+  const unsigned long nowMs = millis();
+  const uint64_t deltaMs = activeSession.accumulatedMs - activeSession.bucketedMs;
+  const auto addToDay = [&](const uint32_t toDay, const uint64_t ms) {
+    addReadingToDays(book.readingDays, toDay, ms);
+    addReadingToDays(readingDays, toDay, ms);
+  };
+
+  // The wall clock moved forward by the same amount as the uptime counter since
+  // the last checkpoint: the day changed because time passed, not because the
+  // clock was set or corrected. Two minutes of slack for RTC/NTP drift.
+  const bool clockAdvancedWithUptime = [&] {
+    if (activeSession.bucketedDay == 0 || sessionTimestamp < activeSession.bucketedAtTimestamp) {
+      return false;
+    }
+    const uint64_t wallMs = static_cast<uint64_t>(sessionTimestamp - activeSession.bucketedAtTimestamp) * 1000ULL;
+    const uint64_t uptimeMs = nowMs - activeSession.bucketedAtMillis;
+    const uint64_t driftMs = wallMs > uptimeMs ? wallMs - uptimeMs : uptimeMs - wallMs;
+    return driftMs <= 2UL * 60UL * 1000UL;
+  }();
+
   if (day == activeSession.bucketedDay) {
     // Same day as last checkpoint — just add what accrued since.
-    const uint64_t deltaMs = activeSession.accumulatedMs - activeSession.bucketedMs;
-    addReadingToDays(book.readingDays, day, deltaMs);
-    addReadingToDays(readingDays, day, deltaMs);
+    addToDay(day, deltaMs);
+    activeSession.bucketedDayMs += deltaMs;
+  } else if (day == activeSession.bucketedDay + 1 && clockAdvancedWithUptime) {
+    // Read across local midnight: what accrued since the last checkpoint ends
+    // now, so the part after midnight (at most the time elapsed since it) goes
+    // to the new day and the rest stays on the old one. Earlier checkpoints are
+    // left where they are. Heartbeats are a minute apart, so the split lands
+    // within a minute of the real crossing.
+    uint64_t afterMidnightMs = deltaMs;
+    uint32_t secondsSinceMidnight = 0;
+    if (TimeUtils::getSecondsSinceLocalMidnight(sessionTimestamp, secondsSinceMidnight)) {
+      afterMidnightMs = std::min<uint64_t>(deltaMs, static_cast<uint64_t>(secondsSinceMidnight) * 1000ULL);
+    }
+    addToDay(activeSession.bucketedDay, deltaMs - afterMidnightMs);
+    addToDay(day, afterMidnightMs);
+    activeSession.bucketedDayMs = afterMidnightMs;
   } else {
-    // Resolved day changed (NTP landed, or crossed midnight): move the whole
-    // session onto the new day so it's never split across two.
-    removeReadingFromDays(book.readingDays, activeSession.bucketedDay, activeSession.bucketedMs);
-    removeReadingFromDays(readingDays, activeSession.bucketedDay, activeSession.bucketedMs);
-    addReadingToDays(book.readingDays, day, activeSession.accumulatedMs);
-    addReadingToDays(readingDays, day, activeSession.accumulatedMs);
+    // Resolved day changed because the clock did (NTP landed, the date was set,
+    // or this is the first valid checkpoint): move the time filed under the old
+    // day onto the new one, so a correction can't scatter the session.
+    removeReadingFromDays(book.readingDays, activeSession.bucketedDay, activeSession.bucketedDayMs);
+    removeReadingFromDays(readingDays, activeSession.bucketedDay, activeSession.bucketedDayMs);
+    activeSession.bucketedDayMs += deltaMs;
+    addToDay(day, activeSession.bucketedDayMs);
   }
 
   activeSession.bucketedDay = day;
   activeSession.bucketedMs = activeSession.accumulatedMs;
+  activeSession.bucketedAtTimestamp = sessionTimestamp;
+  activeSession.bucketedAtMillis = nowMs;
 }
 
 void ReadingStatsStore::tickActiveSession(const bool quiet) {
@@ -1153,8 +1193,9 @@ void ReadingStatsStore::endSession(const bool allowBackgroundSync) {
                                  : static_cast<uint32_t>(activeSession.accumulatedMs);
 
   // Final checkpoint: settle any remainder into the per-day bucket and read back
-  // the day the session landed on. bucketedDay is the single day the whole
-  // session is attributed to, or 0 if the clock never became valid this session
+  // the day the session ended on (a session read across midnight has its time
+  // split between the days, but is logged once, under the day it ended), or 0
+  // if the clock never became valid this session
   // — in which case it's an "unknown session" the user dates later from the
   // Sessions UI (its time stays in book.totalReadingMs until then).
   flushActiveSessionToBuckets();

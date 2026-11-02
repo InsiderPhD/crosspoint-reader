@@ -182,6 +182,33 @@ void testEveryZoneAllYear() {
   }
 }
 
+// Seconds since local midnight is ELAPSED time: on the day the clocks change
+// it differs from the wall clock by the hour that was skipped or repeated. The
+// reading-session midnight split relies on this.
+uint32_t sinceMidnight(const uint32_t epoch) {
+  uint32_t seconds = UINT32_MAX;
+  TimeUtils::getSecondsSinceLocalMidnight(epoch, seconds);
+  return seconds;
+}
+
+void testSecondsSinceMidnight() {
+  uint32_t untouched = 7;
+  expectTrue(!TimeUtils::getSecondsSinceLocalMidnight(0, untouched) && untouched == 7,
+             "midnight: an unset clock has no time of day");
+  if (!selectZone("London / Dublin / Lisbon")) return;
+  // Ordinary winter day: 00:00 GMT = 00:00 UTC.
+  expectEq(sinceMidnight(utc(2026, 1, 15, 0, 20)), 20 * 60, "midnight: London 00:20 GMT");
+  // BST: local midnight is 23:00 UTC the day before.
+  expectEq(sinceMidnight(utc(2026, 6, 14, 23, 5)), 5 * 60, "midnight: London 00:05 BST");
+  // Spring forward (29 March, 01:00 UTC): 03:30 BST is 2h30 after midnight.
+  expectEq(sinceMidnight(utc(2026, 3, 29, 2, 30)), 150 * 60, "midnight: London short day");
+  // Fall back (25 October, 01:00 UTC): 02:30 GMT is 3h30 after midnight BST.
+  expectEq(sinceMidnight(utc(2026, 10, 25, 2, 30)), 210 * 60, "midnight: London long day");
+  if (!selectZone("New York / Toronto")) return;
+  // 23:50 EST on 8 Jan is 04:50 UTC on the 9th.
+  expectEq(sinceMidnight(utc(2026, 1, 9, 4, 50)), 23 * 3600 + 50 * 60, "midnight: New York 23:50 EST");
+}
+
 void testStreakArithmetic() {
   const uint32_t run[] = {100, 101, 102, 104, 105};
   ReadingStreaks::Result r = ReadingStreaks::compute(run, 5, 105);
@@ -220,6 +247,7 @@ int main() {
   testStreakAcrossChange("Berlin / Paris / Madrid / Rome", 2026, 10, 22, 19, 20, 25);
   testEveryZoneAllYear();
   testStreakArithmetic();
+  testSecondsSinceMidnight();
 
   if (failures != 0) {
     std::printf("%d check(s) failed\n", failures);
