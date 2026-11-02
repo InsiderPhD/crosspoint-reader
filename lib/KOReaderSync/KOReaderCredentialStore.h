@@ -111,6 +111,11 @@ class KOReaderCredentialStore {
   bool supportsExtendedMetadata() const { return serverType == KOReaderServerType::OTHER; }
   // The rich `position` object goes to every server type but strict KOSync.
   bool supportsRichProgress() const { return serverType != KOReaderServerType::KOSYNC; }
+  // CrossPoint Sync extensions (batch upload, change feed, stats, sessions,
+  // streaks) are only ever sent to a CrossPoint or Other server, never to a
+  // strict KOSync one; each request still handles a 404 from a server that
+  // lacks the route.
+  bool supportsSyncExtensions() const { return serverType != KOReaderServerType::KOSYNC; }
 
   // Whether progress uploads carry document metadata at all
   void setSendMetadata(bool enabled) { sendMetadata = enabled; }

@@ -10,6 +10,7 @@
 #include <base64.h>
 #include <esp_mac.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -309,8 +310,32 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   LOG_DBG("KOSync", "Updating progress: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
   if (insufficientHeap()) return LOW_MEMORY;
 
-  // Build JSON body
   JsonDocument doc;
+  fillProgressJson(doc.to<JsonObject>(), progress);
+
+  std::string body;
+  serializeJson(doc, body);
+
+  LOG_DBG("KOSync", "Request body: %s", body.c_str());
+
+  freeink::SecureHttpClient http;
+  if (!beginRequest(http, url)) return NETWORK_ERROR;
+  http.addHeader("Content-Type", "application/json");
+  const int httpCode = http.sendRequest("PUT", body);
+  http.end();
+  lastHttpCode = httpCode;
+
+  LOG_DBG("KOSync", "Update progress response: %d", httpCode);
+
+  if (httpCode <= 0) return NETWORK_ERROR;
+  // Any 2xx accepts the progress: Spring-based servers answer a PUT with
+  // 201/204 (upstream #2876).
+  if (httpCode >= 200 && httpCode < 300) return OK;
+  if (httpCode == 401) return AUTH_FAILED;
+  return SERVER_ERROR;
+}
+
+void KOReaderSyncClient::fillProgressJson(JsonObject doc, const KOReaderProgress& progress) {
   doc["document"] = progress.document;
   // The store is checked again here so no caller can leak metadata past the
   // user's switch, or the extended fields to a strict KOSync server.
@@ -356,27 +381,185 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
     // The server rejects the whole position object if xpath exceeds 120 bytes.
     if (!p.xpath.empty() && p.xpath.size() <= 120) pos["xpath"] = p.xpath;
   }
+}
 
-  std::string body;
-  serializeJson(doc, body);
+bool KOReaderProgressBatch::add(const KOReaderProgress& progress) {
+  if (count_ >= KOReaderSyncClient::MAX_PROGRESS_BATCH) return false;
+  if (progress.document.size() != 32) return false;
+  // A batch only ever goes to a CrossPoint/Other server, whose receivers fall
+  // back to the rich position, so a guessed XPath is acceptable here (the
+  // same rule updateProgress applies).
+  JsonDocument item;
+  KOReaderSyncClient::fillProgressJson(item.to<JsonObject>(), progress);
+  if (count_ == 0) {
+    // Typical item ~250-450 bytes (XPath capped at 120 in the rich position,
+    // metadata only with Send Book Details); one reservation for the batch so
+    // appending items never reallocates mid-run.
+    body_.reserve(KOReaderSyncClient::MAX_PROGRESS_BATCH * 512);
+    body_ = "{\"items\":[";
+  } else {
+    body_ += ',';
+  }
+  // serializeJson() replaces a std::string's contents, so serialize the item
+  // on its own (a few hundred bytes, freed at return) and append it.
+  std::string json;
+  serializeJson(item, json);
+  body_ += json;
+  ++count_;
+  return true;
+}
 
-  LOG_DBG("KOSync", "Request body: %s", body.c_str());
+void KOReaderProgressBatch::clear() {
+  body_.clear();
+  count_ = 0;
+}
+
+KOReaderSyncClient::Error KOReaderSyncClient::updateProgressBatch(KOReaderProgressBatch& batch) {
+  lastHttpCode = 0;
+  if (!KOREADER_STORE.hasCredentials()) return NO_CREDENTIALS;
+  if (!KOREADER_STORE.supportsSyncExtensions()) return BATCH_UNSUPPORTED;
+  if (batch.count() == 0) return OK;
+  if (insufficientHeap()) return LOW_MEMORY;
+
+  batch.body_ += "]}";
+  const std::string url = KOREADER_STORE.getBaseUrl() + "/api/v1/progress/batch";
+  LOG_DBG("KOSync", "Batch upload of %u positions (%u bytes, heap %u)", static_cast<unsigned>(batch.count()),
+          static_cast<unsigned>(batch.body_.size()), (unsigned)ESP.getFreeHeap());
 
   freeink::SecureHttpClient http;
   if (!beginRequest(http, url)) return NETWORK_ERROR;
   http.addHeader("Content-Type", "application/json");
-  const int httpCode = http.sendRequest("PUT", body);
+  const int httpCode = http.sendRequest("PUT", batch.body_);
   http.end();
   lastHttpCode = httpCode;
-
-  LOG_DBG("KOSync", "Update progress response: %d", httpCode);
+  LOG_DBG("KOSync", "Batch upload response: %d", httpCode);
+  // The request body is gone either way; the caller re-adds on a retry.
+  batch.clear();
 
   if (httpCode <= 0) return NETWORK_ERROR;
-  // Any 2xx accepts the progress: Spring-based servers answer a PUT with
-  // 201/204 (upstream #2876).
+  // All or nothing on the server, so any 2xx means every item was stored.
   if (httpCode >= 200 && httpCode < 300) return OK;
   if (httpCode == 401) return AUTH_FAILED;
+  // No route: an older CrossPoint Sync or a custom server. One PUT per book.
+  if (httpCode == 404 || httpCode == 405) return BATCH_UNSUPPORTED;
   return SERVER_ERROR;
+}
+
+KOReaderSyncClient::Error KOReaderSyncClient::getProgressChanges(const uint32_t since, const uint8_t limit,
+                                                                 ChangesPage& page,
+                                                                 std::vector<KOReaderProgressChange>& out) {
+  lastHttpCode = 0;
+  out.clear();
+  page = {};
+  if (!KOREADER_STORE.hasCredentials()) return NO_CREDENTIALS;
+  if (!KOREADER_STORE.supportsSyncExtensions()) return FEED_UNSUPPORTED;
+  if (insufficientHeap()) return LOW_MEMORY;
+  // The page body (server cap 8KB) is buffered whole before parsing, so ask
+  // for room for it on top of the handshake.
+  if (ESP.getMaxAllocHeap() < MIN_BLOCK_FOR_TLS + MAX_CHANGES_BODY) {
+    LOG_ERR("KOSync", "Change feed needs a %u-byte block, largest is %u",
+            static_cast<unsigned>(MIN_BLOCK_FOR_TLS + MAX_CHANGES_BODY), ESP.getMaxAllocHeap());
+    return LOW_MEMORY;
+  }
+
+  char deviceId[READER_ID_SIZE];
+  deviceIdForServer(deviceId, sizeof(deviceId));
+  char query[96];
+  snprintf(query, sizeof(query), "/api/v1/progress/changes?since=%lu&limit=%u&device=%s",
+           static_cast<unsigned long>(since), static_cast<unsigned>(std::min<uint8_t>(limit, MAX_CHANGES_PAGE)),
+           deviceId);
+  const std::string url = KOREADER_STORE.getBaseUrl() + query;
+  LOG_DBG("KOSync", "Change feed: %s (heap %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
+
+  freeink::SecureHttpClient http;
+  if (!beginRequest(http, url)) return NETWORK_ERROR;
+  const int httpCode = http.GET();
+  lastHttpCode = httpCode;
+  LOG_DBG("KOSync", "Change feed response: %d", httpCode);
+  if (httpCode <= 0) {
+    http.end();
+    return NETWORK_ERROR;
+  }
+  if (httpCode == 401) {
+    http.end();
+    return AUTH_FAILED;
+  }
+  if (httpCode == 404 || httpCode == 405) {
+    http.end();
+    return FEED_UNSUPPORTED;
+  }
+  if (httpCode < 200 || httpCode >= 300) {
+    http.end();
+    return SERVER_ERROR;
+  }
+
+  // Only the fields this reader uses survive the parse; the device list and
+  // anything a newer server adds are dropped before they cost heap.
+  JsonDocument filter;
+  filter["cursor"] = true;
+  filter["more"] = true;
+  JsonObject changeFilter = filter["changes"].add<JsonObject>();
+  changeFilter["document"] = true;
+  changeFilter["aliases"] = true;
+  changeFilter["percentage"] = true;
+  changeFilter["progress"] = true;
+  changeFilter["position"] = true;
+  changeFilter["device"] = true;
+  changeFilter["timestamp"] = true;
+  JsonDocument doc;
+  DeserializationError error;
+  {
+    const auto& body = http.getString();
+    error = deserializeJson(doc, body.c_str(), DeserializationOption::Filter(filter));
+  }
+  http.end();
+  if (error) {
+    LOG_ERR("KOSync", "Change feed JSON parse failed: %s", error.c_str());
+    return JSON_ERROR;
+  }
+
+  page.cursor = doc["cursor"] | since;
+  page.more = doc["more"] | false;
+  const JsonArrayConst changes = doc["changes"].as<JsonArrayConst>();
+  out.reserve(changes.size());
+  for (JsonObjectConst c : changes) {
+    KOReaderProgressChange change;
+    change.document = c["document"] | "";
+    if (change.document.empty()) continue;
+    for (JsonVariantConst alias : c["aliases"].as<JsonArrayConst>()) {
+      if (change.aliasCount >= KOReaderProgressChange::MAX_ALIASES) break;
+      const char* value = alias.as<const char*>();
+      if (value && strlen(value) == 32) change.aliases[change.aliasCount++] = value;
+    }
+    change.percentage = c["percentage"] | 0.0f;
+    change.progress = c["progress"] | "";
+    change.device = c["device"] | "";
+    change.timestamp = c["timestamp"] | static_cast<int64_t>(0);
+    const JsonObjectConst pos = c["position"].as<JsonObjectConst>();
+    if (!pos.isNull()) {
+      KOReaderRichPosition rich;
+      rich.pctQ = pos["pctQ"] | 0u;
+      rich.spineIndex = pos["spine"] | static_cast<uint16_t>(0);
+      rich.pageNumber = pos["page"] | static_cast<uint16_t>(0);
+      const uint16_t pages = pos["pages"] | static_cast<uint16_t>(0);
+      rich.totalPages = pages > 0 ? pages : 1;
+      const uint16_t para = pos["para"] | static_cast<uint16_t>(0);
+      if (para > 0) rich.paragraphIndex = para;
+      rich.xpath = pos["xpath"] | "";
+      change.position = std::move(rich);
+    }
+    out.push_back(std::move(change));
+  }
+  page.count = static_cast<uint16_t>(out.size());
+  return OK;
+}
+
+bool KOReaderProgressChange::matches(const std::string& hash) const {
+  if (hash == document) return true;
+  for (uint8_t i = 0; i < aliasCount; i++) {
+    if (aliases[i] == hash) return true;
+  }
+  return false;
 }
 
 bool KOReaderSyncClient::readerId(char* out, const size_t capacity) {
@@ -433,6 +616,10 @@ const char* KOReaderSyncClient::errorString(Error error) {
       return "Username is already registered";
     case POSITION_UNRESOLVED:
       return "Position could not be mapped for KOReader";
+    case FEED_UNSUPPORTED:
+      return "Server has no progress change feed";
+    case BATCH_UNSUPPORTED:
+      return "Server has no batch upload";
     default:
       return "Unknown error";
   }

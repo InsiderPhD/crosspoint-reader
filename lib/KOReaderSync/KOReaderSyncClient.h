@@ -1,7 +1,10 @@
 #pragma once
+#include <ArduinoJson.h>
+
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 class Epub;
 
@@ -66,6 +69,45 @@ struct KOReaderProgress {
 };
 
 /**
+ * One entry of the CrossPoint Sync progress change feed
+ * (GET /api/v1/progress/changes): a document's newest position, with every
+ * hash the server knows it by (a merged document has aliases).
+ */
+struct KOReaderProgressChange {
+  // A merged document rarely has more than a couple of aliases.
+  static constexpr uint8_t MAX_ALIASES = 4;
+  std::string document;  // canonical hash
+  std::string aliases[MAX_ALIASES];
+  uint8_t aliasCount = 0;
+  float percentage = 0.0f;
+  std::string progress;  // KOReader XPath
+  std::optional<KOReaderRichPosition> position;
+  std::string device;
+  int64_t timestamp = 0;
+
+  // True when `hash` is the canonical id or one of the aliases.
+  bool matches(const std::string& hash) const;
+};
+
+/**
+ * Body of a PUT /api/v1/progress/batch, built one item at a time so only the
+ * serialized JSON is alive during the TLS request, never a list of
+ * KOReaderProgress records (and the Epub each was mapped from).
+ */
+class KOReaderProgressBatch {
+ public:
+  // False when the batch is full (MAX_PROGRESS_BATCH) or the item is invalid.
+  bool add(const KOReaderProgress& progress);
+  size_t count() const { return count_; }
+  void clear();
+
+ private:
+  friend class KOReaderSyncClient;
+  std::string body_;
+  size_t count_ = 0;
+};
+
+/**
  * HTTP client for KOReader sync API.
  *
  * Base URL: https://sync.koreader.rocks:443/
@@ -91,7 +133,24 @@ class KOReaderSyncClient {
     NOT_FOUND,
     LOW_MEMORY,
     USER_EXISTS,
-    POSITION_UNRESOLVED  // upload refused: the local position has no structural XPath
+    POSITION_UNRESOLVED,  // upload refused: the local position has no structural XPath
+    FEED_UNSUPPORTED,     // strict KOSync or an older CrossPoint Sync: no change feed
+    BATCH_UNSUPPORTED     // no PUT /api/v1/progress/batch: send one PUT per book
+  };
+
+  // Positions per batch request. The server takes 20; 8 keeps the body (held
+  // in RAM for the whole TLS request) to ~4KB on the C3.
+  static constexpr size_t MAX_PROGRESS_BATCH = 8;
+  // Changes per feed page. The server stops a page before 8KB anyway; 10
+  // bounds the parsed list (~10 x 250 bytes) as well.
+  static constexpr uint8_t MAX_CHANGES_PAGE = 10;
+  // Server cap on one change-feed page body.
+  static constexpr uint32_t MAX_CHANGES_BODY = 8 * 1024;
+
+  struct ChangesPage {
+    uint32_t cursor = 0;  // where the next page starts
+    bool more = false;
+    uint16_t count = 0;
   };
 
   /**
@@ -120,6 +179,27 @@ class KOReaderSyncClient {
    * @return OK on success, error code on failure
    */
   static Error updateProgress(const KOReaderProgress& progress);
+
+  /**
+   * PUT /api/v1/progress/batch (CrossPoint/Other servers only): every item in
+   * one request, all stored or none. Empties `batch` whatever the outcome.
+   * @return OK, BATCH_UNSUPPORTED (no route, or a strict KOSync server), or an error
+   */
+  static Error updateProgressBatch(KOReaderProgressBatch& batch);
+
+  /**
+   * GET /api/v1/progress/changes?since=&limit=&device= (CrossPoint/Other
+   * servers only): documents whose newest position changed after `since`,
+   * leaving out the ones this reader wrote last. `out` is replaced.
+   * @return OK, FEED_UNSUPPORTED (no route, or a strict KOSync server), or an error
+   */
+  static Error getProgressChanges(uint32_t since, uint8_t limit, ChangesPage& page,
+                                  std::vector<KOReaderProgressChange>& out);
+
+  // One progress record as JSON, shared by the single and batch uploads.
+  // Applies the server-type rules (metadata switch, extended fields, rich
+  // position, per-reader device id).
+  static void fillProgressJson(JsonObject doc, const KOReaderProgress& progress);
 
   /**
    * Get human-readable error message.
