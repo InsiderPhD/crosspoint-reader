@@ -162,6 +162,9 @@ void OtaUpdateActivity::render(RenderLock&&) {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state == FAILED) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_FAILED), true, EpdFontFamily::BOLD);
+    if (wrongDevice) {
+      renderer.drawCenteredText(UI_10_FONT_ID, top + height + metrics.verticalSpacing, tr(STR_FIRMWARE_WRONG_DEVICE));
+    }
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state == FINISHED) {
@@ -218,6 +221,7 @@ void OtaUpdateActivity::loop() {
         LOG_DBG("OTA", "Update failed: %d", res);
         {
           RenderLock lock(*this);
+          wrongDevice = res == OtaUpdater::WRONG_DEVICE_ERROR;
           state = FAILED;
         }
         requestUpdate();

@@ -21,6 +21,7 @@ class OtaUpdater {
     UPDATE_OLDER_ERROR,
     INTERNAL_UPDATE_ERROR,
     OOM_ERROR,
+    WRONG_DEVICE_ERROR,  // staged image is for another chip/board (FirmwareFlasher BAD_CHIP / WRONG_BOARD)
   };
 
   size_t getOtaSize() const { return otaSize; }

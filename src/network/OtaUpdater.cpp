@@ -250,7 +250,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::flashUpdate(ProgressCallback onProgress,
 
   if (flashResult != firmware_flash::Result::OK) {
     LOG_ERR("OTA", "Raw flash failed: %s", firmware_flash::resultName(flashResult));
-    return INTERNAL_UPDATE_ERROR;
+    return firmware_flash::isWrongDevice(flashResult) ? WRONG_DEVICE_ERROR : INTERNAL_UPDATE_ERROR;
   }
 
   LOG_INF("OTA", "Update completed (raw-write)");

@@ -144,7 +144,8 @@ void DownloadUpdateFromUrlActivity::performDownloadAndFlash() {
 
   if (flashResult != firmware_flash::Result::OK) {
     LOG_ERR("FWURL", "Flash failed: %s", firmware_flash::resultName(flashResult));
-    errorMessage = tr(STR_FIRMWARE_WRITE_FAILED);
+    errorMessage =
+        firmware_flash::isWrongDevice(flashResult) ? tr(STR_FIRMWARE_WRONG_DEVICE) : tr(STR_FIRMWARE_WRITE_FAILED);
     RenderLock lock(*this);
     state = State::FAILED;
     requestUpdate();

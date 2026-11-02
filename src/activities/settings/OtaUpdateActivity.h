@@ -24,6 +24,8 @@ class OtaUpdateActivity : public Activity {
   // card (the framebuffer is lent to the transfer's TLS session), then flips
   // false for the flash phase, which renders a live progress bar.
   bool downloadPhase = false;
+  // FAILED because the downloaded image was built for another chip/board.
+  bool wrongDevice = false;
   OtaUpdater updater;
 
   void onWifiSelectionComplete(bool success);
