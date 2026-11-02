@@ -58,6 +58,7 @@ class ParsedText {
   // this paragraph's opening line, so the next layout pass starts mid-paragraph: no
   // first-line indent, no em-space. Cleared when the block is finalised, because the parser
   // reuses an emptied ParsedText for the next paragraph. Ported from upstream d5693c321.
+  uint16_t linesAfterCurrent = LINES_AFTER_UNKNOWN;
   bool firstLineConsumed = false;
   // The user's spacing controls for the layout pass in progress. Set on entry to
   // layoutAndExtractLines (the parser swaps blockStyle as CSS resolves, so it cannot be
@@ -129,6 +130,11 @@ class ParsedText {
   // Only the table grid passes true: it finds out that a cell does not fit by laying it out,
   // and must then emit the SAME text as paragraphs.
   // processLine also receives the visible-text offset of the line's first word.
+  // While processLine runs: lines of this paragraph still to come after the current one, or
+  // LINES_AFTER_UNKNOWN in a soft flush (the paragraph's end is not known yet). For widow control.
+  static constexpr uint16_t LINES_AFTER_UNKNOWN = 0xFFFF;
+  [[nodiscard]] uint16_t linesAfterCurrentLine() const { return linesAfterCurrent; }
+
   void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
                              const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                              bool includeLastLine = true, bool preserveSource = false,

@@ -497,8 +497,11 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
   LineScratch scratch;
   scratch.reserve(bionicReadingEnabled ? maxLineWords * 2 : maxLineWords);  // bionic splits words in two
   for (size_t i = 0; i < lineCount; ++i) {
+    linesAfterCurrent =
+        includeLastLine ? static_cast<uint16_t>(std::min<size_t>(lineCount - i - 1, 0xFFFE)) : LINES_AFTER_UNKNOWN;
     extractLine(i, pageWidth, wordWidths, wordContinues, lineBreakIndices, processLine, renderer, fontId, scratch);
   }
+  linesAfterCurrent = LINES_AFTER_UNKNOWN;
   lineImages.clear();  // only meaningful inside processLine
 
   if (preserveSource) {

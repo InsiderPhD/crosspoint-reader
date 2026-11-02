@@ -214,6 +214,20 @@ class ChapterHtmlSlimParser {
   void emitBoxSegment(const BoxScope& box, bool closing);
   // Every page completion goes through here, so open boxes get their slice of the page.
   void completeCurrentPage();
+
+  // Widow / orphan control (CSS orphans / widows, both 2 when the book sets none, as in CSS).
+  // A page break inside a paragraph moves its last lines on the page along to the next page
+  // when too few would stay behind (orphans) or too few would arrive (widows). The lines are
+  // moved as already-built PageLines; their page offsets come from a small ring.
+  static constexpr uint8_t MAX_CARRIED_LINES = 6;  // orphans + widows, each at most 3
+  uint8_t blockOrphans = 2;
+  uint8_t blockWidows = 2;
+  uint8_t paragraphLinesOnPage = 0;  // lines of the paragraph being laid out on this page
+  bool paragraphHasInlineImages = false;
+  uint8_t recentLineHead = 0;
+  uint32_t recentLineOffsets[MAX_CARRIED_LINES] = {};
+  size_t linesToCarry() const;
+  void breakPageCarryingLines(size_t carry);
   // CSS page-break-before/after: finish the paragraph in hand and start a fresh page, unless
   // the page is still empty.
   void forcePageBreak();

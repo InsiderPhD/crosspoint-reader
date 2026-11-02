@@ -631,6 +631,16 @@ void CssParser::parseDeclarationIntoStyle(std::string_view decl, CssStyle& style
         iequalsAscii(mode, "break-spaces")) {
       style.defined.whiteSpacePre = 1;
     }
+  } else if (iequalsAscii(name, "orphans") || iequalsAscii(name, "widows")) {
+    int lines = 0;
+    if (tryParseNumber(trimCssWhitespace(stripTrailingImportant(value)), lines) && lines >= 1) {
+      const auto clamped = static_cast<uint8_t>(lines > 3 ? 3 : lines);
+      if (iequalsAscii(name, "orphans")) {
+        style.orphans = clamped;
+      } else {
+        style.widows = clamped;
+      }
+    }
   } else if (iequalsAscii(name, "font-variant") || iequalsAscii(name, "font-variant-caps")) {
     // Only the caps part matters here; a font-variant shorthand may list other values.
     bool smallCaps = false;
@@ -1200,7 +1210,8 @@ bool CssParser::saveToCache() const {
     file.write(static_cast<uint8_t>(style.verticalAlign));
     file.write(static_cast<uint8_t>(style.direction));
     for (const CssBorderSide& side : style.borders) file.write(side.packed());
-    file.write(static_cast<uint8_t>(style.smallCaps | (style.smallCapsDefined << 1)));
+    file.write(static_cast<uint8_t>(style.smallCaps | (style.smallCapsDefined << 1) | (style.orphans << 2) |
+                                    (style.widows << 4)));
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
     writeLength(style.fontSize);
 #endif
@@ -1408,12 +1419,14 @@ bool CssParser::loadFromCache() {
     }
 
     uint8_t textBits = 0;
-    if (file.read(&textBits, 1) != 1 || textBits > 3) {
+    if (file.read(&textBits, 1) != 1 || textBits > 0x3F) {
       clear();
       return false;
     }
     style.smallCaps = textBits & 1;
     style.smallCapsDefined = (textBits >> 1) & 1;
+    style.orphans = (textBits >> 2) & 3;
+    style.widows = (textBits >> 4) & 3;
 
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
     if (!readLength(style.fontSize) ||
