@@ -1,6 +1,7 @@
 // Host test for the plugin catalog paging rules (src/activities/plugins/
-// PluginCatalogPaging.h). Cases follow upstream CrossPoint 2.0's
-// test/plugin_catalog_paging. Run
+// PluginCatalogPaging.h) and the URL helpers the catalog uses
+// (UrlUtils::resolveServerPath). Cases follow upstream CrossPoint 2.0's
+// test/plugin_catalog_paging and test/url_utils. Run
 // test/run_plugin_catalog_paging_test.sh.
 #include <cstdio>
 #include <string>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include "PluginCatalogPaging.h"
+#include "util/UrlUtils.h"
 
 using plugincatalogpaging::countsTowardPage;
 using plugincatalogpaging::limitFor;
@@ -91,12 +93,28 @@ void testWindows() {
   expect(!first.hasMore(Paging::Static), "static hidden row is not a next page");
 }
 
+void testServerPaths() {
+  std::string path = "/api/files/12/download";
+  expect(UrlUtils::resolveServerPath(path, "https://books.example.com:8443/api/books/7?x=1"), "server path joined");
+  expect(path == "https://books.example.com:8443/api/files/12/download", "server path takes the origin");
+  path = "/a";
+  expect(UrlUtils::resolveServerPath(path, "http://h.example?q=1"), "origin without a path");
+  expect(path == "http://h.example/a", "origin ends at the query");
+  for (const char* other : {"https://x.example/a", "//cdn.example/a", "files/12", ""}) {
+    path = other;
+    expect(!UrlUtils::resolveServerPath(path, "https://h.example/a"), "non-path left alone");
+    expect(path == other, "non-path unchanged");
+  }
+  path = "/a";
+  expect(!UrlUtils::resolveServerPath(path, "no-scheme/x"), "request without a scheme");
+}
 }  // namespace
 
 int main() {
   testClassification();
   testLimit();
   testWindows();
+  testServerPaths();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

@@ -19,7 +19,7 @@ inline constexpr const char* FAMILY = "crosspoint";
 inline constexpr int PLUGIN_API_VERSION = 1;
 inline constexpr const char* PLUGIN_CAPABILITIES =
     "catalog.lists,catalog.notices,catalog.bundle_install,catalog.version_tracking,catalog.compatibility,"
-    "catalog.encoded_item_fields,catalog.list_index_mapping,catalog.list_requirements";
+    "catalog.encoded_item_fields,catalog.list_index_mapping,catalog.list_requirements,catalog.server_paths";
 #else
 // Boards without plugin support (lib/DevicePolicy) run no plugin contract.
 inline constexpr int PLUGIN_API_VERSION = 0;

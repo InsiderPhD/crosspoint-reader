@@ -163,6 +163,7 @@ Boards without plugin support (X3 / X4) report API `0` and no capabilities.
 | `catalog.encoded_item_fields` | download and sidecar templates accept `{id_enc}`, `{title_enc}`, `{author_enc}`, `{url_enc}` |
 | `catalog.list_index_mapping` | `browse.lists_url` is fetched with `lists_headers` and read through `lists_items` / `lists_fields`; a list's `id` fills `{list_id}` / `{list_id_enc}` |
 | `catalog.list_requirements` | manifest and fetched lists may carry a `requires` array of capabilities; a list needing one we lack is hidden |
+| `catalog.server_paths` | where a response supplies a URL (the `download.url_path` answer, a fetched list `url`), a server path (`/path`) is joined to the origin of the request that returned it |
 
 ### Schema
 
@@ -269,9 +270,11 @@ Two browse formats:
   "download": {
     "url": "https://.../books/{id}/download",
     "method": "POST",
-    "headers": { "Authorization": "Bearer {token}" },  // sent on the file GET too
+    "headers": { "Authorization": "Bearer {token}" },  // file GET too, unless url_path
+                                            // returns a full URL
     "body": "{}",
-    "url_path": "url",                      // response field with the file URL;
+    "url_path": "url",                      // response field with the file URL or a
+                                            // server path ("/files/1");
                                             // omit to treat "url" itself as the file URL
     "username": "{cfg.user}",              // optional HTTP Basic creds for the file GET
     "password": "{cfg.pass}",             // omit for token/header auth
@@ -381,6 +384,15 @@ Two browse formats:
   `1`, or whose `requires` names a capability not advertised is silently
   omitted. Entries without these fields stay visible. On a static feed the
   page window counts only compatible entries.
+- **Server paths** (json): a URL a response supplies may be a server path
+  such as `/api/files/12/download` — the `download.url_path` answer or a
+  fetched list's `url`. The firmware joins it to the origin (scheme, host and
+  port) of the request that returned it. A `url_path` answer that is a server
+  path is on the API's own host, so the file GET sends the download `headers`
+  (and a 401/403 there gets the password-grant retry); a full URL, even on the
+  same host, gets no headers, because it may be pre-signed. Other relative
+  forms (`files/12`, `//host/x`) are used as they are, and item `url` fields
+  are not changed.
 - **XML navigation**: Confirm on a folder (an item carrying `container_element`)
   descends into it, Back climbs out (Back at the root leaves the screen).
   With `resolve_urls`, server-relative URLs resolve against the browse URL's

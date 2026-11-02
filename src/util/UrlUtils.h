@@ -26,6 +26,14 @@ std::string extractHost(const std::string& url);
 std::string buildUrl(const std::string& serverUrl, const std::string& path);
 
 /**
+ * A server-relative path from a response ("/x", not "//host/x") gets the
+ * origin (scheme, host, and port) of requestUrl, the request that returned it.
+ * Returns true when path was changed. Other values (full URLs, "//host/x",
+ * "files/12") are left alone.
+ */
+bool resolveServerPath(std::string& path, const std::string& requestUrl);
+
+/**
  * True when an HTTP Host header ("name[:port]") names another site. On the
  * reader's hotspot an IP literal, a .local name or a single-label name can only
  * mean the reader; any other name is an OS captive-portal check (or a site the

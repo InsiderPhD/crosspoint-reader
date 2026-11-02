@@ -39,6 +39,7 @@
 #include "util/QrUtils.h"
 #include "util/StringUtils.h"
 #include "util/TouchListNav.h"
+#include "util/UrlUtils.h"
 
 // Template/JSON/transport primitives shared with the plugin event drain.
 using pluginhttp::readHeaders;
@@ -617,6 +618,7 @@ bool PluginCatalogActivity::loadBrowseListIndex(int& status) {
     Manifest::BrowseList entry;
     entry.title = variantToString(resolvePath(l, manifest.listsTitlePath));
     entry.url = variantToString(resolvePath(l, manifest.listsUrlPath));
+    UrlUtils::resolveServerPath(entry.url, url);  // catalog.server_paths: "/x" joins the index's origin
     entry.id = variantToString(resolvePath(l, manifest.listsIdPath));
     readListExtras(l, entry.body, entry.noticeTitle, entry.noticeMessage, entry.noticeConfirm, entry.noticeCancel);
     // An entry with only an id browses the shared browse url via {list_id}.
@@ -1454,10 +1456,21 @@ void PluginCatalogActivity::downloadItem(const Item& item) {
 
   // Resolve the file URL: either the template itself, or one API hop away.
   std::string fileUrl = substituted(manifest.dlUrl, &item);
+  // The file GET carries the download headers unless url_path answered with a
+  // full URL, which may be pre-signed and reject a second Authorization. A
+  // server path ("/files/1", catalog.server_paths) is on the API's own host,
+  // so it keeps them (upstream CrossPoint #4273).
+  bool sendDownloadHeaders = manifest.dlUrlPath.empty();
   if (!manifest.dlUrlPath.empty()) {
-    const auto headers = substitutedHeaders(manifest.dlHeaders, &item);
+    const std::string hopUrl = fileUrl;
     std::string response;
-    const int status = apiRequest(fileUrl, manifest.dlMethod, substituted(manifest.dlBody, &item), headers, response);
+    int status = apiRequest(hopUrl, manifest.dlMethod, substituted(manifest.dlBody, &item),
+                            substitutedHeaders(manifest.dlHeaders, &item), response);
+    // An expired password-grant token: mint a fresh one and retry once.
+    if ((status == 401 || status == 403) && manifest.hasPasswordGrant() && refreshCredentialToken()) {
+      status = apiRequest(substituted(manifest.dlUrl, &item), manifest.dlMethod, substituted(manifest.dlBody, &item),
+                          substitutedHeaders(manifest.dlHeaders, &item), response);
+    }
     if (status < 200 || status >= 300) {
       fail(StrId::STR_DOWNLOAD_FAILED);
       return;
@@ -1468,6 +1481,7 @@ void PluginCatalogActivity::downloadItem(const Item& item) {
       return;
     }
     fileUrl = variantToString(resolvePath(doc.as<JsonVariantConst>(), manifest.dlUrlPath));
+    sendDownloadHeaders = UrlUtils::resolveServerPath(fileUrl, hopUrl);
   }
   if (fileUrl.empty()) {
     fail(StrId::STR_DOWNLOAD_FAILED);
@@ -1498,13 +1512,24 @@ void PluginCatalogActivity::downloadItem(const Item& item) {
 
   const std::string dlUser = substituted(manifest.dlUser, &item);
   const std::string dlPass = substituted(manifest.dlPass, &item);
-  const auto dlHeaders = substitutedHeaders(manifest.dlHeaders, &item);
-  dlLastRenderedPercent = -1;
-  dlLastProgressUpdateMs = 0;
-  const auto result = HttpDownloader::downloadToFile(
-      pluginhttp::escapeUrl(fileUrl), dest,
-      [this](const size_t downloaded, const size_t total) { onDownloadProgress(downloaded, total); }, false, 0,
-      &cancelDownload, dlUser, dlPass, dlHeaders);
+  const auto fetchFile = [&] {
+    const auto dlHeaders = sendDownloadHeaders ? substitutedHeaders(manifest.dlHeaders, &item)
+                                               : std::vector<std::pair<std::string, std::string>>{};
+    dlLastRenderedPercent = -1;
+    dlLastProgressUpdateMs = 0;
+    return HttpDownloader::downloadToFile(
+        pluginhttp::escapeUrl(fileUrl), dest,
+        [this](const size_t downloaded, const size_t total) { onDownloadProgress(downloaded, total); }, false, 0,
+        &cancelDownload, dlUser, dlPass, dlHeaders);
+  };
+  auto result = fetchFile();
+  // A GET carrying the catalog's token templates gets one mint-and-retry when
+  // an expired password-grant token is refused.
+  const bool refused = result == HttpDownloader::HTTP_STATUS_ERROR &&
+                       (HttpDownloader::lastHttpStatus() == 401 || HttpDownloader::lastHttpStatus() == 403);
+  if (refused && sendDownloadHeaders && manifest.hasPasswordGrant() && refreshCredentialToken()) {
+    result = fetchFile();
+  }
 
   if (result == HttpDownloader::ABORTED) {
     finishCancelledDownload();

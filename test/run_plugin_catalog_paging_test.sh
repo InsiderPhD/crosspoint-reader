@@ -10,6 +10,7 @@ mkdir -p "$BUILD_DIR"
 c++ -std=c++20 -O2 -Wall -Wextra -pedantic \
   -I"$ROOT_DIR/src" -I"$ROOT_DIR/src/activities/plugins" \
   "$ROOT_DIR/test/plugin_catalog_paging/PluginCatalogPagingTest.cpp" \
+  "$ROOT_DIR/src/util/UrlUtils.cpp" \
   -o "$BINARY"
 
 "$BINARY" "$@"
