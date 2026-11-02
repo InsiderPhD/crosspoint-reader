@@ -350,6 +350,10 @@ class GfxRenderer {
   }
   int getFontAscenderSize(int fontId) const;
   int getLineHeight(int fontId) const;
+  // Reader line spacing: distance between baselines as `spacing` times the font size in
+  // pixels (its point size at 150 DPI), independent of the font's own advanceY. A family
+  // registered without a point size uses advanceY / 1.2, so +20% is its natural spacing.
+  int getLineHeight(int fontId, float spacing) const;
   std::string truncatedText(int fontId, const char* text, int maxWidth,
                             EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   /// Word-wrap \p text into at most \p maxLines lines, each no wider than

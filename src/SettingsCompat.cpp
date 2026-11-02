@@ -20,7 +20,9 @@ constexpr uint8_t REFRESH_30 = 4, REFRESH_COUNT = 5;
 constexpr uint8_t THEME_LYRA_3_COVERS = 2, THEME_LYRA_LIBRARY = 3;
 constexpr uint8_t FONT_OPENDYSLEXIC = 2;
 constexpr uint8_t FONT_SIZE_COUNT = 4;
-constexpr uint8_t LINE_TIGHT = 0, LINE_NORMAL = 1, LINE_WIDE = 2;
+// lineHeight: the same 7-step percentage table and numbering as upstream (default +20%).
+constexpr uint8_t LINE_HEIGHT_DEFAULT = 2, LINE_HEIGHT_COUNT = 7;
+constexpr uint8_t LEGACY_LINE_SPACING_COUNT = 3;  // pre-table "lineSpacing": Tight / Normal / Wide
 constexpr uint8_t CHAR_SPACING_COUNT = 7;
 constexpr uint8_t INDENT_BOOK = 0, INDENT_NONE = 1, INDENT_COUNT = 6;
 constexpr uint8_t IMAGES_DISPLAY = 0, IMAGE_RENDERING_COUNT = 3;
@@ -111,8 +113,9 @@ constexpr const char* SAME_STRING_KEYS[] = {"dictionaryName", "language", "opdsD
 // is tested here, and exportShared() writes the first two keys plus
 // pluginsEnabled into it, so its output is recognised too.
 constexpr const char* UPSTREAM_ONLY_KEYS[] = {
-    "lineHeight",         "sleepTimeoutMinutes", "pluginsEnabled",      "paragraphIndentSpaces", "pageTurnGesture",
-    "libraryUseMetadata", "screenInverted",      "focusReadingEnabled", "readerMenuStyle",
+    // Not "lineHeight": KatiePoint writes that key too since adopting upstream's table.
+    "sleepTimeoutMinutes", "pluginsEnabled", "paragraphIndentSpaces", "pageTurnGesture",
+    "libraryUseMetadata",  "screenInverted", "focusReadingEnabled",   "readerMenuStyle",
 };
 
 // Store theme folder <-> the upstream mode drawing the same screen. Same
@@ -401,11 +404,12 @@ void SettingsCompat::importUpstream(JsonVariantConst in, JsonDocument& out) {
       out["fontSize"] = static_cast<uint8_t>(slot < kp::FONT_SIZE_COUNT ? slot : kp::FONT_SIZE_COUNT - 1);
     }
   }
-  // Upstream's own migration put Tight/Normal/Wide at lineHeight 1/2/3.
+  // Same table both sides. Pre-lineHeight upstream (Tight/Normal/Wide/Extra Wide, 0..3)
+  // moves up one slot, as upstream's own migration does.
   if (readU8(in, "lineHeight", v) && v < up::LINE_HEIGHT_COUNT) {
-    out["lineSpacing"] = v <= 1 ? kp::LINE_TIGHT : v == 2 ? kp::LINE_NORMAL : kp::LINE_WIDE;
-  } else if (readU8(in, "lineSpacing", v)) {  // pre-lineHeight upstream: 0..3
-    out["lineSpacing"] = v < kp::LINE_WIDE ? v : kp::LINE_WIDE;
+    out["lineHeight"] = v;
+  } else if (readU8(in, "lineSpacing", v)) {
+    out["lineHeight"] = v + 1 < up::LINE_HEIGHT_COUNT ? static_cast<uint8_t>(v + 1) : kp::LINE_HEIGHT_DEFAULT;
   }
   // Upstream: -2..+2 whole px (2 = none). Here: -1.5..+1.5 half px (3 = none).
   if (readU8(in, "characterSpacing", v) && v < up::CHAR_SPACING_COUNT) {
@@ -492,11 +496,16 @@ void SettingsCompat::exportShared(JsonVariantConst in, JsonDocument& out) {
                           ? up::LEGACY_OPENDYSLEXIC
                           : up::STORED_NOTOSANS;
   if (readU8(in, "fontSize", v) && v < kp::FONT_SIZE_COUNT) out["fontSize"] = static_cast<uint8_t>(12 + v * 2);
-  // Always written (with sleepTimeoutMinutes below): these mark the file as
-  // upstream-numbered for isUpstreamDocument().
-  uint8_t lineSpacing = kp::LINE_NORMAL;
-  if (readU8(in, "lineSpacing", v) && v <= kp::LINE_WIDE) lineSpacing = v;
-  out["lineHeight"] = static_cast<uint8_t>(lineSpacing + 1);
+  // Always written, like sleepTimeoutMinutes below (which marks the file as
+  // upstream-numbered for isUpstreamDocument()). Same table both sides; an older
+  // KatiePoint document's "lineSpacing" (Tight / Normal / Wide) moves up one slot.
+  uint8_t lineHeight = kp::LINE_HEIGHT_DEFAULT;
+  if (readU8(in, "lineHeight", v) && v < kp::LINE_HEIGHT_COUNT) {
+    lineHeight = v;
+  } else if (readU8(in, "lineSpacing", v) && v < kp::LEGACY_LINE_SPACING_COUNT) {
+    lineHeight = static_cast<uint8_t>(v + 1);
+  }
+  out["lineHeight"] = lineHeight;
   if (readU8(in, "characterSpacing", v) && v < kp::CHAR_SPACING_COUNT) {
     // Nearest whole pixel, half pixels away from zero, so every upstream value
     // survives a round trip through importUpstream().
@@ -548,8 +557,9 @@ static_assert(kp::REFRESH_30 == S::REFRESH_30 && kp::REFRESH_COUNT == S::REFRESH
 static_assert(kp::THEME_LYRA_3_COVERS == S::LYRA_3_COVERS && kp::THEME_LYRA_LIBRARY == S::LYRA_LIBRARY &&
               S::CLASSIC == 0 && S::LYRA == 1);
 static_assert(kp::FONT_OPENDYSLEXIC == S::OPENDYSLEXIC && kp::FONT_SIZE_COUNT == S::FONT_SIZE_COUNT);
-static_assert(kp::LINE_TIGHT == S::TIGHT && kp::LINE_NORMAL == S::NORMAL && kp::LINE_WIDE == S::WIDE &&
-              S::LINE_COMPRESSION_COUNT == 3);
+static_assert(kp::LINE_HEIGHT_DEFAULT == S::LINE_SPACING_120 && kp::LINE_HEIGHT_COUNT == S::LINE_COMPRESSION_COUNT &&
+              kp::LINE_HEIGHT_COUNT == up::LINE_HEIGHT_COUNT &&
+              kp::LEGACY_LINE_SPACING_COUNT == S::LEGACY_LINE_SPACING_COUNT);
 static_assert(kp::CHAR_SPACING_COUNT == S::CHARACTER_SPACING_COUNT && S::CHARACTER_SPACING_ZERO == 3);
 static_assert(kp::INDENT_BOOK == TextLayoutOptions::PARAGRAPH_INDENT_BOOK &&
               kp::INDENT_NONE == TextLayoutOptions::PARAGRAPH_INDENT_NONE &&

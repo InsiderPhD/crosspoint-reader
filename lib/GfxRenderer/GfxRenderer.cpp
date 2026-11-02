@@ -2061,6 +2061,21 @@ int GfxRenderer::getLineHeight(const int fontId) const {
   return fontIt->second.getData(EpdFontFamily::REGULAR)->advanceY;
 }
 
+int GfxRenderer::getLineHeight(const int fontId, const float spacing) const {
+  const auto fontIt = fontMap.find(fontId);
+  if (fontIt == fontMap.end()) {
+    LOG_ERR("GFX", "Font %d not found", fontId);
+    return 0;
+  }
+  // Layout-time only (once per line or block, never per glyph): the soft-float cost on the
+  // C3 is negligible here.
+  const uint8_t points = fontIt->second.pointSize();
+  const float sizePx = points != 0
+                           ? static_cast<float>(points) * 150.0f / 72.0f
+                           : static_cast<float>(fontIt->second.getData(EpdFontFamily::REGULAR)->advanceY) / 1.2f;
+  return std::max(1, static_cast<int>(sizePx * spacing + 0.5f));
+}
+
 int GfxRenderer::getTextHeight(const int fontId) const {
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) {

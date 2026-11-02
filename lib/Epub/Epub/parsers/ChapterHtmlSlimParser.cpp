@@ -609,6 +609,16 @@ void ChapterHtmlSlimParser::closeBoxScope() {
   // The frame is content of any box that encloses this one.
   if (box.top >= 0) noteContent(box.top - box.padTop, box.bottom + box.padBottom);
   emitBoxSegment(box, true);
+  // Tight line spacing lets the last line's glyphs (and so the frame) reach below the line
+  // step: what follows starts below the frame, counting bottom spacing still pending.
+  if (box.top >= 0) {
+    const int pending =
+        currentTextBlock && currentTextBlock->isEmpty()
+            ? currentTextBlock->getBlockStyle().paddingBottom + currentTextBlock->getBlockStyle().marginBottom
+            : 0;
+    const int raise = std::min<int>(viewportHeight, box.bottom + box.padBottom) - (currentPageNextY + pending);
+    if (raise > 0) currentPageNextY = static_cast<int16_t>(currentPageNextY + raise);
+  }
 }
 
 void ChapterHtmlSlimParser::emitBoxSegment(const BoxScope& box, const bool closing) {
@@ -663,7 +673,7 @@ void ChapterHtmlSlimParser::preLineBreak() {
 void ChapterHtmlSlimParser::beginPreLine() {
   if (prePendingBlankLines > 0 && currentTextBlock && currentTextBlock->isEmpty()) {
     BlockStyle style = currentTextBlock->getBlockStyle();
-    const int lineHeight = static_cast<int>(renderer.getLineHeight(fontId) * lineCompression);
+    const int lineHeight = renderer.getLineHeight(fontId, lineCompression);
     style.marginTop = static_cast<int16_t>(style.marginTop + prePendingBlankLines * lineHeight);
     currentTextBlock->setBlockStyle(style);
   }
@@ -933,7 +943,7 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
     previousBlockBottomMargin = 0;
   }
 
-  const int16_t lineHeight = static_cast<int16_t>(renderer.getLineHeight(fontId) * lineCompression + 0.5f);
+  const int16_t lineHeight = static_cast<int16_t>(renderer.getLineHeight(fontId, lineCompression));
   const int16_t defaultVerticalSpacing = static_cast<int16_t>(lineHeight / 2);
   const int16_t topSpacing =
       static_cast<int16_t>((blockStyle.marginTop > 0 ? blockStyle.marginTop : defaultVerticalSpacing) +
@@ -1525,8 +1535,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
                 // and has already given this row up (see "image in cell" above).
                 const bool cssInline = imgStyle.hasDisplay() && imgStyle.display == CssDisplay::Inline;
                 const bool cssBlock = imgStyle.hasDisplay() && imgStyle.display == CssDisplay::Block;
-                const int textLineHeight =
-                    static_cast<int>(self->renderer.getLineHeight(self->fontId) * self->lineCompression);
+                const int textLineHeight = self->renderer.getLineHeight(self->fontId, self->lineCompression);
                 const bool inlineSized = displayWidth > 0 && displayHeight > 0 && displayWidth < containerWidth &&
                                          (cssInline || displayHeight <= textLineHeight * 2);
                 if (inlineSized && !cssBlock && self->currentTextBlock && !self->currentTable &&
@@ -2664,7 +2673,7 @@ int ChapterHtmlSlimParser::lookupFootnoteLineCount(const char* href, const int w
 
 void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const uint32_t visibleOffset) {
   const int metricsFontId = lineMetricsFontId(line->getBlockStyle());
-  const int textLineHeight = renderer.getLineHeight(metricsFontId) * lineCompression;
+  const int textLineHeight = renderer.getLineHeight(metricsFontId, lineCompression);
   // Inline images on this line. They sit on the text baseline, as CSS places an inline image
   // by default; one taller than the font's ascent pushes the line's text down by the excess,
   // so the line grows upwards-in-effect and nothing overlaps the line above.
@@ -2677,6 +2686,10 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
     for (const auto& image : lineImages) imageRise = std::max(imageRise, static_cast<int>(image.height) - ascender);
   }
   const int lineHeight = textLineHeight + imageRise;
+  // Spacing below the font's own line height (0% / +10% on most fonts) lets glyphs reach past
+  // the line's step: fit and frame the full glyphs, so the last line never crosses the
+  // bottom of the page or of a box.
+  const int contentHeight = lineHeight + std::max(0, renderer.getLineHeight(metricsFontId) - textLineHeight);
 
   if (!currentPage) {
     currentPage.reset(new (std::nothrow) Page());
@@ -2728,7 +2741,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
   }
   const int effectiveViewportH = viewportHeight - footnoteBlockH;
 
-  if (currentPageNextY + lineHeight > effectiveViewportH || forceBreakForAnchorAlignment) {
+  if (currentPageNextY + contentHeight > effectiveViewportH || forceBreakForAnchorAlignment) {
     // Nothing on the page claimed an offset yet: it ends where this line begins.
     setCurrentPageVisibleOffset(visibleOffset);
     completeCurrentPage();
@@ -2841,7 +2854,7 @@ void ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line, const
     }
     currentPage->elements.push_back(std::move(pageLine));
   }
-  noteContent(currentPageNextY, currentPageNextY + lineHeight);
+  noteContent(currentPageNextY, currentPageNextY + contentHeight);
   currentPageNextY += lineHeight;
 }
 
@@ -2857,7 +2870,7 @@ void ChapterHtmlSlimParser::makePages(const bool includeLastLine) {
     previousBlockBottomMargin = 0;
   }
 
-  const int lineHeight = renderer.getLineHeight(fontId) * lineCompression;
+  const int lineHeight = renderer.getLineHeight(fontId, lineCompression);
 
   // Apply top spacing before the paragraph (stored in pixels).
   //
@@ -3009,7 +3022,7 @@ void ChapterHtmlSlimParser::attachPendingFootnotesToPage() {
 
 // Same truncation as addLineToPage(), so a cell line steps exactly like a body line.
 int ChapterHtmlSlimParser::tableLineStep() const {
-  return std::max(1, static_cast<int>(renderer.getLineHeight(fontId) * lineCompression));
+  return std::max(1, renderer.getLineHeight(fontId, lineCompression));
 }
 
 std::unique_ptr<ParsedText> ChapterHtmlSlimParser::newCellText() const {

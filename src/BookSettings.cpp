@@ -10,7 +10,11 @@ namespace BookSettings {
 
 namespace {
 
-constexpr uint8_t FILE_VERSION = 1;
+// 2: lineSpacing holds the 7-step percentage table; version 1 files hold Tight / Normal /
+// Wide there and are migrated on load (CrossPointSettings::lineSpacingFromLegacy).
+constexpr uint8_t FILE_VERSION = 2;
+constexpr uint8_t FILE_VERSION_LEGACY_LINE_SPACING = 1;
+constexpr size_t LINE_SPACING_FIELD = 2;
 constexpr char FILE_NAME[] = "/book_settings.bin";
 constexpr uint32_t FONT_BIT = 1u << 0;
 constexpr uint32_t ALL_BITS = (1u << kFieldCount) - 1;
@@ -21,6 +25,9 @@ constexpr size_t CACHE_DIR_LEN = 48;
 constexpr size_t MAX_FILE_FIELDS = 32;
 
 static_assert(kFieldCount <= MAX_FILE_FIELDS, "override mask is a uint32_t");
+static_assert(LINE_SPACING_FIELD < kFieldCount &&
+                  kFields[LINE_SPACING_FIELD].member == &CrossPointSettings::lineSpacing,
+              "lineSpacing field index");
 
 struct Values {
   uint8_t v[kFieldCount];
@@ -77,7 +84,8 @@ bool load(uint32_t& mask, Values& values) {
   if (!Storage.openFileForRead("BKS", path, file)) return false;
 
   uint8_t header[6];  // version, field count, mask (little-endian)
-  bool ok = file.read(header, sizeof(header)) == static_cast<int>(sizeof(header)) && header[0] == FILE_VERSION;
+  bool ok = file.read(header, sizeof(header)) == static_cast<int>(sizeof(header)) &&
+            (header[0] == FILE_VERSION || header[0] == FILE_VERSION_LEGACY_LINE_SPACING);
   const uint8_t fileFields = ok ? header[1] : 0;
   uint8_t raw[MAX_FILE_FIELDS] = {};
   ok = ok && fileFields <= MAX_FILE_FIELDS && file.read(raw, fileFields) == static_cast<int>(fileFields) &&
@@ -94,6 +102,9 @@ bool load(uint32_t& mask, Values& values) {
   // A file written by a newer firmware may carry fields this build does not
   // know; a damaged one may carry values out of range. Drop those overrides
   // rather than the whole file.
+  if (header[0] == FILE_VERSION_LEGACY_LINE_SPACING && fileFields > LINE_SPACING_FIELD) {
+    raw[LINE_SPACING_FIELD] = CrossPointSettings::lineSpacingFromLegacy(raw[LINE_SPACING_FIELD]);
+  }
   for (size_t i = 0; i < kFieldCount && i < fileFields; ++i) {
     if (!(fileMask & (1u << i))) continue;
     if (raw[i] < kFields[i].min || raw[i] > kFields[i].max) continue;

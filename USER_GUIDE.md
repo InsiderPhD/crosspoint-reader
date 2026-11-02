@@ -679,7 +679,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 - **Font Family** — Bookerly / Inter / Open Dyslexic / Monospace. SD-card fonts can also be loaded, and on the X4 Pro and X4C a `.ttf`/`.otf` file can be used directly (see [sd-card-fonts](./docs/sd-card-fonts.md)). If the reader shows **Damaged font file**, a `.cpfont` file on the SD card is broken (for example, from an interrupted copy); the affected characters are drawn blank. Delete the font family's folder and install it again.
 - **Font Size** — Small / Medium / Large / X-Large (plus an X-Small size).
-- **Line Spacing** — Tight / Normal / Wide.
+- **Line Spacing** — space between lines as a percentage of the font size: 0%, +10%, +20% (default), +30%, +45%, +60% or +75%. Same steps as CrossPoint, so the setting carries over when you swap firmware; the old Tight / Normal / Wide become +10% / +20% / +30%.
 - **Screen Margin** — 5–40 px in 5-px steps.
 - **Paragraph Alignment** — Justify / Left / Center / Right / Book's Style.
 - **Embedded Style** — use the EPUB's own HTML/CSS formatting.

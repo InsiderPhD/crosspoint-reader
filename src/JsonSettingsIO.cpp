@@ -252,6 +252,12 @@ void JsonSettingsIO::serializeSettings(const CrossPointSettings& s, JsonDocument
   doc["frontButtonLeft"] = s.frontButtonLeft;
   doc["frontButtonRight"] = s.frontButtonRight;
   doc["readingSpeedSecondsPerPage"] = s.readingSpeedSecondsPerPage;
+  // Older KatiePoint builds read Tight / Normal / Wide from "lineSpacing": keep a downgrade
+  // working (0% and +10% -> Tight, +20% -> Normal, wider -> Wide). Loading ignores it while
+  // "lineHeight" is present.
+  doc["lineSpacing"] = static_cast<uint8_t>(s.lineSpacing <= CrossPointSettings::LINE_SPACING_110   ? 0
+                                            : s.lineSpacing == CrossPointSettings::LINE_SPACING_120 ? 1
+                                                                                                    : 2);
 
   // Theme — a DynamicEnum in SettingsList (the picker skips a retired value),
   // so the generic loop above skips it. Stored as the raw UI_THEME number.
@@ -421,6 +427,12 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
   // it, so the value both firmwares write agrees.
   if (doc["pluginsEnabled"].isNull()) {
     s.pluginsEnabled = PluginLocations::anyPluginInstalledOnDisk() ? 1 : 0;
+    if (needsResave) *needsResave = true;
+  }
+
+  // Files from before the percentage table carry Tight / Normal / Wide as "lineSpacing".
+  if (doc["lineHeight"].isNull() && doc["lineSpacing"].is<uint8_t>()) {
+    s.lineSpacing = CrossPointSettings::lineSpacingFromLegacy(doc["lineSpacing"].as<uint8_t>());
     if (needsResave) *needsResave = true;
   }
 

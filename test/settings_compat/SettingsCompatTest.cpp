@@ -79,6 +79,10 @@ void testDetection() {
   parse(kp, R"({"sleepScreen":3,"fontSize":1,"lineSpacing":1,"sleepTimeout":2,"shortPwrBtn":0,
                 "readerActionsMigrated":1,"statusBarBatteryPos":1,"sleepTheme":"light"})");
   expectTrue(!SettingsCompat::isUpstreamDocument(kp.as<JsonVariantConst>()), "KatiePoint file not upstream");
+  // Current KatiePoint files carry "lineHeight" too (same table as upstream).
+  JsonDocument kpNew;
+  parse(kpNew, R"({"sleepTheme":"light","lineHeight":4,"lineSpacing":2,"sleepTimeout":2})");
+  expectTrue(!SettingsCompat::isUpstreamDocument(kpNew.as<JsonVariantConst>()), "lineHeight alone is not upstream");
 
   // Our own export must read back as upstream-numbered.
   JsonDocument out;
@@ -104,8 +108,9 @@ void testImport() {
   expectInt(k, "darkMode", 1, L);
   expectStr(k, "sdFontFamilyName", "Literata", L);
   expectAbsent(k, "fontFamily", L);
-  expectInt(k, "fontSize", 2, L);     // 16pt -> Large
-  expectInt(k, "lineSpacing", 2, L);  // lineHeight 3 (+30%) -> Wide
+  expectInt(k, "fontSize", 2, L);    // 16pt -> Large
+  expectInt(k, "lineHeight", 3, L);  // same table: +30% stays +30%
+  expectAbsent(k, "lineSpacing", L);
   expectInt(k, "wordSpacing", 125, L);
   expectInt(k, "characterSpacing", 5, L);  // +1px -> +1.0 (index 5)
   expectInt(k, "screenMargin", 15, L);
@@ -158,7 +163,6 @@ void testImport() {
   // The plugins master switch maps straight across.
   expectInt(k, "pluginsEnabled", 0, L);
   // Upstream-only keys never leak into ours.
-  expectAbsent(k, "lineHeight", L);
   expectAbsent(k, "shortPwrBtn", L);
 }
 
@@ -167,7 +171,7 @@ constexpr const char* KATIEPOINT = R"({
   "language": "FR", "sleepTheme": "blank", "seamlessSleepScreen": 0, "refreshFrequency": 2, "uiTheme": 4,
   "pluginsEnabled": 1,
   "fadingFix": 0, "darkMode": 0, "fontFamily": 2, "sdFontFamilyName": "", "dictionaryName": "",
-  "fontSize": 3, "lineSpacing": 0, "wordSpacing": 100, "characterSpacing": 2, "screenMargin": 20,
+  "fontSize": 3, "lineHeight": 5, "lineSpacing": 2, "wordSpacing": 100, "characterSpacing": 2, "screenMargin": 20,
   "paragraphAlignment": 0, "paragraphIndent": 0, "embeddedStyle": 1, "hyphenationEnabled": 0,
   "orientation": 0, "extraParagraphSpacing": 1, "textAntiAliasing": 1, "imageRendering": 1,
   "imageGrayscale": 1, "bionicReading": 0, "sleepTimeout": 4, "showHiddenFiles": 0, "finishedBookFolder": 2,
@@ -201,7 +205,7 @@ void testExport() {
   expectInt(u, "fontFamily", 2, L);  // built-in OpenDyslexic -> upstream legacy id
   expectStr(u, "sdFontFamilyName", "", L);
   expectInt(u, "fontSize", 18, L);
-  expectInt(u, "lineHeight", 1, L);        // Tight -> +10%
+  expectInt(u, "lineHeight", 5, L);        // same table: +60% stays +60%
   expectInt(u, "characterSpacing", 1, L);  // -0.5px -> -1px
   expectInt(u, "screenMargin", 20, L);
   expectAbsent(u, "paragraphIndentSpaces", L);  // book's own indent
@@ -245,7 +249,7 @@ void testRoundTrip() {
       {"paragraphIndentSpaces", 0, 4}, {"imageRendering", 0, 3},
       {"sideButtonLayout", 0, 4},      {"longPressButtonBehavior", 0, 2},
       {"orientation", 0, 3},           {"statusBarClock", 0, 2},
-      {"statusBarTitle", 0, 2},        {"lineHeight", 1, 3},
+      {"statusBarTitle", 0, 2},        {"lineHeight", 0, 6},
       {"xtcStatusBarMode", 0, 2},      {"pluginsEnabled", 0, 1},
   };
   for (const auto& c : CASES) {
@@ -302,11 +306,34 @@ void testRoundTrip() {
 }
 }  // namespace
 
+// Settings written before the percentage table: "lineSpacing" moves up one slot both ways.
+void testLegacyLineSpacing() {
+  const char* L = "legacy lineSpacing";
+  for (int v = 0; v <= 2; v++) {  // an older KatiePoint document: Tight / Normal / Wide
+    JsonDocument kp, up;
+    kp["lineSpacing"] = v;
+    SettingsCompat::exportShared(kp.as<JsonVariantConst>(), up);
+    expectInt(up.as<JsonVariantConst>(), "lineHeight", v + 1, L);
+  }
+  JsonDocument kpNone, upNone;  // no line spacing at all: the shared default +20%
+  kpNone["fontSize"] = 1;
+  SettingsCompat::exportShared(kpNone.as<JsonVariantConst>(), upNone);
+  expectInt(upNone.as<JsonVariantConst>(), "lineHeight", 2, L);
+  for (int v = 0; v <= 3; v++) {  // pre-2.0 upstream: Tight / Normal / Wide / Extra Wide
+    JsonDocument up, kp;
+    up["pluginsEnabled"] = 0;
+    up["lineSpacing"] = v;
+    SettingsCompat::importUpstream(up.as<JsonVariantConst>(), kp);
+    expectInt(kp.as<JsonVariantConst>(), "lineHeight", v + 1, L);
+  }
+}
+
 int main() {
   testDetection();
   testImport();
   testExport();
   testRoundTrip();
+  testLegacyLineSpacing();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

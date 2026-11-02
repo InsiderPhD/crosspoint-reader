@@ -543,8 +543,7 @@ reason.
    defaults are used. `settings.json` is never imported over it.
 2. Otherwise `settings.json` (or its `.tmp` / `.bak`) is imported once and our file saved straight
    away. `settings.json` is not moved or deleted.
-   - **Upstream file**: it contains a key KatiePoint has never written (`lineHeight`,
-     `sleepTimeoutMinutes`, `pluginsEnabled`, `paragraphIndentSpaces`, `pageTurnGesture`,
+   - **Upstream file**: it contains a key KatiePoint has never written (`sleepTimeoutMinutes`, `pluginsEnabled`, `paragraphIndentSpaces`, `pageTurnGesture`,
      `libraryUseMetadata`, `screenInverted`, `focusReadingEnabled`, `readerMenuStyle`). It is
      translated by `SettingsCompat::importUpstream` (table below); unmapped settings keep our
      defaults. Its `language` code sets the UI language.
@@ -587,7 +586,7 @@ Same name, value and range on both sides: `hideBatteryPercentage`, `fadingFix`, 
 | `uiTheme` | `uiTheme` | 0..2 same; our retired 3 exports as 2; Carousel / Dashboard / Bookshelf not exported; upstream RoundedRaff 3 / Cover Grid 4 not imported |
 | `fontFamily` | `fontFamily` | upstream always 1 (Noto Sans) unless an SD family is set; our built-in OpenDyslexic <-> upstream legacy 2; Bookerly / Inter / Monospace export as 1 |
 | `fontSize` 0..3 | `fontSize` (pt) | slot i <-> 12 + 2i pt; other point sizes snap to the nearest slot; legacy 0..3 import as-is |
-| `lineSpacing` Tight / Normal / Wide | `lineHeight` 0..6 | i <-> i + 1 (upstream's own legacy migration); upstream 0 -> Tight, 4..6 -> Wide |
+| `lineHeight` 0..6 | `lineHeight` 0..6 | same table (0%, +10%, +20%, +30%, +45%, +60%, +75% of the font size). An older document's `lineSpacing` (ours Tight / Normal / Wide, pre-2.0 upstream's 0..3) moves up one slot |
 | `characterSpacing` 0..6 (half px, 3 = 0) | `characterSpacing` 0..4 (whole px, 2 = 0) | import {0,1,3,5,6}; export {0,1,1,2,3,3,4} (round trip exact for upstream values) |
 | `paragraphIndent` (0 book, 1 none, 2..5 = 1..4 spaces) | `paragraphIndentSpaces` 0..5 | n spaces <-> n + 1; upstream 5 -> 4 spaces; "book" not exported |
 | `imageRendering` + `imageGrayscale` | `imageRendering` 0..3 | Display + grayscale off <-> 3 (Display B/W); others same |
@@ -611,11 +610,16 @@ Optional, in the book's cache directory (`/.crosspoint/epub_<hash>/`), so it fol
 removed with the cache. Written by the reader menu's **Book Settings** editor; a missing file means the
 book follows the global settings. Owned by `src/BookSettings.cpp`.
 
-### Version 1
+### Version 2
+
+Same layout as version 1. Field 2 (`lineSpacing`) now holds the 7-step `lineHeight` table
+(0%, +10%, +20%, +30%, +45%, +60%, +75%); a version 1 file holds Tight / Normal / Wide there and
+loads one step up (+10% / +20% / +30%). Version 1 files are still read; they are rewritten as
+version 2 on the next save.
 
 ```c++
 struct BookSettingsBin {
-    u8  version;              // 1
+    u8  version;              // 2 (1 is still read, see above)
     u8  fieldCount;           // value bytes that follow the mask (14 when written by this firmware)
     u32 overrideMask;         // little-endian; bit i set = values[i] overrides the global setting
     u8  values[fieldCount];   // BookSettings::kFields order, see below

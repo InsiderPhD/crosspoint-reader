@@ -204,7 +204,21 @@ class CrossPointSettings {
   // Font size options. All families are normalised to the same point sizes (6/8/10/12)
   // so switching family keeps text at the same scale.
   enum FONT_SIZE { SMALL = 0, MEDIUM = 1, LARGE = 2, EXTRA_LARGE = 3, FONT_SIZE_COUNT };
-  enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, LINE_COMPRESSION_COUNT };
+  // Line spacing: distance between baselines as a percentage of the font size, CrossPoint
+  // 2.0's 7-step table and numbering (JSON key "lineHeight"). Persisted: append only.
+  // Builds before this stored Tight / Normal / Wide (0..2) under "lineSpacing"; those load
+  // one step up (Tight -> +10%), CrossPoint's own migration of the same three values.
+  enum LINE_COMPRESSION {
+    LINE_SPACING_100 = 0,
+    LINE_SPACING_110 = 1,
+    LINE_SPACING_120 = 2,
+    LINE_SPACING_130 = 3,
+    LINE_SPACING_145 = 4,
+    LINE_SPACING_160 = 5,
+    LINE_SPACING_175 = 6,
+    LINE_COMPRESSION_COUNT
+  };
+  static constexpr uint8_t LEGACY_LINE_SPACING_COUNT = 3;  // Tight / Normal / Wide
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,
     LEFT_ALIGN = 1,
@@ -622,7 +636,7 @@ class CrossPointSettings {
   int (*sdFontIdResolver)(void* ctx, const char* familyName, uint8_t fontSizeEnum) = nullptr;
   void* sdFontResolverCtx = nullptr;
   uint8_t fontSize = MEDIUM;
-  uint8_t lineSpacing = NORMAL;
+  uint8_t lineSpacing = LINE_SPACING_120;
   // Gap between words as a percentage of the font's own space advance. 100 = the font's
   // spacing, i.e. the layout every book had before this setting existed.
   static constexpr uint8_t WORD_SPACING_MIN = 50;
@@ -1002,7 +1016,10 @@ class CrossPointSettings {
   bool importLegacyJson();
 
  public:
+  // Line spacing as a multiple of the font size (1.0 .. 1.75), for GfxRenderer::getLineHeight(id, spacing).
   float getReaderLineCompression() const;
+  // Settings from before the percentage table: Tight / Normal / Wide (0..2) -> +10 / +20 / +30%.
+  static uint8_t lineSpacingFromLegacy(uint8_t legacy);
   // The reader's spacing controls in the form the EPUB layout engine and the section cache
   // key take them. Out-of-range stored values fall back to "no change".
   TextLayoutOptions readerTextLayout() const;

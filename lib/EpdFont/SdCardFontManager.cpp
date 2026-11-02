@@ -79,7 +79,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
           font->styleCount(), fontSizeEnum);
 
   EpdFontFamily fontFamily(font->getEpdFont(0), font->getEpdFont(1), font->getEpdFont(2), font->getEpdFont(3));
-  renderer.insertFont(fontId, fontFamily);
+  renderer.insertFont(fontId, fontFamily.withPointSize(selected->pointSize));
 
   loadedFamilyName_ = family.name;
   loadedPointSize_ = selected->pointSize;

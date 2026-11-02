@@ -90,7 +90,7 @@ void SettingsActivity::onEnter() {
     // rows from the device Settings list. They remain in the web UI, which
     // visits the same list itself.
     if (setting.key &&
-        (std::strcmp(setting.key, "fontSize") == 0 || std::strcmp(setting.key, "lineSpacing") == 0 ||
+        (std::strcmp(setting.key, "fontSize") == 0 || std::strcmp(setting.key, "lineHeight") == 0 ||
          std::strcmp(setting.key, "wordSpacing") == 0 || std::strcmp(setting.key, "characterSpacing") == 0 ||
          std::strcmp(setting.key, "paragraphIndent") == 0 || std::strcmp(setting.key, "paragraphAlignment") == 0 ||
          std::strcmp(setting.key, "screenMargin") == 0 || std::strcmp(setting.key, "extraParagraphSpacing") == 0 ||

@@ -446,28 +446,28 @@ void setupDisplayAndFonts(bool seamless = false) {
   }
   fontCacheManager.setFontDecompressor(&fontDecompressor);
   renderer.setFontCacheManager(&fontCacheManager);
-  renderer.insertFont(BOOKERLY_8_FONT_ID, bookerly8FontFamily);
+  renderer.insertFont(BOOKERLY_8_FONT_ID, bookerly8FontFamily.withPointSize(8));
 #ifndef OMIT_FONTS
-  renderer.insertFont(BOOKERLY_6_FONT_ID, bookerly6FontFamily);
-  renderer.insertFont(BOOKERLY_10_FONT_ID, bookerly10FontFamily);
-  renderer.insertFont(BOOKERLY_12_FONT_ID, bookerly12FontFamily);
+  renderer.insertFont(BOOKERLY_6_FONT_ID, bookerly6FontFamily.withPointSize(6));
+  renderer.insertFont(BOOKERLY_10_FONT_ID, bookerly10FontFamily.withPointSize(10));
+  renderer.insertFont(BOOKERLY_12_FONT_ID, bookerly12FontFamily.withPointSize(12));
 
-  renderer.insertFont(INTER_6_FONT_ID, inter6FontFamily);
-  renderer.insertFont(INTER_8_FONT_ID, inter8FontFamily);
-  renderer.insertFont(INTER_10_FONT_ID, inter10FontFamily);
-  renderer.insertFont(INTER_12_FONT_ID, inter12FontFamily);
-  renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily);
-  renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily);
-  renderer.insertFont(OPENDYSLEXIC_6_FONT_ID, opendyslexic6FontFamily);
-  renderer.insertFont(OPENDYSLEXIC_8_FONT_ID, opendyslexic8FontFamily);
-  renderer.insertFont(OPENDYSLEXIC_10_FONT_ID, opendyslexic10FontFamily);
-  renderer.insertFont(OPENDYSLEXIC_12_FONT_ID, opendyslexic12FontFamily);
-  renderer.insertFont(OPENDYSLEXIC_14_FONT_ID, opendyslexic14FontFamily);
+  renderer.insertFont(INTER_6_FONT_ID, inter6FontFamily.withPointSize(6));
+  renderer.insertFont(INTER_8_FONT_ID, inter8FontFamily.withPointSize(8));
+  renderer.insertFont(INTER_10_FONT_ID, inter10FontFamily.withPointSize(10));
+  renderer.insertFont(INTER_12_FONT_ID, inter12FontFamily.withPointSize(12));
+  renderer.insertFont(NOTOSANS_14_FONT_ID, notosans14FontFamily.withPointSize(14));
+  renderer.insertFont(NOTOSANS_16_FONT_ID, notosans16FontFamily.withPointSize(16));
+  renderer.insertFont(OPENDYSLEXIC_6_FONT_ID, opendyslexic6FontFamily.withPointSize(6));
+  renderer.insertFont(OPENDYSLEXIC_8_FONT_ID, opendyslexic8FontFamily.withPointSize(8));
+  renderer.insertFont(OPENDYSLEXIC_10_FONT_ID, opendyslexic10FontFamily.withPointSize(10));
+  renderer.insertFont(OPENDYSLEXIC_12_FONT_ID, opendyslexic12FontFamily.withPointSize(12));
+  renderer.insertFont(OPENDYSLEXIC_14_FONT_ID, opendyslexic14FontFamily.withPointSize(14));
 #endif  // OMIT_FONTS
-  renderer.insertFont(MONO_6_FONT_ID, mono6FontFamily);
-  renderer.insertFont(MONO_8_FONT_ID, mono8FontFamily);
-  renderer.insertFont(MONO_10_FONT_ID, mono10FontFamily);
-  renderer.insertFont(MONO_12_FONT_ID, mono12FontFamily);
+  renderer.insertFont(MONO_6_FONT_ID, mono6FontFamily.withPointSize(6));
+  renderer.insertFont(MONO_8_FONT_ID, mono8FontFamily.withPointSize(8));
+  renderer.insertFont(MONO_10_FONT_ID, mono10FontFamily.withPointSize(10));
+  renderer.insertFont(MONO_12_FONT_ID, mono12FontFamily.withPointSize(12));
   renderer.insertFont(UI_10_FONT_ID, ui10FontFamily);
   renderer.insertFont(UI_12_FONT_ID, ui12FontFamily);
   renderer.insertFont(SMALL_FONT_ID, smallFontFamily);

@@ -737,7 +737,11 @@ bool CrossPointSettings::loadFromBinaryFile() {
     if (++settingsRead >= fileSettingsCount) break;
     readAndValidate(inputFile, fontSize, FONT_SIZE_COUNT);
     if (++settingsRead >= fileSettingsCount) break;
-    readAndValidate(inputFile, lineSpacing, LINE_COMPRESSION_COUNT);
+    {
+      uint8_t legacyLineSpacing = 1;  // Normal; settings.bin predates the percentage table
+      readAndValidate(inputFile, legacyLineSpacing, LEGACY_LINE_SPACING_COUNT);
+      lineSpacing = lineSpacingFromLegacy(legacyLineSpacing);
+    }
     if (++settingsRead >= fileSettingsCount) break;
     readAndValidate(inputFile, paragraphAlignment, PARAGRAPH_ALIGNMENT_COUNT);
     if (++settingsRead >= fileSettingsCount) break;
@@ -844,49 +848,14 @@ TextLayoutOptions CrossPointSettings::readerTextLayout() const {
 }
 
 float CrossPointSettings::getReaderLineCompression() const {
-  switch (fontFamily) {
-    case BOOKERLY:
-    default:
-      switch (lineSpacing) {
-        case TIGHT:
-          return 0.95f;
-        case NORMAL:
-        default:
-          return 1.0f;
-        case WIDE:
-          return 1.1f;
-      }
-    case INTER:
-      switch (lineSpacing) {
-        case TIGHT:
-          return 0.90f;
-        case NORMAL:
-        default:
-          return 0.95f;
-        case WIDE:
-          return 1.0f;
-      }
-    case OPENDYSLEXIC:
-      switch (lineSpacing) {
-        case TIGHT:
-          return 0.82f;
-        case NORMAL:
-        default:
-          return 0.87f;
-        case WIDE:
-          return 0.95f;
-      }
-    case MONOSPACE:
-      switch (lineSpacing) {
-        case TIGHT:
-          return 0.90f;
-        case NORMAL:
-        default:
-          return 0.95f;
-        case WIDE:
-          return 1.0f;
-      }
-  }
+  // CrossPoint 2.0's table (#4174): 0%, +10%, +20% (default), +30%, +45%, +60%, +75% of the
+  // font size, the same for every family, so a value means the same on both firmwares.
+  static constexpr float MULTIPLIERS[LINE_COMPRESSION_COUNT] = {1.0f, 1.1f, 1.2f, 1.3f, 1.45f, 1.6f, 1.75f};
+  return MULTIPLIERS[lineSpacing < LINE_COMPRESSION_COUNT ? lineSpacing : LINE_SPACING_120];
+}
+
+uint8_t CrossPointSettings::lineSpacingFromLegacy(const uint8_t legacy) {
+  return legacy < LEGACY_LINE_SPACING_COUNT ? static_cast<uint8_t>(legacy + 1) : LINE_SPACING_120;
 }
 
 unsigned long CrossPointSettings::getSleepTimeoutMs() const {

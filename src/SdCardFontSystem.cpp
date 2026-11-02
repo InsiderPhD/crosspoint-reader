@@ -190,7 +190,7 @@ void SdCardFontSystem::loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRend
     if (ttf_->load(pointSize) == TtfEpdFont::LoadResult::OK) {
       const int fontId = computeTtfFontId(ttf_->contentHash(), ttfFamily_, pointSize);
       if (renderer.getFontMap().count(fontId) == 0) {
-        renderer.insertFont(fontId, ttf_->family());
+        renderer.insertFont(fontId, ttf_->family().withPointSize(pointSize));
         ttfFontId_ = fontId;
         ttfPointSize_ = pointSize;
         LOG_DBG("SDFS", "Vector font %s resized to %upt (id=%d)", ttfFamily_, pointSize, fontId);
@@ -251,7 +251,7 @@ void SdCardFontSystem::loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRend
     ttf_ = nullptr;
     return;
   }
-  renderer.insertFont(fontId, ttf_->family());
+  renderer.insertFont(fontId, ttf_->family().withPointSize(pointSize));
   snprintf(ttfFamily_, sizeof(ttfFamily_), "%s", family.name.c_str());
   ttfFontId_ = fontId;
   ttfPointSize_ = pointSize;

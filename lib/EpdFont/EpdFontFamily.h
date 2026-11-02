@@ -22,6 +22,15 @@ class EpdFontFamily {
                          const EpdFont* boldItalic = nullptr)
       : regular(regular), bold(bold), italic(italic), boldItalic(boldItalic) {}
   ~EpdFontFamily() = default;
+  // Nominal point size the faces were rasterized at (150 DPI, fontconvert.py / the SD and
+  // vector loaders). Belongs to the registration, so generated font data stays unchanged.
+  // 0 = unknown: line spacing then falls back to the font's own advanceY.
+  [[nodiscard]] EpdFontFamily withPointSize(const uint8_t points) const {
+    EpdFontFamily family = *this;
+    family.pointSize_ = points;
+    return family;
+  }
+  [[nodiscard]] uint8_t pointSize() const { return pointSize_; }
   void getTextDimensions(const char* string, int* w, int* h, Style style = REGULAR) const;
   const EpdFontData* getData(Style style = REGULAR) const;
   const EpdGlyph* getGlyph(uint32_t cp, Style style = REGULAR) const;
@@ -33,6 +42,7 @@ class EpdFontFamily {
   const EpdFont* bold;
   const EpdFont* italic;
   const EpdFont* boldItalic;
+  uint8_t pointSize_ = 0;
 
   const EpdFont* getFont(Style style) const;
 };

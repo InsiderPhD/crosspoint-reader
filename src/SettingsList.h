@@ -203,9 +203,14 @@ inline void appendReaderTypographySettings(SettingSink& v) {
   v.push_back(SettingInfo::Enum(StrId::STR_FONT_SIZE, &CrossPointSettings::fontSize,
                                 {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE, StrId::STR_X_LARGE}, "fontSize",
                                 StrId::STR_CAT_READER));
-  v.push_back(SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing,
-                                {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE}, "lineSpacing",
-                                StrId::STR_CAT_READER));
+  // "lineHeight", CrossPoint 2.0's key and numbering. JsonSettingsIO reads an older file's
+  // "lineSpacing" (Tight / Normal / Wide) one step up when "lineHeight" is absent.
+  v.push_back(SettingInfo::Enum(
+      StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing,
+      {StrId::STR_SPACING_0_PERCENT, StrId::STR_SPACING_PLUS_10_PERCENT, StrId::STR_SPACING_PLUS_20_PERCENT_DEFAULT,
+       StrId::STR_SPACING_PLUS_30_PERCENT, StrId::STR_SPACING_PLUS_45_PERCENT, StrId::STR_SPACING_PLUS_60_PERCENT,
+       StrId::STR_SPACING_PLUS_75_PERCENT},
+      "lineHeight", StrId::STR_CAT_READER));
   v.push_back(SettingInfo::Value(StrId::STR_WORD_SPACING, &CrossPointSettings::wordSpacing,
                                  {CrossPointSettings::WORD_SPACING_MIN, CrossPointSettings::WORD_SPACING_MAX,
                                   CrossPointSettings::WORD_SPACING_STEP},

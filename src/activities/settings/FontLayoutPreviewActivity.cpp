@@ -24,7 +24,12 @@ namespace {
 constexpr StrId kFamilyLabels[] = {StrId::STR_BOOKERLY, StrId::STR_INTER, StrId::STR_OPEN_DYSLEXIC,
                                    StrId::STR_MONOSPACE};
 constexpr StrId kSizeLabels[] = {StrId::STR_SMALL, StrId::STR_MEDIUM, StrId::STR_LARGE, StrId::STR_X_LARGE};
-constexpr StrId kSpacingLabels[] = {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE};
+// Same order as the persisted index (CrossPointSettings::LINE_COMPRESSION).
+constexpr StrId kSpacingLabels[] = {
+    StrId::STR_SPACING_0_PERCENT,       StrId::STR_SPACING_PLUS_10_PERCENT, StrId::STR_SPACING_PLUS_20_PERCENT_DEFAULT,
+    StrId::STR_SPACING_PLUS_30_PERCENT, StrId::STR_SPACING_PLUS_45_PERCENT, StrId::STR_SPACING_PLUS_60_PERCENT,
+    StrId::STR_SPACING_PLUS_75_PERCENT};
+static_assert(sizeof(kSpacingLabels) / sizeof(kSpacingLabels[0]) == CrossPointSettings::LINE_COMPRESSION_COUNT);
 // Same order as the persisted index (SettingsList.h): -1.5 px .. +1.5 px.
 constexpr StrId kCharSpacingLabels[] = {
     StrId::STR_SPACING_MINUS_3, StrId::STR_SPACING_MINUS_2, StrId::STR_SPACING_MINUS_1, StrId::STR_SPACING_ZERO,
@@ -521,7 +526,7 @@ void FontLayoutPreviewActivity::renderPreview(int x, int y, int w, int h) const 
     renderer.ensureSdCardFontReady(fontId, I18N.get(para), 0x03);
   }
 
-  int lineH = static_cast<int>(renderer.getLineHeight(fontId) * SETTINGS.getReaderLineCompression() + 0.5f);
+  int lineH = renderer.getLineHeight(fontId, SETTINGS.getReaderLineCompression());
   if (lineH < 8) lineH = 8;
 
   const int margin = SETTINGS.screenMargin;
