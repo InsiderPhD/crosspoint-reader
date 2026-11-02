@@ -1972,29 +1972,33 @@ int GfxRenderer::getKerning(const int fontId, const uint32_t leftCp, const uint3
 int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style,
                                  const int8_t tracking) const {
   // Advance table fast-path for SD card fonts during layout.
-  // No kerning/ligature lookup — consistent with previous metadataOnly behavior
-  // where kern/lig data was not loaded.
+  // Each advance is snapped to whole pixels as drawText steps its cursor, so a word
+  // measures what it draws; summing the fixed-point advances and rounding once drifted by
+  // up to half a pixel per glyph (justification gaps, right-edge overruns). Kerning and
+  // ligature data are not resident during layout, so a kerned pair can still differ.
   auto sdIt = sdCardFonts_.find(fontId);
   if (sdIt != sdCardFonts_.end() && sdIt->second->hasAdvanceTable()) {
-    int32_t widthFP = 0;
+    int widthPx = 0;
+    int32_t prevAdvanceFP = 0;
     int trackingGaps = 0;
-    uint32_t prevBaseCp = 0;
+    uint32_t prevCp = 0;
     const bool isSupSub = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0;
     const uint8_t styleIdx = resolveSdCardStyle(*sdIt->second, style);
     while (uint32_t cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text))) {
-      if (utf8IsVariationSelector(cp)) continue;  // no advance, and never in the advance table
-      int32_t advFP = sdIt->second->getAdvance(cp, styleIdx);
-      widthFP += isSupSub ? (advFP + 1) / 2 : advFP;
-      // Count the boundaries drawText will space: it steps over combining marks without
-      // moving its previous-glyph cursor, so they are stepped over here too.
-      if (tracking != 0 && !utf8IsCombiningMark(cp)) {
-        if (trackingBoundary(prevBaseCp, cp)) ++trackingGaps;
-        prevBaseCp = cp;
+      // Variation selectors and combining marks take no advance in drawText, which draws a
+      // mark over its base without moving the cursor or its previous-glyph state.
+      if (utf8IsVariationSelector(cp) || utf8IsCombiningMark(cp)) continue;
+      if (prevCp != 0) {
+        widthPx += fp4::toPixel(prevAdvanceFP);
+        // Whole pixels per gap, exactly as drawText accumulates tracking.
+        if (tracking != 0 && trackingBoundary(prevCp, cp)) widthPx += trackingStep(trackingGaps++, tracking);
       }
+      const int32_t advFP = sdIt->second->getAdvance(cp, styleIdx);
+      prevAdvanceFP = isSupSub ? (advFP + 1) / 2 : advFP;
+      prevCp = cp;
     }
-    // Added in whole pixels, exactly as drawText accumulates it, so tracking brings no
-    // measure/draw drift of its own on top of the advance table's.
-    return fp4::toPixel(widthFP) + trackingPixels(trackingGaps, tracking);
+    widthPx += fp4::toPixel(prevAdvanceFP);  // final glyph's advance
+    return widthPx;
   }
 
   const auto fontIt = fontMap.find(fontId);
