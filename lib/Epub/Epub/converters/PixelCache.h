@@ -169,7 +169,13 @@ struct PixelCache {
       abort();
       return false;
     }
-    file.close();
+    // close() flushes SdFat's dirty sector and the directory entry; if it fails the cache file
+    // may be truncated or stale, so drop it instead of reporting it as written.
+    if (!file.close()) {
+      LOG_ERR("IMG", "Failed to close image cache %s", cachePathStr.c_str());
+      abort();
+      return false;
+    }
     LOG_DBG("IMG", "Cache written: %s (%dx%d, %d bytes)", cachePathStr.c_str(), width, height,
             4 + bytesPerRow * height);
     ok = false;  // file handed off; nothing left to clean up
