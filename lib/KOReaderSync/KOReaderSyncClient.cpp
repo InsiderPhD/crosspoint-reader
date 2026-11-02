@@ -5,11 +5,15 @@
 #include <Epub.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <MD5Builder.h>
 #include <SecureHttpClient.h>
 #include <base64.h>
+#include <esp_mac.h>
 
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 
 #include "KOReaderCredentialStore.h"
@@ -19,6 +23,7 @@ int KOReaderSyncClient::lastHttpCode = 0;
 namespace {
 // Device identifier for CrossPoint reader
 constexpr char DEVICE_NAME[] = "CrossPoint";
+// Shared legacy device_id; strict KOSync servers still get it (deviceIdForServer).
 constexpr char DEVICE_ID[] = "crosspoint-reader";
 
 // Transport is freeink::SecureHttpClient (wolfSSL, TLS 1.3), like every other
@@ -336,7 +341,9 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   doc["progress"] = progress.progress;
   doc["percentage"] = progress.percentage;
   doc["device"] = DEVICE_NAME;
-  doc["device_id"] = DEVICE_ID;
+  char deviceId[READER_ID_SIZE];
+  deviceIdForServer(deviceId, sizeof(deviceId));
+  doc["device_id"] = deviceId;
   if (progress.position.has_value() && KOREADER_STORE.supportsRichProgress()) {
     // Opt-in by server type; strict KOSync never receives it.
     const KOReaderRichPosition& p = *progress.position;
@@ -370,6 +377,38 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   if (httpCode >= 200 && httpCode < 300) return OK;
   if (httpCode == 401) return AUTH_FAILED;
   return SERVER_ERROR;
+}
+
+bool KOReaderSyncClient::readerId(char* out, const size_t capacity) {
+  if (!out || capacity < READER_ID_SIZE) return false;
+  // Computed once: the MAC never changes while running. 27 chars + NUL in
+  // .bss, cheaper than re-hashing for every request of a bulk sync.
+  static char cached[READER_ID_SIZE] = {};
+  if (cached[0] == '\0') {
+    uint8_t mac[6] = {};
+    esp_efuse_mac_get_default(mac);
+    // Domain-separating salt: the same MAC also keys the credential
+    // obfuscation, so the id must not be the MAC or a plain hash of it.
+    MD5Builder md5;
+    md5.begin();
+    md5.add("KatiePoint sync reader id v1:");
+    md5.add(mac, sizeof(mac));
+    md5.calculate();
+    const String digest = md5.toString();
+    snprintf(cached, sizeof(cached), "katiepoint-%.16s", digest.c_str());
+  }
+  memcpy(out, cached, READER_ID_SIZE);
+  return true;
+}
+
+void KOReaderSyncClient::deviceIdForServer(char* out, const size_t capacity) {
+  if (!out || capacity == 0) return;
+  // Strict KOSync servers keep the id every CrossPoint build has always sent:
+  // a per-reader id is a CrossPoint Sync extension (one progress row per
+  // reader), and KOReader-only servers get nothing they did not get before.
+  if (KOREADER_STORE.getServerType() == KOReaderServerType::KOSYNC || !readerId(out, capacity)) {
+    snprintf(out, capacity, "%s", DEVICE_ID);
+  }
 }
 
 const char* KOReaderSyncClient::errorString(Error error) {

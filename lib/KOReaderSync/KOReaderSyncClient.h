@@ -126,6 +126,23 @@ class KOReaderSyncClient {
    */
   static const char* errorString(Error error);
 
+  // Characters readerId() writes, including the terminator.
+  static constexpr size_t READER_ID_SIZE = 28;
+
+  /**
+   * This reader's own sync device id, "katiepoint-" + 16 hex digits: a salted
+   * MD5 of the factory MAC, so it is stable across SD cards and reflashes but
+   * never carries the MAC itself. Sent as `device_id` to CrossPoint/Other
+   * servers, where it gives each reader its own progress row (so the change
+   * feed can leave out this reader's writes) and scopes its stats snapshots.
+   * A strict KOSync server keeps the shared legacy id. False only when the
+   * buffer is too small.
+   */
+  static bool readerId(char* out, size_t capacity);
+
+  /** device_id for a request to the configured server type (see readerId). */
+  static void deviceIdForServer(char* out, size_t capacity);
+
   /** HTTP status code from the last request (for diagnostics). */
   static int lastHttpCode;
 };
