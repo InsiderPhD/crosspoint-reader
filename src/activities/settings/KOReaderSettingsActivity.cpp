@@ -25,6 +25,7 @@ enum Row : int {
   ROW_DOCUMENT_MATCHING,
   ROW_SEND_METADATA,
   ROW_SYNC_CLIPPINGS,
+  ROW_SYNC_STATS,
   ROW_SYNC_BEHAVIOR,
   ROW_SIGN_UP,
   ROW_AUTHENTICATE,
@@ -34,8 +35,9 @@ constexpr StrId menuNames[MENU_ITEMS] = {StrId::STR_USERNAME,          StrId::ST
                                          StrId::STR_SYNC_SERVER_URL,   StrId::STR_KOSYNC_SERVER_TYPE,
                                          StrId::STR_CUSTOM_HEADER_1,   StrId::STR_CUSTOM_HEADER_2,
                                          StrId::STR_DOCUMENT_MATCHING, StrId::STR_KOSYNC_SEND_METADATA,
-                                         StrId::STR_SYNC_CLIPPINGS,    StrId::STR_SYNC_BEHAVIOR,
-                                         StrId::STR_REGISTER,          StrId::STR_AUTHENTICATE};
+                                         StrId::STR_SYNC_CLIPPINGS,    StrId::STR_SYNC_READING_STATS,
+                                         StrId::STR_SYNC_BEHAVIOR,     StrId::STR_REGISTER,
+                                         StrId::STR_AUTHENTICATE};
 
 const char* serverTypeLabel(const KOReaderServerType type) {
   switch (type) {
@@ -187,6 +189,10 @@ void KOReaderSettingsActivity::handleSelection() {
     KOREADER_STORE.setSyncClippings(!KOREADER_STORE.getSyncClippings());
     KOREADER_STORE.saveToFile();
     requestUpdate();
+  } else if (selectedIndex == ROW_SYNC_STATS) {
+    KOREADER_STORE.setSyncStats(!KOREADER_STORE.getSyncStats());
+    KOREADER_STORE.saveToFile();
+    requestUpdate();
   } else if (selectedIndex == ROW_DOCUMENT_MATCHING) {
     // Document Matching - toggle between Filename and Binary
     const auto current = KOREADER_STORE.getMatchMethod();
@@ -263,6 +269,8 @@ void KOReaderSettingsActivity::render(RenderLock&&) {
                                                                                     : std::string(tr(STR_BINARY));
           case ROW_SYNC_CLIPPINGS:
             return std::string(KOREADER_STORE.getSyncClippings() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
+          case ROW_SYNC_STATS:
+            return std::string(KOREADER_STORE.getSyncStats() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
           case ROW_SIGN_UP:
           case ROW_AUTHENTICATE:
             return KOREADER_STORE.hasCredentials() ? "" : std::string("[") + tr(STR_SET_CREDENTIALS_FIRST) + "]";

@@ -688,6 +688,7 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
   doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
   doc["sendMetadata"] = store.getSendMetadata();
   doc["syncClippings"] = store.getSyncClippings();
+  doc["syncStats"] = store.getSyncStats();
   doc["syncBehavior"] = static_cast<uint8_t>(store.getSyncBehavior());
   JsonArray headers = doc["headers"].to<JsonArray>();
   for (const auto& header : store.getCustomHeaders()) {
@@ -751,6 +752,7 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
   store.matchMethod = static_cast<DocumentMatchMethod>(method);
   store.sendMetadata = doc["sendMetadata"] | false;
   store.syncClippings = doc["syncClippings"] | false;
+  store.syncStats = doc["syncStats"] | false;
   // A file from before the setting keeps asking every time; new setups get Smart.
   const JsonVariantConst behaviorValue = doc["syncBehavior"];
   const uint8_t behavior = behaviorValue | static_cast<uint8_t>(KOReaderSyncBehavior::ASK_EVERY_TIME);

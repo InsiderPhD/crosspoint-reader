@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "activities/Activity.h"
+#include "sync/StatsSync.h"
 
 // File Transfer > Sync Books: KOReader / CrossPoint Sync progress for every
 // EPUB on the card that has a saved position, in one pass, without opening
@@ -69,6 +70,8 @@ class SyncBooksActivity final : public Activity {
   unsigned unchanged = 0;
   unsigned conflicts = 0;
   unsigned failed = 0;
+  StatsSync::Result statsResult = StatsSync::Result::Off;
+  unsigned statsBooks = 0;
   bool batchUnsupported = false;
   int lastRepaint = -1;
 

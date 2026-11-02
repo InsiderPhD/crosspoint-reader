@@ -554,6 +554,51 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgressChanges(const uint32_t 
   return OK;
 }
 
+KOReaderSyncClient::Error KOReaderSyncClient::extensionRequest(const char* endpoint, const char* body, char* reply,
+                                                               const size_t replyCapacity) {
+  lastHttpCode = 0;
+  if (reply && replyCapacity) reply[0] = '\0';
+  if (!KOREADER_STORE.hasCredentials()) return NO_CREDENTIALS;
+  if (!KOREADER_STORE.supportsSyncExtensions()) return EXTENSION_UNSUPPORTED;
+  if (!reply || replyCapacity < 2) return JSON_ERROR;
+  if (insufficientHeap()) return LOW_MEMORY;
+
+  const std::string url = KOREADER_STORE.getBaseUrl() + endpoint;
+  freeink::SecureHttpClient http;
+  if (!beginRequest(http, url)) return NETWORK_ERROR;
+  // The reply goes into the caller's fixed buffer as it streams in; nothing
+  // grows on the heap however large a misbehaving server's answer is.
+  size_t length = 0;
+  bool overflow = false;
+  const auto sink = [&](const uint8_t* data, const size_t n) {
+    if (length + n >= replyCapacity) {
+      overflow = true;
+      return false;
+    }
+    memcpy(reply + length, data, n);
+    length += n;
+    return true;
+  };
+  int httpCode;
+  if (body) {
+    http.addHeader("Content-Type", "application/json");
+    httpCode = http.sendRequest("PUT", reinterpret_cast<const uint8_t*>(body), strlen(body), sink);
+  } else {
+    httpCode = http.GET(sink);
+  }
+  http.end();
+  lastHttpCode = httpCode;
+  reply[length] = '\0';
+  LOG_DBG("KOSync", "%s %s -> %d (%u bytes)", body ? "PUT" : "GET", endpoint, httpCode, static_cast<unsigned>(length));
+
+  if (httpCode == 401) return AUTH_FAILED;
+  if (httpCode == 404 || httpCode == 405) return EXTENSION_UNSUPPORTED;
+  if (httpCode <= 0 && !overflow) return NETWORK_ERROR;
+  if (overflow) return JSON_ERROR;
+  if (httpCode >= 200 && httpCode < 300) return OK;
+  return SERVER_ERROR;
+}
+
 bool KOReaderProgressChange::matches(const std::string& hash) const {
   if (hash == document) return true;
   for (uint8_t i = 0; i < aliasCount; i++) {
@@ -620,6 +665,8 @@ const char* KOReaderSyncClient::errorString(Error error) {
       return "Server has no progress change feed";
     case BATCH_UNSUPPORTED:
       return "Server has no batch upload";
+    case EXTENSION_UNSUPPORTED:
+      return "Requires CrossPoint Sync";
     default:
       return "Unknown error";
   }

@@ -133,9 +133,10 @@ class KOReaderSyncClient {
     NOT_FOUND,
     LOW_MEMORY,
     USER_EXISTS,
-    POSITION_UNRESOLVED,  // upload refused: the local position has no structural XPath
-    FEED_UNSUPPORTED,     // strict KOSync or an older CrossPoint Sync: no change feed
-    BATCH_UNSUPPORTED     // no PUT /api/v1/progress/batch: send one PUT per book
+    POSITION_UNRESOLVED,   // upload refused: the local position has no structural XPath
+    FEED_UNSUPPORTED,      // strict KOSync or an older CrossPoint Sync: no change feed
+    BATCH_UNSUPPORTED,     // no PUT /api/v1/progress/batch: send one PUT per book
+    EXTENSION_UNSUPPORTED  // stats/sessions/summary route missing on this server
   };
 
   // Positions per batch request. The server takes 20; 8 keeps the body (held
@@ -195,6 +196,16 @@ class KOReaderSyncClient {
    */
   static Error getProgressChanges(uint32_t since, uint8_t limit, ChangesPage& page,
                                   std::vector<KOReaderProgressChange>& out);
+
+  /**
+   * One CrossPoint Sync extension request (stats, sessions, summary) with the
+   * usual auth and custom headers. `body` null = GET, else PUT of that JSON.
+   * The reply is kept only up to `replyCapacity - 1` bytes (NUL-terminated);
+   * a longer reply is JSON_ERROR, never a partial parse. Refused up front on
+   * a strict KOSync server or below the TLS heap floor.
+   * @return OK on 2xx, EXTENSION_UNSUPPORTED on 404/405, or an error
+   */
+  static Error extensionRequest(const char* endpoint, const char* body, char* reply, size_t replyCapacity);
 
   // One progress record as JSON, shared by the single and batch uploads.
   // Applies the server-type rules (metadata switch, extended fields, rich

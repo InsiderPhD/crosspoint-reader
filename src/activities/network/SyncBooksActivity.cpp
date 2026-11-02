@@ -30,6 +30,7 @@
 #include "activities/reader/TlsFramebufferBorrow.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "sync/StatsSync.h"
 #include "util/HardcoverSync.h"
 #include "util/TimeUtils.h"
 #include "util/WifiTimeSync.h"
@@ -184,6 +185,12 @@ void SyncBooksActivity::runSync() {
     ok = readChangeFeed(feedUsed);
     if (ok && !feedUsed) ok = walkBooks();
     if (ok) ok = uploadChanged();
+  }
+  // Stats go after progress and only when the run is still healthy: they are
+  // independent snapshots, so a books-without-progress card still sends them.
+  if (ok && KOREADER_STORE.getSyncStats() && KOREADER_STORE.supportsSyncExtensions()) {
+    step(tr(STR_SYNC_UPLOADING_STATS), 0, 0);
+    statsResult = StatsSync::upload(renderer, statsBooks);
   }
   LOG_INF("SYNCB", "Done: %u up, %u pulled, %u same, %u conflicts, %u failed (heap %u)", uploaded, pulled, unchanged,
           conflicts, failed, (unsigned)ESP.getFreeHeap());
@@ -565,6 +572,20 @@ void SyncBooksActivity::render(RenderLock&&) {
       char value[12];
       snprintf(value, sizeof(value), "%u", row.value);
       renderer.drawText(UI_10_FONT_ID, x, y, I18N.get(row.label));
+      renderer.drawText(UI_10_FONT_ID, pageWidth - x - renderer.getTextWidth(UI_10_FONT_ID, value), y, value, true,
+                        EpdFontFamily::BOLD);
+      y += lineH;
+    }
+    if (KOREADER_STORE.getSyncStats() && KOREADER_STORE.supportsSyncExtensions()) {
+      // "Done (12)" with the number of book snapshots the server took.
+      char value[48];
+      if (statsResult == StatsSync::Result::Ok) {
+        snprintf(value, sizeof(value), "%s (%u)", StatsSync::label(statsResult), statsBooks);
+      } else {
+        snprintf(value, sizeof(value), "%s", StatsSync::label(statsResult));
+      }
+      y += lineH / 2;
+      renderer.drawText(UI_10_FONT_ID, x, y, tr(STR_SYNC_STATS_ROW));
       renderer.drawText(UI_10_FONT_ID, pageWidth - x - renderer.getTextWidth(UI_10_FONT_ID, value), y, value, true,
                         EpdFontFamily::BOLD);
       y += lineH;

@@ -58,6 +58,10 @@ class KOReaderCredentialStore {
   // Opt-in crosspoint-sync extension: a manual sync also pushes and pulls the
   // book's clippings. Needs a server with the /api/v1/clippings endpoint.
   bool syncClippings = false;
+  // Opt-in crosspoint-sync extension: Sync Books also uploads reading stats
+  // (overall + per-book snapshots, daily reading time, session journal) and
+  // reads back the combined streak. Never sent to a strict KOSync server.
+  bool syncStats = false;
   // New setups get Smart; a file saved before the setting existed keeps Ask.
   KOReaderSyncBehavior syncBehavior = KOReaderSyncBehavior::SMART;
   std::array<HttpHeader, KOREADER_MAX_CUSTOM_HEADERS> customHeaders;
@@ -124,6 +128,10 @@ class KOReaderCredentialStore {
   // Whether a manual sync also syncs clippings
   void setSyncClippings(bool enabled) { syncClippings = enabled; }
   bool getSyncClippings() const { return syncClippings; }
+
+  // Whether Sync Books also syncs reading stats (CrossPoint/Other servers)
+  void setSyncStats(bool enabled) { syncStats = enabled; }
+  bool getSyncStats() const { return syncStats; }
 
   // Manual sync conflict resolution
   void setSyncBehavior(KOReaderSyncBehavior behavior);
