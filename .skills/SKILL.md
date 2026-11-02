@@ -882,8 +882,13 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 **Source**: `lib/Epub/Epub/Section.cpp`, `lib/Epub/Epub/BookMetadataCache.cpp`
 
 **Current Versions** (as of docs/file-formats.md):
-- `book.bin`: **Version 13** (metadata structure) — `lib/Epub/Epub/BookMetadataCache.cpp`
-- `section.bin`: **Version 48** (layout structure) — `lib/Epub/Epub/Section.cpp`
+- `book.bin`: **Version 14** (metadata structure) — `lib/Epub/Epub/BookMetadataCache.cpp`
+- `section.bin`: **Version 50** (layout structure) — `lib/Epub/Epub/Section.cpp`
+- TXT `index.bin`: **Version 5** — `src/activities/reader/TxtReaderActivity.cpp`
+
+All three start with a 4-byte fork magic (`FF 'K' 'P' 'B'/'S'/'T'`) before the version byte, so
+upstream CrossPoint / CrossInk files with the same version number are rejected, never parsed.
+Never change the magics; bump only the version (see `docs/file-formats.md`, "Fork namespace").
 
 Check the constants in those files rather than trusting this list; they move often.
 
