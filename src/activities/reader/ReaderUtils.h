@@ -77,6 +77,21 @@ static_assert(flippedOrientation(CrossPointSettings::PORTRAIT) == CrossPointSett
               flippedOrientation(flippedOrientation(CrossPointSettings::LANDSCAPE_CCW)) ==
                   CrossPointSettings::LANDSCAPE_CCW);
 
+// Tilt page turn for this frame. Both sensor getters consume their event, so
+// both are read even when the first fires: under Next Page Only a second
+// direction must not stay pending and turn another page a frame later.
+struct TiltPageTurn {
+  bool prev;
+  bool next;
+};
+inline TiltPageTurn detectTiltPageTurn() {
+  const bool forward = halTiltSensor.wasTiltedForward();
+  const bool back = halTiltSensor.wasTiltedBack();
+  if (!SETTINGS.tiltPageTurn) return {false, false};
+  const bool nextOnly = SETTINGS.tiltNextPageOnly != 0;
+  return {back && !nextOnly, forward || (back && nextOnly)};
+}
+
 struct PageTurnResult {
   bool prev;
   bool next;
@@ -124,8 +139,9 @@ inline bool allowLongPressChapterSkip() {
 
 inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   const bool usePress = !allowLongPressChapterSkip();
-  const bool tiltNext = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedForward();
-  const bool tiltPrev = SETTINGS.tiltPageTurn && halTiltSensor.wasTiltedBack();
+  const auto tilt = detectTiltPageTurn();
+  const bool tiltNext = tilt.next;
+  const bool tiltPrev = tilt.prev;
 #if FREEINK_DEVICE_X4PRO
   // X4 Pro: logical Left/Right are the side keys — the same physical keys as
   // PageBack/PageForward — so counting them here would double-match one press.

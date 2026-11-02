@@ -450,10 +450,11 @@ void XtcReaderActivity::loop() {
 #endif
 
   // ── Tilt sensor: always page forward/back ────────────────────────────────
-  if (SETTINGS.tiltPageTurn) {
-    if (halTiltSensor.wasTiltedForward()) {
+  {
+    const auto tilt = ReaderUtils::detectTiltPageTurn();
+    if (tilt.next) {
       executeReaderAction(CrossPointSettings::READER_ACTION_PAGE_FORWARD);
-    } else if (halTiltSensor.wasTiltedBack()) {
+    } else if (tilt.prev) {
       executeReaderAction(CrossPointSettings::READER_ACTION_PAGE_BACK);
     }
   }

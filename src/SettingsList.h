@@ -329,6 +329,8 @@ inline void appendControlSettings(SettingSink& v) {
   v.push_back(SettingInfo::Enum(StrId::STR_TILT_PAGE_TURN, &CrossPointSettings::tiltPageTurn,
                                 {StrId::STR_STATE_OFF, StrId::STR_NORMAL, StrId::STR_INVERTED}, "tiltPageTurn",
                                 StrId::STR_CAT_SYSTEM));
+  v.push_back(SettingInfo::Toggle(StrId::STR_TILT_NEXT_PAGE_ONLY, &CrossPointSettings::tiltNextPageOnly,
+                                  "tiltNextPageOnly", StrId::STR_CAT_SYSTEM));
   // Per-button reader actions are persisted directly in JsonSettingsIO (not via SettingsList)
   // to allow proper clamping against READER_ACTION_COUNT.
   // Persisted last-chosen sort. Hidden from the settings UI (no category set) —
@@ -639,7 +641,7 @@ inline void appendStatusBarSettings(SettingSink& v) {
 // more (the list is visited, never stored); forEachSetting() logs a mismatch so a
 // helper that stops emitting an entry (and so stops persisting it) shows up on
 // the serial log. Recount when adding or removing an entry.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 100;  // includes tiltPageTurn
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 101;  // includes tiltPageTurn + tiltNextPageOnly
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT
@@ -672,7 +674,9 @@ void forEachUiSetting(Fn& fn) {
   const bool hasTiltSensor = halTiltSensor.isAvailable();
   auto filter = [&fn, hasTiltSensor](const SettingInfo& info) {
     // Tilt page turn needs the QMI8658 IMU (X3).
-    if (!hasTiltSensor && info.nameId == StrId::STR_TILT_PAGE_TURN) return;
+    if (!hasTiltSensor && (info.nameId == StrId::STR_TILT_PAGE_TURN || info.nameId == StrId::STR_TILT_NEXT_PAGE_ONLY)) {
+      return;
+    }
     fn(info);
   };
   forEachSetting(filter);

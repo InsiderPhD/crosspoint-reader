@@ -733,6 +733,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **Front Button Follows Orientation** *(not on X4 Pro)* — front-button roles rotate with the screen.
 - **Remap Front Buttons** *(action, not on X4 Pro)* — reassign the four front buttons to different physical positions.
 - **Tilt Page Turn** *(X3 only, when the IMU is present)* — Off / Normal / Inverted.
+- **Tilt: Next Page Only** *(X3 only, when the IMU is present)* — either tilt direction turns to the next page, so you never page back by accident.
 - **WiFi Networks** *(action)* — manage saved networks.
 - **Bluetooth Page Turner** *(action)* — pair a BLE remote (see **[Bluetooth Page Turner](#11-bluetooth-page-turner)**).
 - **KOReader Sync** *(action)* — see **[KOReader Sync](#koreader-sync-quick-setup)**.

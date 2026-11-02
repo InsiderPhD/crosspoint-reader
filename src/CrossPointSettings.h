@@ -741,6 +741,9 @@ class CrossPointSettings {
   uint8_t sleepFullRefresh = 0;
   // Tilt-based page turning (X3 only — requires QMI8658 IMU)
   uint8_t tiltPageTurn = TILT_OFF;
+  // Tilt "Next Page Only": either tilt direction advances, so the device can be
+  // flicked one way without paging back by accident. Same key as CrossInk's.
+  uint8_t tiltNextPageOnly = 0;
 
   // Per-button reader actions (short and long press for each logical button).
   // Defaults match legacy hard-coded behaviour so existing users see no change.
