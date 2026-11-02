@@ -113,6 +113,15 @@ class PluginCatalogActivity final : public Activity {
     // items are installable plugin bundles keyed by folder name.
     std::string versionPath;
     bool tracksInstalls() const { return !versionPath.empty(); }
+    // Optional item details (catalog.item_details, JSON only): read for the
+    // selected row only, from the kept browse response, when its Details
+    // screen opens, so long descriptions are never held for a whole page.
+    // details_url (text or html) is fetched only then too.
+    std::string descriptionPath, detailAuthorPath, repositoryPath;
+    std::string detailsUrlPath, detailsFormatPath;
+    bool hasItemDetails() const {
+      return tracksInstalls() || !descriptionPath.empty() || !repositoryPath.empty() || !detailsUrlPath.empty();
+    }
     // Optional catalog-entry compatibility fields (browse.compatibility, JSON
     // only): an entry whose family / minimum plugin API / required
     // capabilities do not match this firmware is not shown. Empty paths mean
@@ -191,9 +200,10 @@ class PluginCatalogActivity final : public Activity {
 
   struct Item {
     std::string title, author, id, url;
-    std::string version;  // catalog version (tracksInstalls only)
-    std::string status;   // computed install/update badge shown in the row value
-    bool isDir = false;   // a container/folder (navigable), not a downloadable file
+    std::string version;   // catalog version (tracksInstalls only)
+    std::string status;    // computed install/update badge shown in the row value
+    bool isDir = false;    // a container/folder (navigable), not a downloadable file
+    int sourceIndex = -1;  // row in the browse response (JSON), for the details lookup
     // Bundle download only: base URL + relative file paths for this item.
     std::string base;
     std::vector<std::string> files;
@@ -323,7 +333,11 @@ class PluginCatalogActivity final : public Activity {
   void confirmUninstallPlugin(int index);
   // Row dispatch: pager rows page, picker rows pick, item rows open/download.
   void activateIndex(int index);
-  void activateItem(int itemIndex);  // XML list: navigate into a folder, else download
+  void activateItem(int itemIndex);  // XML list: navigate into a folder, else details/download
+  // Details screen for a JSON item: its metadata from the kept browse
+  // response plus the optional details_url page. Confirm downloads.
+  void showItemDetails(int itemIndex);
+  std::string itemDetailsText(const Item& item);
   // Screen painters, one per state family; each leaves the button hints to
   // render(), which finishes the frame.
   void drawListScreen();

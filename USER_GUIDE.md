@@ -280,6 +280,7 @@ Plugins are folders on the SD card (`/plugins/<name>/` or `/.crosspoint/plugins/
 
 - **On the reader:** **Settings → System → Plugins** lists every installed plugin and opens the ones with a device screen (browse, sign in, download to SD). Opening a browser-only plugin shows its description and its `README.md` as scrollable usage instructions instead (Up/Down or swipe to scroll). Once one is installed, **Plugins** also appears in **Home → File Transfer**.
 - **In the browser:** join a network, then open the **Plugins** tab of the device's web pages. Browser plugins (and the plugin store) run there. `http://<device>/plugins-run` is a headless version of that tab: it loads every plugin with its UI hidden so that jobs queued by an external app or script keep running while the page stays open.
+- **Details before download:** catalogs that describe their items (plugin stores do) show a Details screen when you pick one: author, version, whether it is installed or has an update, and a description. Confirm there downloads or installs it; Back returns to the list.
 - **Uninstall:** hold Confirm for a second on a plugin in the list (or long-press its row on the X4 Pro) and confirm. The plugin's folder, with its settings and sign-in, is deleted from the SD card.
 - Plugins for services the firmware already has built in (BookFusion, dictionaries) are ignored, and the plugin store will not install them. Use the native features instead.
 - Plugins and the manifest format are documented in [docs/sd-plugins.md](docs/sd-plugins.md).

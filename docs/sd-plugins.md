@@ -166,10 +166,11 @@ Boards without plugin support (X3 / X4) report API `0` and no capabilities.
 | `catalog.bundle_install` | a catalog entry can install a multi-file bundle (base URL + file list) |
 | `catalog.version_tracking` | catalog versions are compared with installed manifests (Installed / Update) |
 | `catalog.compatibility` | JSON catalog entries are filtered by firmware family, minimum plugin API and required capabilities (`browse.compatibility`) |
+| `catalog.item_details` | JSON catalog items open a Details screen (description, author, repository, version, optional `details_url` text/HTML page) before Fetch / Install / Update |
 | `catalog.encoded_item_fields` | download and sidecar templates accept `{id_enc}`, `{title_enc}`, `{author_enc}`, `{url_enc}` |
 | `catalog.list_index_mapping` | `browse.lists_url` is fetched with `lists_headers` and read through `lists_items` / `lists_fields`; a list's `id` fills `{list_id}` / `{list_id_enc}` |
 | `catalog.list_requirements` | manifest and fetched lists may carry a `requires` array of capabilities; a list needing one we lack is hidden |
-| `catalog.server_paths` | where a response supplies a URL (the `download.url_path` answer, a fetched list `url`), a server path (`/path`) is joined to the origin of the request that returned it |
+| `catalog.server_paths` | where a response supplies a URL (the `download.url_path` answer, a fetched list `url`, an item `details_url`), a server path (`/path`) is joined to the origin of the request that returned it |
 
 ### Schema
 
@@ -187,8 +188,8 @@ Every string field is a template. Available substitutions:
 | `{offset}` | rows before the current page: `(page - 1) * page_size` | browse |
 | `{list_id}` `{list_id_enc}` | the open list's `id` as received / percent-encoded; empty outside a list | browse, download, sidecar |
 | `{limit}` | `page_size` when the request uses `{page}` and not `{offset}`; otherwise `page_size + 1` (the extra row shows that another page exists) | browse |
-| `{id}` `{title}` `{author}` `{url}` | fields of the selected item, as received | download, sidecar |
-| `{id_enc}` `{title_enc}` `{author_enc}` `{url_enc}` | the same fields percent-encoded (everything except letters, digits, `-_.~`), for query values and path segments | download, sidecar |
+| `{id}` `{title}` `{author}` `{url}` | fields of the selected item, as received | download, sidecar, item details |
+| `{id_enc}` `{title_enc}` `{author_enc}` `{url_enc}` | the same fields percent-encoded (everything except letters, digits, `-_.~`), for query values and path segments | download, sidecar, item details |
 | `{md5}` | MD5 hex of the destination file path | sidecar |
 | `{dest}` | sanitized on-SD path of the downloaded file | sidecar |
 | `{device_code}` | from the auth request response | auth poll |
@@ -240,6 +241,11 @@ Two browse formats:
                                             // installed plugin's manifest.json (found by id).
                                             // Both are MAJOR.MINOR.PATCH ("1.2.0"); only a
                                             // newer catalog version shows Update.
+      "description": "description",         // optional: paged text on the Details screen
+      "detail_author": "authors.0.name",    // optional Details author; defaults to author
+      "repository": "repository",           // optional: line under the author on Details
+      "details_url": "details.url",         // optional: fetched only when Details opens
+      "details_format": "details.format"    // optional: "html" or plain text (default)
     },
     "compatibility": {                      // optional (json): entry fields checked against
       "firmware_family": "compatibility.firmware_family",   // comma-separated allow-list
@@ -392,9 +398,21 @@ Two browse formats:
   `1`, or whose `requires` names a capability not advertised is silently
   omitted. Entries without these fields stay visible. On a static feed the
   page window counts only compatible entries.
+- **Item details** (json): when a catalog maps `description`, `repository`
+  or `details_url` (or tracks versions, which implies the conventional
+  `description` / `author` / `repository` / `details.url` / `details.format`
+  keys), Confirm on an item opens a Details screen first: author, repository,
+  version and install state, then the description. Confirm there fetches /
+  installs / updates, Back returns to the list. The fields are read for the
+  selected row only, from the browse response kept on SD while the page is
+  shown, so long descriptions are never held for a whole page (description
+  capped at 8 KB). A `details_url` is fetched only then (GET, no headers,
+  24 KB cap); `details_format: "html"` is shown as readable text, an empty
+  format or `text` as is. A failed or unsupported page falls back to the
+  description and never blocks the download.
 - **Server paths** (json): a URL a response supplies may be a server path
-  such as `/api/files/12/download` — the `download.url_path` answer or a
-  fetched list's `url`. The firmware joins it to the origin (scheme, host and
+  such as `/api/files/12/download` — the `download.url_path` answer, a
+  fetched list's `url`, or an item's `details_url`. The firmware joins it to the origin (scheme, host and
   port) of the request that returned it. A `url_path` answer that is a server
   path is on the API's own host, so the file GET sends the download `headers`
   (and a 401/403 there gets the password-grant retry); a full URL, even on the

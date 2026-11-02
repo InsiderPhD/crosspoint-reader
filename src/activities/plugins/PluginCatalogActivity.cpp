@@ -35,6 +35,7 @@
 #include "util/BookCacheUtils.h"
 #include "util/ButtonNavigator.h"
 #include "util/FirmwareIdentity.h"
+#include "util/HtmlToPlainText.h"
 #include "util/PluginHttp.h"
 #include "util/PluginLocations.h"
 #include "util/QrUtils.h"
@@ -66,6 +67,10 @@ constexpr size_t MAX_BROWSE_RESPONSE = 1024 * 1024;
 // index of tiny entries would otherwise reserve hundreds of entries.
 constexpr size_t MAX_BROWSE_LIST_INDEX_RESPONSE = 16 * 1024;
 constexpr size_t MAX_BROWSE_LISTS = 64;
+// A details_url page and a row's description are bounded: they are read for
+// one item when its Details screen opens, then freed with that screen.
+constexpr size_t MAX_ITEM_DETAILS_RESPONSE = 24 * 1024;
+constexpr size_t MAX_ITEM_DESCRIPTION = 8 * 1024;
 constexpr int MAX_PAGE_SIZE = 16;
 constexpr int DOWNLOAD_PROGRESS_STEP_PERCENT = 5;
 constexpr unsigned long PLUGIN_UNINSTALL_HOLD_MS = 1000;
@@ -504,6 +509,23 @@ bool PluginCatalogActivity::loadManifest() {
   manifest.idPath = browse["fields"]["id"] | "";
   manifest.urlPath = browse["fields"]["url"] | "";
   manifest.versionPath = browse["fields"]["version"] | "";
+  manifest.descriptionPath = browse["fields"]["description"] | "";
+  manifest.detailAuthorPath = browse["fields"]["detail_author"] | "";
+  manifest.repositoryPath = browse["fields"]["repository"] | "";
+  manifest.detailsUrlPath = browse["fields"]["details_url"] | "";
+  manifest.detailsFormatPath = browse["fields"]["details_format"] | "";
+  if (manifest.detailAuthorPath.empty()) manifest.detailAuthorPath = manifest.authorPath;
+  // Version-tracked catalogs predate item details: conventional field names
+  // keep those manifests working, while newer catalogs map them explicitly.
+  if (manifest.tracksInstalls()) {
+    if (manifest.descriptionPath.empty()) manifest.descriptionPath = "description";
+    if (manifest.repositoryPath.empty()) manifest.repositoryPath = "repository";
+    if (manifest.detailsUrlPath.empty()) manifest.detailsUrlPath = "details.url";
+    if (manifest.detailsFormatPath.empty()) manifest.detailsFormatPath = "details.format";
+    if (manifest.detailAuthorPath.empty() || manifest.detailAuthorPath == manifest.descriptionPath) {
+      manifest.detailAuthorPath = "author";
+    }
+  }
   const JsonVariantConst compatibility = browse["compatibility"];
   manifest.compatFamilyPath = compatibility["firmware_family"] | "";
   manifest.compatApiMinPath = compatibility["plugin_api_min"] | "";
@@ -803,7 +825,10 @@ void PluginCatalogActivity::enterCatalog() {
 // Leaving the open catalog (Back at its root, or Back out of an error /
 // sign-in screen): return to the plugin picker. Wi-Fi stays up so the next
 // pick connects instantly; onExit tears it down when the activity ends.
-void PluginCatalogActivity::exitCatalog() { enterPluginPicker(); }
+void PluginCatalogActivity::exitCatalog() {
+  Storage.remove(BROWSE_TMP_PATH);
+  enterPluginPicker();
+}
 
 void PluginCatalogActivity::onExit() {
   Activity::onExit();
@@ -1220,7 +1245,10 @@ void PluginCatalogActivity::fetchPage(const int newPage) {
       return;
     }
   }
-  Storage.remove(BROWSE_TMP_PATH);
+  // The response stays on SD while this page is shown: a Details screen reads
+  // its row's long fields from it on demand. Replaced by the next fetch and
+  // removed when the catalog closes.
+  if (!manifest.hasItemDetails()) Storage.remove(BROWSE_TMP_PATH);
 
   JsonVariantConst itemsNode = resolvePath(doc.as<JsonVariantConst>(), manifest.itemsPath);
   JsonArrayConst arr = itemsNode.as<JsonArrayConst>();
@@ -1237,7 +1265,9 @@ void PluginCatalogActivity::fetchPage(const int newPage) {
   plugincatalogpaging::PageWindow window(pageOffset, static_cast<size_t>(manifest.pageSize));
   if (!arr.isNull()) {
     items.reserve(manifest.pageSize);
+    int rowIndex = -1;
     for (JsonVariantConst v : arr) {
+      rowIndex++;
       // An incompatible entry is never shown; on a static feed the page window
       // then slides over compatible entries only, so pages never come out empty.
       const bool shown = !variantToString(resolvePath(v, manifest.titlePath)).empty() &&
@@ -1247,6 +1277,7 @@ void PluginCatalogActivity::fetchPage(const int newPage) {
                                                  csvField(resolvePath(v, manifest.compatRequiresPath))));
       if (!window.take(plugincatalogpaging::countsTowardPage(paging, shown)) || !shown) continue;
       Item item;
+      item.sourceIndex = rowIndex;
       item.title = variantToString(resolvePath(v, manifest.titlePath));
       item.author = variantToString(resolvePath(v, manifest.authorPath));
       item.id = variantToString(resolvePath(v, manifest.idPath));
@@ -1861,7 +1892,113 @@ void PluginCatalogActivity::activateItem(const int itemIndex) {
     fetchXmlList();
     return;
   }
+  if (!manifest.isXmlList() && manifest.hasItemDetails()) {
+    showItemDetails(itemIndex);
+    return;
+  }
   downloadItem(item);
+}
+
+// The selected row's detail fields, read back from the kept browse response
+// with a filter admitting only those fields (and freed on return), then the
+// optional details_url page. Every failure falls back to whatever was found;
+// none of it blocks the download.
+std::string PluginCatalogActivity::itemDetailsText(const Item& item) {
+  std::string author, repository, description, detailsUrl, detailsFormat;
+  if (item.sourceIndex >= 0) {
+    JsonDocument filter;
+    addFieldFilter(filter, manifest.itemsPath, manifest.detailAuthorPath);
+    addFieldFilter(filter, manifest.itemsPath, manifest.repositoryPath);
+    addFieldFilter(filter, manifest.itemsPath, manifest.descriptionPath);
+    addFieldFilter(filter, manifest.itemsPath, manifest.detailsUrlPath);
+    addFieldFilter(filter, manifest.itemsPath, manifest.detailsFormatPath);
+    JsonDocument doc;
+    HalFile file;
+    if (Storage.openFileForRead("PCAT", BROWSE_TMP_PATH, file)) {
+      struct HalFileReader {
+        HalFile& f;
+        int read() { return f.read(); }
+        size_t readBytes(char* buf, size_t n) {
+          const int r = f.read(buf, n);
+          return r < 0 ? 0 : static_cast<size_t>(r);
+        }
+      } reader{file};
+      if (deserializeJson(doc, reader, DeserializationOption::Filter(filter)) == DeserializationError::Ok) {
+        const JsonVariantConst row =
+            resolvePath(doc.as<JsonVariantConst>(), manifest.itemsPath).as<JsonArrayConst>()[item.sourceIndex];
+        author = variantToString(resolvePath(row, manifest.detailAuthorPath));
+        repository = variantToString(resolvePath(row, manifest.repositoryPath));
+        description = variantToString(resolvePath(row, manifest.descriptionPath));
+        detailsUrl = variantToString(resolvePath(row, manifest.detailsUrlPath));
+        detailsFormat = variantToString(resolvePath(row, manifest.detailsFormatPath));
+      } else {
+        LOG_INF("PCAT", "item details unavailable (browse response unreadable)");
+      }
+    }
+  }
+  if (description.size() > MAX_ITEM_DESCRIPTION) description.resize(MAX_ITEM_DESCRIPTION);
+
+  // A details page replaces the description when it arrives: GET, no headers
+  // (it may be on another host), bounded, text or html.
+  if (!detailsUrl.empty()) {
+    std::string url = substituted(detailsUrl, &item);
+    UrlUtils::resolveServerPath(url, substituted(activeBrowseUrl(), nullptr));
+    std::string response;
+    const int status = pluginhttp::request(session.get(), url, "GET", "", {}, response, MAX_ITEM_DETAILS_RESPONSE);
+    const bool html = detailsFormat == "html";
+    if (status < 200 || status >= 300 || response.empty()) {
+      LOG_INF("PCAT", "item details fetch failed: HTTP %d", status);
+    } else if (html) {
+      description = htmlToPlainText(response);
+    } else if (detailsFormat.empty() || detailsFormat == "text") {
+      description = std::move(response);
+    } else {
+      LOG_INF("PCAT", "unsupported item details format: %s", detailsFormat.c_str());
+    }
+  }
+
+  std::string text;
+  text.reserve(description.size() + 160);
+  const auto addLine = [&text](const std::string& line) {
+    if (line.empty()) return;
+    text += line;
+    text += '\n';
+  };
+  if (!author.empty()) addLine(std::string(tr(STR_AUTHOR)) + ": " + author);
+  if (!repository.empty()) addLine(std::string(tr(STR_REPOSITORY)) + ": " + repository);
+  std::string facts;
+  if (!item.version.empty()) facts = std::string(tr(STR_VERSION)) + " " + item.version;
+  if (!item.status.empty() && item.status != "v" + item.version) {
+    if (!facts.empty()) facts += " \xC2\xB7 ";
+    facts += item.status;
+  }
+  addLine(facts);
+  if (!description.empty()) {
+    if (!text.empty()) text += '\n';
+    text += description;
+  }
+  return text;
+}
+
+void PluginCatalogActivity::showItemDetails(const int itemIndex) {
+  if (itemIndex < 0 || itemIndex >= static_cast<int>(items.size())) return;
+  beginLoading();  // the details page may be a network round trip
+  const Item& item = items[itemIndex];
+  std::string text = itemDetailsText(item);
+  const bool update = item.status == tr(STR_UPDATE_AVAILABLE);
+  const char* action = update ? tr(STR_UPDATE) : (manifest.tracksInstalls() ? tr(STR_INSTALL) : tr(STR_FETCH));
+  state = State::BROWSING;  // the screen under the details
+  infoOpen = true;
+  startActivityForResult(
+      std::make_unique<PluginInfoActivity>(renderer, mappedInput, item.title, std::move(text), action),
+      [this, itemIndex](const ActivityResult& result) {
+        infoOpen = false;
+        if (result.isCancelled || itemIndex < 0 || itemIndex >= static_cast<int>(items.size())) {
+          requestUpdate();
+          return;
+        }
+        downloadItem(items[itemIndex]);
+      });
 }
 
 // --- Rendering --------------------------------------------------------------
@@ -2059,9 +2196,10 @@ void PluginCatalogActivity::drawFooter() {
         confirmLabel = count > 0 ? tr(STR_OPEN) : "";
       } else {
         // Folders open; items and the pager rows both fetch from the server.
-        const bool onDir =
-            manifest.isXmlList() && itemSel >= 0 && itemSel < static_cast<int>(items.size()) && items[itemSel].isDir;
-        confirmLabel = count == 0 ? "" : (onDir ? tr(STR_OPEN) : tr(STR_FETCH));
+        const bool onItem = itemSel >= 0 && itemSel < static_cast<int>(items.size());
+        const bool onDir = manifest.isXmlList() && onItem && items[itemSel].isDir;
+        const bool onDetails = !manifest.isXmlList() && onItem && manifest.hasItemDetails();
+        confirmLabel = count == 0 ? "" : (onDir ? tr(STR_OPEN) : (onDetails ? tr(STR_DETAILS) : tr(STR_FETCH)));
       }
       // On the top row of a searchable catalog the previous-nav slot becomes
       // Search; it is an action there, so the touch action bar draws it too.
