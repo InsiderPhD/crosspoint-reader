@@ -229,7 +229,7 @@ void EpubReaderClippingListActivity::jumpToSelectedClipping() {
     return;
   }
   setResult(ClippingJumpResult{clipping.spineIndex, clipping.startPage, clipping.pageCount, clipping.paragraphIndex,
-                               static_cast<uint16_t>(selectedIndex)});
+                               static_cast<uint16_t>(selectedIndex), clipping.startOffset, !clipping.foreignAnchor});
   finish();
 }
 

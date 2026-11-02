@@ -117,10 +117,13 @@ bool KOReaderCredentialStore::loadFromBinaryFile() {
     matchMethod = DocumentMatchMethod::FILENAME;
   }
 
-  // The binary format predates the default-server change.
+  // The binary format predates the default-server change, the server type and
+  // the sync behaviour setting.
   if (serverUrl.empty() && !username.empty()) {
     serverUrl = LEGACY_DEFAULT_SERVER_URL;
   }
+  serverType = usesDefaultServer() ? KOReaderServerType::CROSSPOINT : KOReaderServerType::KOSYNC;
+  syncBehavior = KOReaderSyncBehavior::ASK_EVERY_TIME;
 
   LOG_DBG("KRS", "Loaded KOReader credentials from binary for user: %s", username.c_str());
   return true;
@@ -179,13 +182,29 @@ std::string KOReaderCredentialStore::getBaseUrl() const {
   return url;
 }
 
+bool KOReaderCredentialStore::usesDefaultServer() const { return getBaseUrl() == DEFAULT_SERVER_URL; }
+
 void KOReaderCredentialStore::setServerType(KOReaderServerType type) {
-  // Only the two types this firmware implements are storable.
-  if (type != KOReaderServerType::OTHER) {
+  if (static_cast<uint8_t>(type) > static_cast<uint8_t>(KOReaderServerType::OTHER)) {
     type = KOReaderServerType::KOSYNC;
   }
   serverType = type;
   LOG_DBG("KRS", "Set server type: %u", static_cast<unsigned>(type));
+}
+
+void KOReaderCredentialStore::setSyncBehavior(KOReaderSyncBehavior behavior) {
+  if (static_cast<uint8_t>(behavior) > static_cast<uint8_t>(KOReaderSyncBehavior::SMART)) {
+    behavior = KOReaderSyncBehavior::ASK_EVERY_TIME;
+  }
+  syncBehavior = behavior;
+  LOG_DBG("KRS", "Set sync behavior: %s", behavior == KOReaderSyncBehavior::SMART ? "Smart" : "Ask");
+}
+
+void KOReaderCredentialStore::setCustomHeader(const size_t index, const std::string& name, const std::string& value) {
+  if (index >= customHeaders.size()) return;
+  customHeaders[index].name = name;
+  customHeaders[index].value = value;
+  LOG_DBG("KRS", "Set custom header %u: %s", static_cast<unsigned>(index), name.empty() ? "(cleared)" : name.c_str());
 }
 
 void KOReaderCredentialStore::setMatchMethod(DocumentMatchMethod method) {

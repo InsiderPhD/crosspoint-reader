@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "KOReaderSyncClient.h"
+#include "ProgressComparison.h"
 #include "ProgressMapper.h"
 #include "activities/Activity.h"
 
@@ -31,7 +32,8 @@ class KOReaderSyncActivity final : public Activity {
                                 const std::shared_ptr<Epub>& epub, const std::string& epubPath, int currentSpineIndex,
                                 int currentPage, int totalPagesInSpine,
                                 std::optional<uint16_t> currentParagraphIndex = std::nullopt,
-                                Direction direction = Direction::ASK)
+                                Direction direction = Direction::ASK,
+                                std::optional<uint32_t> currentVisibleTextOffset = std::nullopt)
       : Activity("KOReaderSync", renderer, mappedInput),
         epub(epub),
         epubPath(epubPath),
@@ -39,6 +41,7 @@ class KOReaderSyncActivity final : public Activity {
         currentPage(currentPage),
         totalPagesInSpine(totalPagesInSpine),
         currentParagraphIndex(currentParagraphIndex),
+        currentVisibleTextOffset(currentVisibleTextOffset),
         direction(direction),
         remoteProgress{},
         remotePosition{},
@@ -59,6 +62,7 @@ class KOReaderSyncActivity final : public Activity {
     SHOWING_RESULT,
     UPLOADING,
     UPLOAD_COMPLETE,
+    ALREADY_SYNCED,
     NO_REMOTE_PROGRESS,
     SYNC_FAILED,
     NO_CREDENTIALS
@@ -70,6 +74,7 @@ class KOReaderSyncActivity final : public Activity {
   int currentPage;
   int totalPagesInSpine;
   std::optional<uint16_t> currentParagraphIndex;
+  std::optional<uint32_t> currentVisibleTextOffset;
   Direction direction;
 
   State state = WIFI_SELECTION;
@@ -97,6 +102,12 @@ class KOReaderSyncActivity final : public Activity {
   bool framebufferDirty = false;
 
   void onWifiSelectionComplete(bool success);
+  // This activity's own position, with the paragraph and content offset the
+  // reader handed over. Local layout, so spine and page are both trusted.
+  CrossPointPosition localPosition() const;
+  // Remote record -> local position: the XPath first, the rich position's page
+  // hints when the XPath cannot be placed, refined against the cached layout.
+  CrossPointPosition mapRemote(const KOReaderProgress& progress);
   void performSync();
   void performUpload();
   void connectWifiWithPopup();

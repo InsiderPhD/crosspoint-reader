@@ -43,9 +43,11 @@ class ContentOpfParser final : public Print {
   // Tracks whether the description char-data stream is currently inside an HTML
   // tag (Calibre stores comments as escaped HTML); used to strip tags across chunks.
   bool descInTag = false;
-  // Current <dc:identifier>: its text, and whether its scheme attribute said ISBN.
+  // Current <dc:identifier>: its text, and whether its scheme attribute said ISBN
+  // or ASIN.
   std::string identifierText;
   bool identifierSchemeIsbn = false;
+  bool identifierSchemeAsin = false;
 
   // Index for fast idref→href lookup (used only for large EPUBs)
   struct ItemIndexEntry {
@@ -84,6 +86,7 @@ class ContentOpfParser final : public Print {
   std::string rating;       // calibre:rating meta (0-10 scale, as written)
   std::string bookshelf;    // calibre:user_metadata:#bookshelf custom column (#value#)
   std::string isbn;         // first dc:identifier that is a valid ISBN, normalised to ISBN-13
+  std::string asin;         // first dc:identifier that is an Amazon ASIN (scheme or "asin:" prefix)
   std::string description;  // dc:description, HTML-stripped, capped at Epub::MAX_DESCRIPTION_BYTES
   std::string tocNcxPath;
   std::string tocNavPath;  // EPUB 3 nav document path

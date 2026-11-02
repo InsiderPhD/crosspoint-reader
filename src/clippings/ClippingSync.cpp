@@ -3,23 +3,31 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <DevicePolicy.h>
+#include <Epub.h>
+#include <GfxRenderer.h>
+#include <InflateReader.h>
 #include <KOReaderCredentialStore.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <SecureHttpClient.h>
 #include <Utf8.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
 #include "ClippingStore.h"
+#include "HighlightOffsetFinder.h"
 
 // Ported from upstream CrossPoint's src/clippings/ClippingSync.cpp (#3589) onto
 // this fork's ClippingStore. Wire format is unchanged. Differences:
-//   * Our clips have no layout signature or source offsets. We send a zero
-//     signature (upstream lists such clips but doesn't highlight them), and mark
-//     clips pulled with a non-zero one as foreignAnchor so we don't highlight
-//     them on the wrong words either.
+//   * Our clips have no layout signature. We send a zero signature (upstream
+//     lists such clips but doesn't highlight them), and mark clips pulled with a
+//     non-zero one as foreignAnchor so we don't highlight them on the wrong words
+//     either.
+//   * Source offsets are not tracked per word at layout time (that would cost
+//     8 bytes per word on every loaded page); resolveContentOffsets() finds them
+//     from the clip text in the chapter XHTML instead, before a sync.
 //   * Our store keeps at most CLIPPING_TEXT_MAX bytes of text per clip, so longer
 //     remote text is cut at a UTF-8 boundary instead of rejected.
 //   * Smaller exchange buffer on the C3, see BUFFER_SIZE.
@@ -102,6 +110,11 @@ void encode(JsonObject item, const Clipping& clipping) {
   item["chapter"] = clipping.chapterTitle;
   item["text"] = clipping.text.c_str();
   item["created_at"] = clipping.timestamp;
+  // Both or neither, [start, end) in chapter visible codepoints.
+  if (clipping.startOffset != UINT32_MAX && clipping.endOffset != UINT32_MAX) {
+    item["start_offset"] = clipping.startOffset;
+    item["end_offset"] = clipping.endOffset;
+  }
   // No layout signature in this firmware; zero tells upstream not to trust the
   // page/word anchors after a relayout.
   item["layout_signature"] = 0;
@@ -124,6 +137,15 @@ bool decode(JsonObjectConst item, Clipping& clipping, bool& deleted) {
       !item["layout_signature"].is<uint32_t>())
     return false;
   if (!item["para"].isNull() && !item["para"].is<uint16_t>()) return false;
+  clipping.startOffset = UINT32_MAX;
+  clipping.endOffset = UINT32_MAX;
+  clipping.offsetsResolved = false;
+  if (!item["start_offset"].isNull() || !item["end_offset"].isNull()) {
+    if (!item["start_offset"].is<uint32_t>() || !item["end_offset"].is<uint32_t>()) return false;
+    clipping.startOffset = item["start_offset"];
+    clipping.endOffset = item["end_offset"];
+    clipping.offsetsResolved = true;
+  }
   const JsonString quote = item["text"].as<JsonString>();
   if (quote.isNull() || quote.size() == 0 || strlen(quote.c_str()) != quote.size()) return false;
   clipping.spineIndex = item["spine"];
@@ -157,6 +179,44 @@ struct UnloadClippings {
   }
 };
 }  // namespace
+
+bool clippingSync::resolveContentOffsets(GfxRenderer& renderer, const Epub& epub) {
+  if (!KOREADER_STORE.getSyncClippings()) return false;
+  UnloadClippings unload;
+  if (CLIPPINGS.getBookFilePath() != epub.getPath()) {
+    if (!CLIPPINGS.loadForBook(epub.getPath(), epub.getTitle(), epub.getAuthor(), "epub")) return false;
+    unload.owned = true;
+  }
+  const auto& clips = CLIPPINGS.getClippings();
+  const bool anyPending = std::any_of(clips.begin(), clips.end(),
+                                      [](const Clipping& clip) { return !clip.text.empty() && !clip.offsetsResolved; });
+  if (!anyPending) return false;
+
+  InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
+  bool changed = false;
+  for (size_t i = 0; i < clips.size(); ++i) {
+    const Clipping& clip = clips[i];
+    if (clip.text.empty() || clip.offsetsResolved) continue;
+    if (static_cast<int>(clip.spineIndex) >= epub.getSpineItemsCount()) {
+      CLIPPINGS.setContentOffsets(i, false, 0, 0);
+      changed = true;
+      continue;
+    }
+    const float fraction =
+        clip.pageCount > 0 ? (static_cast<float>(clip.startPage) + 0.5f) / static_cast<float>(clip.pageCount) : 0.0f;
+    uint32_t start = 0;
+    uint32_t end = 0;
+    const auto result = HighlightOffsetFinder::find(epub, clip.spineIndex, clip.text, fraction, start, end,
+                                                    HighlightOffsetFinder::Unit::Codepoint);
+    if (result == HighlightOffsetFinder::Result::Error) continue;  // retried next sync
+    CLIPPINGS.setContentOffsets(i, result == HighlightOffsetFinder::Result::Found, start, end);
+    changed = true;
+  }
+  if (changed && !CLIPPINGS.saveToFile()) {
+    LOG_ERR("CLIP", "Failed to persist clipping content offsets");
+  }
+  return scratch.active();
+}
 
 bool clippingSync::run(const std::string& bookPath, const std::string& title, const std::string& author,
                        const std::string& documentHash) {

@@ -230,8 +230,75 @@ struct ParsedText::LineScratch {
   }
 };
 
+uint32_t ParsedText::visibleOffsetBaseAt(const size_t wordIndex) const {
+  uint32_t base = visibleOffsetBase;
+  for (const auto& rebase : visibleOffsetRebases) {
+    if (rebase.wordIndex > wordIndex) break;
+    base = rebase.base;
+  }
+  return base;
+}
+
+uint32_t ParsedText::visibleOffsetAt(const size_t wordIndex) const {
+  if (wordIndex >= wordVisibleOffsetDeltas.size()) return 0;
+  return visibleOffsetBaseAt(wordIndex) + wordVisibleOffsetDeltas[wordIndex];
+}
+
+void ParsedText::pushVisibleOffset(const uint32_t offset) {
+  uint32_t base = visibleOffsetBase;
+  if (wordVisibleOffsetDeltas.empty()) {
+    visibleOffsetBase = offset;
+    base = offset;
+  } else if (!visibleOffsetRebases.empty()) {
+    base = visibleOffsetRebases.back().base;
+  }
+
+  if (offset < base || offset - base > std::numeric_limits<uint16_t>::max()) {
+    visibleOffsetRebases.push_back({static_cast<uint32_t>(wordVisibleOffsetDeltas.size()), offset});
+    base = offset;
+  }
+  wordVisibleOffsetDeltas.push_back(static_cast<uint16_t>(offset - base));
+}
+
+void ParsedText::insertVisibleOffset(const size_t wordIndex, const uint32_t offset) {
+  const uint32_t base = wordIndex > 0 ? visibleOffsetBaseAt(wordIndex - 1) : visibleOffsetBase;
+  for (auto& rebase : visibleOffsetRebases) {
+    if (rebase.wordIndex >= wordIndex) rebase.wordIndex++;
+  }
+
+  uint32_t insertionBase = base;
+  if (offset < base || offset - base > std::numeric_limits<uint16_t>::max()) {
+    const auto rebaseIt = std::find_if(visibleOffsetRebases.begin(), visibleOffsetRebases.end(),
+                                       [wordIndex](const auto& rebase) { return rebase.wordIndex > wordIndex; });
+    visibleOffsetRebases.insert(rebaseIt, {static_cast<uint32_t>(wordIndex), offset});
+    insertionBase = offset;
+  }
+  wordVisibleOffsetDeltas.insert(wordVisibleOffsetDeltas.begin() + wordIndex,
+                                 static_cast<uint16_t>(offset - insertionBase));
+}
+
+void ParsedText::eraseVisibleOffsetPrefix(const size_t count) {
+  if (count >= wordVisibleOffsetDeltas.size()) {
+    wordVisibleOffsetDeltas.clear();
+    visibleOffsetRebases.clear();
+    visibleOffsetBase = 0;
+    return;
+  }
+
+  const uint32_t newBase = visibleOffsetBaseAt(count);
+  wordVisibleOffsetDeltas.erase(wordVisibleOffsetDeltas.begin(), wordVisibleOffsetDeltas.begin() + count);
+  size_t writeIndex = 0;
+  for (auto rebase : visibleOffsetRebases) {
+    if (rebase.wordIndex <= count) continue;
+    rebase.wordIndex -= static_cast<uint32_t>(count);
+    visibleOffsetRebases[writeIndex++] = rebase;
+  }
+  visibleOffsetRebases.resize(writeIndex);
+  visibleOffsetBase = newBase;
+}
+
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
-                         const bool attachToPrevious) {
+                         const bool attachToPrevious, const uint32_t visibleTextOffset) {
   if (word.empty()) return;
 
   EpdFontFamily::Style combinedStyle = fontStyle;
@@ -246,13 +313,15 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   words.push_back(std::move(word));
   wordStyles.push_back(combinedStyle);
   wordContinues.push_back(attachToPrevious);
+  pushVisibleOffset(visibleTextOffset);
 }
 
 void ParsedText::addInlineImage(const uint16_t id, const uint16_t width, const uint16_t height,
-                                const bool attachToPrevious) {
+                                const bool attachToPrevious, const uint32_t visibleTextOffset) {
   words.push_back(makeInlineImageToken(id, width, height));
   wordStyles.push_back(EpdFontFamily::REGULAR);
   wordContinues.push_back(attachToPrevious && words.size() > 1);
+  pushVisibleOffset(visibleTextOffset);
 }
 
 // Returns true if word i should be rendered with bionic bolding: feature on and not already bold.
@@ -262,7 +331,7 @@ bool ParsedText::isBionicWord(const size_t i) const {
 
 // Consumes data to minimize memory usage
 void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int baseFontId, const uint16_t viewportWidth,
-                                       const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
+                                       const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                                        const bool includeLastLine, const bool preserveSource,
                                        const TextLayoutOptions& layoutOptions) {
   if (words.empty()) {
@@ -276,10 +345,15 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
   std::deque<std::string> savedWords;
   std::vector<EpdFontFamily::Style> savedStyles;
   std::vector<bool> savedContinues;
+  std::vector<uint16_t> savedOffsetDeltas;
+  std::vector<VisibleOffsetRebase> savedOffsetRebases;
+  const uint32_t savedOffsetBase = visibleOffsetBase;
   if (preserveSource) {
     savedWords = words;
     savedStyles = wordStyles;
     savedContinues = wordContinues;
+    savedOffsetDeltas = wordVisibleOffsetDeltas;
+    savedOffsetRebases = visibleOffsetRebases;
   }
 
   // A block may override the reader font (e.g. <pre> code blocks use monospace). Measure and
@@ -348,6 +422,9 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
     words = std::move(savedWords);
     wordStyles = std::move(savedStyles);
     wordContinues = std::move(savedContinues);
+    wordVisibleOffsetDeltas = std::move(savedOffsetDeltas);
+    visibleOffsetRebases = std::move(savedOffsetRebases);
+    visibleOffsetBase = savedOffsetBase;
     return;
   }
 
@@ -357,6 +434,7 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
     words.erase(words.begin(), words.begin() + consumed);
     wordStyles.erase(wordStyles.begin(), wordStyles.begin() + consumed);
     wordContinues.erase(wordContinues.begin(), wordContinues.begin() + consumed);
+    eraseVisibleOffsetPrefix(consumed);
   }
 
   // A soft flush leaves the paragraph's tail behind: what is laid out next continues it.
@@ -672,6 +750,17 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
     return false;
   }
 
+  // The remainder's visible offset: the prefix's codepoints past the word's own offset.
+  uint32_t remainderOffset = visibleOffsetAt(wordIndex);
+  {
+    const auto* offsetPtr = reinterpret_cast<const unsigned char*>(word.data());
+    const auto* const splitPtr = offsetPtr + chosenOffset;
+    while (offsetPtr < splitPtr) {
+      utf8NextCodepoint(&offsetPtr);
+      remainderOffset++;
+    }
+  }
+
   // Split the word at the selected breakpoint and append a hyphen if required.
   std::string remainder = word.substr(chosenOffset);
   words[wordIndex].resize(chosenOffset);
@@ -682,6 +771,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // Insert the remainder word (with matching style and continuation flag) directly after the prefix.
   words.insert(words.begin() + wordIndex + 1, remainder);
   wordStyles.insert(wordStyles.begin() + wordIndex + 1, style);
+  insertVisibleOffset(wordIndex + 1, remainderOffset);
 
   // Continuation flag handling after splitting a word into prefix + remainder.
   //
@@ -714,12 +804,13 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 
 void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const std::vector<uint16_t>& wordWidths,
                              const std::vector<bool>& continuesVec, const std::vector<size_t>& lineBreakIndices,
-                             const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
+                             const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                              const GfxRenderer& renderer, const int fontId, LineScratch& scratch) {
   scratch.clear();
   lineImages.clear();
   const size_t lineBreak = lineBreakIndices[breakIndex];
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
+  const uint32_t lineVisibleOffset = visibleOffsetAt(lastBreakAt);
 
   // Expand this line's whole words into bionic render fragments (bold prefix + regular suffix
   // per letter run); non-bionic words expand to a single fragment. Done per line so the
@@ -890,5 +981,5 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
     LOG_ERR("PTX", "Dropping line: TextBlock allocation failed");
     return;
   }
-  processLine(std::move(block));
+  processLine(std::move(block), lineVisibleOffset);
 }

@@ -15,7 +15,13 @@ struct KOReaderMetadata {
   std::string filename;  // e.g. "my_book.epub"
   std::string title;
   std::string authors;
+  // Flat JSON object of service ids sent verbatim inside metadata (JSON types
+  // kept): the book's plugin sidecar ("<book>.meta.json") plus our own
+  // BookFusion download id as "bookfusion_id". crosspoint-sync routes progress
+  // to a linked service with it; the firmware assigns no meaning to the keys.
+  std::string extraJson;
   std::string isbn;    // ISBN-13 from the package metadata, when the book has one
+  std::string asin;    // Amazon ASIN from the package metadata, when the book has one
   std::string series;  // Series title, when the book has one
   std::optional<float> seriesIndex;
 
@@ -27,16 +33,32 @@ struct KOReaderMetadata {
 };
 
 /**
+ * Rich CrossPoint position sent alongside progress uploads. Maps 1:1 onto the
+ * crosspoint-sync extended `position` object (crosspoint-sync docs/API.md).
+ * Sent only when the server type supports rich progress. Page fields are
+ * layout hints; the standard XPath stays the content anchor.
+ */
+struct KOReaderRichPosition {
+  uint32_t pctQ = 0;                       // Percentage quantized 0..1,000,000
+  uint16_t spineIndex = 0;                 // Spine (chapter) index
+  uint16_t pageNumber = 0;                 // Page within spine (layout-dependent hint)
+  uint16_t totalPages = 1;                 // Spine page count (layout-dependent hint)
+  std::optional<uint16_t> paragraphIndex;  // Synthetic 1-based paragraph index
+  std::string xpath;                       // KOReader-style xpath (server cap: 120 bytes)
+};
+
+/**
  * Progress data from KOReader sync server.
  */
 struct KOReaderProgress {
-  std::string document;                      // Document hash
-  std::string progress;                      // XPath-like progress string
-  float percentage = 0.0f;                   // Progress percentage (0.0 to 1.0)
-  std::string device;                        // Device name
-  std::string deviceId;                      // Device ID
-  int64_t timestamp = 0;                     // Unix timestamp of last update
-  std::optional<KOReaderMetadata> metadata;  // Upload only; never filled by getProgress
+  std::string document;                          // Document hash
+  std::string progress;                          // XPath-like progress string
+  float percentage = 0.0f;                       // Progress percentage (0.0 to 1.0)
+  std::string device;                            // Device name
+  std::string deviceId;                          // Device ID
+  int64_t timestamp = 0;                         // Unix timestamp of last update
+  std::optional<KOReaderMetadata> metadata;      // Upload only; never filled by getProgress
+  std::optional<KOReaderRichPosition> position;  // Rich position, both directions, when supported
 };
 
 /**

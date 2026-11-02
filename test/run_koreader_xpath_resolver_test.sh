@@ -10,6 +10,7 @@ mkdir -p "$BUILD_DIR"
 INCLUDES=(
   -I"$ROOT_DIR/test/koreader_xpath_resolver/stubs"
   -I"$ROOT_DIR/lib/KOReaderSync"
+  -I"$ROOT_DIR/lib/Epub"
   -I"$ROOT_DIR/lib/Utf8"
   -I"$ROOT_DIR/lib/XmlParserUtils"
   -I"$ROOT_DIR/lib/expat"

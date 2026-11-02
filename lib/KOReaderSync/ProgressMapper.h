@@ -2,21 +2,13 @@
 #include <Epub.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 
-/**
- * CrossPoint position representation.
- */
-struct CrossPointPosition {
-  int spineIndex;                  // Current spine item (chapter) index
-  int pageNumber;                  // Current page within the spine item
-  int totalPages;                  // Total pages in the current spine item
-  uint16_t paragraphIndex = 0;     // 1-based synthetic paragraph index from XPath p[N]
-  bool hasParagraphIndex = false;  // True when paragraphIndex was resolved from XPath
-  uint16_t liIndex = 0;            // Running <li> count at the matched XPath element
-  bool hasLiIndex = false;         // True when target element is <li> and liIndex was resolved
-  char xpathAnchorId[64] = {};     // First <a id> captured inside the matched XPath element
-};
+#include "CrossPointPosition.h"
+#include "KOReaderSyncClient.h"
+
+class GfxRenderer;
 
 /**
  * KOReader position representation.
@@ -61,6 +53,29 @@ class ProgressMapper {
    */
   static CrossPointPosition toCrossPoint(const std::shared_ptr<Epub>& epub, const KOReaderPosition& koPos,
                                          int currentSpineIndex = -1, int totalPagesInCurrentSpine = 0);
+
+  /**
+   * Replace a toCrossPoint() page estimate with one from the target chapter's
+   * cached layout: the visible-text offset LUT first, then the list-item,
+   * anchor and paragraph LUTs. Sets hasMappedPage when one of them answers;
+   * leaves the estimate alone when the chapter has no cached layout.
+   */
+  static void refinePageFromLayout(const std::shared_ptr<Epub>& epub, GfxRenderer& renderer, CrossPointPosition& pos);
+
+  /**
+   * Rich crosspoint-sync position for an upload: percentage quantized, the
+   * layout hints, and the same XPath as the standard progress field.
+   */
+  static KOReaderRichPosition toRichPosition(const CrossPointPosition& pos, const KOReaderPosition& koPos);
+
+  /**
+   * Map a rich position downloaded from a crosspoint-sync server when its XPath
+   * could not be resolved to content: same chapter page count means the page
+   * transfers as is, otherwise the paragraph LUT, otherwise the page fraction.
+   * std::nullopt when the spine is out of range or has no cached layout.
+   */
+  static std::optional<CrossPointPosition> fromRichPosition(const std::shared_ptr<Epub>& epub,
+                                                            const KOReaderRichPosition& rich);
 
  private:
   /**

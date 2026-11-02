@@ -37,6 +37,19 @@ class ParsedText {
   std::deque<std::string> words;
   std::vector<EpdFontFamily::Style> wordStyles;
   std::vector<bool> wordContinues;  // true = word attaches to previous (no space before it)
+  // Zero-based visible Unicode-codepoint offset of each word in the spine <body> (see
+  // ChapterHtmlSlimParser::visibleTextOffset), stored as uint16_t deltas from a shared base so
+  // this layout-only metadata costs 2 bytes per word. A span wider than uint16_t (or a word
+  // whose offset goes backwards) starts a sparse rebase. Rendered TextBlocks carry none of it:
+  // only each line's starting offset leaves, through the processLine callback.
+  // Ported from upstream crosspoint #2805.
+  struct VisibleOffsetRebase {
+    uint32_t wordIndex;
+    uint32_t base;
+  };
+  std::vector<uint16_t> wordVisibleOffsetDeltas;
+  uint32_t visibleOffsetBase = 0;
+  std::vector<VisibleOffsetRebase> visibleOffsetRebases;
   BlockStyle blockStyle;
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
@@ -57,6 +70,12 @@ class ParsedText {
 
   struct LineScratch;
 
+  uint32_t visibleOffsetBaseAt(size_t wordIndex) const;
+  uint32_t visibleOffsetAt(size_t wordIndex) const;
+  void pushVisibleOffset(uint32_t offset);
+  void insertVisibleOffset(size_t wordIndex, uint32_t offset);
+  void eraseVisibleOffsetPrefix(size_t count);
+
   void applyParagraphIndent();
   // Pixel indent of this paragraph's opening line (negative for a hanging indent).
   int resolveFirstLineIndent(const GfxRenderer& renderer, int fontId) const;
@@ -68,8 +87,8 @@ class ParsedText {
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks);
   void extractLine(size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
                    const std::vector<bool>& continuesVec, const std::vector<size_t>& lineBreakIndices,
-                   const std::function<void(std::unique_ptr<TextBlock>)>& processLine, const GfxRenderer& renderer,
-                   int fontId, LineScratch& scratch);
+                   const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
+                   const GfxRenderer& renderer, int fontId, LineScratch& scratch);
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
   // True if word i should render with bionic bolding (feature on and not already bold).
   bool isBionicWord(size_t i) const;
@@ -83,11 +102,14 @@ class ParsedText {
         bionicReadingEnabled(bionicReadingEnabled) {}
   ~ParsedText() = default;
 
-  void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false);
+  // visibleTextOffset: where the word's first codepoint sits in the chapter's visible text.
+  void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
+               uint32_t visibleTextOffset = 0);
   // Adds an image that flows in the line like a word `width` pixels wide (InlineImageToken.h).
   // attachToPrevious: no whitespace separated it from the word before, so the two stay
   // together on a line with no gap between them.
-  void addInlineImage(uint16_t id, uint16_t width, uint16_t height, bool attachToPrevious);
+  void addInlineImage(uint16_t id, uint16_t width, uint16_t height, bool attachToPrevious,
+                      uint32_t visibleTextOffset = 0);
   // Valid only inside a processLine callback: the inline images on the line being handed
   // over, which the TextBlock itself does not carry.
   const std::vector<InlineImagePlacement>& currentLineImages() const { return lineImages; }
@@ -103,8 +125,9 @@ class ParsedText {
   // in place (em-space indent, fallback force-split), so skipping the erase alone is not enough.
   // Only the table grid passes true: it finds out that a cell does not fit by laying it out,
   // and must then emit the SAME text as paragraphs.
+  // processLine also receives the visible-text offset of the line's first word.
   void layoutAndExtractLines(const GfxRenderer& renderer, int fontId, uint16_t viewportWidth,
-                             const std::function<void(std::unique_ptr<TextBlock>)>& processLine,
+                             const std::function<void(std::unique_ptr<TextBlock>, uint32_t)>& processLine,
                              bool includeLastLine = true, bool preserveSource = false,
                              const TextLayoutOptions& layoutOptions = {});
 };

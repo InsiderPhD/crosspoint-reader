@@ -111,13 +111,18 @@ constexpr NamedEntity NAMED_ENTITIES[] = {
 };
 
 // Print sink fed the raw chapter XHTML by Epub::readItemContentsToStream.
-// Tracks the UTF-16 offset of <body> text content and runs KMP over the
+// Tracks the offset (in the requested unit) of <body> text content and runs KMP over the
 // normalised (ignored chars dropped, ASCII folded) UTF-8 stream.
 class OffsetMatcher final : public Print {
  public:
   OffsetMatcher(const uint8_t* pattern, const uint16_t* failure, uint32_t* startRing, const size_t patternLen,
-                const size_t expectedRawByte)
-      : pattern(pattern), failure(failure), startRing(startRing), m(patternLen), expectedRawByte(expectedRawByte) {}
+                const size_t expectedRawByte, const Unit unit)
+      : pattern(pattern),
+        failure(failure),
+        startRing(startRing),
+        m(patternLen),
+        expectedRawByte(expectedRawByte),
+        unit(unit) {}
 
   size_t write(const uint8_t b) override {
     consume(b);
@@ -172,6 +177,7 @@ class OffsetMatcher final : public Print {
 
   void beginTag() {
     mode = Mode::Tag;
+    lastTagChar = 0;
     tagLen = 0;
     tagNameDone = false;
     tagQuote = 0;
@@ -203,8 +209,25 @@ class OffsetMatcher final : public Print {
         inBody = true;
       } else if (tagLen == 5 && memcmp(tagName, "/body", 5) == 0) {
         mode = Mode::Done;
+      } else if (unit == Unit::Codepoint && inBody) {
+        // CrossPoint's page parser does not count text inside these.
+        const bool closing = tagLen > 0 && tagName[0] == '/';
+        if (isNonVisibleTag(closing ? tagName + 1 : tagName, closing ? tagLen - 1 : tagLen)) {
+          if (closing) {
+            if (nonVisibleDepth > 0) --nonVisibleDepth;
+          } else if (lastTagChar != '/') {
+            ++nonVisibleDepth;
+          }
+        }
       }
     }
+    lastTagChar = c;
+  }
+
+  static bool isNonVisibleTag(const char* name, const size_t len) {
+    // tagName holds at most 8 lower-cased bytes; longer names never match.
+    const auto is = [&](const char* tag) { return len == strlen(tag) && memcmp(name, tag, len) == 0; };
+    return is("head") || is("style") || is("script") || is("title") || is("rp");
   }
 
   void consumeEntity(const uint8_t c) {
@@ -240,10 +263,17 @@ class OffsetMatcher final : public Print {
   }
 
   void emit(uint32_t cp) {
-    // XML normalises CRLF to LF, so a CR adds nothing to the text content.
-    if (cp == '\r') return;
-    const uint32_t cpStart = utf16Pos;
-    utf16Pos += cp >= 0x10000 ? 2 : 1;
+    // XML normalises CRLF and a lone CR to one LF.
+    const bool afterCr = prevCr;
+    prevCr = cp == '\r';
+    if (cp == '\r') {
+      cp = '\n';
+    } else if (cp == '\n' && afterCr) {
+      return;
+    }
+    if (unit == Unit::Codepoint && nonVisibleDepth > 0) return;
+    const uint32_t cpStart = textPos;
+    textPos += (unit == Unit::Utf16 && cp >= 0x10000) ? 2 : 1;
     if (isIgnored(cp)) return;
     cp = foldCase(cp);
     uint8_t bytes[4];
@@ -258,14 +288,14 @@ class OffsetMatcher final : public Print {
     if (pattern[q] == b) ++q;
     if (q < m) return;
 
-    // Full match ending on this byte. utf16Pos is already past its code point.
+    // Full match ending on this byte. textPos is already past its code point.
     const uint32_t matchStart = startRing[(normPos - m) % m];
     const size_t distance = rawByte > expectedRawByte ? rawByte - expectedRawByte : expectedRawByte - rawByte;
     if (!hasMatch || distance < bestDistance) {
       hasMatch = true;
       bestDistance = distance;
       bestStart = matchStart;
-      bestEnd = utf16Pos;
+      bestEnd = textPos;
     }
     q = failure[q - 1];
   }
@@ -275,9 +305,13 @@ class OffsetMatcher final : public Print {
   uint32_t* startRing;
   const size_t m;
   const size_t expectedRawByte;
+  const Unit unit;
 
   Mode mode = Mode::Text;
   bool inBody = false;
+  uint8_t nonVisibleDepth = 0;  // Unit::Codepoint only
+  uint8_t lastTagChar = 0;      // previous byte inside the current tag, to spot "/>"
+
   Utf8Decoder decoder;
   char tagName[8] = {};
   size_t tagLen = 0;
@@ -288,7 +322,8 @@ class OffsetMatcher final : public Print {
   uint8_t entityLen = 0;
 
   size_t rawByte = 0;
-  uint32_t utf16Pos = 0;
+  uint32_t textPos = 0;  // offset of the next body text character, in `unit`s
+  bool prevCr = false;
   size_t normPos = 0;
   size_t q = 0;
 
@@ -301,7 +336,7 @@ class OffsetMatcher final : public Print {
 }  // namespace
 
 Result find(const Epub& epub, const int spineIndex, const std::string& clipText, const float expectedFraction,
-            uint32_t& outStart, uint32_t& outEnd) {
+            uint32_t& outStart, uint32_t& outEnd, const Unit unit) {
   const std::string href = epub.getSpineItem(spineIndex).href;
   if (href.empty()) {
     LOG_ERR("HLO", "No spine item %d", spineIndex);
@@ -347,7 +382,7 @@ Result find(const Epub& epub, const int spineIndex, const std::string& clipText,
   float fraction = expectedFraction < 0.0f ? 0.0f : (expectedFraction > 1.0f ? 1.0f : expectedFraction);
   const auto expectedRawByte = static_cast<size_t>(fraction * static_cast<float>(itemSize));
 
-  OffsetMatcher matcher(pattern.get(), failure.get(), startRing.get(), m, expectedRawByte);
+  OffsetMatcher matcher(pattern.get(), failure.get(), startRing.get(), m, expectedRawByte, unit);
   if (!epub.readItemContentsToStream(href, matcher, 1024)) {
     LOG_ERR("HLO", "Failed to read %s", href.c_str());
     return Result::Error;

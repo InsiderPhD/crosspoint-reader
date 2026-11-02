@@ -128,7 +128,7 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-> **Current version: 48** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> **Current version: 49** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
 > The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
 > v30 inline ("on page") footnotes; v31–v33 KOReader xpath/paragraph sync data and
 > nested block styles; v34 `<pre>` blocks carry a monospace font override; v35 hanging
@@ -181,6 +181,16 @@ if (parsedSize != fileSize) {
 > `fontOverride` in each TextBlock; nothing else in the payload changes. On those builds
 > the CSS cache version byte has bit 7 set (`0x88`): each rule carries one more length,
 > `fontSize` (float + unit), after the border bytes, flagged by defined bit 30.
+> v49 content-based reading positions (upstream #2805): the header gains a fifth trailing
+> `u32 visibleTextLutOffset` after `listItemLutOffset` (so `pageCount` and the four older
+> offsets each move 4 bytes earlier relative to the header end), and the file gains a
+> visible-text LUT at that offset: `u32 visibleTextOffset[pageCount]`, the zero-based Unicode
+> codepoint offset in the chapter's visible `<body>` text where each page starts
+> (non-decreasing; page 0 is always 0). Visible text is the raw character data inside
+> `<body>`, uncollapsed whitespace included, excluding `<head>`, `<style>`, `<script>`,
+> `<title>` and `<rp>` subtrees and synthetic text such as image alt fallbacks, counted the
+> same way upstream CrossPoint counts it so offsets are portable between devices. Those five
+> elements are also no longer rendered when they appear inside `<body>`.
 >
 > Any change to the on-disk structure **must** bump this constant — a stale cache read
 > against a new layout is how you get a hard fault, not a graceful failure.
@@ -522,14 +532,14 @@ skipped; a label longer than 11 bytes is cut on a UTF-8 boundary; at most 8000 e
 
 Saved clippings for one book, keyed by `std::hash` of the book path. Owned by
 `src/ClippingStore.cpp`. Strings are `u32` length + bytes (`lib/Serialization`).
-Versions 1-3 still load; missing fields take their defaults (every clip pending upload,
-no sync id) and the file is rewritten as version 4 on the next save.
+Versions 1-4 still load; missing fields take their defaults (every clip pending upload,
+no sync id, no content offsets) and the file is rewritten as version 5 on the next save.
 
-### Version 4
+### Version 5
 
 ```c++
 struct ClippingsBin {
-    u8     version;  // 4
+    u8     version;  // 5
     u16    count;    // <= CLIPPING_MAX_PER_BOOK (64)
     string title;
     string author;
@@ -541,9 +551,11 @@ struct ClippingsBin {
         u32  bookFusionId;     // v2+; 0 = not pushed
         u32  bookFusionStart, bookFusionEnd;  // v3+
         u8   bookFusionFlags;  // v3+; BF_* bits
-        u8   syncFlags;        // v4; 0x01 pending upload, 0x02 foreign layout anchor
+        u8   syncFlags;        // v4; 0x01 pending upload, 0x02 foreign layout anchor,
+                               //     0x04 content-offset lookup reached a verdict (v5)
         u64  syncRevision;     // v4; server revision, 0 = never synced
         string id;             // v4; clipping-sync id, empty until first sync (<= 64 chars)
+        u32  startOffset, endOffset;  // v5; chapter visible codepoints [start, end), 0xFFFFFFFF = unknown
         char chapterTitle[48]; // NUL padded
         string text;           // <= 512 bytes
     } clippings[count];

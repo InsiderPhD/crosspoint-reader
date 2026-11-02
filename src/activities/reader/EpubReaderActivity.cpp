@@ -1698,14 +1698,11 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         // which way to sync.
         const int currentPage = section ? section->currentPage : nextPageNumber;
         const int totalPages = section ? section->pageCount : cachedChapterTotalPageCount;
+        const CrossPointPosition localPos = koSyncLocalPosition(currentPage, totalPages);
         std::optional<uint16_t> paragraphIndex;
-        if (section && currentPage >= 0 && currentPage < section->pageCount) {
-          const uint16_t paragraphPage =
-              currentPage > 0 ? static_cast<uint16_t>(currentPage - 1) : static_cast<uint16_t>(currentPage);
-          if (const auto pIdx = section->getParagraphIndexForPage(paragraphPage)) {
-            paragraphIndex = *pIdx;
-          }
-        }
+        if (localPos.hasParagraphIndex) paragraphIndex = localPos.paragraphIndex;
+        std::optional<uint32_t> visibleTextOffset;
+        if (localPos.hasVisibleTextOffset) visibleTextOffset = localPos.visibleTextOffset;
         const auto direction = KOReaderSyncActivity::Direction::ASK;
         {
           // KOReaderSyncActivity exits by silent-restarting into the book, which
@@ -1715,7 +1712,8 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         }
         startActivityForResult(
             std::make_unique<KOReaderSyncActivity>(renderer, mappedInput, epub, epub->getPath(), currentSpineIndex,
-                                                   currentPage, totalPages, paragraphIndex, direction),
+                                                   currentPage, totalPages, paragraphIndex, direction,
+                                                   visibleTextOffset),
             [this](const ActivityResult& result) {
               if (!result.isCancelled) {
                 const auto& sync = std::get<SyncResult>(result.data);
@@ -2283,8 +2281,20 @@ void EpubReaderActivity::performDictionaryLookup(const std::string& word) {
 void EpubReaderActivity::handleClippingJump(const ClippingJumpResult& jump) {
   clearQueuedPageTurns();
   RenderLock lock(*this);
+  int page = jump.page;
+  if (jump.visibleTextOffset != UINT32_MAX && epub) {
+    // The saved page only holds under the layout it was saved with: a clip
+    // from another device, or one saved before a font/margin change, is
+    // placed by its content offset instead (when the chapter is laid out).
+    Section target(epub, jump.spineIndex, renderer);
+    const uint16_t cachedPages =
+        Section::readCachedPageCount(epub->getCachePath() + "/sections/" + std::to_string(jump.spineIndex) + ".bin");
+    if (!jump.pageIsLocal || cachedPages != jump.pageCount) {
+      if (const auto offsetPage = target.getPageForVisibleTextOffset(jump.visibleTextOffset)) page = *offsetPage;
+    }
+  }
   currentSpineIndex = jump.spineIndex;
-  nextPageNumber = jump.page;
+  nextPageNumber = page;
   cachedChapterTotalPageCount = 0;
   pendingPageJump.reset();
   section.reset();
@@ -3077,22 +3087,11 @@ std::unique_ptr<ProgressAutoSync::Payload> EpubReaderActivity::buildAutosyncPayl
   // KOReader. The XPath must be generated here: ChapterXPathResolver reads the
   // chapter out of the EPUB, and Epub/zip access is not safe against the render
   // task re-parsing a chapter concurrently.
-  std::optional<uint16_t> paragraphIndex;
-  if (section && currentPage >= 0 && currentPage < section->pageCount) {
-    const uint16_t paragraphPage =
-        currentPage > 0 ? static_cast<uint16_t>(currentPage - 1) : static_cast<uint16_t>(currentPage);
-    if (const auto pIdx = section->getParagraphIndexForPage(paragraphPage)) {
-      paragraphIndex = *pIdx;
-    }
-  }
-  CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPages};
-  if (paragraphIndex.has_value()) {
-    localPos.paragraphIndex = *paragraphIndex;
-    localPos.hasParagraphIndex = true;
-  }
+  const CrossPointPosition localPos = koSyncLocalPosition(currentPage, totalPages);
   const KOReaderPosition koPos = ProgressMapper::toKOReader(epub, localPos);
   payload->koXpath = koPos.xpath;
   payload->koPercentage = koPos.percentage;
+  payload->koPosition = ProgressMapper::toRichPosition(localPos, koPos);
   payload->bookPercent = koPos.percentage * 100.0f;
   // Empty unless the user turned Send Book Details on, so the default costs the
   // push nothing; the strings have to be copied here because the push releases
@@ -4094,6 +4093,24 @@ void EpubReaderActivity::performLongPressSync() {
   renderer.displayBuffer(HalDisplay::FULL_REFRESH);
 }
 
+CrossPointPosition EpubReaderActivity::koSyncLocalPosition(const int currentPage, const int totalPages) const {
+  CrossPointPosition pos = {currentSpineIndex, currentPage, totalPages};
+  if (section && currentPage >= 0 && currentPage < section->pageCount) {
+    // The paragraph LUT is keyed one page back: a page usually opens mid-paragraph.
+    const uint16_t paragraphPage =
+        currentPage > 0 ? static_cast<uint16_t>(currentPage - 1) : static_cast<uint16_t>(currentPage);
+    if (const auto pIdx = section->getParagraphIndexForPage(paragraphPage)) {
+      pos.paragraphIndex = *pIdx;
+      pos.hasParagraphIndex = true;
+    }
+    if (const auto offset = section->getVisibleTextOffsetForPage(static_cast<uint16_t>(currentPage))) {
+      pos.visibleTextOffset = *offset;
+      pos.hasVisibleTextOffset = true;
+    }
+  }
+  return pos;
+}
+
 void EpubReaderActivity::performKOReaderQuickSync() {
   if (!epub || !KOREADER_STORE.hasCredentials()) {
     LOG_DBG("KRS", "KOReader quick sync unavailable, performing refresh instead");
@@ -4118,20 +4135,7 @@ void EpubReaderActivity::performKOReaderQuickSync() {
 
   const int currentPage = section ? section->currentPage : nextPageNumber;
   const int totalPages = section ? section->pageCount : cachedChapterTotalPageCount;
-  std::optional<uint16_t> paragraphIndex;
-  if (section && currentPage >= 0 && currentPage < section->pageCount) {
-    const uint16_t paragraphPage =
-        currentPage > 0 ? static_cast<uint16_t>(currentPage - 1) : static_cast<uint16_t>(currentPage);
-    if (const auto pIdx = section->getParagraphIndexForPage(paragraphPage)) {
-      paragraphIndex = *pIdx;
-    }
-  }
-
-  CrossPointPosition localPos = {currentSpineIndex, currentPage, totalPages};
-  if (paragraphIndex.has_value()) {
-    localPos.paragraphIndex = *paragraphIndex;
-    localPos.hasParagraphIndex = true;
-  }
+  const CrossPointPosition localPos = koSyncLocalPosition(currentPage, totalPages);
   const KOReaderPosition localKoPos = ProgressMapper::toKOReader(epub, localPos);
 
   // Local position (with paragraph precision) is captured; free the chapter
@@ -4200,8 +4204,9 @@ void EpubReaderActivity::performKOReaderQuickSync() {
 
     if (shouldApplyRemote) {
       KOReaderPosition remoteKoPos = {remoteProgress.progress, remoteProgress.percentage};
-      const CrossPointPosition remotePos =
+      CrossPointPosition remotePos =
           ProgressMapper::toCrossPoint(epub, remoteKoPos, currentSpineIndex, std::max(1, totalPages));
+      ProgressMapper::refinePageFromLayout(epub, renderer, remotePos);
 
       {
         RenderLock lock(*this);
@@ -4262,6 +4267,7 @@ void EpubReaderActivity::performKOReaderQuickSync() {
     uploadProgress.document = documentHash;
     uploadProgress.progress = localKoPos.xpath;
     uploadProgress.percentage = localKoPos.percentage;
+    uploadProgress.position = ProgressMapper::toRichPosition(localPos, localKoPos);
     uploadProgress.metadata = KOReaderMetadata::fromBook(*epub);
     uploadResult = KOReaderSyncClient::updateProgress(uploadProgress);
     if (uploadResult == KOReaderSyncClient::OK) {

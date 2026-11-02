@@ -119,6 +119,10 @@ struct ClippingJumpResult {
   uint16_t pageCount = 1;
   uint16_t paragraphIndex = UINT16_MAX;
   uint16_t clippingIndex = UINT16_MAX;
+  // Layout-independent anchor (chapter visible codepoints), UINT32_MAX = none.
+  uint32_t visibleTextOffset = UINT32_MAX;
+  // The page/word anchors came from this device's layout.
+  bool pageIsLocal = true;
 };
 
 // Returned by ClipSelectionActivity in single-word mode: one word picked off the

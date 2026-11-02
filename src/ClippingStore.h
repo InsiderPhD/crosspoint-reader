@@ -46,6 +46,13 @@ struct Clipping {
   // Page/word anchors came from another device's layout, so they cannot be
   // trusted to land on the right words here: listed, but not highlighted.
   bool foreignAnchor = false;
+  // Layout-independent anchor shared with every CrossPoint device: chapter
+  // visible-codepoint offsets [start, end), counted the way the page parser
+  // counts. UINT32_MAX = unknown. offsetsResolved: the lookup reached a verdict
+  // (found or not), so it is not repeated on every sync.
+  uint32_t startOffset = UINT32_MAX;
+  uint32_t endOffset = UINT32_MAX;
+  bool offsetsResolved = false;
   char chapterTitle[CLIPPING_CHAPTER_TITLE_MAX] = {};
   std::string text;
 };
@@ -83,6 +90,9 @@ class ClippingStore {
   // callers update a batch of clips and then call saveToFile() once.
   bool setBookFusionOffsets(size_t index, bool found, uint32_t start, uint32_t end);
   bool setBookFusionPushed(size_t index, uint32_t id, bool withOffsets);
+  // Record the content-offset lookup's verdict. A clip of this device's that
+  // gains offsets after it was synced is queued to go up again with them.
+  bool setContentOffsets(size_t index, bool found, uint32_t start, uint32_t end);
   // Clipping sync bookkeeping (clippings/ClippingSync.cpp). Deleting a clip that
   // has an id queues it in a per-book journal so the server can be told.
   bool prepareSync();      // mint ids for clips that have none, then save

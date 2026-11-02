@@ -189,6 +189,7 @@ bool pushKOReader(const ProgressAutoSync::Payload& payload) {
   progress.progress = payload.koXpath;
   progress.percentage = payload.koPercentage;
   progress.metadata = payload.koMetadata;
+  progress.position = payload.koPosition;
   const auto result = KOReaderSyncClient::updateProgress(progress);
   if (result != KOReaderSyncClient::OK) {
     LOG_DBG("PAS", "KOReader push failed: %s", KOReaderSyncClient::errorString(result));

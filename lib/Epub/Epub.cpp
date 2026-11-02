@@ -183,6 +183,13 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const 
     } else if (!Storage.writeFile(isbnPath.c_str(), String(opfParser.isbn.c_str()))) {
       LOG_ERR("EBP", "Could not write ISBN sidecar");
     }
+    // ASIN sidecar for sync servers that match on it (same reasoning as ISBN).
+    const auto asinPath = getAsinPath();
+    if (opfParser.asin.empty()) {
+      if (Storage.exists(asinPath.c_str())) Storage.remove(asinPath.c_str());
+    } else if (!Storage.writeFile(asinPath.c_str(), String(opfParser.asin.c_str()))) {
+      LOG_ERR("EBP", "Could not write ASIN sidecar");
+    }
   }
 
   if (!opfParser.tocNcxPath.empty()) {
@@ -707,6 +714,8 @@ const std::string& Epub::getBookshelf() const {
 std::string Epub::getDescriptionPath() const { return cachePath + "/desc.bin"; }
 
 std::string Epub::getIsbnPath() const { return cachePath + "/isbn.txt"; }
+
+std::string Epub::getAsinPath() const { return cachePath + "/asin.txt"; }
 
 bool Epub::hasDescription() const { return Storage.exists(getDescriptionPath().c_str()); }
 

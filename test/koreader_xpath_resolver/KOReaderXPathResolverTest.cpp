@@ -67,9 +67,9 @@ int main() {
     expectEq(ChapterXPathResolver::findXPathForProgress(epub, 0, 0.5f),
              "/body/DocFragment[1]/body/div[3]/span[1]/text()[1].3", "div/span text, 50%");
     // ceil(0.1 * 34) = 4: a formatting space. Whitespace is never an anchor, so the target is
-    // carried to the start of the next text run (offset 0 -> the bare element path).
+    // carried to the start of the next text run (offset 0, still an exact text-node anchor).
     expectEq(ChapterXPathResolver::findXPathForProgress(epub, 0, 0.1f),
-             "/body/DocFragment[1]/body/div[3]/span[1]/span[1]", "div/span text, target in whitespace");
+             "/body/DocFragment[1]/body/div[3]/span[1]/span[1]/text()[1].0", "div/span text, target in whitespace");
   }
 
   expectEq(ChapterXPathResolver::findXPathForProgress(
