@@ -52,6 +52,17 @@ struct Book {
   size_t dailyCount = 0;
 };
 
+constexpr size_t MAX_SESSION_BATCH = 20;  // server cap per request
+
+struct Session {
+  const char* id = "";        // 1-64 of [A-Za-z0-9_-]
+  const char* document = "";  // 32 lowercase hex
+  uint32_t startedAt = 0;     // unix UTC seconds
+  uint32_t endedAt = 0;
+  uint32_t seconds = 0;  // active seconds: >= 10 and <= the wall span
+  int32_t utcOffsetMinutes = 0;
+};
+
 // Civil date of a day ordinal (days since 1970-01-01).
 void civilFromOrdinal(uint32_t ordinal, int& year, unsigned& month, unsigned& day);
 // 0 = Monday .. 6 = Sunday.
@@ -71,6 +82,25 @@ class BookBatch {
   BookBatch(char* out, size_t capacity) : out_(out), capacity_(capacity) {}
   bool begin(const char* deviceId);
   bool add(const Book& book);
+  bool finish();
+  size_t count() const { return items_; }
+  const char* payload() const { return out_; }
+
+ private:
+  char* out_;
+  size_t capacity_;
+  size_t length_ = 0;
+  size_t items_ = 0;
+};
+
+// Same shape for the session journal (PUT /api/v1/stats/sessions). add()
+// also refuses a session the server would reject (< 10 s, or more active
+// seconds than its wall span).
+class SessionBatch {
+ public:
+  SessionBatch(char* out, size_t capacity) : out_(out), capacity_(capacity) {}
+  bool begin(const char* deviceId);
+  bool add(const Session& session);
   bool finish();
   size_t count() const { return items_; }
   const char* payload() const { return out_; }

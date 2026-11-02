@@ -16,6 +16,7 @@
 
 #include "CombinedStreak.h"
 #include "ReadingStatsStore.h"
+#include "SessionJournal.h"
 #include "StatsPayload.h"
 #include "activities/reader/TlsFramebufferBorrow.h"
 #include "util/TimeUtils.h"
@@ -217,6 +218,13 @@ Result upload(GfxRenderer& renderer, unsigned& booksSent) {
 
   Result result = uploadGlobal(renderer, buffer.get(), deviceId);
   if (result == Result::Ok) result = uploadBooks(renderer, buffer.get(), deviceId, booksSent);
+  // The session journal is extra detail on top of the snapshots: an older
+  // server without the route, or a failed batch, keeps the outbox for next
+  // time and never fails the stats sync.
+  if (result == Result::Ok) {
+    unsigned sessions = 0;
+    SessionJournal::upload(renderer, buffer.get(), PAYLOAD_CAPACITY, deviceId, sessions);
+  }
   // Read back only after this reader's own days are on the server, so the
   // combined streak includes them. A failure here never fails the upload.
   if (result == Result::Ok) downloadStreak(renderer, buffer.get());

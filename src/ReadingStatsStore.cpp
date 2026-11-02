@@ -13,6 +13,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "sync/SessionJournal.h"
 #include "util/BookIdentity.h"
 #include "util/HardcoverSync.h"
 #include "util/ReadingStreaks.h"
@@ -854,6 +855,11 @@ void ReadingStatsStore::beginSession(const std::string& path, const std::string&
   auto& book = books[0];
   activeSession.startProgressPercent = book.lastProgressPercent;
   activeSession.startCompleted = book.completed;
+  // Wall-clock start for the CrossPoint Sync session journal; 0 = no clock.
+  {
+    const uint32_t now = TimeUtils::getCurrentValidTimestamp();
+    activeSession.startedAtTimestamp = TimeUtils::isClockValid(now) ? now : 0;
+  }
   if (progressPercent > 0) {
     book.lastProgressPercent = clampPercent(progressPercent);
     if (book.lastProgressPercent >= 100) {
@@ -1210,6 +1216,9 @@ void ReadingStatsStore::endSession(const bool allowBackgroundSync) {
     // the "no date yet" sentinel; bookId pins which book it was so the editor
     // can apply the credit to the right book's per-day bucket once dated.
     appendSessionLogEntry(dayOrdinal, sessionMs, book.bookId, book.lastProgressPercent);
+    // Queued on the card for the next Sync Books (no-op unless Sync Reading
+    // Stats is on); one small append per counted session, never a network call.
+    SessionJournal::record(book.path, activeSession.startedAtTimestamp, sessionMs);
   }
 
   lastSessionSnapshot.valid = true;

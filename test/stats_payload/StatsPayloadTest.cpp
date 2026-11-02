@@ -102,6 +102,25 @@ int main() {
   BookBatch other(out, sizeof(out));
   check(other.begin("katiepoint-0123456789abcdef") && !other.add(bad), "book batch refuses a bad document id");
 
+  SessionBatch sessions(out, sizeof(out));
+  check(sessions.begin("katiepoint-0123456789abcdef"), "session batch begins");
+  Session s;
+  s.id = "s1793600000-0a1b2c3d";
+  s.document = "0123456789abcdef0123456789abcdef";
+  s.startedAt = 1793600000;
+  s.endedAt = 1793600600;
+  s.seconds = 540;
+  s.utcOffsetMinutes = -300;
+  check(sessions.add(s), "valid session accepted");
+  Session tooShort = s;
+  tooShort.seconds = 5;
+  check(!sessions.add(tooShort), "session under 10 s refused");
+  Session overSpan = s;
+  overSpan.seconds = 601;
+  check(!sessions.add(overSpan), "active time over the wall span refused");
+  check(sessions.finish() && sessions.count() == 1, "session batch closes with one item");
+  check(contains(out, "\"utc_offset_minutes\":-300}]}"), "session offset and closing");
+
   if (failures == 0) std::printf("stats_payload: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

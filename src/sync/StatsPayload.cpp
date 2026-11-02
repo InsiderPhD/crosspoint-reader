@@ -180,4 +180,20 @@ bool BookBatch::add(const Book& b) {
 
 bool BookBatch::finish() { return finishBatch(out_, capacity_, length_, items_); }
 
+bool SessionBatch::begin(const char* deviceId) { return beginBatch(out_, capacity_, length_, items_, deviceId); }
+
+bool SessionBatch::add(const Session& s) {
+  if (items_ >= MAX_SESSION_BATCH || !validId(s.id, 64) || !validDocument(s.document)) return false;
+  if (s.endedAt < s.startedAt || s.seconds < 10 || s.seconds > s.endedAt - s.startedAt) return false;
+  return appendItem(out_, capacity_, length_, items_, [&s](Writer& w) {
+    w.add(
+        "{\"session_id\":\"%s\",\"document\":\"%s\",\"started_at\":%lu,\"ended_at\":%lu,\"seconds\":%lu,"
+        "\"utc_offset_minutes\":%ld}",
+        s.id, s.document, static_cast<unsigned long>(s.startedAt), static_cast<unsigned long>(s.endedAt),
+        static_cast<unsigned long>(s.seconds), static_cast<long>(s.utcOffsetMinutes));
+  });
+}
+
+bool SessionBatch::finish() { return finishBatch(out_, capacity_, length_, items_); }
+
 }  // namespace StatsPayload

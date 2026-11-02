@@ -130,6 +130,9 @@ class ReadingStatsStore {
     // credited to whichever bucket the clock is in at each checkpoint and are
     // never moved afterwards, so they cannot share bucketedMs.
     uint64_t todBucketedMs = 0;
+    // Wall clock when the session began (0 = clock not valid then), for the
+    // CrossPoint Sync session journal. Fixed 4 bytes in the singleton.
+    uint32_t startedAtTimestamp = 0;
   };
 
   std::vector<ReadingBookStats> books;
