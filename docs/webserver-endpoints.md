@@ -23,6 +23,7 @@ This document describes all HTTP and WebSocket endpoints available on the CrossP
     - [GET `/api/fonts` - List Installed Fonts](#get-apifonts---list-installed-fonts)
     - [POST `/api/fonts/upload` - Upload a Font](#post-apifontsupload---upload-a-font)
     - [POST `/api/fonts/delete` - Delete a Font Family](#post-apifontsdelete---delete-a-font-family)
+    - [SD-card plugin endpoints (X4 Pro / X4C)](#sd-card-plugin-endpoints-x4-pro--x4c)
   - [WebSocket Endpoint](#websocket-endpoint)
     - [Port 81 - Fast Binary Upload](#port-81---fast-binary-upload)
   - [Network Modes](#network-modes)
@@ -81,6 +82,9 @@ curl http://crosspoint.local/api/status
 ```json
 {
   "version": "1.0.0",
+  "firmwareFamily": "crosspoint",
+  "pluginApi": 1,
+  "pluginCapabilities": "catalog.lists,catalog.notices,...,events.sleep.enter",
   "ip": "192.168.1.100",
   "mode": "STA",
   "rssi": -45,
@@ -92,11 +96,18 @@ curl http://crosspoint.local/api/status
 | Field      | Type   | Description                                               |
 | ---------- | ------ | --------------------------------------------------------- |
 | `version`  | string | CrossPoint firmware version                               |
+| `firmwareFamily` | string | Plugin contract family: `"crosspoint"` (shared with upstream CrossPoint) |
+| `pluginApi` | number | Plugin API level: `1` on X4 Pro / X4C, `0` on boards without plugin support |
+| `pluginCapabilities` | string | Comma-separated plugin capabilities this build implements (see `docs/sd-plugins.md`); empty without plugin support |
 | `ip`       | string | Device IP address                                         |
 | `mode`     | string | `"STA"` (connected to WiFi) or `"AP"` (access point mode) |
 | `rssi`     | number | WiFi signal strength in dBm (0 in AP mode)                |
 | `freeHeap` | number | Free heap memory in bytes                                 |
 | `uptime`   | number | Seconds since device boot                                 |
+| `device`   | string | Board name (`X3`, `X4`, or the S3 board's name)           |
+
+No `deviceId` is returned (upstream derives a per-plugin id from a device
+secret this firmware does not have), and `?plugin=` is ignored.
 
 ---
 
@@ -502,6 +513,27 @@ plus the limits the compiler checks against.
 `sleep.image`). An empty `value` means unknown right now (no book open, clock not set).
 Making a theme the sleep screen is a `POST /api/settings` with `{"sleepTheme": "<name>"}`
 (`""` for the built-in screen).
+
+---
+
+### SD-card plugin endpoints (X4 Pro / X4C)
+
+Built only on the boards with plugin support (`CROSSPOINT_SD_PLUGINS`). The
+action endpoints answer `403 plugin system disabled` while **Enable Plugins**
+is off. Full contract: [docs/sd-plugins.md](sd-plugins.md).
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /plugins` | Plugins page (all boards; a one-line note where unsupported) |
+| `GET /plugin-host.js`, `GET /js/plugin-host.js` | the shared browser plugin host script (gzip) |
+| `GET /api/plugins` | discovered browser plugins `[{name, dir, title, mount}]` |
+| `GET /plugin?name=&file=` | a plugin's file; `ETag` (content MD5) + `Cache-Control: no-cache`, `304` on `If-None-Match` |
+| `GET /plugins-run` | headless page that runs plugin jobs |
+| `POST /api/relay` | outbound HTTP(S) on a plugin's behalf |
+| `POST /api/fetch` | download a URL straight to SD |
+| `POST /api/crypto` | wolfCrypt primitives |
+| `POST /api/plugin-fs` | write a small file to SD |
+| `POST /api/plugin-jobs`, `GET /api/plugin-jobs/claim`, `POST /api/plugin-jobs/complete`, `GET /api/plugin-jobs/status` | plugin job queue |
 
 ---
 

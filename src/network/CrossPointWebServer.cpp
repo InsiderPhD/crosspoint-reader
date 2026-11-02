@@ -37,6 +37,7 @@
 #endif
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
+#include "util/FirmwareIdentity.h"
 #if CROSSPOINT_SD_PLUGINS
 #include "html/js/plugin_hostJs.generated.h"
 #endif
@@ -533,6 +534,13 @@ void CrossPointWebServer::handleStatus() const {
 
   JsonDocument doc;
   doc["version"] = CROSSPOINT_VERSION;
+  // Plugin contract (util/FirmwareIdentity.h): the same family and API as
+  // upstream CrossPoint 2.0, and exactly the capabilities implemented here
+  // (empty with API 0 on boards that build no plugins). No per-plugin
+  // deviceId: this firmware has no non-identifying device secret to derive one.
+  doc["firmwareFamily"] = firmwareidentity::FAMILY;
+  doc["pluginApi"] = firmwareidentity::PLUGIN_API_VERSION;
+  doc["pluginCapabilities"] = firmwareidentity::PLUGIN_CAPABILITIES;
   doc["ip"] = ipAddr;
   doc["mode"] = apMode ? "AP" : "STA";
   doc["rssi"] = apMode ? 0 : WiFi.RSSI();
