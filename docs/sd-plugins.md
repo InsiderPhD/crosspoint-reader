@@ -155,10 +155,14 @@ Boards without plugin support (X3 / X4) report API `0` and no capabilities.
 
 | Capability | What it means |
 |---|---|
-| `catalog.lists` | the manifest can expose named browse `lists` |
+| `catalog.lists` | the manifest can expose named browse `lists`, including lists fetched from `browse.lists_url` |
+| `catalog.notices` | a browse list can show a confirmation notice (title, message, Confirm / Cancel labels) before it opens |
 | `catalog.bundle_install` | a catalog entry can install a multi-file bundle (base URL + file list) |
 | `catalog.version_tracking` | catalog versions are compared with installed manifests (Installed / Update) |
+| `catalog.compatibility` | JSON catalog entries are filtered by firmware family, minimum plugin API and required capabilities (`browse.compatibility`) |
 | `catalog.encoded_item_fields` | download and sidecar templates accept `{id_enc}`, `{title_enc}`, `{author_enc}`, `{url_enc}` |
+| `catalog.list_index_mapping` | `browse.lists_url` is fetched with `lists_headers` and read through `lists_items` / `lists_fields`; a list's `id` fills `{list_id}` / `{list_id_enc}` |
+| `catalog.list_requirements` | manifest and fetched lists may carry a `requires` array of capabilities; a list needing one we lack is hidden |
 
 ### Schema
 
@@ -174,6 +178,7 @@ Every string field is a template. Available substitutions:
 | `{plugin_capabilities}` | comma-separated advertised capabilities (see below) | everywhere |
 | `{page}` | current 1-based page | browse |
 | `{offset}` | rows before the current page: `(page - 1) * page_size` | browse |
+| `{list_id}` `{list_id_enc}` | the open list's `id` as received / percent-encoded; empty outside a list | browse, download, sidecar |
 | `{limit}` | `page_size` when the request uses `{page}` and not `{offset}`; otherwise `page_size + 1` (the extra row shows that another page exists) | browse |
 | `{id}` `{title}` `{author}` `{url}` | fields of the selected item, as received | download, sidecar |
 | `{id_enc}` `{title_enc}` `{author_enc}` `{url_enc}` | the same fields percent-encoded (everything except letters, digits, `-_.~`), for query values and path segments | download, sidecar |
@@ -227,13 +232,31 @@ Two browse formats:
                                             // Installed / Update by comparing this to the
                                             // installed plugin's manifest.json (found by id)
     },
+    "compatibility": {                      // optional (json): entry fields checked against
+      "firmware_family": "compatibility.firmware_family",   // comma-separated allow-list
+      "plugin_api_min": "compatibility.plugin_api_min",     // minimum plugin API
+      "requires": "compatibility.requires"                  // capabilities (string or array)
+    },
     "page_size": 8,                         // 1..16; see Pagination below
 
     "lists": [                              // optional named sub-catalogs (json only):
       { "title": "All Books" },             // a picker screen precedes browsing;
       { "title": "Favorites",               // each entry may override url and/or
-        "body": "{\"page\":{page},\"per_page\":{limit},\"list\":\"favorites\"}" }
-    ],                                      // omitted keys fall back to browse's
+        "body": "{\"page\":{page},\"per_page\":{limit},\"list\":\"favorites\"}",
+        "requires": ["catalog.compatibility"],  // optional: hidden unless all are advertised
+        "notice": {                         // optional confirmation before opening
+          "title": "Community content",     // defaults to the list title
+          "message": "Review this notice before continuing.",
+          "confirm": "Continue",            // defaults to translated Confirm
+          "cancel": "Go Back"               // defaults to translated Cancel
+        } }
+    ],                                      // omitted keys fall back to browse's;
+                                            // an "id" fills {list_id} / {list_id_enc}
+
+    "lists_url": "https://.../folders",     // optional: more lists, shown after "lists"
+    "lists_headers": { "Authorization": "Bearer {token}" },  // sent only to lists_url
+    "lists_items": "folders",               // dotted path to the array; default "lists"
+    "lists_fields": { "title": "title", "id": "folder_id" },  // defaults: title, url, id, requires
 
     // --- xml format (ignore the json fields above; fields become selectors) ---
     "item": "response",                     // local-name of the repeating element
@@ -331,9 +354,33 @@ Two browse formats:
   page" row follows them while more pages exist — tappable and
   button-reachable like any row.
 - **Lists** (json): with `browse.lists`, opening the catalog shows a picker
-  of the named entries first; each entry browses with its own url/body
-  overrides (server-side categories, shelves, sort orders). Back from the
-  book list returns to the picker.
+  of the named entries first (a single list skips the picker and opens
+  directly, after its notice; Back then leaves the catalog); each entry
+  browses with its own url/body overrides (server-side categories, shelves,
+  sort orders). A list with `notice.message` shows a paged confirmation
+  first: Confirm continues into the list, Back returns to the picker. Back
+  from the book list returns to the picker.
+- **Dynamic lists** (json): `browse.lists_url` is fetched with a GET once per
+  catalog visit, carrying `lists_headers` and no other headers. Entries come
+  from the array at `lists_items`; each entry's title, url and id from the
+  dotted paths in `lists_fields`, plus optional `body` and `notice` read by the
+  same names as in `lists`. An entry needs a title and a url or an id (an
+  id-only entry browses `browse.url` with `{list_id}`). At most 64 fetched
+  lists are kept; an answer with no usable entries, or one larger than 16KB,
+  counts as a failed fetch. The fetched lists follow the manifest's own; if the
+  fetch fails the manifest's lists are still shown (not retried until the
+  catalog is reopened), and without any the catalog shows an error that Retry
+  fetches again. A 401/403 is handled as for browsing (password grant re-mint,
+  else the sign-in screen).
+- **List requirements**: an optional `requires` array on a manifest list or a
+  fetched list (path `lists_fields.requires`) names firmware capabilities; the
+  list is shown only when every one is advertised. A malformed array or more
+  than 32 names hides the list.
+- **Compatibility** (json): with `browse.compatibility`, an entry whose
+  `firmware_family` list lacks `crosspoint`, whose `plugin_api_min` is above
+  `1`, or whose `requires` names a capability not advertised is silently
+  omitted. Entries without these fields stay visible. On a static feed the
+  page window counts only compatible entries.
 - **XML navigation**: Confirm on a folder (an item carrying `container_element`)
   descends into it, Back climbs out (Back at the root leaves the screen).
   With `resolve_urls`, server-relative URLs resolve against the browse URL's

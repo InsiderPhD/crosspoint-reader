@@ -112,6 +112,14 @@ class PluginCatalogActivity final : public Activity {
     // items are installable plugin bundles keyed by folder name.
     std::string versionPath;
     bool tracksInstalls() const { return !versionPath.empty(); }
+    // Optional catalog-entry compatibility fields (browse.compatibility, JSON
+    // only): an entry whose family / minimum plugin API / required
+    // capabilities do not match this firmware is not shown. Empty paths mean
+    // no restriction; entries that omit the values stay visible.
+    std::string compatFamilyPath, compatApiMinPath, compatRequiresPath;
+    bool filtersCompatibility() const {
+      return !compatFamilyPath.empty() || !compatApiMinPath.empty() || !compatRequiresPath.empty();
+    }
     int pageSize = 8;
     // Optional named sub-catalogs ("lists"): each entry may override the
     // browse url/body, so one service exposes several server-side views
@@ -119,8 +127,18 @@ class PluginCatalogActivity final : public Activity {
     // picker screen precedes browsing and Back returns to it.
     struct BrowseList {
       std::string title, url, body;
+      std::string id;  // fills {list_id}, so lists can share one browse url
+      // Optional confirmation shown before the list opens.
+      std::string noticeTitle, noticeMessage, noticeConfirm, noticeCancel;
+      bool hasNotice() const { return !noticeMessage.empty(); }
     };
     std::vector<BrowseList> browseLists;
+    // Optional remote list index (browse.lists_url): fetched once per catalog
+    // visit with its own headers; its lists follow the manifest's own.
+    std::string browseListsUrl;
+    std::vector<std::pair<std::string, std::string>> listsHeaders;
+    std::string listsItemsPath, listsTitlePath, listsUrlPath, listsIdPath, listsRequiresPath;
+    size_t fixedListCount = 0;  // leading browseLists entries from the manifest
     // Optional server-side search. When a search url or body is set, the
     // browsing screen gains a search action; the entered text substitutes
     // {query} (URL-encoded, for a GET url) or {query_raw} (verbatim, for a JSON
@@ -188,8 +206,8 @@ class PluginCatalogActivity final : public Activity {
   // Picker state: the installed device.json plugins.
   std::vector<PluginRef> installedPlugins;
   int pickerReturnRow = 0;  // picker row to reselect after leaving a catalog
-  // A web-only plugin's info screen (PluginInfoActivity) is pushed on top of
-  // the picker; the picker's input is parked until it returns.
+  // A PluginInfoActivity (web-only plugin info, a list notice, item details)
+  // is pushed on top; this screen's input is parked until it returns.
   bool infoOpen = false;
   std::vector<Item> items;
   // Highlighted row of whichever list state is showing (picker rows, browse
@@ -200,6 +218,9 @@ class PluginCatalogActivity final : public Activity {
   int page = 1;
   bool hasMore = false;
   int currentList = -1;  // index into manifest.browseLists; -1 = none/default
+  // browse.lists_url was fetched (or failed while manifest lists remain), so
+  // Back to the list picker does not refetch it.
+  bool listIndexLoaded = false;
   // Active server-side search: the raw query text and a flag that swaps the
   // browse url/body for the search templates. Cleared on Back out of results.
   std::string searchQuery;
@@ -252,6 +273,16 @@ class PluginCatalogActivity final : public Activity {
   // Wi-Fi is up (or a token just arrived): open the list picker when the
   // manifest defines browse lists, else fetch the first page directly.
   void startBrowse();
+  // Retry from the error / sign-in screens: sign in, reload the lists, or
+  // refetch the current page, whichever the catalog is missing.
+  void retryBrowse();
+  // JSON catalog with named lists and none picked yet.
+  bool wantsListPicker() const;
+  // Opens a browse list, after its notice when it has one.
+  void openList(int index);
+  // Fetches browse.lists_url into browseLists. `status` is the HTTP status
+  // (200 when there is no index). False when the fetch or parse failed.
+  bool loadBrowseListIndex(int& status);
   // Server-side search (manifest.hasSearch()): prompt for a query on the
   // keyboard, then run it via the search templates.
   void launchSearch();

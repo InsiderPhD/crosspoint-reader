@@ -44,6 +44,9 @@ void PluginInfoActivity::onEnter() {
   Activity::onEnter();
   topLine = 0;
   wrappedWidth = -1;
+  // The Confirm that opened this screen (the picker activates on press) is
+  // still down; its release must not also accept the prompt.
+  confirmArmed = !mappedInput.isPressed(MappedInputManager::Button::Confirm);
   loadParagraphs();
   requestUpdate();
 }
@@ -52,6 +55,21 @@ void PluginInfoActivity::onEnter() {
 // onEnter (fonts/orientation may not be settled until the render task runs).
 void PluginInfoActivity::loadParagraphs() {
   paragraphs.clear();
+  if (isPrompt()) {
+    // Plain text from the caller (a list notice, catalog item details):
+    // one paragraph per line, no markdown.
+    paragraphs.reserve(4 + promptText.size() / 60);
+    size_t pos = 0;
+    while (pos <= promptText.size()) {
+      const size_t nl = promptText.find('\n', pos);
+      paragraphs.push_back(promptText.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos));
+      if (nl == std::string::npos) break;
+      pos = nl + 1;
+    }
+    promptText.clear();
+    promptText.shrink_to_fit();  // the paragraphs hold the text now
+    return;
+  }
   if (!plugin.description.empty()) {
     paragraphs.push_back(plugin.description);
     paragraphs.emplace_back("");
@@ -101,7 +119,7 @@ void PluginInfoActivity::ensureWrapped() {
   lines.clear();
   lines.reserve(paragraphs.size() * 2);  // rough average wrapped lines per paragraph
   for (const std::string& raw : paragraphs) {
-    const std::string text = stripMarkdown(raw);
+    const std::string text = isPrompt() ? raw : stripMarkdown(raw);
     if (text.empty()) {
       lines.emplace_back("");
       continue;
@@ -136,9 +154,23 @@ void PluginInfoActivity::ensureWrapped() {
   }
 }
 
+void PluginInfoActivity::finishWith(const bool cancelled) {
+  ActivityResult res;
+  res.isCancelled = cancelled;
+  setResult(std::move(res));
+  finish();
+}
+
 void PluginInfoActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    finish();
+    finishWith(true);
+    return;
+  }
+  if (!confirmArmed) {
+    confirmArmed = !mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
+                   !mappedInput.wasReleased(MappedInputManager::Button::Confirm);
+  } else if (!confirmLabel.empty() && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    finishWith(false);
     return;
   }
 
@@ -181,7 +213,8 @@ void PluginInfoActivity::render(RenderLock&&) {
   const bool canScroll = static_cast<int>(lines.size()) > visibleRows;
   const char* up = canScroll ? tr(STR_DIR_UP) : "";
   const char* down = canScroll ? tr(STR_DIR_DOWN) : "";
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", up, down);
+  const auto labels =
+      mappedInput.mapLabels(backLabel.empty() ? tr(STR_BACK) : backLabel.c_str(), confirmLabel.c_str(), up, down);
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();

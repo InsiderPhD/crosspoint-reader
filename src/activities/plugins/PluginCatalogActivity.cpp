@@ -15,9 +15,11 @@
 #include <strings.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <new>
+#include <string_view>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
@@ -57,6 +59,11 @@ constexpr size_t MAX_API_RESPONSE = 48 * 1024;
 // metadata), and buffering that in a std::string aborts on low heap.
 constexpr char BROWSE_TMP_PATH[] = "/.pcat_tmp.json";
 constexpr size_t MAX_BROWSE_RESPONSE = 1024 * 1024;
+// browse.lists_url answers are small JSON indexes held in DRAM (PSRAM on the
+// boards that build plugins); the list count bounds the vector, since a 16KB
+// index of tiny entries would otherwise reserve hundreds of entries.
+constexpr size_t MAX_BROWSE_LIST_INDEX_RESPONSE = 16 * 1024;
+constexpr size_t MAX_BROWSE_LISTS = 64;
 constexpr int MAX_PAGE_SIZE = 16;
 constexpr int DOWNLOAD_PROGRESS_STEP_PERCENT = 5;
 constexpr unsigned long DOWNLOAD_PROGRESS_MIN_UPDATE_MS = 5000;
@@ -124,6 +131,87 @@ std::string md5Hex(const std::string& text) {
 // Returns `override` unless it's empty, in which case `fallback` applies.
 const std::string& pick(const std::string& override, const std::string& fallback) {
   return override.empty() ? fallback : override;
+}
+
+// --- Catalog compatibility (upstream CrossPoint 2.0 catalog.compatibility /
+// catalog.list_requirements) ---------------------------------------------
+std::string_view trimCsvToken(std::string_view token) {
+  while (!token.empty() && (token.front() == ' ' || token.front() == '\t')) token.remove_prefix(1);
+  while (!token.empty() && (token.back() == ' ' || token.back() == '\t')) token.remove_suffix(1);
+  return token;
+}
+
+// Calls fn(token) for each trimmed comma-separated token; stops early (and
+// returns false) when fn returns false.
+template <typename Fn>
+bool allCsvTokens(const std::string_view csv, Fn fn) {
+  size_t start = 0;
+  while (true) {
+    size_t end = csv.find(',', start);
+    if (end == std::string_view::npos) end = csv.size();
+    if (!fn(trimCsvToken(csv.substr(start, end - start)))) return false;
+    if (end == csv.size()) return true;
+    start = end + 1;
+  }
+}
+
+bool csvContainsToken(const std::string_view csv, const std::string_view wanted) {
+  return !allCsvTokens(csv, [wanted](const std::string_view token) { return token != wanted; });
+}
+
+bool hasCapability(const std::string_view capability) {
+  return !capability.empty() && csvContainsToken(firmwareidentity::PLUGIN_CAPABILITIES, capability);
+}
+
+// An entry is compatible unless it names a family list without ours, a
+// minimum plugin API above ours, or a capability we do not advertise.
+bool catalogEntryCompatible(const std::string& family, const std::string& apiMin, const std::string& required) {
+  if (!family.empty() && !csvContainsToken(family, firmwareidentity::FAMILY)) return false;
+  if (!apiMin.empty()) {
+    char* end = nullptr;
+    const long parsed = strtol(apiMin.c_str(), &end, 10);
+    if (end == apiMin.c_str() || *end != '\0' || parsed < 0 || parsed > firmwareidentity::PLUGIN_API_VERSION)
+      return false;
+  }
+  return required.empty() || allCsvTokens(required, hasCapability);
+}
+
+// A catalog's `requires` field as one comma-separated string: either a string
+// already, or an array of names (joined).
+std::string csvField(const JsonVariantConst v) {
+  if (!v.is<JsonArrayConst>()) return variantToString(v);
+  std::string out;
+  for (JsonVariantConst name : v.as<JsonArrayConst>()) {
+    const char* text = name.as<const char*>();
+    if (!text) continue;
+    if (!out.empty()) out += ',';
+    out += text;
+  }
+  return out;
+}
+
+// A list's optional `requires` is an all-of array of capability names.
+// Missing means public; a malformed or oversized array never exposes a list.
+bool matchesListRequirements(const JsonVariantConst requirements) {
+  if (requirements.isUnbound() || requirements.isNull()) return true;
+  JsonArrayConst required = requirements.as<JsonArrayConst>();
+  if (required.isNull() || required.size() > 32) return false;
+  for (JsonVariantConst v : required) {
+    const char* capability = v.as<const char*>();
+    if (!capability || !hasCapability(capability)) return false;
+  }
+  return true;
+}
+
+// Reads a list's body / notice, shared by manifest lists and fetched ones.
+void readListExtras(const JsonVariantConst l, std::string& body, std::string& noticeTitle, std::string& noticeMessage,
+                    std::string& noticeConfirm, std::string& noticeCancel) {
+  body = l["body"] | "";
+  const JsonVariantConst notice = l["notice"];
+  noticeTitle = notice["title"] | "";
+  noticeMessage = notice["message"] | "";
+  noticeConfirm = notice["confirm"] | "";
+  noticeCancel = notice["cancel"] | "";
 }
 
 // --- XML-list helpers -----------------------------------------------------
@@ -412,18 +500,35 @@ bool PluginCatalogActivity::loadManifest() {
   manifest.idPath = browse["fields"]["id"] | "";
   manifest.urlPath = browse["fields"]["url"] | "";
   manifest.versionPath = browse["fields"]["version"] | "";
+  const JsonVariantConst compatibility = browse["compatibility"];
+  manifest.compatFamilyPath = compatibility["firmware_family"] | "";
+  manifest.compatApiMinPath = compatibility["plugin_api_min"] | "";
+  manifest.compatRequiresPath = compatibility["requires"] | "";
   manifest.pageSize = browse["page_size"] | 8;
   // Documented bounds: each row costs an Item (strings) and a screen slot.
   manifest.pageSize = std::min(std::max(manifest.pageSize, 1), 16);
   if (manifest.pageSize < 1) manifest.pageSize = 1;
   if (manifest.pageSize > MAX_PAGE_SIZE) manifest.pageSize = MAX_PAGE_SIZE;
+  manifest.browseListsUrl = browse["lists_url"] | "";
+  readHeaders(browse["lists_headers"], manifest.listsHeaders);
+  manifest.listsItemsPath = browse["lists_items"] | "lists";
+  const JsonVariantConst listFields = browse["lists_fields"];
+  manifest.listsTitlePath = listFields["title"] | "title";
+  manifest.listsUrlPath = listFields["url"] | "url";
+  manifest.listsIdPath = listFields["id"] | "id";
+  manifest.listsRequiresPath = listFields["requires"] | "requires";
+  manifest.browseLists.reserve(std::min<size_t>(browse["lists"].size(), MAX_BROWSE_LISTS));
   for (JsonVariantConst l : browse["lists"].as<JsonArrayConst>()) {
+    if (manifest.browseLists.size() >= MAX_BROWSE_LISTS) break;
+    if (!matchesListRequirements(l["requires"])) continue;
     Manifest::BrowseList entry;
     entry.title = l["title"] | "";
     entry.url = l["url"] | "";
-    entry.body = l["body"] | "";
+    entry.id = variantToString(l["id"]);
+    readListExtras(l, entry.body, entry.noticeTitle, entry.noticeMessage, entry.noticeConfirm, entry.noticeCancel);
     if (!entry.title.empty()) manifest.browseLists.push_back(std::move(entry));
   }
+  manifest.fixedListCount = manifest.browseLists.size();
   manifest.searchUrl = browse["search"]["url"] | "";
   manifest.searchBody = browse["search"]["body"] | "";
   manifest.xmlItem = browse["item"] | "";
@@ -466,6 +571,63 @@ bool PluginCatalogActivity::loadManifest() {
   manifest.authErrorPath = auth["error_path"] | "error";
 
   return !manifest.browseUrl.empty();
+}
+
+bool PluginCatalogActivity::loadBrowseListIndex(int& status) {
+  status = 200;
+  if (manifest.browseListsUrl.empty()) return true;
+
+  std::string response;
+  std::string url;
+  // GET with lists_headers only: a token reaches the list server only when the
+  // manifest says so.
+  const auto run = [&] {
+    url = substituted(manifest.browseListsUrl, nullptr);
+    return pluginhttp::request(session.get(), url, "GET", "", substitutedHeaders(manifest.listsHeaders, nullptr),
+                               response, MAX_BROWSE_LIST_INDEX_RESPONSE);
+  };
+  status = run();
+  // Same policy as browsing: an expired password-grant token is minted again once.
+  if ((status == 401 || status == 403) && manifest.hasPasswordGrant() && refreshCredentialToken()) status = run();
+  if (status < 200 || status >= 300) {
+    LOG_ERR("PCAT", "browse list index fetch failed: status=%d %s", status, url.c_str());
+    return false;
+  }
+
+  JsonDocument doc;
+  if (deserializeJson(doc, response) != DeserializationError::Ok) {
+    LOG_ERR("PCAT", "browse list index parse failed: %s", url.c_str());
+    return false;
+  }
+  std::string().swap(response);  // the document holds its own copies
+  JsonArrayConst lists = resolvePath(doc.as<JsonVariantConst>(), manifest.listsItemsPath).as<JsonArrayConst>();
+  if (lists.isNull() || lists.size() == 0) {
+    LOG_ERR("PCAT", "browse list index has no lists: %s", url.c_str());
+    return false;
+  }
+
+  manifest.browseLists.resize(manifest.fixedListCount);
+  manifest.browseLists.reserve(manifest.fixedListCount + std::min(lists.size(), MAX_BROWSE_LISTS));
+  for (JsonVariantConst l : lists) {
+    if (manifest.browseLists.size() - manifest.fixedListCount >= MAX_BROWSE_LISTS) {
+      LOG_ERR("PCAT", "browse list index truncated to %u lists", static_cast<unsigned>(MAX_BROWSE_LISTS));
+      break;
+    }
+    if (!matchesListRequirements(resolvePath(l, manifest.listsRequiresPath))) continue;
+    Manifest::BrowseList entry;
+    entry.title = variantToString(resolvePath(l, manifest.listsTitlePath));
+    entry.url = variantToString(resolvePath(l, manifest.listsUrlPath));
+    entry.id = variantToString(resolvePath(l, manifest.listsIdPath));
+    readListExtras(l, entry.body, entry.noticeTitle, entry.noticeMessage, entry.noticeConfirm, entry.noticeCancel);
+    // An entry with only an id browses the shared browse url via {list_id}.
+    const bool browsable = !entry.url.empty() || !entry.id.empty();
+    if (!entry.title.empty() && browsable) manifest.browseLists.push_back(std::move(entry));
+  }
+  if (manifest.browseLists.size() == manifest.fixedListCount) {
+    LOG_ERR("PCAT", "browse list index has no valid lists: %s", url.c_str());
+    return false;
+  }
+  return true;
 }
 
 bool PluginCatalogActivity::saveToken(const std::string& value) {
@@ -536,6 +698,12 @@ std::string PluginCatalogActivity::substituted(std::string tpl, const Item* item
   substituteAll(tpl, "{limit}", num);
   snprintf(num, sizeof(num), "%d", std::max(0, page - 1) * manifest.pageSize);
   substituteAll(tpl, "{offset}", num);
+  // The open list's id, so lists can share one browse url ("?folder={list_id_enc}").
+  const bool inList = currentList >= 0 && currentList < static_cast<int>(manifest.browseLists.size());
+  static const std::string noList;
+  const std::string& listId = inList ? manifest.browseLists[currentList].id : noList;
+  substituteAll(tpl, "{list_id}", listId);
+  if (tpl.find("{list_id_enc}") != std::string::npos) substituteAll(tpl, "{list_id_enc}", urlEncodeQuery(listId));
   substituteAll(tpl, "{query}", urlEncodeQuery(searchQuery));
   substituteAll(tpl, "{query_raw}", searchQuery);
   if (item) {
@@ -610,6 +778,7 @@ void PluginCatalogActivity::enterCatalog() {
   page = 1;
   hasMore = false;
   currentList = -1;
+  listIndexLoaded = false;
   searchActive = false;
   searchQuery.clear();
   errorMessage.clear();
@@ -650,12 +819,18 @@ void PluginCatalogActivity::checkAndConnectWifi() {
   launchWifiSelection();
 }
 
-void PluginCatalogActivity::startBrowse() {
+bool PluginCatalogActivity::wantsListPicker() const {
   // Browse lists apply to JSON catalogs; XML lists navigate by folder instead.
-  if (!manifest.browseLists.empty() && !manifest.isXmlList() && currentList < 0) {
+  return !manifest.browseLists.empty() && !manifest.isXmlList() && currentList < 0;
+}
+
+void PluginCatalogActivity::startBrowse() {
+  const bool needsListIndex = !manifest.browseListsUrl.empty() && !manifest.isXmlList() && !listIndexLoaded;
+  if (needsListIndex || wantsListPicker()) {
     // Same auth gate as fetchPage: without it a signed-out user is shown the
-    // list picker and only hits the sign-in screen after picking a list.
-    // loadToken() returns true for token-less catalogs, which skip the gate.
+    // list picker and only hits the sign-in screen after picking a list. The
+    // list index may use {token}/{cfg.KEY} too. loadToken() returns true for
+    // token-less catalogs, which skip the gate.
     loadConfig();
     if (!loadToken() && !(manifest.hasPasswordGrant() && refreshCredentialToken())) {
       if (manifest.hasDeviceCode()) {
@@ -664,6 +839,31 @@ void PluginCatalogActivity::startBrowse() {
         state = State::NO_TOKEN;
         requestUpdate();
       }
+      return;
+    }
+  }
+  if (needsListIndex) {
+    beginLoading();
+    int status = 0;
+    if (!loadBrowseListIndex(status)) {
+      if (status == 401 || status == 403) {
+        state = State::NO_TOKEN;  // as for a rejected browse request: sign in again
+        requestUpdate();
+        return;
+      }
+      // Without manifest lists to fall back on the catalog has nothing to show.
+      if (manifest.fixedListCount == 0) {
+        fail(StrId::STR_FETCH_FEED_FAILED);
+        return;
+      }
+    }
+    // After a failed fetch the manifest's own lists still work; Back to the
+    // picker must not refetch until the catalog is reopened.
+    listIndexLoaded = true;
+  }
+  if (wantsListPicker()) {
+    if (manifest.browseLists.size() == 1) {
+      openList(0);  // a one-entry picker is just an extra click
       return;
     }
     items.clear();
@@ -676,6 +876,54 @@ void PluginCatalogActivity::startBrowse() {
   }
   beginLoading();
   fetchPage(1);
+}
+
+void PluginCatalogActivity::openList(const int index) {
+  if (index < 0 || index >= static_cast<int>(manifest.browseLists.size())) return;
+  const auto& list = manifest.browseLists[index];
+  if (!list.hasNotice()) {
+    currentList = index;
+    startBrowse();
+    return;
+  }
+  // The notice (catalog.notices): Confirm continues into the list; Back stays
+  // on the picker, or leaves the catalog when this is its only list. Labels
+  // default to the translated Confirm / Cancel.
+  const std::string confirm = substituted(list.noticeConfirm, nullptr);
+  const std::string cancel = substituted(list.noticeCancel, nullptr);
+  infoOpen = true;
+  state = State::LIST_PICKER;  // the screen under the notice
+  startActivityForResult(
+      std::make_unique<PluginInfoActivity>(
+          renderer, mappedInput, substituted(list.noticeTitle.empty() ? list.title : list.noticeTitle, nullptr),
+          substituted(list.noticeMessage, nullptr), confirm.empty() ? std::string(tr(STR_CONFIRM)) : confirm,
+          cancel.empty() ? std::string(tr(STR_CANCEL)) : cancel),
+      [this, index](const ActivityResult& result) {
+        infoOpen = false;
+        if (result.isCancelled) {
+          if (manifest.browseLists.size() == 1) {
+            exitCatalog();
+          } else {
+            requestUpdate();
+          }
+          return;
+        }
+        currentList = index;
+        startBrowse();
+      });
+}
+
+void PluginCatalogActivity::retryBrowse() {
+  if (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IPAddress(0, 0, 0, 0)) {
+    launchWifiSelection();
+  } else if (state == State::NO_TOKEN && manifest.hasDeviceCode()) {
+    beginAuth();
+  } else if ((!manifest.browseListsUrl.empty() && !manifest.isXmlList() && !listIndexLoaded) || wantsListPicker()) {
+    startBrowse();  // nothing picked yet: retry lands on the list picker
+  } else {
+    beginLoading();
+    fetchPage(page);
+  }
 }
 
 void PluginCatalogActivity::pumpDownloadInput() {
@@ -936,6 +1184,9 @@ void PluginCatalogActivity::fetchPage(const int newPage) {
   addFieldFilter(filter, manifest.itemsPath, manifest.versionPath);
   addFieldFilter(filter, manifest.itemsPath, manifest.bundleBasePath);
   addFieldFilter(filter, manifest.itemsPath, manifest.bundleFilesPath);
+  addFieldFilter(filter, manifest.itemsPath, manifest.compatFamilyPath);
+  addFieldFilter(filter, manifest.itemsPath, manifest.compatApiMinPath);
+  addFieldFilter(filter, manifest.itemsPath, manifest.compatRequiresPath);
 
   // Filtered parse straight from the SD temp file — the raw response never
   // occupies DRAM, only the few fields the filter admits.
@@ -981,7 +1232,13 @@ void PluginCatalogActivity::fetchPage(const int newPage) {
   if (!arr.isNull()) {
     items.reserve(manifest.pageSize);
     for (JsonVariantConst v : arr) {
-      const bool shown = !variantToString(resolvePath(v, manifest.titlePath)).empty();
+      // An incompatible entry is never shown; on a static feed the page window
+      // then slides over compatible entries only, so pages never come out empty.
+      const bool shown = !variantToString(resolvePath(v, manifest.titlePath)).empty() &&
+                         (!manifest.filtersCompatibility() ||
+                          catalogEntryCompatible(variantToString(resolvePath(v, manifest.compatFamilyPath)),
+                                                 variantToString(resolvePath(v, manifest.compatApiMinPath)),
+                                                 csvField(resolvePath(v, manifest.compatRequiresPath))));
       if (!window.take(plugincatalogpaging::countsTowardPage(paging, shown)) || !shown) continue;
       Item item;
       item.title = variantToString(resolvePath(v, manifest.titlePath));
@@ -1320,16 +1577,7 @@ void PluginCatalogActivity::loop() {
     int tx = 0;
     int ty = 0;
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || mappedInput.wasScreenTapped(tx, ty)) {
-      if (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IPAddress(0, 0, 0, 0)) {
-        launchWifiSelection();
-      } else if (state == State::NO_TOKEN && manifest.hasDeviceCode()) {
-        beginAuth();
-      } else if (!manifest.browseLists.empty() && !manifest.isXmlList() && currentList < 0) {
-        startBrowse();  // nothing picked yet: retry lands on the list picker
-      } else {
-        beginLoading();
-        fetchPage(page);
-      }
+      retryBrowse();
     } else if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
       exitCatalog();
     }
@@ -1443,6 +1691,7 @@ void PluginCatalogActivity::onBackButton() {
     // Leave the results and return to the pre-search view (picker or page 1).
     searchActive = false;
     searchQuery.clear();
+    if (manifest.browseLists.size() == 1) currentList = 0;  // its notice was already accepted
     startBrowse();
     return;
   }
@@ -1451,8 +1700,9 @@ void PluginCatalogActivity::onBackButton() {
     browseHistory.pop_back();
     beginLoading();
     fetchXmlList();
-  } else if (state == State::BROWSING && currentList >= 0) {
-    // Browsing a picked list: Back returns to the list picker, not out.
+  } else if (state == State::BROWSING && currentList >= 0 && manifest.browseLists.size() > 1) {
+    // Browsing a picked list: Back returns to the list picker, not out (a
+    // single list has no picker, so Back leaves the catalog).
     currentList = -1;
     startBrowse();
   } else {
@@ -1484,8 +1734,7 @@ void PluginCatalogActivity::activateIndex(const int index) {
   }
   if (state == State::LIST_PICKER) {
     if (index < 0 || index >= static_cast<int>(manifest.browseLists.size())) return;
-    currentList = index;
-    startBrowse();
+    openList(index);
     return;
   }
   // The pager rows bracket the items: "Previous page" ahead of them past
