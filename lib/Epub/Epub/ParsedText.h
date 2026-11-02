@@ -92,6 +92,9 @@ class ParsedText {
   std::vector<uint16_t> calculateWordWidths(const GfxRenderer& renderer, int fontId);
   // True if word i should render with bionic bolding (feature on and not already bold).
   bool isBionicWord(size_t i) const;
+  // False when word i must stay on the same line as word i - 1 (a continuation that does not
+  // follow an explicit hyphen or dash).
+  bool breakAllowedBefore(size_t i, const std::vector<bool>& continuesVec) const;
 
  public:
   explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,

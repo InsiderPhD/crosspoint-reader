@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "InlineImageToken.h"
+#include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
 
 constexpr int MAX_COST = std::numeric_limits<int>::max();
@@ -54,6 +55,17 @@ uint32_t lastCodepoint(const std::string& word) {
 }
 
 bool containsSoftHyphen(const std::string& word) { return word.find(SOFT_HYPHEN_UTF8) != std::string::npos; }
+
+// A visible hyphen or dash a line may break after. A soft hyphen only shows when its
+// conditional break is taken, and U+2011 exists to forbid a break.
+bool allowsBreakAfterExplicitHyphen(const uint32_t cp) {
+  constexpr uint32_t NON_BREAKING_HYPHEN_CP = 0x2011;
+  return isExplicitHyphen(cp) && !isSoftHyphen(cp) && cp != NON_BREAKING_HYPHEN_CP;
+}
+
+bool endsWithBreakableHyphen(const std::string& token) {
+  return !token.empty() && allowsBreakAfterExplicitHyphen(lastCodepoint(token));
+}
 
 // Removes every soft hyphen in-place so rendered glyphs match measured widths.
 void stripSoftHyphensInPlace(std::string& word) {
@@ -310,10 +322,67 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   // bold prefix + regular suffix here (which doubled the per-paragraph vectors and could OOM
   // a large chapter under heap fragmentation). The split is reproduced on demand at layout
   // time via appendBionicFrags(), keeping these long-lived vectors at one entry per word.
-  words.push_back(std::move(word));
+  //
+  // The one split made here is after an explicit hyphen or dash ("foo—bar" -> "foo—" +
+  // "bar"), so a line can end there even with hyphenation off. The tail token is a
+  // continuation (no space before it) that breakAllowedBefore() still lets the line breaker
+  // stop at, because the token before it ends in a breakable hyphen. A run of dashes stays
+  // together, and a dash with nothing in front of it on the line is not a break point.
+  const auto* const begin = reinterpret_cast<const unsigned char*>(word.c_str());
+  const auto* const end = begin + word.size();
+  const auto* p = begin;
+  size_t tokenStart = 0;
+  bool tokenAttaches = attachToPrevious;
+  uint32_t tokenOffset = visibleTextOffset;
+  uint32_t tokenCodepoints = 0;
+  bool hasLeadingContent = attachToPrevious && !words.empty();
+  while (p < end) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (cp == 0) break;
+    tokenCodepoints++;
+    if (!allowsBreakAfterExplicitHyphen(cp)) {
+      hasLeadingContent = true;
+      continue;
+    }
+    while (p < end) {
+      const auto* next = p;
+      if (!allowsBreakAfterExplicitHyphen(utf8NextCodepoint(&next))) break;
+      p = next;
+      tokenCodepoints++;
+    }
+    // Never strand closing punctuation at the start of a line ("—”", "—,"): no break when
+    // punctuation follows the run. Opening quotes are kept attached too, conservatively.
+    const auto* peek = p;
+    if (hasLeadingContent && p < end && !isPunctuation(utf8NextCodepoint(&peek))) {
+      const size_t cut = static_cast<size_t>(p - begin);
+      words.push_back(word.substr(tokenStart, cut - tokenStart));
+      wordStyles.push_back(combinedStyle);
+      wordContinues.push_back(tokenAttaches);
+      pushVisibleOffset(tokenOffset);
+      tokenOffset += tokenCodepoints;
+      tokenCodepoints = 0;
+      tokenStart = cut;
+      tokenAttaches = true;
+    }
+    hasLeadingContent = true;
+  }
+
+  if (tokenStart == 0) {
+    words.push_back(std::move(word));
+  } else {
+    words.push_back(word.substr(tokenStart));
+  }
   wordStyles.push_back(combinedStyle);
-  wordContinues.push_back(attachToPrevious);
-  pushVisibleOffset(visibleTextOffset);
+  wordContinues.push_back(tokenAttaches);
+  pushVisibleOffset(tokenOffset);
+}
+
+// A line may end before word i unless the word attaches to the one before it. The exception
+// is a word attached after an explicit hyphen or dash ("foo—" + "bar"): it is glued without a
+// space when both share a line, but the break is still allowed.
+bool ParsedText::breakAllowedBefore(const size_t i, const std::vector<bool>& continuesVec) const {
+  if (i == 0 || i >= continuesVec.size() || !continuesVec[i]) return true;
+  return endsWithBreakableHyphen(words[i - 1]);
 }
 
 void ParsedText::addInlineImage(const uint16_t id, const uint16_t width, const uint16_t height,
@@ -524,7 +593,7 @@ std::vector<size_t> ParsedText::computeLineBreaks(const GfxRenderer& renderer, c
       }
 
       // Cannot break after word j if the next word attaches to it (continuation group)
-      if (j + 1 < totalWordCount && continuesVec[j + 1]) {
+      if (j + 1 < totalWordCount && !breakAllowedBefore(j + 1, continuesVec)) {
         continue;
       }
 
@@ -692,7 +761,8 @@ std::vector<size_t> ParsedText::computeHyphenatedLineBreaks(const GfxRenderer& r
 
     // Don't break before a continuation word (e.g., orphaned "?" after "question").
     // Backtrack to the start of the continuation group so the whole group moves to the next line.
-    while (currentIndex > lineStart + 1 && currentIndex < wordWidths.size() && continuesVec[currentIndex]) {
+    while (currentIndex > lineStart + 1 && currentIndex < wordWidths.size() &&
+           !breakAllowedBefore(currentIndex, continuesVec)) {
       --currentIndex;
     }
 
