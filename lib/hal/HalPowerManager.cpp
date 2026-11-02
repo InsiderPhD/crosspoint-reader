@@ -379,11 +379,24 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
   // its charge from the CW2017 I2C gauge above and never reaches this path.
   static const BatteryMonitor battery;
 
-  // smooth the battery %.
-  if (_batteryCachedPercent == 0) {
-    _batteryCachedPercent = 10 * battery.readPercentage();
+  // Sample and smooth once per BATTERY_POLL_MS, not once per call. A status bar
+  // calls this twice per draw (measure the label, then draw it) and several
+  // screens call it more often, so smoothing per call made the EMA's speed depend
+  // on how often the UI happened to redraw, and let the measured and drawn
+  // percentages differ within one frame (CrossInk #904).
+  const unsigned long now = millis();
+  if (_batteryAdcPollStarted && (now - _batteryLastPollMs) < BATTERY_POLL_MS) {
+    return _batteryCachedPercent / 10;
+  }
+  _batteryLastPollMs = now;
+  const uint16_t percent = battery.readPercentage();
+  if (!_batteryAdcPollStarted) {
+    // Seed from the first sample. A flag rather than `cached == 0`, which
+    // re-seeded on every call while the battery genuinely read 0%.
+    _batteryCachedPercent = 10 * percent;
+    _batteryAdcPollStarted = true;
   } else {
-    _batteryCachedPercent = (_batteryCachedPercent * 9 + battery.readPercentage() * 10) / 10;
+    _batteryCachedPercent = (_batteryCachedPercent * 9 + percent * 10) / 10;
   }
   return _batteryCachedPercent / 10;
 }

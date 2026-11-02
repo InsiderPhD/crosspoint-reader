@@ -23,6 +23,9 @@ class HalPowerManager {
   bool _batteryUseI2C = false;                   // True if using I2C fuel gauge (X3), false for ADC (X4)
   mutable int _batteryCachedPercent = 0;         // Last read battery percentage (0-100)
   mutable unsigned long _batteryLastPollMs = 0;  // Timestamp of last battery read in milliseconds
+  // ADC/BatteryMonitor path (every board but the X3): _batteryCachedPercent holds
+  // the smoothed percentage x10 there, and this marks that it has been seeded.
+  mutable bool _batteryAdcPollStarted = false;
 
   // X3 BQ27220 design-capacity load (stepBatteryGaugeCapacityLoad). Mutable for
   // the same reason as the cache above: startDeepSleep() is const and has to
