@@ -23,6 +23,7 @@
 #include "fontIds.h"
 #include "util/BookFinished.h"
 #include "util/SleepBootImages.h"
+#include "util/SwipeToDelete.h"
 #include "util/TouchListNav.h"
 
 namespace {
@@ -413,20 +414,7 @@ void FileBrowserActivity::loop() {
       } else if (opt == UITheme::BOOK_OPT_RENAME) {
         startRename(path);
       } else if (opt == UITheme::BOOK_OPT_DELETE) {
-        startActivityForResult(std::make_unique<ConfirmationActivity>(
-                                   renderer, mappedInput, tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
-                               [this, path, reload](const ActivityResult& res) mutable {
-                                 if (!res.isCancelled) {
-                                   if (FsHelpers::hasEpubExtension(path)) Epub(path, "/.crosspoint").clearCache();
-                                   Storage.remove(path.c_str());
-                                   // The folder's mtime does not change on remove, so the
-                                   // Library indexes would keep listing the book.
-                                   if (isBookEntry(path)) LibraryScan::invalidateIndex();
-                                   RECENT_BOOKS.removeBook(path);
-                                   RECENT_BOOKS.saveToFile();
-                                   reload();
-                                 }
-                               });
+        confirmDeleteFile(path, title);
       } else if (opt == UITheme::BOOK_OPT_DELETE_CLIPPINGS) {
         startActivityForResult(std::make_unique<ConfirmationActivity>(
                                    renderer, mappedInput, tr(STR_DELETE_CLIPPINGS) + std::string("?"), title),
@@ -464,6 +452,33 @@ void FileBrowserActivity::loop() {
       return;
     }
     return;  // Block main input while modal is open
+  }
+
+  // Swipe a file row left for its Delete button (X4 Pro; folders excluded:
+  // their delete takes everything inside, which deserves the deliberate
+  // hold-and-pick route). Only reached with no modal open.
+  if (mode == Mode::Books) {
+    int row;
+    switch (swipeDelete.handle(
+        mappedInput, listRect(), static_cast<int>(files.size()), static_cast<int>(selectorIndex), false, row,
+        [](const void* ctx, const int index) {
+          return static_cast<const FileBrowserActivity*>(ctx)->files[index].back() != '/';
+        },
+        this)) {
+      case SwipeToDelete::Event::Delete: {
+        selectorIndex = static_cast<size_t>(row);
+        const std::string& entry = files[selectorIndex];
+        const auto dotPos = entry.rfind('.');
+        confirmDeleteFile(selectedEntryPath(),
+                          (dotPos != std::string::npos && isBookEntry(entry)) ? entry.substr(0, dotPos) : entry);
+        return;
+      }
+      case SwipeToDelete::Event::Consumed:
+        requestUpdate();
+        return;
+      case SwipeToDelete::Event::None:
+        break;
+    }
   }
 
 #if FREEINK_DEVICE_X4PRO
@@ -740,6 +755,24 @@ void FileBrowserActivity::confirmDeleteSelectedEntry() {
   startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, entry), handler);
 }
 
+void FileBrowserActivity::confirmDeleteFile(const std::string& path, const std::string& title) {
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput,
+                                                                tr(STR_DELETE_FROM_DEVICE) + std::string("?"), title),
+                         [this, path](const ActivityResult& res) {
+                           if (res.isCancelled) return;
+                           if (FsHelpers::hasEpubExtension(path)) Epub(path, "/.crosspoint").clearCache();
+                           Storage.remove(path.c_str());
+                           // The folder's mtime does not change on remove, so the
+                           // Library indexes would keep listing the book.
+                           if (isBookEntry(path)) LibraryScan::invalidateIndex();
+                           RECENT_BOOKS.removeBook(path);
+                           RECENT_BOOKS.saveToFile();
+                           loadFiles();
+                           if (selectorIndex >= files.size()) selectorIndex = files.empty() ? 0 : files.size() - 1;
+                           requestUpdate(true);
+                         });
+}
+
 void FileBrowserActivity::startRename(const std::string& path) {
   renameFlow.start(*this, renderer, mappedInput, path, [this](const std::string&, const std::string& newPath) {
     loadFiles();
@@ -886,6 +919,7 @@ void FileBrowserActivity::render(RenderLock&&) {
           return "";
         },
         false);
+    swipeDelete.draw(renderer, contentRect, static_cast<int>(files.size()), static_cast<int>(selectorIndex), false);
   }
 
   // Full path display

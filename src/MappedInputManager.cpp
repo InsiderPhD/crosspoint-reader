@@ -229,7 +229,11 @@ void MappedInputManager::processTouchInput() const {
         swipe = Swipe::Right;  // BTN_CONFIRM: the rightward swipe
         break;
     }
-    LOG_DBG("INPUT", "Swipe logical=(%d,%d) -> Full Touch gesture %u", ldx, ldy, static_cast<unsigned>(swipe));
+    const LogicalTouchPoint start = toLogicalPoint(nxs, nys);
+    swipeStartX = static_cast<int16_t>(start.x);
+    swipeStartY = static_cast<int16_t>(start.y);
+    LOG_DBG("INPUT", "Swipe logical=(%d,%d) from (%d,%d) -> Full Touch gesture %u", ldx, ldy, start.x, start.y,
+            static_cast<unsigned>(swipe));
     return;
   }
   if (confirmSwipeIgnored && idx == HalGPIO::BTN_CONFIRM) {

@@ -73,6 +73,16 @@ class MappedInputManager {
   // Cleared at the start of every update().
   enum class Swipe : uint8_t { None, Up, Down, Right };
   Swipe wasSwipe() const { return swipe; }
+  // Same swipe, plus the logical point its contact came down on (the same
+  // frame as wasTapPoint()), for screens that act on WHAT was swiped: a row's
+  // swipe-to-delete (SwipeToDelete). Start is untouched when None.
+  Swipe wasSwipe(int& startX, int& startY) const {
+    if (swipe != Swipe::None) {
+      startX = swipeStartX;
+      startY = swipeStartY;
+    }
+    return swipe;
+  }
 
   // Completed screen tap this frame, classified into left/middle/right thirds
   // of the logical screen. None while a home-key event fires (a bar contact
@@ -147,6 +157,7 @@ class MappedInputManager {
   // Mirrors the X4 Pro declaration above; always None without a digitizer.
   enum class Swipe : uint8_t { None, Up, Down, Right };
   Swipe wasSwipe() const { return Swipe::None; }
+  Swipe wasSwipe(int&, int&) const { return Swipe::None; }
 #endif
 
   // True when the board has a touch digitizer. Screens gate touch-only
@@ -258,6 +269,9 @@ class MappedInputManager {
   // Written by the const processTouchInput(); the injected presses live in gpio
   // so these are the only pieces of per-frame touch state the manager owns.
   mutable Swipe swipe = Swipe::None;
+  // Logical touch-down point of the recorded swipe (see wasSwipe(int&, int&)).
+  mutable int16_t swipeStartX = 0;
+  mutable int16_t swipeStartY = 0;
   // This frame's tap landed on an action-bar button and became that button's
   // press; wasTapPoint()/wasTapZone() must not also report it. Cleared at the
   // start of every update().

@@ -10,6 +10,7 @@
 #include "components/SortMenu.h"
 #include "sorting/SortMode.h"
 #include "util/ButtonNavigator.h"
+#include "util/SwipeToDelete.h"
 
 struct Rect;
 
@@ -59,6 +60,7 @@ class FileBrowserActivity final : public Activity {
   bool bookOptionsHasClippings = false;
 
   FileRenameFlow renameFlow;
+  SwipeToDelete swipeDelete;
 
   // Files state
   std::string basepath = "/";
@@ -114,6 +116,9 @@ class FileBrowserActivity final : public Activity {
   // Hold-Confirm delete flow for files[selectorIndex] (confirmation dialog +
   // removal), also fired by a Full Touch long tap on a folder row.
   void confirmDeleteSelectedEntry();
+  // Delete one file (book or not) after a confirmation naming `title`: the
+  // book context menu's Delete and the X4 Pro row swipe.
+  void confirmDeleteFile(const std::string& path, const std::string& title);
   // Rename (FileRenameFlow), then reload the folder with the cursor on the file.
   void startRename(const std::string& path);
   // Hold-Confirm / long tap on a row that is not a book. Folders and BMP
