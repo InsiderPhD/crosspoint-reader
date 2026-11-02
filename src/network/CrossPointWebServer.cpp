@@ -30,6 +30,7 @@
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
 #include "util/BookMoveUtils.h"
+#include "util/UrlUtils.h"
 #if CROSSPOINT_SD_PLUGINS
 #include "html/PluginsPageHtml.generated.h"
 #include "html/RunnerPageHtml.generated.h"
@@ -210,6 +211,25 @@ void CrossPointWebServer::begin() {
     return;
   }
 
+#ifndef SIMULATOR
+  // Hotspot captive portal: the AP's DNS answers every name with our IP, so an
+  // OS connectivity check (captive.apple.com, connectivitycheck.gstatic.com,
+  // ...) lands here. Redirect GET/HEAD for any foreign Host to the home page so
+  // the phone opens it as a portal. Middleware runs after the headers are
+  // parsed (a RequestHandler's canHandle runs before them) and before the
+  // WebDAV handler, which claims every GET. Other methods are never
+  // redirected. The simulator's WebServer has no middleware support.
+  if (apMode) {
+    server->addMiddleware([](WebServer& s, Middleware::Callback next) {
+      const bool check = s.method() == HTTP_GET || s.method() == HTTP_HEAD;
+      if (!check || !UrlUtils::isForeignHost(s.header("Host").c_str())) return next();
+      s.sendHeader("Location", "http://" + WiFi.softAPIP().toString() + "/", true);
+      s.send(302, "text/plain", "");
+      return true;
+    });
+  }
+#endif
+
   // Setup routes
   LOG_DBG("WEB", "Setting up routes...");
   server->on("/", HTTP_GET, [this] { handleRoot(); });
@@ -272,9 +292,9 @@ void CrossPointWebServer::begin() {
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
 
-  // Collect WebDAV headers and register handler
-  const char* davHeaders[] = {"Depth", "Destination", "Overwrite", "If", "Lock-Token", "Timeout"};
-  server->collectHeaders(davHeaders, 6);
+  // Collect WebDAV headers (and Host for the AP captive-portal check) and register handler
+  const char* davHeaders[] = {"Depth", "Destination", "Overwrite", "If", "Lock-Token", "Timeout", "Host"};
+  server->collectHeaders(davHeaders, sizeof(davHeaders) / sizeof(davHeaders[0]));
   server->addHandler(new WebDAVHandler());  // Note: WebDAVHandler will be deleted by WebServer when server is stopped
   LOG_DBG("WEB", "WebDAV handler initialized");
 
