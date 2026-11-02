@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "OpdsDescription.h"
+
 /**
  * Type of OPDS entry.
  */
@@ -87,6 +89,16 @@ class OpdsParser final : public Print {
    */
   void clear();
 
+  /**
+   * Description preview: while parsing, keep the summary/content text (tags
+   * stripped, at most maxBytes) of the one entry whose acquisition href is
+   * `href`; read it with takeDescription() after the feed is parsed. Off by
+   * default, so a normal feed load holds no description text at all. This
+   * pass stores no entries.
+   */
+  void captureDescriptionFor(const std::string& href, size_t maxBytes);
+  std::string takeDescription() { return std::move(capturedDescription); }
+
  private:
   // Expat callbacks
   static void XMLCALL startElement(void* userData, const XML_Char* name, const XML_Char** atts);
@@ -111,6 +123,15 @@ class OpdsParser final : public Print {
   bool inAuthorName = false;
   bool inId = false;
   bool inSummary = false;
+
+  // Description capture (captureDescriptionFor); inactive when the href is empty.
+  std::string descriptionHref;
+  OpdsDescription description;
+  std::string capturedDescription;
+  bool inDescription = false;
+  // False for a description-only pass: entries are not stored, so the second
+  // parse of a feed costs no second entry list.
+  bool keepEntries = true;
 
   bool errorOccured = false;
 };

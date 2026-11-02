@@ -130,7 +130,41 @@ void OpdsBookBrowserActivity::activateSelectedEntry() {
   if (entries.empty() || selectorIndex < 0 || selectorIndex >= static_cast<int>(entries.size())) return;
 
   const auto& entry = entries[selectorIndex];
-  entry.type == OpdsEntryType::BOOK ? downloadBook(entry) : navigateToEntry(entry);
+  entry.type == OpdsEntryType::BOOK ? showDescription(entry) : navigateToEntry(entry);
+}
+
+void OpdsBookBrowserActivity::showDescription(const OpdsEntry& book) {
+  state = BrowserState::LOADING;
+  statusMessage = tr(STR_LOADING);
+  requestUpdateAndWait();
+
+  // A second, description-only parse of the same feed: it stores no entries,
+  // so the transient cost is the parser plus one bounded excerpt buffer, not
+  // a copy of the catalog. A failed fetch still opens the preview (without a
+  // description) so the book stays downloadable.
+  const std::string url = UrlUtils::buildUrl(server.url, currentPath);
+  {
+    OpdsParser parser;
+    parser.captureDescriptionFor(book.href, DESCRIPTION_MAX_BYTES);
+    TlsFramebufferBorrow borrow(renderer);
+    OpdsParserStream stream{parser};
+    if (HttpDownloader::fetchUrl(url, stream, auth, nullptr) && parser) {
+      descriptionText = parser.takeDescription();
+    } else {
+      LOG_ERR("OPDS", "Could not load the description");
+      descriptionText.clear();
+    }
+  }
+  descriptionTop = 0;
+  state = BrowserState::DESCRIPTION;
+  requestUpdate();
+}
+
+void OpdsBookBrowserActivity::closeDescription() {
+  std::string().swap(descriptionText);
+  descriptionTop = 0;
+  state = BrowserState::BROWSING;
+  requestUpdate();
 }
 
 void OpdsBookBrowserActivity::loop() {
@@ -211,6 +245,31 @@ void OpdsBookBrowserActivity::loop() {
 
   if (state == BrowserState::DOWNLOADING) return;
 
+  if (state == BrowserState::DESCRIPTION) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (selectorIndex >= 0 && selectorIndex < static_cast<int>(entries.size())) {
+        std::string().swap(descriptionText);
+        downloadBook(entries[selectorIndex]);
+      }
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      closeDescription();
+      return;
+    }
+    // A page of lines per press; render() clamps the end.
+    const auto scroll = [this](const int direction) {
+      const int next = std::max(0, descriptionTop + direction * std::max(1, descriptionPageLines - 1));
+      if (next != descriptionTop) {
+        descriptionTop = next;
+        requestUpdate();
+      }
+    };
+    buttonNavigator.onNextRelease([&scroll] { scroll(1); });
+    buttonNavigator.onPreviousRelease([&scroll] { scroll(-1); });
+    return;
+  }
+
   if (state == BrowserState::BROWSING) {
 #if FREEINK_DEVICE_X4PRO
     // Full Touch: first tap on a row moves the cursor there; a second tap on the
@@ -284,6 +343,7 @@ bool OpdsBookBrowserActivity::preventAutoSleep() {
     case BrowserState::SEARCH_INPUT:
       return true;
     case BrowserState::BROWSING:
+    case BrowserState::DESCRIPTION:
     case BrowserState::ERROR:
       return false;
   }
@@ -336,6 +396,55 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     return;
   }
 
+  if (state == BrowserState::DESCRIPTION && selectorIndex >= 0 && selectorIndex < static_cast<int>(entries.size())) {
+    const auto& book = entries[selectorIndex];
+    constexpr int SIDE = 20;
+    const int textWidth = pageWidth - 2 * SIDE;
+    int y = 50;
+    for (const auto& line :
+         renderer.wrappedText(UI_12_FONT_ID, book.title.c_str(), textWidth, 2, EpdFontFamily::BOLD)) {
+      renderer.drawText(UI_12_FONT_ID, SIDE, y, line.c_str(), true, EpdFontFamily::BOLD);
+      y += renderer.getLineHeight(UI_12_FONT_ID);
+    }
+    if (!book.author.empty()) {
+      const auto author = renderer.truncatedText(UI_10_FONT_ID, book.author.c_str(), textWidth);
+      renderer.drawText(UI_10_FONT_ID, SIDE, y, author.c_str());
+      y += renderer.getLineHeight(UI_10_FONT_ID);
+    }
+    y += 10;
+    renderer.drawLine(SIDE, y, pageWidth - SIDE, y);
+    y += 10;
+
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const int bottom = pageHeight - metrics.buttonHintsHeight - 30;
+    descriptionPageLines = std::max(1, (bottom - y) / lineHeight);
+    if (descriptionText.empty()) {
+      renderer.drawText(UI_10_FONT_ID, SIDE, y, tr(STR_NO_DESCRIPTION));
+    } else {
+      // Wrapped per paint from the bounded excerpt: no line list is kept
+      // between frames.
+      const auto lines = renderer.wrappedText(UI_10_FONT_ID, descriptionText.c_str(), textWidth, INT16_MAX);
+      const int lastTop = std::max(0, static_cast<int>(lines.size()) - descriptionPageLines);
+      if (descriptionTop > lastTop) descriptionTop = lastTop;
+      for (int i = 0; i < descriptionPageLines && descriptionTop + i < static_cast<int>(lines.size()); ++i) {
+        renderer.drawText(UI_10_FONT_ID, SIDE, y + i * lineHeight, lines[descriptionTop + i].c_str());
+      }
+      if (lines.size() > static_cast<size_t>(descriptionPageLines)) {
+        const int step = std::max(1, descriptionPageLines - 1);
+        char page[24];
+        snprintf(page, sizeof(page), "%d / %d", (descriptionTop + step - 1) / step + 1,
+                 (lastTop + step - 1) / step + 1);
+        renderer.drawCenteredText(UI_10_FONT_ID, bottom + 4, page);
+      }
+    }
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_DOWNLOAD), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+    return;
+  }
+
   if (state == BrowserState::DOWNLOADING) {
     // Static frame: the screen freezes on this while the framebuffer is lent
     // to the transfer's TLS session — no live progress (serial has a per-MB
@@ -350,7 +459,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   }
 
   const char* confirmLabel =
-      (!entries.empty() && entries[selectorIndex].type == OpdsEntryType::BOOK) ? tr(STR_DOWNLOAD) : tr(STR_OPEN);
+      (!entries.empty() && entries[selectorIndex].type == OpdsEntryType::BOOK) ? tr(STR_PREVIEW) : tr(STR_OPEN);
   const char* searchLabel = (!searchTemplate.empty() && selectorIndex == 0) ? tr(STR_SEARCH) : tr(STR_DIR_UP);
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, searchLabel, tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

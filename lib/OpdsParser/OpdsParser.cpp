@@ -131,6 +131,13 @@ void OpdsParser::clear() {
   inEntry = inTitle = inAuthor = inAuthorName = inId = inSummary = false;
 }
 
+void OpdsParser::captureDescriptionFor(const std::string& href, const size_t maxBytes) {
+  descriptionHref = href;
+  keepEntries = false;
+  capturedDescription.clear();
+  description.begin(maxBytes);
+}
+
 std::vector<OpdsEntry> OpdsParser::getBooks() const {
   std::vector<OpdsEntry> books;
   for (const auto& entry : entries) {
@@ -194,10 +201,23 @@ void XMLCALL OpdsParser::startElement(void* userData, const XML_Char* name, cons
   if (strcmp(name, "entry") == 0 || strstr(name, ":entry") != nullptr) {
     self->inEntry = true;
     self->currentEntry = OpdsEntry{};
+    self->inDescription = false;
+    if (!self->descriptionHref.empty()) self->description.reset();
     return;
   }
 
   if (!self->inEntry) return;
+
+  // Description capture: the first of summary/content with text wins; nested
+  // XHTML elements inside it only separate words.
+  if (!self->descriptionHref.empty()) {
+    if (self->inDescription) {
+      self->description.appendSpace();
+    } else if (self->description.empty() && (strcmp(name, "summary") == 0 || strstr(name, ":summary") != nullptr ||
+                                             strcmp(name, "content") == 0 || strstr(name, ":content") != nullptr)) {
+      self->inDescription = true;
+    }
+  }
 
   if (strcmp(name, "title") == 0 || strstr(name, ":title") != nullptr) {
     self->inTitle = true;
@@ -219,8 +239,17 @@ void XMLCALL OpdsParser::startElement(void* userData, const XML_Char* name, cons
 void XMLCALL OpdsParser::endElement(void* userData, const XML_Char* name) {
   auto* self = static_cast<OpdsParser*>(userData);
 
+  if (self->inDescription && (strcmp(name, "summary") == 0 || strstr(name, ":summary") != nullptr ||
+                              strcmp(name, "content") == 0 || strstr(name, ":content") != nullptr)) {
+    self->inDescription = false;
+  }
+
   if (strcmp(name, "entry") == 0 || strstr(name, ":entry") != nullptr) {
-    if (!self->currentEntry.title.empty() && !self->currentEntry.href.empty()) {
+    if (!self->descriptionHref.empty() && self->capturedDescription.empty() &&
+        self->currentEntry.href == self->descriptionHref) {
+      self->capturedDescription = self->description.finish();
+    }
+    if (self->keepEntries && !self->currentEntry.title.empty() && !self->currentEntry.href.empty()) {
       // A book's summary is its blurb, never a category size.
       if (self->currentEntry.type != OpdsEntryType::NAVIGATION) self->currentEntry.count = -1;
       self->entries.push_back(self->currentEntry);
@@ -250,6 +279,7 @@ void XMLCALL OpdsParser::endElement(void* userData, const XML_Char* name) {
 
 void XMLCALL OpdsParser::characterData(void* userData, const XML_Char* s, const int len) {
   auto* self = static_cast<OpdsParser*>(userData);
+  if (self->inDescription) self->description.append(s, static_cast<size_t>(len));
   if (self->inTitle || self->inAuthorName || self->inId) {
     self->currentText.append(s, len);
   } else if (self->inSummary) {

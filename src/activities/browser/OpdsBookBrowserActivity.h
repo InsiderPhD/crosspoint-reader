@@ -24,6 +24,7 @@ class OpdsBookBrowserActivity final : public Activity {
     WIFI_SELECTION,
     LOADING,
     BROWSING,
+    DESCRIPTION,
     DOWNLOADING,
     ERROR,
     SEARCH_INPUT
@@ -62,6 +63,13 @@ class OpdsBookBrowserActivity final : public Activity {
   HttpDownloader::ScopedAuth auth;
   // Cursor on the catalog picker (shown only when more than one is saved).
   int serverIndex = 0;
+  // DESCRIPTION state: the selected book's excerpt and the first line shown.
+  // Held only while the preview is open (freed by closeDescription()).
+  static constexpr size_t DESCRIPTION_MAX_BYTES = 1536;
+  std::string descriptionText;
+  int descriptionTop = 0;
+  // Description lines per screen, written by render() for loop()'s scrolling.
+  int descriptionPageLines = 1;
 
   // Top edge of the first BROWSING row band; row i spans
   // [listTopY() + i*ROW_H, + ROW_H). Shared by render() and the Full Touch tap
@@ -85,6 +93,10 @@ class OpdsBookBrowserActivity final : public Activity {
   void navigateToEntry(const OpdsEntry& entry);
   void navigateBack();
   void downloadBook(const OpdsEntry& book);
+  // Book preview before a download: re-reads the current feed for just that
+  // book's description (bounded, see DESCRIPTION_MAX_BYTES), then shows it.
+  void showDescription(const OpdsEntry& book);
+  void closeDescription();
   void launchSearch();
   void performSearch(const std::string& query);
   // Holds the device awake only while something is in flight. An idle catalog
