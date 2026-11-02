@@ -1,6 +1,7 @@
 #include "ActivityManager.h"
 
 #include <BluetoothHIDManager.h>
+#include <HalGPIO.h>
 #include <HalPowerManager.h>
 
 #include "BookSettings.h"
@@ -64,6 +65,10 @@ void ActivityManager::renderTaskTrampoline(void* param) {
 void ActivityManager::renderTaskLoop() {
   while (true) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // Taken after the notify is consumed: every request counted up to here is
+    // covered by the render below. One that lands later leaves a notify pending
+    // and keeps the sequences unequal until the next pass.
+    const uint32_t renderSeq = renderRequestSeq.load();
     // Acquire the lock before reading currentActivity to avoid a TOCTOU race
     // where the main task deletes the activity between the null-check and render().
     RenderLock lock;
@@ -87,6 +92,7 @@ void ActivityManager::renderTaskLoop() {
       ActionBar::setConfirmRedundant(currentActivity->tapActivatesConfirm());
       currentActivity->render(std::move(lock));
     }
+    renderDoneSeq.store(renderSeq);
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
     TaskHandle_t waiter = nullptr;
     taskENTER_CRITICAL(&waiterMux);
@@ -100,6 +106,17 @@ void ActivityManager::renderTaskLoop() {
 }
 
 void ActivityManager::loop() {
+  // Input watermark for isQuietFor(). Non-consuming HalGPIO reads only (the
+  // mapped helpers can consume gesture suppression). A held button counts too,
+  // so a long press is not interrupted by deferred SD work.
+  bool inputSeen = gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity();
+  for (uint8_t i = 0; !inputSeen && i <= HalGPIO::BTN_POWER; ++i) {
+    inputSeen = gpio.isPressed(i);
+  }
+  if (inputSeen) {
+    lastInputMs = millis();
+  }
+
   if (currentActivity) {
     // Note: do not hold a lock here, the loop() method must be responsible for acquire one if needed
     currentActivity->loop();
@@ -203,9 +220,7 @@ void ActivityManager::processPendingActions() {
     requestedUpdate = false;
     // Using direct notification to signal the render task to update
     // Increment counter so multiple rapid calls won't be lost
-    if (renderTaskHandle) {
-      xTaskNotify(renderTaskHandle, 1, eIncrement);
-    }
+    notifyRenderTask();
   }
 }
 
@@ -360,9 +375,7 @@ ScreenshotInfo ActivityManager::getScreenshotInfo() const {
 
 void ActivityManager::requestUpdate(bool immediate) {
   if (immediate) {
-    if (renderTaskHandle) {
-      xTaskNotify(renderTaskHandle, 1, eIncrement);
-    }
+    notifyRenderTask();
   } else {
     // Deferring the update until current loop is finished
     // This is to avoid multiple updates being requested in the same loop
@@ -395,8 +408,25 @@ void ActivityManager::requestUpdateAndWait() {
   // Cannot call while holding RenderLock or it will cause a deadlock
   assert(!holdingRenderLock && "Cannot call requestUpdateAndWait() while holding RenderLock");
 
-  xTaskNotify(renderTaskHandle, 1, eIncrement);
+  notifyRenderTask();
   ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+}
+
+void ActivityManager::notifyRenderTask() {
+  if (!renderTaskHandle) {
+    return;
+  }
+  // Count before notifying, so the render task can never consume a notify whose
+  // request it has not counted yet.
+  renderRequestSeq.fetch_add(1);
+  xTaskNotify(renderTaskHandle, 1, eIncrement);
+}
+
+bool ActivityManager::isQuietFor(const unsigned long quietMs) const {
+  if (requestedUpdate || renderRequestSeq.load() != renderDoneSeq.load()) {
+    return false;
+  }
+  return millis() - lastInputMs >= quietMs;
 }
 
 // RenderLock

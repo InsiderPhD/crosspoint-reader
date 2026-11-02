@@ -241,7 +241,7 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
 
 void XtcReaderActivity::loop() {
   rememberBookOnceRendered(false);
-  READING_STATS.tickActiveSession();
+  READING_STATS.tickActiveSession(activityManager.isQuietFor(ReadingStatsStore::DEFERRED_SAVE_QUIET_MS));
 
   // ── Custom combos (chords) ───────────────────────────────────────────────
   // Ahead of every per-button block below, and swallowing the chord's release

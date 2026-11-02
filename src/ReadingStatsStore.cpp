@@ -23,7 +23,14 @@ namespace {
 constexpr char READING_STATS_FILE_JSON[] = "/.crosspoint/reading_stats.json";
 constexpr unsigned long MAX_READING_GAP_MS = 30UL * 60UL * 1000UL;
 constexpr unsigned long SESSION_HEARTBEAT_MS = 60UL * 1000UL;
-constexpr unsigned long DEFERRED_SAVE_INTERVAL_MS = 30UL * 1000UL;
+// While a reader session is active the store is only written from
+// tickActiveSession(), and then at most this often: the whole JSON file is
+// rewritten each time (tens of KB on a long-lived device), which costs SD time
+// and wear. Up to this much reading can be lost to a crash or battery death;
+// reader exit and sleep still save immediately via endSession().
+constexpr unsigned long DEFERRED_SAVE_INTERVAL_MS = 5UL * 60UL * 1000UL;
+// ...and only when the reader reports it is quiet (ReadingStatsStore::
+// DEFERRED_SAVE_QUIET_MS without input, last page on the panel).
 constexpr size_t MAX_SESSION_LOG_ENTRIES = 256;
 constexpr uint32_t STATS_RETENTION_DAYS = 366;
 // How many days PAST the reference day a bucket may sit before the future-side
@@ -897,9 +904,8 @@ void ReadingStatsStore::noteActivity() {
   }
 
   activeSession.lastInteractionMs = nowMs;
-  if (shouldSaveDeferred()) {
-    saveToFile();
-  }
+  // No save here: this runs on the page-turn path, ahead of the render.
+  // tickActiveSession() persists it once the page is drawn.
 }
 
 void ReadingStatsStore::flushActiveSessionToBuckets() {
@@ -953,17 +959,19 @@ void ReadingStatsStore::flushActiveSessionToBuckets() {
   activeSession.bucketedMs = activeSession.accumulatedMs;
 }
 
-void ReadingStatsStore::tickActiveSession() {
+void ReadingStatsStore::tickActiveSession(const bool quiet) {
   if (!activeSession.active || activeSession.bookIndex >= books.size()) {
     return;
   }
 
   const unsigned long nowMs = millis();
-  if ((nowMs - activeSession.lastInteractionMs) < SESSION_HEARTBEAT_MS) {
-    return;
+  if ((nowMs - activeSession.lastInteractionMs) >= SESSION_HEARTBEAT_MS) {
+    noteActivity();
   }
 
-  noteActivity();
+  if (quiet && shouldSaveDeferred()) {
+    saveToFile();
+  }
 }
 
 void ReadingStatsStore::resumeSession() {
@@ -1020,9 +1028,8 @@ void ReadingStatsStore::updateProgress(const uint8_t progressPercent, const bool
   }
 
   markDirty();
-  if (shouldSaveDeferred()) {
-    saveToFile();
-  }
+  // No save here: readers report progress around page turns. tickActiveSession()
+  // persists it once the page is drawn; endSession() always does.
 }
 
 bool ReadingStatsStore::updateBookMetadata(const std::string& path, const std::string& title, const std::string& author,

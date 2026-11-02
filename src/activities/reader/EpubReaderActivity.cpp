@@ -769,7 +769,7 @@ void EpubReaderActivity::loop() {
   // menu) or leave the reader before a rendered book has been remembered.
   rememberBookOnceRendered(false);
 
-  READING_STATS.tickActiveSession();
+  READING_STATS.tickActiveSession(activityManager.isQuietFor(ReadingStatsStore::DEFERRED_SAVE_QUIET_MS));
 
   // Record book completion on the main task (not render task) to avoid racing stats store.
   if (!bookFinishedRecorded && currentSpineIndex >= epub->getSpineItemsCount()) {

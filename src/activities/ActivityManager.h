@@ -4,6 +4,7 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
+#include <atomic>
 #include <cassert>
 #include <memory>
 #include <string>
@@ -62,6 +63,15 @@ class ActivityManager {
   // Whether to trigger a render after the current loop()
   // This variable must only be set by the main loop, to avoid race conditions
   bool requestedUpdate = false;
+  // Render-completion tracking for isQuietFor(). Every render-task notify bumps
+  // renderRequestSeq; the render task stores the value it saw on waking into
+  // renderDoneSeq once that render has finished, so the two are equal only
+  // when no requested frame is still queued or being drawn.
+  std::atomic<uint32_t> renderRequestSeq{0};
+  std::atomic<uint32_t> renderDoneSeq{0};
+  // millis() of the last button edge, held button or touch seen by loop().
+  unsigned long lastInputMs = 0;
+  void notifyRenderTask();
   // Set for the duration of goToSleep()'s teardown so a sleep request raised
   // from inside it (a still-held power button) is dropped instead of nesting.
   bool sleepInProgress = false;
@@ -130,6 +140,12 @@ class ActivityManager {
   // If immediate is true, the update will be triggered immediately.
   // Otherwise, it will be deferred until the end of the current loop iteration.
   void requestUpdate(bool immediate = false);
+
+  // True when every requested render has reached the panel and no input (button
+  // edge, held button, touch) has been seen for at least quietMs. For deferrable
+  // SD writes from the main task, so they never sit in front of a page render or
+  // the next button press. Main task only.
+  bool isQuietFor(unsigned long quietMs) const;
 
   // Trigger a render and block until it completes.
   // Must NOT be called from the render task or while holding a RenderLock.

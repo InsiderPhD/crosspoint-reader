@@ -96,7 +96,7 @@ void TxtReaderActivity::onExit() {
 
 void TxtReaderActivity::loop() {
   rememberBookOnceRendered(false);
-  READING_STATS.tickActiveSession();
+  READING_STATS.tickActiveSession(activityManager.isQuietFor(ReadingStatsStore::DEFERRED_SAVE_QUIET_MS));
 
   // Long press BACK (1s+) goes to file selection
   if (mappedInput.isPressed(MappedInputManager::Button::Back) &&

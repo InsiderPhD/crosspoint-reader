@@ -196,8 +196,17 @@ class ReadingStatsStore {
   void beginSession(const std::string& path, const std::string& title, const std::string& author,
                     const std::string& coverBmpPath, uint8_t progressPercent = 0, const std::string& chapterTitle = "",
                     uint8_t chapterProgressPercent = 0);
+  // How long a reader must see no input before it reports quiet to
+  // tickActiveSession(); see ActivityManager::isQuietFor().
+  static constexpr unsigned long DEFERRED_SAVE_QUIET_MS = 1000;
+
   void noteActivity();
-  void tickActiveSession();
+  // Call every reader loop(). Accrues a heartbeat while the page sits open and,
+  // when `quiet` (no recent input and no render in flight), writes the dirty
+  // store at most once per deferred-save interval. noteActivity() and
+  // updateProgress() never write during a session, so a page turn is never
+  // delayed by SD I/O; endSession() always writes.
+  void tickActiveSession(bool quiet = false);
   void resumeSession();
   void updateProgress(uint8_t progressPercent, bool completed = false, const std::string& chapterTitle = "",
                       uint8_t chapterProgressPercent = 0);
