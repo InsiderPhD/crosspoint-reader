@@ -20,7 +20,7 @@ INCLUDES=(
 # expat is C; build it separately so the C++ flags do not apply to it.
 EXPAT_OBJECTS=()
 for src in xmlparse xmlrole xmltok; do
-  cc -O2 -DXML_GE=0 -DXML_CONTEXT_BYTES=1024 -DHAVE_ARC4RANDOM_BUF -I"$ROOT_DIR/lib/expat" \
+  cc -O2 -DXML_GE=0 -DXML_CONTEXT_BYTES=0 -DHAVE_ARC4RANDOM_BUF -I"$ROOT_DIR/lib/expat" \
     -c "$ROOT_DIR/lib/expat/$src.c" -o "$BUILD_DIR/$src.o"
   EXPAT_OBJECTS+=("$BUILD_DIR/$src.o")
 done
