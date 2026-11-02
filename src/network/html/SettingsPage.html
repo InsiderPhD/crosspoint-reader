@@ -112,6 +112,38 @@
     .setting-control input[type="number"] {
       width: 80px;
     }
+    /* Saved WiFi networks / OPDS catalogs */
+    .item-box {
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 4px 12px 10px;
+      margin: 10px 0;
+    }
+    .item-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
+    .btn-small {
+      padding: 6px 14px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      background-color: var(--accent-color);
+      color: white;
+    }
+    .btn-small:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .btn-small.btn-delete {
+      background-color: #e74c3c;
+    }
+    .empty-note {
+      color: var(--label-color);
+      text-align: center;
+    }
     /* Toggle switch */
     .toggle-switch {
       display: inline-block;
@@ -281,6 +313,9 @@
   <div class="save-container" id="save-container" style="display:none;">
     <button class="save-btn" id="saveBtn" onclick="saveSettings()">Save Settings</button>
   </div>
+
+  <div id="wifi-container"></div>
+  <div id="opds-container"></div>
 
   <div class="card">
     <h2>Library Data</h2>
@@ -490,7 +525,181 @@
     btn.textContent = 'Clear Library Data';
   }
 
-  loadSettings();
+  // --- Saved WiFi networks and OPDS catalogs (/api/wifi, /api/opds) ---
+  // Password and header-value fields are never filled in: the device does not
+  // send them back. Left blank on an existing entry, the stored value is kept.
+  const OPDS_HEADER_SLOTS = 2;
+  let wifiNetworks = [];
+  let opdsServers = [];
+
+  function textRow(label, id, value, type, placeholder) {
+    return '<div class="setting-row"><span class="setting-name">' + escapeHtml(label) + '</span>' +
+      '<span class="setting-control"><input type="' + (type || 'text') + '" id="' + id + '" value="' +
+      escapeHtml(value || '') + '" placeholder="' + escapeHtml(placeholder || '') + '"></span></div>';
+  }
+
+  function itemActions(kind, idx) {
+    return '<div class="item-actions">' +
+      '<button class="btn-small" id="' + kind + '-save-' + idx + '" onclick="save' + kind + '(' + idx + ')" disabled>Save</button>' +
+      (idx < 0 ? '' : '<button class="btn-small btn-delete" onclick="delete' + kind + '(' + idx + ')">Delete</button>') +
+      '</div>';
+  }
+
+  function itemBox(kind, idx, rows) {
+    return '<div class="item-box" id="' + kind + '-' + idx + '" oninput="document.getElementById(\'' + kind +
+      '-save-' + idx + '\').disabled = false">' + rows + itemActions(kind, idx) + '</div>';
+  }
+
+  function wifiBox(net, idx) {
+    return itemBox('Wifi', idx,
+      textRow('SSID', 'wifi-ssid-' + idx, net.ssid) +
+      textRow('Password', 'wifi-pass-' + idx, '', 'password', net.hasPassword ? '(unchanged)' : '') +
+      (net.isLastConnected ? '<div class="empty-note">Last connected network</div>' : ''));
+  }
+
+  function opdsBox(srv, idx) {
+    let rows = textRow('Name', 'opds-name-' + idx, srv.name) +
+      textRow('URL', 'opds-url-' + idx, srv.url) +
+      textRow('Username', 'opds-user-' + idx, srv.username) +
+      textRow('Password', 'opds-pass-' + idx, '', 'password', srv.hasPassword ? '(unchanged)' : '');
+    const headers = srv.headers || [];
+    for (let i = 0; i < OPDS_HEADER_SLOTS; i++) {
+      const h = headers[i] || {name: '', hasValue: false};
+      rows += textRow('Header ' + (i + 1) + ' name', 'opds-h' + i + '-name-' + idx, h.name) +
+        textRow('Header ' + (i + 1) + ' value', 'opds-h' + i + '-value-' + idx, '', 'password', h.hasValue ? '(unchanged)' : '');
+    }
+    return itemBox('Opds', idx, rows);
+  }
+
+  function renderList(containerId, title, items, boxFn, emptyText, addLabel, addFn) {
+    let html = '<div class="card"><h2>' + title + '</h2>';
+    if (items.length === 0) html += '<p class="empty-note">' + emptyText + '</p>';
+    items.forEach(function(item, idx) { html += boxFn(item, idx); });
+    html += '<div id="' + containerId + '-new"></div><div class="item-actions" style="justify-content:center">' +
+      '<button class="btn-small" onclick="' + addFn + '()">' + addLabel + '</button></div></div>';
+    document.getElementById(containerId).innerHTML = html;
+  }
+
+  async function loadWifi() {
+    try {
+      const resp = await fetch('/api/wifi');
+      if (!resp.ok) throw new Error(await resp.text());
+      wifiNetworks = await resp.json();
+      renderList('wifi-container', 'WiFi Networks', wifiNetworks, wifiBox, 'No WiFi networks saved', '+ Add Network', 'addWifi');
+    } catch (e) {
+      console.error('WiFi load error:', e);
+    }
+  }
+
+  async function loadOpds() {
+    try {
+      const resp = await fetch('/api/opds');
+      if (!resp.ok) throw new Error(await resp.text());
+      opdsServers = await resp.json();
+      renderList('opds-container', 'OPDS Servers', opdsServers, opdsBox, 'No OPDS servers saved', '+ Add Server', 'addOpds');
+    } catch (e) {
+      console.error('OPDS load error:', e);
+    }
+  }
+
+  function addWifi() {
+    const slot = document.getElementById('wifi-container-new');
+    if (!slot.innerHTML) slot.innerHTML = wifiBox({ssid: ''}, -1);
+  }
+
+  function addOpds() {
+    const slot = document.getElementById('opds-container-new');
+    if (!slot.innerHTML) slot.innerHTML = opdsBox({name: '', url: '', username: '', headers: []}, -1);
+  }
+
+  async function postJson(url, data) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+  }
+
+  async function saveWifi(idx) {
+    const data = {ssid: document.getElementById('wifi-ssid-' + idx).value.trim()};
+    if (!data.ssid) {
+      showMessage('SSID is required.', true);
+      return;
+    }
+    const pass = document.getElementById('wifi-pass-' + idx).value;
+    if (pass || idx < 0) data.password = pass;
+    if (idx >= 0) data.index = idx;
+    try {
+      await postJson('/api/wifi', data);
+      showMessage('WiFi network saved.', false);
+      await loadWifi();
+    } catch (e) {
+      showMessage('Error: ' + e.message, true);
+    }
+  }
+
+  async function deleteWifi(idx) {
+    if (!confirm('Delete this WiFi network?')) return;
+    try {
+      await postJson('/api/wifi/delete', {index: idx});
+      showMessage('WiFi network deleted.', false);
+      await loadWifi();
+    } catch (e) {
+      showMessage('Error: ' + e.message, true);
+    }
+  }
+
+  async function saveOpds(idx) {
+    const data = {
+      name: document.getElementById('opds-name-' + idx).value.trim(),
+      url: document.getElementById('opds-url-' + idx).value.trim(),
+      username: document.getElementById('opds-user-' + idx).value
+    };
+    if (!data.url) {
+      showMessage('URL is required.', true);
+      return;
+    }
+    const pass = document.getElementById('opds-pass-' + idx).value;
+    if (pass) data.password = pass;
+    data.headers = [];
+    for (let i = 0; i < OPDS_HEADER_SLOTS; i++) {
+      const name = document.getElementById('opds-h' + i + '-name-' + idx).value.trim();
+      const value = document.getElementById('opds-h' + i + '-value-' + idx).value;
+      const header = {name: name};
+      // An omitted value keeps the stored one; a cleared name clears the slot.
+      if (value || !name) header.value = value;
+      data.headers.push(header);
+    }
+    if (idx >= 0) data.index = idx;
+    try {
+      await postJson('/api/opds', data);
+      showMessage('OPDS server saved.', false);
+      await loadOpds();
+    } catch (e) {
+      showMessage('Error: ' + e.message, true);
+    }
+  }
+
+  async function deleteOpds(idx) {
+    if (!confirm('Delete this OPDS server?')) return;
+    try {
+      await postJson('/api/opds/delete', {index: idx});
+      showMessage('OPDS server deleted.', false);
+      await loadOpds();
+    } catch (e) {
+      showMessage('Error: ' + e.message, true);
+    }
+  }
+
+  // One request at a time: the device serves a single client connection, and
+  // parallel fetches on load can stall a response long enough to trip its
+  // watchdog.
+  (async () => {
+    await loadSettings();
+    await loadWifi();
+    await loadOpds();
+  })();
 </script>
 </body>
 </html>

@@ -130,6 +130,14 @@ class CrossPointWebServer {
   void handlePostSettings();
   void handleClearLibraryData() const;
 
+  // Saved OPDS catalogs / WiFi networks (CrossPointWebServerCredentials.cpp)
+  void handleGetOpdsServers() const;   // GET  /api/opds
+  void handlePostOpdsServer();         // POST /api/opds        -> add, or update by index
+  void handleDeleteOpdsServer();       // POST /api/opds/delete -> {index}
+  void handleGetWifiNetworks() const;  // GET  /api/wifi
+  void handlePostWifiNetwork();        // POST /api/wifi        -> add, or update by index
+  void handleDeleteWifiNetwork();      // POST /api/wifi/delete -> {index}
+
   // Font management handlers
   void handleFontsPage() const;
   void handleFontList() const;

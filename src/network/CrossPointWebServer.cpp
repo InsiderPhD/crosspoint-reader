@@ -271,6 +271,15 @@ void CrossPointWebServer::begin() {
   server->on("/api/fonts/upload", HTTP_POST, [this] { handleFontUpload(); }, [this] { handleFontUploadData(); });
   server->on("/api/fonts/delete", HTTP_POST, [this] { handleFontDelete(); });
 
+  // Saved OPDS catalogs and WiFi networks, upstream CrossPoint's shapes
+  // (CrossPointWebServerCredentials.cpp). Secrets are never sent back.
+  server->on("/api/opds", HTTP_GET, [this] { handleGetOpdsServers(); });
+  server->on("/api/opds", HTTP_POST, [this] { handlePostOpdsServer(); });
+  server->on("/api/opds/delete", HTTP_POST, [this] { handleDeleteOpdsServer(); });
+  server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
+  server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
+  server->on("/api/wifi/delete", HTTP_POST, [this] { handleDeleteWifiNetwork(); });
+
   // Sleep themes (CrossPointWebServerSleepThemes.cpp)
   server->on("/sleep-themes", HTTP_GET, [this] { handleSleepThemesPage(); });
   server->on("/api/sleep-theme/vars", HTTP_GET, [this] { handleSleepThemeVars(); });

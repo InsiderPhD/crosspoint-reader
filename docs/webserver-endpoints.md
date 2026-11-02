@@ -424,6 +424,72 @@ Returns 500 with a `<cleared> cleared, <failed> failed` body if any item could n
 
 ---
 
+### GET `/api/opds` - List OPDS Servers
+
+Saved OPDS catalogs (`/.crosspoint/opds.json`). Same shape as upstream CrossPoint 2.0. Passwords and header
+values are never returned, only whether one is set.
+
+```json
+[
+  {
+    "index": 0,
+    "name": "My Catalog",
+    "url": "http://calibre.local:8080/opds",
+    "username": "reader",
+    "hasPassword": true,
+    "headers": [{"name": "CF-Access-Client-Id", "hasValue": true}, {"name": "", "hasValue": false}]
+  }
+]
+```
+
+---
+
+### POST `/api/opds` - Add or Update an OPDS Server
+
+JSON body (`Content-Type: application/json`). Without `index` it adds a server (400 once 8 are saved); with
+`index` it replaces that one. On an update an omitted `password`, or an omitted header `value`, keeps the
+stored secret; a header with an empty `name` clears that slot.
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"name":"My Catalog","url":"http://calibre.local:8080/opds","username":"reader","password":"secret","headers":[{"name":"X-Token","value":"abc"}]}' \
+  http://crosspoint.local/api/opds
+```
+
+**Response:** `200 OK` with body `OK`; `400` for a missing/invalid body or index.
+
+---
+
+### POST `/api/opds/delete` - Delete an OPDS Server
+
+Body `{"index": 0}`. POST rather than DELETE because the ESP32 web server takes no DELETE body.
+
+---
+
+### GET `/api/wifi` - List Saved WiFi Networks
+
+Passwords are never returned.
+
+```json
+[{"index": 0, "ssid": "HomeWiFi", "hasPassword": true, "isLastConnected": true}]
+```
+
+---
+
+### POST `/api/wifi` - Add or Update a WiFi Network
+
+Body `{"ssid": "HomeWiFi", "password": "secret"}`, plus `"index"` to update that entry (renaming it moves it to
+the end of the list). On an update an omitted `password` keeps the stored one; an empty one means an open network.
+`ssid` is required.
+
+---
+
+### POST `/api/wifi/delete` - Delete a WiFi Network
+
+Body `{"index": 0}`.
+
+---
+
 ### GET `/fonts` - Font Manager Page
 
 Serves the SD-card font management HTML interface. See [sd-card-fonts.md](sd-card-fonts.md).
