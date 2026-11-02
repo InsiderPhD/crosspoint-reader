@@ -15,6 +15,8 @@
 #include <esp_task_wdt.h>
 
 #include <algorithm>
+#include <memory>
+#include <new>
 
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
@@ -1450,10 +1452,21 @@ void CrossPointWebServer::handleGetSettings() const {
         continue;
     }
 
-    const size_t written = serializeJson(doc, output, outputSize);
-    if (written >= outputSize) {
-      LOG_DBG("WEB", "Skipping oversized setting JSON for: %s", s.key);
-      continue;
+    const char* json = output;
+    // Only an entry over the stack buffer touches the heap: fontFamily's
+    // option list grows with every SD font family, and skipping it left the
+    // web Settings page without a font picker. Sized exactly, freed per entry.
+    std::unique_ptr<char[]> large;
+    size_t len = serializeJson(doc, output, outputSize);
+    if (len >= outputSize) {
+      len = measureJson(doc);
+      large.reset(new (std::nothrow) char[len + 1]);
+      if (!large) {
+        LOG_ERR("WEB", "OOM: setting JSON for %s (%zu bytes)", s.key, len);
+        continue;
+      }
+      serializeJson(doc, large.get(), len + 1);
+      json = large.get();
     }
 
     if (seenFirst) {
@@ -1461,7 +1474,8 @@ void CrossPointWebServer::handleGetSettings() const {
     } else {
       seenFirst = true;
     }
-    server->sendContent(output);
+    server->sendContent(json, len);
+    yield();  // each sendContent() is a blocking network write
   }
 
   server->sendContent("]");
@@ -1801,24 +1815,36 @@ void CrossPointWebServer::handleFontList() const {
   const_cast<SdCardFontSystem&>(sdFontSystem).refreshIfDirty();
   const auto& families = sdFontSystem.registry().getFamilies();
 
-  JsonDocument doc;
-  JsonArray arr = doc["families"].to<JsonArray>();
-  doc["maxFamilies"] = SdCardFontRegistry::MAX_SD_FAMILIES;
+  // Stream one family per chunk. With many families the whole document plus
+  // its serialized String copy did not fit in a DRAM-only board's heap, and
+  // the Fonts page (and the font picker data behind it) failed to load.
+  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server->send(200, "application/json", "");
+  char head[96];
   // Whether this build renders .ttf/.otf files (PSRAM boards); the page uses it
   // to decide which files the upload form accepts.
-  doc["vectorFonts"] = CROSSPOINT_VECTOR_FONTS != 0;
+  snprintf(head, sizeof(head), "{\"maxFamilies\":%d,\"vectorFonts\":%s,\"families\":[",
+           static_cast<int>(SdCardFontRegistry::MAX_SD_FAMILIES), CROSSPOINT_VECTOR_FONTS != 0 ? "true" : "false");
+  server->sendContent(head);
 
+  JsonDocument doc;
+  // One serialization buffer reused across families; regrown only for a
+  // larger entry (a few hundred bytes), freed before the regrow so two are
+  // never held at once.
+  std::unique_ptr<char[]> buf;
+  size_t bufSize = 0;
+  bool first = true;
   for (const auto& family : families) {
-    JsonObject fObj = arr.add<JsonObject>();
-    fObj["name"] = family.name;
+    doc.clear();
+    doc["name"] = family.name;
 
     // A vector family has no fixed sizes: its file entries carry pointSize 0.
-    JsonArray sizes = fObj["sizes"].to<JsonArray>();
+    JsonArray sizes = doc["sizes"].to<JsonArray>();
     for (uint8_t s : family.availableSizes()) {
       if (s != 0) sizes.add(s);
     }
 
-    JsonArray files = fObj["files"].to<JsonArray>();
+    JsonArray files = doc["files"].to<JsonArray>();
     for (const auto& file : family.files) {
       JsonObject fileObj = files.add<JsonObject>();
       const char* name = strrchr(file.path.c_str(), '/');
@@ -1832,11 +1858,30 @@ void CrossPointWebServer::handleFontList() const {
         fileObj["size"] = 0;
       }
     }
+
+    const size_t len = 1 + measureJson(doc);  // leading comma + entry
+    if (!doc.overflowed() && len + 1 > bufSize) {
+      buf.reset();
+      buf.reset(new (std::nothrow) char[len + 1]);
+      bufSize = buf ? len + 1 : 0;
+    }
+    if (doc.overflowed() || !buf) {
+      // Leave the JSON unterminated so the page reports a failed load rather
+      // than a silently short list.
+      LOG_ERR("WEB", "OOM: font list entry (%zu bytes)", len);
+      server->sendContent("");
+      return;
+    }
+    buf[0] = ',';
+    serializeJson(doc, buf.get() + 1, bufSize - 1);
+    const size_t skip = first ? 1 : 0;  // no comma before the first entry
+    first = false;
+    server->sendContent(buf.get() + skip, len - skip);
+    yield();  // each sendContent() is a blocking network write
   }
 
-  String json;
-  serializeJson(doc, json);
-  server->send(200, "application/json", json);
+  server->sendContent("]}");
+  server->sendContent("");
 }
 
 void CrossPointWebServer::handleFontUploadData() {
