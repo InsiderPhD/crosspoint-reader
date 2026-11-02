@@ -11,6 +11,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
+#include "util/SyncBookLauncher.h"
 
 namespace {
 using Action = BookContextMenu::Action;
@@ -18,12 +19,13 @@ using Action = BookContextMenu::Action;
 // Build the list of currently-visible actions, in display order. The testing-only
 // actions (Reset Progress, Delete Book Cache, Regenerate Cover) are shown only when
 // Dev Mode is enabled. Returns the count; fills out[] (sized OPTIONS_COUNT).
-int collectActions(Action* out) {
+int collectActions(Action* out, const bool syncable) {
   const bool dev = SETTINGS.devMode != 0;
   int n = 0;
   out[n++] = Action::BookInfo;  // First: the most common, least destructive action
   out[n++] = Action::ViewStats;
   out[n++] = Action::MarkRead;
+  if (syncable) out[n++] = Action::SyncBook;
   if (dev) out[n++] = Action::ResetProgress;
   if (UITheme::getInstance().getMetrics().homePinnedBooks) out[n++] = Action::Pin;
   out[n++] = Action::Shelve;
@@ -56,6 +58,8 @@ const char* labelForAction(Action action, const std::string& path) {
       return tr(STR_VIEW_STATS);
     case Action::Rename:
       return tr(STR_RENAME);
+    case Action::SyncBook:
+      return tr(STR_SYNC_BOOK);
   }
   return "";
 }
@@ -99,6 +103,8 @@ bool BookContextMenu::checkLongPress(const MappedInputManager& input, std::strin
   author_ = std::move(author);
   tags_.clear();  // host supplies tags via setInfoTags() after we open
   progressPercent_ = progressPercent;
+  // Once per open: it reads the book's BookFusion id sidecar.
+  syncable_ = SyncBookLauncher::canSync(path_);
   return true;
 }
 
@@ -107,7 +113,7 @@ bool BookContextMenu::handleInput(ButtonNavigator& nav, const MappedInputManager
   if (!showing_) return false;
 
   Action actions[OPTIONS_COUNT];
-  const int actionCount = collectActions(actions);
+  const int actionCount = collectActions(actions, syncable_);
 
   // Allow next/prev wraparound across the option list while modal is up.
   nav.onNext([this, actionCount] { selectedIndex_ = (selectedIndex_ + 1) % actionCount; });
@@ -227,7 +233,7 @@ void BookContextMenu::render(GfxRenderer& renderer) const {
   infoLines[infoCount++] = infoBuf;
 
   Action actions[OPTIONS_COUNT];
-  const int actionCount = collectActions(actions);
+  const int actionCount = collectActions(actions, syncable_);
 
   const int infoBlockH = infoCount * INFO_H;
   const int POPUP_H = TITLE_H + infoBlockH + actionCount * OPTION_H + H_PAD;

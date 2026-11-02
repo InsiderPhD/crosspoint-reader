@@ -31,6 +31,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/SwipeToDelete.h"
+#include "util/SyncBookLauncher.h"
 #include "util/TouchListNav.h"
 #include "util/WifiTimeSync.h"
 
@@ -607,6 +608,9 @@ void GroupBrowserActivity::dispatchBookAction(BookContextMenu::Action action, co
       startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, path),
                              [this](const ActivityResult&) { requestUpdate(); });
       break;
+    case BookContextMenu::Action::SyncBook:
+      SyncBookLauncher::start(path);  // replaces this activity
+      return;
     case BookContextMenu::Action::Rename:
       renameFlow.start(
           *this, renderer, mappedInput, path,

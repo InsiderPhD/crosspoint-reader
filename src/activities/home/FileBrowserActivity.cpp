@@ -24,6 +24,7 @@
 #include "util/BookFinished.h"
 #include "util/SleepBootImages.h"
 #include "util/SwipeToDelete.h"
+#include "util/SyncBookLauncher.h"
 #include "util/TouchListNav.h"
 
 namespace {
@@ -317,8 +318,8 @@ void FileBrowserActivity::loop() {
 
   if (showingBookOptions) {
     int optionIds[UITheme::BOOK_OPTIONS_COUNT];
-    const int optionCount = UITheme::getVisibleBookOptions(optionIds, UITheme::BOOK_OPTIONS_COUNT,
-                                                           bookOptionsHasClippings, bookOptionsFileOnly);
+    const int optionCount = UITheme::getVisibleBookOptions(
+        optionIds, UITheme::BOOK_OPTIONS_COUNT, bookOptionsHasClippings, bookOptionsFileOnly, bookOptionsSyncable);
     buttonNavigator.onNext([this, optionCount] {
       bookOptionsIndex = (bookOptionsIndex + 1) % optionCount;
       requestUpdate();
@@ -411,6 +412,9 @@ void FileBrowserActivity::loop() {
           Xtc(path, "/.crosspoint").clearCache();
         }
         reload();
+      } else if (opt == UITheme::BOOK_OPT_SYNC) {
+        SyncBookLauncher::start(path);  // replaces this activity
+        return;
       } else if (opt == UITheme::BOOK_OPT_RENAME) {
         startRename(path);
       } else if (opt == UITheme::BOOK_OPT_DELETE) {
@@ -815,6 +819,7 @@ void FileBrowserActivity::openBookOptions(const bool awaitRelease) {
   }
   bookOptionsHasClippings =
       FsHelpers::hasEpubExtension(bookOptionsPath) && ClippingStore::hasForFilePath(bookOptionsPath, "epub");
+  bookOptionsSyncable = !bookOptionsFileOnly && SyncBookLauncher::canSync(bookOptionsPath);
   requestUpdate();
 }
 
@@ -969,9 +974,10 @@ void FileBrowserActivity::render(RenderLock&&) {
     const auto lastSlash = bookOptionsPath.rfind('/');
     const std::string folder =
         (lastSlash != std::string::npos) ? bookOptionsPath.substr(0, lastSlash) : bookOptionsPath;
-    const auto layout = UITheme::drawBookOptionsPopup(
-        renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(), folder.c_str(), bookOptionsProgress,
-        bookOptionsIndex, bookOptionsHasClippings, RECENT_BOOKS.isPinned(bookOptionsPath), bookOptionsFileOnly);
+    const auto layout =
+        UITheme::drawBookOptionsPopup(renderer, bookOptionsTitle.c_str(), bookOptionsAuthor.c_str(), folder.c_str(),
+                                      bookOptionsProgress, bookOptionsIndex, bookOptionsHasClippings,
+                                      RECENT_BOOKS.isPinned(bookOptionsPath), bookOptionsFileOnly, bookOptionsSyncable);
     bookOptionsPopupX = layout.popup.x;
     bookOptionsPopupY = layout.popup.y;
     bookOptionsPopupW = layout.popup.width;

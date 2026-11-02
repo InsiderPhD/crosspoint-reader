@@ -55,7 +55,7 @@ class UITheme {
 
   // File browser context menu (book rows get the full list, other files only
   // the file actions).
-  static constexpr int BOOK_OPTIONS_COUNT = 9;
+  static constexpr int BOOK_OPTIONS_COUNT = 10;
   static constexpr int BOOK_OPT_MARK_READ = 0;
   static constexpr int BOOK_OPT_RESET_PROGRESS = 1;
   static constexpr int BOOK_OPT_SHELVE = 2;
@@ -65,6 +65,7 @@ class UITheme {
   static constexpr int BOOK_OPT_DELETE_CLIPPINGS = 6;
   static constexpr int BOOK_OPT_PIN = 7;  // Pin / Unpin from Shelf; only on a theme with homePinnedBooks
   static constexpr int BOOK_OPT_RENAME = 8;
+  static constexpr int BOOK_OPT_SYNC = 9;  // Sync Book; only for an EPUB with a sync account
 
   // Fills ids[] with the BOOK_OPT_* values currently visible (honoring Dev Mode —
   // Delete Book Cache is hidden when Dev Mode is off; Delete Clippings appears only when
@@ -72,7 +73,9 @@ class UITheme {
   // drawBookOptionsPopup (labels) and the host activities (index -> option id).
   // fileOnly: the row is not a book (text file, image), so only the actions that
   // make sense for any file are listed — Rename and Delete.
-  static int getVisibleBookOptions(int* ids, int maxIds, bool includeDeleteClippings, bool fileOnly = false);
+  // includeSync: list Sync Book (SyncBookLauncher::canSync).
+  static int getVisibleBookOptions(int* ids, int maxIds, bool includeDeleteClippings, bool fileOnly = false,
+                                   bool includeSync = false);
 
   // Layout of the popup just drawn, for Full Touch tap hit-testing: option
   // row i spans y in [optionsTopY + i*optionRowH, optionsTopY + (i+1)*optionRowH).
@@ -84,7 +87,8 @@ class UITheme {
   static BookOptionsPopupLayout drawBookOptionsPopup(GfxRenderer& renderer, const char* title, const char* author,
                                                      const char* folderPath, int progressPercent,
                                                      int selectedOptionIndex, bool includeDeleteClippings,
-                                                     bool pinned = false, bool fileOnly = false);
+                                                     bool pinned = false, bool fileOnly = false,
+                                                     bool includeSync = false);
 
   static void drawSyncProgressPopup(GfxRenderer& renderer, const char* title, const char* statusMessage);
 

@@ -625,6 +625,12 @@ void EpubReaderActivity::onEnter() {
     pendingOpen = {};
   }
 
+  // Opened by "Sync Book" from a context menu: run the Sync action once the
+  // first page is up (loop()). Consumed here whichever book opened, so a stale
+  // request can never fire on a later open.
+  syncOnFirstPage = !APP_STATE.pendingSyncPath.empty() && APP_STATE.pendingSyncPath == epub->getPath();
+  APP_STATE.pendingSyncPath.clear();
+
   // APP_STATE.openEpubPath and the recents entry are NOT written here: see
   // rememberBookOnceRendered(), which waits for the first rendered page.
   READING_STATS.beginSession(epub->getPath(), epub->getTitle(), epub->getAuthor(), epub->getThumbBmpPath());
@@ -771,6 +777,15 @@ void EpubReaderActivity::loop() {
   // Ahead of all input handling: nothing below may open a sub-activity (sync,
   // menu) or leave the reader before a rendered book has been remembered.
   rememberBookOnceRendered(false);
+
+  // "Sync Book" from a context menu: the first page is on screen (so the book
+  // is remembered as the one to reopen after the sync's silent reboot) and no
+  // render is in flight, so the position the sync reads is settled.
+  if (syncOnFirstPage && section && !RenderLock::peek()) {
+    syncOnFirstPage = false;
+    onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::SYNC);
+    return;
+  }
 
   READING_STATS.tickActiveSession(activityManager.isQuietFor(ReadingStatsStore::DEFERRED_SAVE_QUIET_MS));
 

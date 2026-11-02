@@ -58,6 +58,7 @@ class FileBrowserActivity final : public Activity {
   std::string bookOptionsAuthor;
   int bookOptionsProgress = -1;
   bool bookOptionsHasClippings = false;
+  bool bookOptionsSyncable = false;  // SyncBookLauncher::canSync, sampled when the menu opens
 
   FileRenameFlow renameFlow;
   SwipeToDelete swipeDelete;

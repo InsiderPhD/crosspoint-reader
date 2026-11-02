@@ -29,10 +29,11 @@ class BookContextMenu {
     RegenerateCover = 5,
     BookInfo = 6,
     ViewStats = 7,
-    Pin = 8,     // toggles: label reads Pin or Unpin from the store's current state
-    Rename = 9,  // host runs FileRenameFlow, then keeps its cursor on the book
+    Pin = 8,        // toggles: label reads Pin or Unpin from the store's current state
+    Rename = 9,     // host runs FileRenameFlow, then keeps its cursor on the book
+    SyncBook = 10,  // EPUB with a sync account only; host calls SyncBookLauncher::start
   };
-  static constexpr int OPTIONS_COUNT = 10;
+  static constexpr int OPTIONS_COUNT = 11;
   static constexpr uint32_t DEFAULT_HOLD_MS = 700;
 
   bool isOpen() const { return showing_; }
@@ -107,4 +108,5 @@ class BookContextMenu {
   std::string author_;
   std::string tags_;
   int progressPercent_ = -1;
+  bool syncable_ = false;  // SyncBookLauncher::canSync, sampled when the menu opens
 };

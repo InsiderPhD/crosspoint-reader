@@ -86,6 +86,11 @@ class CrossPointState {
     uint16_t pageCount = 0;
   } pendingOpen;
 
+  // One-shot "sync this EPUB as soon as it opens" request from a book context
+  // menu (SyncBookLauncher). Memory only, never persisted; consumed by
+  // EpubReaderActivity::onEnter whatever book it opens.
+  std::string pendingSyncPath;
+
   // Returns true if idx was shown within the last checkCount picks.
   // Walks backwards from the most recently written slot.
   bool isRecentSleep(uint16_t idx, uint8_t checkCount) const;

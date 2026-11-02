@@ -214,6 +214,8 @@ const char* bookOptionLabel(int optionId, const bool pinned) {
       return tr(STR_DELETE_CLIPPINGS);
     case UITheme::BOOK_OPT_BOOK_INFO:
       return tr(STR_BOOK_INFO);
+    case UITheme::BOOK_OPT_SYNC:
+      return tr(STR_SYNC_BOOK);
     case UITheme::BOOK_OPT_RENAME:
       return tr(STR_RENAME);
     default:
@@ -222,7 +224,8 @@ const char* bookOptionLabel(int optionId, const bool pinned) {
 }
 }  // namespace
 
-int UITheme::getVisibleBookOptions(int* ids, int maxIds, const bool includeDeleteClippings, const bool fileOnly) {
+int UITheme::getVisibleBookOptions(int* ids, int maxIds, const bool includeDeleteClippings, const bool fileOnly,
+                                   const bool includeSync) {
   int n = 0;
   const auto add = [&](int id) {
     if (n < maxIds) ids[n++] = id;
@@ -234,6 +237,7 @@ int UITheme::getVisibleBookOptions(int* ids, int maxIds, const bool includeDelet
   }
   add(BOOK_OPT_BOOK_INFO);  // First: the most common, least destructive action
   add(BOOK_OPT_MARK_READ);
+  if (includeSync) add(BOOK_OPT_SYNC);
   add(BOOK_OPT_RESET_PROGRESS);
   if (getInstance().getMetrics().homePinnedBooks) add(BOOK_OPT_PIN);
   add(BOOK_OPT_SHELVE);
@@ -248,7 +252,7 @@ UITheme::BookOptionsPopupLayout UITheme::drawBookOptionsPopup(GfxRenderer& rende
                                                               const char* author, const char* folderPath,
                                                               int progressPercent, int selectedOptionIndex,
                                                               const bool includeDeleteClippings, const bool pinned,
-                                                              const bool fileOnly) {
+                                                              const bool fileOnly, const bool includeSync) {
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
   constexpr int POPUP_W = 420;
@@ -265,7 +269,7 @@ UITheme::BookOptionsPopupLayout UITheme::drawBookOptionsPopup(GfxRenderer& rende
   const int titleBlockH = LINE_V_PAD + static_cast<int>(titleLines.size()) * lineH + LINE_V_PAD;
 
   int ids[BOOK_OPTIONS_COUNT];
-  const int optionCount = getVisibleBookOptions(ids, BOOK_OPTIONS_COUNT, includeDeleteClippings, fileOnly);
+  const int optionCount = getVisibleBookOptions(ids, BOOK_OPTIONS_COUNT, includeDeleteClippings, fileOnly, includeSync);
   const int popupH = titleBlockH + INFO_COUNT * INFO_H + optionCount * OPTION_H + H_PAD;
   const int px = (pageWidth - POPUP_W) / 2;
   const int py = (pageHeight - popupH) / 2;

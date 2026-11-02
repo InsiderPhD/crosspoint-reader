@@ -66,6 +66,8 @@ class EpubReaderActivity final : public Activity {
   unsigned long readingSessionStartMs = 0UL;
   uint32_t sessionPageTurns = 0;
   bool bookFinishedRecorded = false;
+  // Set by onEnter for a "Sync Book" open; loop() runs the Sync action once.
+  bool syncOnFirstPage = false;
   // Remembers this book as the one to wake into, once a page has rendered.
   RenderedBookGate openGate;
   // renderLockHeld: true from onExit(), which already runs under the RenderLock.

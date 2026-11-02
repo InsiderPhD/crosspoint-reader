@@ -28,6 +28,7 @@
 #include "SilentRestart.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/SyncBookLauncher.h"
 #include "util/TouchListNav.h"
 
 // Largest-free-block floor below which arriving home triggers a defrag restart.
@@ -509,6 +510,9 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
       startActivityForResult(std::make_unique<ReadingStatsDetailActivity>(renderer, mappedInput, path),
                              [this](const ActivityResult&) { requestUpdate(); });
       break;
+    case BookContextMenu::Action::SyncBook:
+      SyncBookLauncher::start(path);  // replaces this activity
+      return;
     case BookContextMenu::Action::Rename:
       // RecentBooksStore re-paths the entry in place (BookMoveUtils), so the
       // book keeps its slot and the selector, restored by reloadRecents, stays
