@@ -110,8 +110,9 @@ class Dictionary {
   // missing or stale — call buildIndex() first so the UI can show an
   // "Indexing…" message for the slow first pass.
 
-  // True when the .ifo declares sametypesequence=h or x (HTML or XDXF) — the
-  // viewer may lay definitions out through the EPUB rendering pipeline.
+  // True when the .ifo declares sametypesequence=h or x (HTML or XDXF), or has
+  // no sametypesequence (per-entry types, decoded to HTML) — the viewer may lay
+  // definitions out through the EPUB rendering pipeline.
   bool definitionsAreHtml() const { return htmlDefinitions; }
 
   bool needsIndex();
@@ -264,6 +265,9 @@ class Dictionary {
   bool hasPlainDict = false;
   bool hasSyn = false;  // a <stem>.syn synonym index exists next to the .idx
   bool htmlDefinitions = false;
+  // The .ifo has no sametypesequence: each entry's fields carry their own type
+  // byte and are decoded into one HTML fragment as they are read.
+  bool inlineTypes = false;
 
   // Shared scan buffer: lookups are single-threaded and this avoids a
   // 256-byte array on the stack of every locate() call.

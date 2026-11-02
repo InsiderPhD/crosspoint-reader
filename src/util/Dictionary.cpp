@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <string_view>
 
 #include "DictZip.h"
 #include "DictionaryRegistry.h"
@@ -97,44 +98,79 @@ size_t edgePunctuationAt(const unsigned char* b, const size_t pos, const size_t 
   return pos + len <= end && isEdgePunctuation(cp) ? len : 0;
 }
 
-// Facts read from the .ifo at open time. Only the first 2KB is scanned — .ifo
-// headers are tiny and both keys always appear early when present.
+// Facts read from the .ifo at open time.
 struct IfoFacts {
   bool offsets64 = false;        // idxoffsetbits=64 (unsupported)
   bool htmlDefinitions = false;  // sametypesequence=h or x (HTML or XDXF)
+  // A readable .ifo with no (or an empty) sametypesequence: every entry field
+  // carries its own type byte, decoded per entry by decodeInlineFields().
+  bool inlineTypes = false;
 };
 
+void readIfoLine(IfoFacts& facts, std::string_view line, bool& hasFixedTypes) {
+  if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+  const size_t eq = line.find('=');
+  if (eq == std::string_view::npos) return;
+  const std::string_view key = line.substr(0, eq);
+  const std::string_view value = line.substr(eq + 1);
+  if (key == "idxoffsetbits") {
+    // value is a view into the line buffer: copy it out for strtol.
+    char number[16];
+    const size_t count = std::min(value.size(), sizeof(number) - 1);
+    memcpy(number, value.data(), count);
+    number[count] = '\0';
+    if (strtol(number, nullptr, 10) == 64) facts.offsets64 = true;
+    return;
+  }
+  if (key != "sametypesequence" || value.empty()) return;
+  hasFixedTypes = true;
+  // HTML (h) and XDXF (x) share the styled renderer: the XHTML normalizer
+  // keeps the text of tags it does not know (<k>, <dtrn>, <ex>...). Multi-type
+  // sequences keep the plain-text viewing path.
+  facts.htmlDefinitions = value == "h" || value == "x";
+}
+
+// Streams the whole .ifo line by line through two small stack buffers (192
+// bytes together; the old single-read version held a 2KB stack array and only
+// saw the first 2KB). Lines longer than the line buffer — long descriptions —
+// are cut, which no key or type value ever is.
 IfoFacts readIfoFacts(const std::string& ifoPath) {
   IfoFacts facts;
   HalFile ifo;
   if (!Storage.openFileForRead("DICT", ifoPath, ifo)) return facts;
-  char buf[2048];
-  const int n = ifo.read(buf, sizeof(buf) - 1);
-  if (n <= 0) return facts;
-  buf[n] = '\0';
-  const char* line = strstr(buf, "idxoffsetbits");
-  const char* eq = line ? strchr(line, '=') : nullptr;
-  facts.offsets64 = eq && strtol(eq + 1, nullptr, 10) == 64;
-  line = strstr(buf, "sametypesequence");
-  eq = line ? strchr(line, '=') : nullptr;
-  if (eq) {
-    // HTML (h) and XDXF (x) share the styled renderer: the XHTML normalizer
-    // keeps the text of tags it does not know (<k>, <dtrn>, <ex>...). Multi-type
-    // sequences keep the plain-text viewing path.
-    facts.htmlDefinitions = (eq[1] == 'h' || eq[1] == 'x') && (eq[2] == '\0' || eq[2] == '\r' || eq[2] == '\n');
+  size_t remaining = ifo.fileSize();
+  if (remaining == 0) return facts;
+  char chunk[128];
+  char line[64];
+  size_t lineLength = 0;
+  bool hasFixedTypes = false;
+  while (remaining > 0) {
+    const size_t count = std::min(remaining, sizeof(chunk));
+    if (ifo.read(chunk, count) != static_cast<int>(count)) return {};
+    remaining -= count;
+    for (size_t i = 0; i < count; ++i) {
+      if (chunk[i] == '\n') {
+        readIfoLine(facts, std::string_view(line, lineLength), hasFixedTypes);
+        lineLength = 0;
+      } else if (lineLength < sizeof(line)) {
+        line[lineLength++] = chunk[i];
+      }
+    }
   }
+  readIfoLine(facts, std::string_view(line, lineLength), hasFixedTypes);
+  facts.inlineTypes = !hasFixedTypes;
   return facts;
 }
 
-size_t escapedHtmlSize(const char* text) {
+size_t escapedHtmlSize(const std::string_view text) {
   size_t size = 0;
-  for (; *text; ++text) size += *text == '&' ? 5 : (*text == '<' || *text == '>') ? 4 : 1;
+  for (const char c : text) size += c == '&' ? 5 : (c == '<' || c == '>') ? 4 : 1;
   return size;
 }
 
-void appendEscapedHtml(std::string& out, const char* text) {
-  for (; *text; ++text) {
-    switch (*text) {
+void appendEscapedHtml(std::string& out, const std::string_view text) {
+  for (const char c : text) {
+    switch (c) {
       case '&':
         out += "&amp;";
         break;
@@ -145,10 +181,145 @@ void appendEscapedHtml(std::string& out, const char* text) {
         out += "&gt;";
         break;
       default:
-        out.push_back(*text);
+        out.push_back(c);
         break;
     }
   }
+}
+
+// One field of an entry stored without sametypesequence: a type byte, then
+// either a NUL-terminated string (lowercase types) or a BE32 size plus that
+// many bytes of binary data (uppercase types: images, sounds...). Binary
+// fields come back empty: there is nothing displayable in them. A string at
+// the very end of the entry may lack its NUL (and does when the read was capped
+// at MAX_DEFINITION_BYTES), so the end of input also terminates it.
+bool readInlineField(std::string_view& input, char& type, std::string_view& field) {
+  type = input.front();
+  input.remove_prefix(1);
+  if (type >= 'A' && type <= 'Z') {
+    if (input.size() < 4) return false;
+    const size_t size = readBe32(reinterpret_cast<const uint8_t*>(input.data()));
+    input.remove_prefix(4);
+    if (size > input.size()) return false;
+    input.remove_prefix(size);
+    field = {};
+    return true;
+  }
+  if (type < 'a' || type > 'z') return false;
+  const size_t end = input.find('\0');
+  field = input.substr(0, end);
+  input.remove_prefix(end == std::string_view::npos ? input.size() : end + 1);
+  // 'r' is a resource file list (image/sound names), not text to read.
+  if (type == 'r') field = {};
+  return true;
+}
+
+// Markup field types go to the styled renderer as they are: HTML (h), XDXF (x)
+// and Pango markup (g, HTML-like inline tags). Every other string type is text,
+// escaped into a paragraph with its line breaks kept as <br/>. (Upstream wraps
+// text in <pre>, which our parser draws in the monospace code font; a <p> keeps
+// the definition in the reading font like every other dictionary.)
+bool isMarkupType(const char type) { return type == 'h' || type == 'x' || type == 'g'; }
+
+constexpr char TEXT_FIELD_OPEN[] = "<p>";
+constexpr char TEXT_FIELD_CLOSE[] = "</p>";
+constexpr char TEXT_FIELD_BREAK[] = "<br/>";
+
+size_t escapedTextFieldSize(const std::string_view text) {
+  size_t size = sizeof(TEXT_FIELD_OPEN) - 1 + sizeof(TEXT_FIELD_CLOSE) - 1;
+  for (const char c : text) {
+    size += c == '\n' ? sizeof(TEXT_FIELD_BREAK) - 1 : c == '&' ? 5 : (c == '<' || c == '>') ? 4 : 1;
+  }
+  return size;
+}
+
+void appendEscapedTextField(std::string& out, const std::string_view text) {
+  out += TEXT_FIELD_OPEN;
+  size_t from = 0;
+  while (from <= text.size()) {
+    const size_t nl = text.find('\n', from);
+    appendEscapedHtml(out, text.substr(from, nl == std::string_view::npos ? std::string_view::npos : nl - from));
+    if (nl == std::string_view::npos) break;
+    out += TEXT_FIELD_BREAK;
+    from = nl + 1;
+  }
+  out += TEXT_FIELD_CLOSE;
+}
+
+// Port of upstream #4270's decoder. Rewrites the entry at text[start..] (just
+// read from .dict) as one HTML fragment and returns Found, NotFound (no
+// displayable field: binary-only or empty), ReadError (malformed, or the result
+// would pass `limit` bytes of text in total) or LowMemory.
+//
+// Markup-only entries are compacted in place (field framing removed, no second
+// buffer). Text fields need escaping, which can grow the entry, so the decoded
+// entry is built in a separate buffer the size of THIS entry — not of the whole
+// combined definition text holds when called for a labelled group — and then
+// appended back in place of the raw bytes.
+Dictionary::LookupResult decodeInlineFields(std::string& text, const size_t start, const size_t limit) {
+  const std::string_view source = std::string_view(text).substr(start);
+  size_t decodedSize = 0;
+  bool onlyMarkup = true;
+  {
+    std::string_view input = source;
+    while (!input.empty()) {
+      char type;
+      std::string_view field;
+      if (!readInlineField(input, type, field)) {
+        LOG_ERR("DICT", "Invalid inline definition field");
+        return Dictionary::LookupResult::ReadError;
+      }
+      if (field.empty()) continue;
+      const bool markup = isMarkupType(type);
+      onlyMarkup = onlyMarkup && markup;
+      decodedSize += markup ? field.size() : escapedTextFieldSize(field);
+    }
+  }
+  if (decodedSize == 0) return Dictionary::LookupResult::NotFound;
+  if (decodedSize > limit || start > limit - decodedSize) {
+    LOG_INF("DICT", "Decoded definition exceeds %u bytes", static_cast<unsigned>(limit));
+    return Dictionary::LookupResult::ReadError;
+  }
+
+  if (onlyMarkup) {
+    // Removing the framing only shrinks the entry: compact it in place.
+    std::string_view input = source;
+    size_t written = start;
+    while (!input.empty()) {
+      char type;
+      std::string_view field;
+      readInlineField(input, type, field);  // validated above
+      if (field.empty()) continue;
+      memmove(&text[written], field.data(), field.size());
+      written += field.size();
+    }
+    text.resize(written);
+    return Dictionary::LookupResult::Found;
+  }
+
+  const bool grows = start + decodedSize > text.capacity();
+  if (ESP.getMaxAllocHeap() < decodedSize + 1 + DEFINITION_HEAP_HEADROOM_BYTES ||
+      (grows && ESP.getMaxAllocHeap() < start + decodedSize + 1 + DEFINITION_HEAP_HEADROOM_BYTES)) {
+    LOG_ERR("DICT", "Low heap for %u byte decoded definition", static_cast<unsigned>(decodedSize));
+    return Dictionary::LookupResult::LowMemory;
+  }
+  std::string decoded;
+  decoded.reserve(decodedSize);
+  std::string_view input = source;
+  while (!input.empty()) {
+    char type;
+    std::string_view field;
+    readInlineField(input, type, field);  // validated above
+    if (field.empty()) continue;
+    if (isMarkupType(type)) {
+      decoded.append(field);
+    } else {
+      appendEscapedTextField(decoded, field);
+    }
+  }
+  text.resize(start);
+  text += decoded;
+  return Dictionary::LookupResult::Found;
 }
 
 // Markup that labels each entry of a combined definition. The size budget is
@@ -182,6 +353,7 @@ bool Dictionary::open(const char* folderName) {
   basePath.clear();
   hasSyn = false;
   htmlDefinitions = false;
+  inlineTypes = false;
   std::string resolved;
   if (!DictionaryRegistry::resolveBasePath(folderName, resolved)) {
     LOG_ERR("DICT", "No dictionary found in folder '%s'", folderName ? folderName : "");
@@ -209,7 +381,9 @@ bool Dictionary::open(const char* folderName) {
     return false;
   }
   hasSyn = Storage.exists((resolved + ".syn").c_str());
-  htmlDefinitions = ifo.htmlDefinitions;
+  inlineTypes = ifo.inlineTypes;
+  // Decoded inline entries are HTML fragments (text fields wrapped in <pre>).
+  htmlDefinitions = ifo.htmlDefinitions || inlineTypes;
 
   basePath = std::move(resolved);
   return true;
@@ -665,6 +839,13 @@ bool Dictionary::readDefinition(const DictLocation& location, std::string& out, 
   if (dict.read(&out[originalSize], size) != static_cast<int>(size)) {
     return fail(LookupResult::ReadError);
   }
+  if (inlineTypes) {
+    // Appending into a labelled group keeps the combined cap; a single entry
+    // may grow by escaping, so it gets the cap plus half again.
+    const size_t limit = append ? MAX_DEFINITION_BYTES : MAX_DEFINITION_BYTES + MAX_DEFINITION_BYTES / 2;
+    const LookupResult decoded = decodeInlineFields(out, originalSize, limit);
+    if (decoded != LookupResult::Found) return fail(decoded);
+  }
   // A styled definition can still fall back to plain text in the viewer, and
   // htmlToPlainText() builds its output alongside this input (up to the same
   // size again). Refuse here, where the failure has a name, rather than let
@@ -708,6 +889,7 @@ bool Dictionary::readLabelledGroup(const DictEntryList& group, std::string& out,
   }
   out.clear();
   out.reserve(combined);
+  bool anyReadError = false;
 
   for (size_t i = 0; i < group.size(); i++) {
     const char* headword = group.headword(i);
@@ -731,15 +913,21 @@ bool Dictionary::readLabelledGroup(const DictEntryList& group, std::string& out,
     LookupResult entryResult = LookupResult::Found;
     if (!readDefinition(location, out, &entryResult, /*append=*/true)) {
       out.resize(before);
-      // A damaged entry should not hide the others; a memory or decompression
-      // failure would fail the same way for the rest, so stop and name it.
-      if (entryResult == LookupResult::ReadError) continue;
+      // A damaged, oversized or empty (binary-only) entry should not hide the
+      // others; a memory or decompression failure would fail the same way for
+      // the rest, so stop and name it.
+      if (entryResult == LookupResult::ReadError) {
+        anyReadError = true;
+        continue;
+      }
+      if (entryResult == LookupResult::NotFound) continue;
       if (outResult) *outResult = entryResult;
       return false;
     }
   }
   if (out.empty()) {
-    if (outResult) *outResult = LookupResult::ReadError;
+    // Every entry was empty: that is a miss, not a failure.
+    if (outResult) *outResult = anyReadError ? LookupResult::ReadError : LookupResult::NotFound;
     return false;
   }
   return true;
