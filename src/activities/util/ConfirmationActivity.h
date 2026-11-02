@@ -39,4 +39,9 @@ class ConfirmationActivity : public Activity {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&& lock) override;
+  // loop() hit-tests its own Cancel/Confirm buttons (X4 Pro). Without this the
+  // main loop also turned the tap into an injected Confirm press whose release
+  // landed on the screen beneath once the dialog had closed: confirming a
+  // delete in the File Browser then opened whichever book the cursor was on.
+  bool handlesDirectTouch() const override { return true; }
 };
