@@ -5,6 +5,7 @@
 #include <I18n.h>
 
 #include "BookFusionTokenStore.h"
+#include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "activities/plugins/PluginCatalogActivity.h"
@@ -28,6 +29,8 @@ constexpr MenuRow MENU_ROWS[] = {
     {NetworkMode::BOOKFUSION, StrId::STR_BF_BROWSE_LIBRARY, StrId::STR_BF_LIBRARY_DESC, UIIcon::BookFusion},
     {NetworkMode::OPDS, StrId::STR_OPDS_BROWSER, StrId::STR_OPDS_DESC, UIIcon::Library},
     {NetworkMode::PLUGINS, StrId::STR_PLUGINS, StrId::STR_PLUGINS_DESC, UIIcon::Library},
+    // Sync Server section: last, below the transfer modes.
+    {NetworkMode::SYNC_BOOKS, StrId::STR_SYNC_BOOKS, StrId::STR_SYNC_BOOKS_DESC, UIIcon::Transfer},
 };
 constexpr int MAX_MENU_ITEM_COUNT = static_cast<int>(sizeof(MENU_ROWS) / sizeof(MENU_ROWS[0]));
 
@@ -38,6 +41,8 @@ bool rowVisible(const MenuRow& row) {
   if (row.mode == NetworkMode::BOOKFUSION) return BF_TOKEN_STORE.hasToken();
   // Same for OPDS: until a catalog is added in Settings there is nothing to browse.
   if (row.mode == NetworkMode::OPDS) return OPDS_STORE.hasServers();
+  // Sync Books: only once a KOReader / CrossPoint Sync account is set up.
+  if (row.mode == NetworkMode::SYNC_BOOKS) return KOREADER_STORE.hasCredentials();
   // Plugins: only on boards that build them, and only once a plugin with an
   // on-device catalog is on the card (rescanned each time this screen opens).
   if (row.mode == NetworkMode::PLUGINS) {

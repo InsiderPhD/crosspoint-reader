@@ -16,6 +16,7 @@
 #include "WifiSelectionActivity.h"
 #include "activities/browser/OpdsBookBrowserActivity.h"
 #include "activities/network/CalibreConnectActivity.h"
+#include "activities/network/SyncBooksActivity.h"
 #include "activities/plugins/PluginCatalogActivity.h"
 #include "activities/settings/BookFusionBrowserActivity.h"
 #include "components/UITheme.h"
@@ -135,16 +136,21 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "OPDS Browser";
   } else if (mode == NetworkMode::PLUGINS) {
     modeName = "Plugins";
+  } else if (mode == NetworkMode::SYNC_BOOKS) {
+    modeName = "Sync Books";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
 
-  if (mode == NetworkMode::BOOKFUSION || mode == NetworkMode::OPDS || mode == NetworkMode::PLUGINS) {
+  if (mode == NetworkMode::BOOKFUSION || mode == NetworkMode::OPDS || mode == NetworkMode::PLUGINS ||
+      mode == NetworkMode::SYNC_BOOKS) {
     // Use startActivityForResult so pressing Back in the browser returns to mode
     // selection rather than going all the way to the home screen. replaceActivity
     // would clear the stack and leave nowhere to pop back to. Both browsers
     // bring up WiFi themselves.
     std::unique_ptr<Activity> browser;
-    if (mode == NetworkMode::BOOKFUSION) {
+    if (mode == NetworkMode::SYNC_BOOKS) {
+      browser = std::make_unique<SyncBooksActivity>(renderer, mappedInput);
+    } else if (mode == NetworkMode::BOOKFUSION) {
       browser = std::make_unique<BookFusionBrowserActivity>(renderer, mappedInput);
 #if CROSSPOINT_SD_PLUGINS
     } else if (mode == NetworkMode::PLUGINS) {
