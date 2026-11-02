@@ -210,7 +210,9 @@ class ReadingStatsStore {
   void resumeSession();
   void updateProgress(uint8_t progressPercent, bool completed = false, const std::string& chapterTitle = "",
                       uint8_t chapterProgressPercent = 0);
-  void endSession();
+  // allowBackgroundSync=false skips the post-session Hardcover push, for callers
+  // that restart the device straight afterwards.
+  void endSession(bool allowBackgroundSync = true);
   bool adjustBookReadingTime(const std::string& path, uint32_t dayOrdinal, int32_t deltaMs);
   // Reassigns a sessionLog entry to a different calendar day. Moves the
   // session's sessionMs from its previous dayOrdinal (if any) to newDayOrdinal

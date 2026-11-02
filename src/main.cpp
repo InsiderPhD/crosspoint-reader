@@ -224,6 +224,13 @@ static bool deepSleepInProgress = false;
 // running in that case.
 static void silentRestartTo(const uint32_t target, const char* targetName) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
+  // The restart skips the reader's onExit() (KOSync and Nearby sync are pushed
+  // over the reader and restart from their own onExit()), which is where the
+  // open reading-stats session is normally ended and written. Close it here so
+  // the session is logged and on SD; the reader begins a new one after reboot.
+  // No-op when no session is open. No Hardcover push: it would start a worker
+  // that the restart kills, and the next session end pushes anyway.
+  READING_STATS.endSession(/*allowBackgroundSync=*/false);
   silentRebootTarget = target;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=%s)", targetName);

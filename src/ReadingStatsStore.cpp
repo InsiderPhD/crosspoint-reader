@@ -1137,7 +1137,7 @@ bool ReadingStatsStore::removeBook(const std::string& path) {
   return true;
 }
 
-void ReadingStatsStore::endSession() {
+void ReadingStatsStore::endSession(const bool allowBackgroundSync) {
   if (!activeSession.active || activeSession.bookIndex >= books.size()) {
     lastSessionSnapshot = {};
     activeSession = {};
@@ -1194,7 +1194,7 @@ void ReadingStatsStore::endSession() {
   // The session is on SD; mirror the book's progress to Hardcover in the
   // background. Skipped for a glance too short to count, unless it finished the
   // book. Looked up by path because the prune above may have rewritten `books`.
-  if (lastSessionSnapshot.counted || lastSessionSnapshot.completedThisSession) {
+  if (allowBackgroundSync && (lastSessionSnapshot.counted || lastSessionSnapshot.completedThisSession)) {
     if (const ReadingBookStats* synced = findBook(lastSessionSnapshot.path)) {
       HardcoverSync::onSessionWritten(*synced);
     }
