@@ -1,6 +1,10 @@
 #pragma once
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
+
+#include "HttpHeader.h"
 
 // Document matching method for KOReader sync
 enum class DocumentMatchMethod : uint8_t {
@@ -11,10 +15,21 @@ enum class DocumentMatchMethod : uint8_t {
 // What the server accepts beyond the standard KOSync payload. The
 // numbers are upstream CrossPoint's (koreader.json "serverType"); never renumber.
 enum class KOReaderServerType : uint8_t {
-  CROSSPOINT = 0,  // Upstream's rich-position server. Not implemented here: loads as KOSYNC.
+  CROSSPOINT = 0,  // crosspoint-sync: standard payload plus the rich `position` object.
   KOSYNC = 1,      // Strict standard KOSync payloads.
-  OTHER = 2,       // Custom server that also takes the extended metadata fields.
+  OTHER = 2,       // Custom server that takes rich position and the extended metadata fields.
 };
+
+// How a manual sync resolves a difference after fetching remote progress.
+// Numbers are upstream's (koreader.json "syncBehavior"); never renumber.
+enum class KOReaderSyncBehavior : uint8_t {
+  ASK_EVERY_TIME = 0,  // Always show the Apply/Upload choice.
+  SMART = 1,           // Auto-resolve the simple cases: furthest progress wins.
+};
+
+// Extra request headers (e.g. a Cloudflare Access service token). Fixed-size so
+// editing never grows a vector; an empty name marks an unused slot.
+constexpr size_t KOREADER_MAX_CUSTOM_HEADERS = 2;
 
 class KOReaderCredentialStore;
 namespace JsonSettingsIO {
@@ -34,7 +49,7 @@ class KOReaderCredentialStore {
   std::string username;
   std::string password;
   std::string serverUrl;                                            // Custom sync server URL (empty = default)
-  KOReaderServerType serverType = KOReaderServerType::KOSYNC;       // What kind of server serverUrl points at
+  KOReaderServerType serverType = KOReaderServerType::CROSSPOINT;   // What kind of server serverUrl points at
   DocumentMatchMethod matchMethod = DocumentMatchMethod::FILENAME;  // Default to filename for compatibility
   // Privacy switch for title/author/filename (and, on an OTHER server, ISBN and
   // series). Off by default: the book you are reading is nobody's business
@@ -43,6 +58,9 @@ class KOReaderCredentialStore {
   // Opt-in crosspoint-sync extension: a manual sync also pushes and pulls the
   // book's clippings. Needs a server with the /api/v1/clippings endpoint.
   bool syncClippings = false;
+  // New setups get Smart; a file saved before the setting existed keeps Ask.
+  KOReaderSyncBehavior syncBehavior = KOReaderSyncBehavior::SMART;
+  std::array<HttpHeader, KOREADER_MAX_CUSTOM_HEADERS> customHeaders;
 
   // Private constructor for singleton
   KOReaderCredentialStore() = default;
@@ -84,11 +102,15 @@ class KOReaderCredentialStore {
 
   // Get base URL for API calls (with http:// normalization if no protocol, falls back to default)
   std::string getBaseUrl() const;
+  // True when requests go to the CrossPoint server (empty URL or that URL typed in).
+  bool usesDefaultServer() const;
 
   // Server capability
   void setServerType(KOReaderServerType type);
   KOReaderServerType getServerType() const { return serverType; }
   bool supportsExtendedMetadata() const { return serverType == KOReaderServerType::OTHER; }
+  // The rich `position` object goes to every server type but strict KOSync.
+  bool supportsRichProgress() const { return serverType != KOReaderServerType::KOSYNC; }
 
   // Whether progress uploads carry document metadata at all
   void setSendMetadata(bool enabled) { sendMetadata = enabled; }
@@ -97,6 +119,14 @@ class KOReaderCredentialStore {
   // Whether a manual sync also syncs clippings
   void setSyncClippings(bool enabled) { syncClippings = enabled; }
   bool getSyncClippings() const { return syncClippings; }
+
+  // Manual sync conflict resolution
+  void setSyncBehavior(KOReaderSyncBehavior behavior);
+  KOReaderSyncBehavior getSyncBehavior() const { return syncBehavior; }
+
+  // Custom headers sent with every sync request (index must be < KOREADER_MAX_CUSTOM_HEADERS)
+  void setCustomHeader(size_t index, const std::string& name, const std::string& value);
+  const std::array<HttpHeader, KOREADER_MAX_CUSTOM_HEADERS>& getCustomHeaders() const { return customHeaders; }
 
   // URL a settings file with no serverUrl used before the default moved to the
   // CrossPoint server. Loading such a file pins it, so an existing account is

@@ -114,7 +114,8 @@ class ChapterHtmlSlimParser {
   std::shared_ptr<Epub> epub;
   const std::string& filepath;
   GfxRenderer& renderer;
-  std::function<void(std::unique_ptr<Page>, uint16_t, uint16_t)> completePageFn;
+  // (page, paragraph index, list-item index, visible-text offset where the page starts)
+  std::function<void(std::unique_ptr<Page>, uint16_t, uint16_t, uint32_t)> completePageFn;
   std::function<void()> popupFn;  // Popup callback
   int depth = 0;
   int skipUntilDepth = INT_MAX;
@@ -222,7 +223,7 @@ class ChapterHtmlSlimParser {
   uint8_t prePendingBlankLines = 0;       // blank source lines waiting for the next line of text
   bool suppressParagraphSpacing = false;  // makePages(): this block is one line of a larger one
   void preLineBreak();
-  void preLeadingSpace(int count);
+  void preLeadingSpace(int count, uint32_t visibleOffset);
   void beginPreLine();
 
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
@@ -277,7 +278,8 @@ class ChapterHtmlSlimParser {
   };
   struct LayoutRow {
     std::vector<TableCell> cells;
-    uint16_t height = 0;  // content height + 2 x TABLE_CELL_PADDING
+    uint32_t visibleOffset = UINT32_MAX;  // smallest first-line offset over the row's cells
+    uint16_t height = 0;                  // content height + 2 x TABLE_CELL_PADDING
     bool isHeaderRow = false;
     uint8_t renderCols = 0;  // grid columns this row was laid out on
   };
@@ -288,6 +290,7 @@ class ChapterHtmlSlimParser {
     uint16_t totalWidth = 0;
     int16_t xInset = 0;  // left edge of the table box; non-zero when the <table> carries a left inset
     bool hasBorder = true;
+    uint32_t visibleOffset = 0;  // offset of the fragment's first (non-repeated) row
   };
   struct BufferedTable {
     BufferedTableRow pendingRow;
@@ -315,6 +318,21 @@ class ChapterHtmlSlimParser {
   bool recordPageBreakAnchors = false;
   uint16_t xpathParagraphIndex = 0;
   uint16_t xpathListItemIndex = 0;
+  // Canonical reading-position counter (upstream crosspoint #2805): zero-based Unicode
+  // codepoints of the raw character data inside <body>, outside head/style/script/title/rp,
+  // counted before any whitespace collapsing or skipping. Synthetic text (image alt) is not
+  // counted. Word offsets flow through line breaking so every completed page records the first
+  // source character it shows. Must count exactly as upstream does: sync servers and other
+  // CrossPoint devices exchange these offsets.
+  uint32_t visibleTextOffset = 0;
+  uint32_t partWordVisibleOffset = 0;
+  uint32_t currentPageVisibleOffset = 0;
+  bool currentPageVisibleOffsetSet = false;
+  bool insideBody = false;
+  bool syntheticCharacterData = false;
+  uint16_t nonVisibleTextDepth = 0;
+  // First content placed on the current page claims its start offset; later calls are no-ops.
+  void setCurrentPageVisibleOffset(uint32_t offset);
 
   // First-body-element tracking: <a> links inside the first direct child of <body>
   // are treated as navigation (TOC), not footnote references.
@@ -388,16 +406,16 @@ class ChapterHtmlSlimParser {
   static void XMLCALL endElement(void* userData, const XML_Char* name);
 
  public:
-  explicit ChapterHtmlSlimParser(std::shared_ptr<Epub> epub, const std::string& filepath, GfxRenderer& renderer,
-                                 const int fontId, const int codeFontId, const float lineCompression,
-                                 const bool extraParagraphSpacing, const uint8_t paragraphAlignment,
-                                 const uint16_t viewportWidth, const uint16_t viewportHeight,
-                                 const bool hyphenationEnabled,
-                                 const std::function<void(std::unique_ptr<Page>, uint16_t, uint16_t)>& completePageFn,
-                                 const bool embeddedStyle, const std::string& contentBase,
-                                 const std::string& imageBasePath, const uint8_t imageRendering = 0,
-                                 const std::function<void()>& popupFn = nullptr, const CssParser* cssParser = nullptr,
-                                 const bool footnoteDisplayOnPage = true, const bool bionicReadingEnabled = false)
+  explicit ChapterHtmlSlimParser(
+      std::shared_ptr<Epub> epub, const std::string& filepath, GfxRenderer& renderer, const int fontId,
+      const int codeFontId, const float lineCompression, const bool extraParagraphSpacing,
+      const uint8_t paragraphAlignment, const uint16_t viewportWidth, const uint16_t viewportHeight,
+      const bool hyphenationEnabled,
+      const std::function<void(std::unique_ptr<Page>, uint16_t, uint16_t, uint32_t)>& completePageFn,
+      const bool embeddedStyle, const std::string& contentBase, const std::string& imageBasePath,
+      const uint8_t imageRendering = 0, const std::function<void()>& popupFn = nullptr,
+      const CssParser* cssParser = nullptr, const bool footnoteDisplayOnPage = true,
+      const bool bionicReadingEnabled = false)
 
       : epub(epub),
         filepath(filepath),
@@ -424,7 +442,7 @@ class ChapterHtmlSlimParser {
   // Call before parseAndBuildPages(). A setter rather than one more constructor argument.
   void setTextLayout(const TextLayoutOptions& options) { textLayout = options; }
   bool parseAndBuildPages();
-  void addLineToPage(std::unique_ptr<TextBlock> line);
+  void addLineToPage(std::unique_ptr<TextBlock> line, uint32_t visibleOffset);
   const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
   // Also record the ids of page-break markers (epub:type="pagebreak"), which are
   // usually <span>s and so skipped as anchors. Only worth its RAM for a book that

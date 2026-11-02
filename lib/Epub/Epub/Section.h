@@ -63,4 +63,13 @@ class Section {
 
   // Look up the synthetic paragraph index for the given rendered page.
   std::optional<uint16_t> getParagraphIndexForPage(uint16_t page) const;
+
+  // Exact zero-based visible Unicode-codepoint offset (see ChapterHtmlSlimParser::
+  // visibleTextOffset) where a rendered page starts, from the finished section cache.
+  std::optional<uint32_t> getVisibleTextOffsetForPage(uint16_t page) const;
+
+  // The page containing an exact visible-text offset: the last page starting at or before it.
+  // When preferFirstAtOffset is true, ties caused by zero-width content such as an image-only
+  // page select the first page at that offset.
+  std::optional<uint16_t> getPageForVisibleTextOffset(uint32_t offset, bool preferFirstAtOffset = false) const;
 };

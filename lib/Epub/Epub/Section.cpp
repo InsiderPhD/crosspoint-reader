@@ -33,7 +33,10 @@ namespace {
 //     line; still a PageImage) and publisher decorations (new page element
 //     TAG_PageBorderBox = 5; forced page breaks and white-space:pre change layout only).
 //     Header gains layoutFeatures (see LAYOUT_FEATURES below).
-constexpr uint8_t SECTION_FILE_VERSION = 48;
+// 49: content-based reading positions (upstream #2805): a fifth trailing header offset and a
+//     uint32_t per page giving the visible-text offset where the page starts. Also stops
+//     rendering <style>/<script>/<title>/<rp> found inside <body>.
+constexpr uint8_t SECTION_FILE_VERSION = 49;
 // Staging buffer for page serialization, one per section build (not per page). 2KB is four
 // SD sectors: a typical text page (~3-6KB serialized) goes out in two to four writes, and a
 // field larger than the buffer (a long line's word arena) bypasses it. Heap, not stack: 2KB
@@ -48,12 +51,22 @@ constexpr uint32_t HEADER_SIZE = sizeof(uint8_t) + sizeof(int) + sizeof(float) +
                                  sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) +
                                  sizeof(uint8_t) + sizeof(uint8_t) + sizeof(bool) + sizeof(int8_t) + sizeof(uint8_t) +
                                  sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                 sizeof(uint32_t) + sizeof(uint32_t);
+                                 sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t);
+// The header ends with the page count and five uint32_t offsets, patched once the build ends.
+// Each offset is addressed from the end of the header, in this order.
+constexpr uint32_t TRAILING_OFFSETS = 5;
+constexpr uint32_t OFFSET_SLOT_LUT = HEADER_SIZE - sizeof(uint32_t) * 5;
+constexpr uint32_t OFFSET_SLOT_ANCHORS = HEADER_SIZE - sizeof(uint32_t) * 4;
+constexpr uint32_t OFFSET_SLOT_PARAGRAPHS = HEADER_SIZE - sizeof(uint32_t) * 3;
+constexpr uint32_t OFFSET_SLOT_LIST_ITEMS = HEADER_SIZE - sizeof(uint32_t) * 2;
+constexpr uint32_t OFFSET_SLOT_VISIBLE_TEXT = HEADER_SIZE - sizeof(uint32_t);
+constexpr uint32_t PAGE_COUNT_POS = HEADER_SIZE - sizeof(uint32_t) * TRAILING_OFFSETS - sizeof(uint16_t);
 
 struct PageLutEntry {
   uint32_t fileOffset;
   uint16_t paragraphIndex;
   uint16_t listItemIndex;
+  uint32_t visibleTextOffset;
 };
 }  // namespace
 
@@ -101,8 +114,7 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
                                    sizeof(embeddedStyle) + sizeof(imageRendering) + sizeof(footnoteDisplay) +
                                    sizeof(bionicReadingEnabled) + sizeof(textLayout.characterSpacing) +
                                    sizeof(textLayout.wordSpacingPercent) + sizeof(textLayout.paragraphIndent) +
-                                   sizeof(LAYOUT_FEATURES) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                   sizeof(uint32_t),
+                                   sizeof(LAYOUT_FEATURES) + sizeof(uint32_t) * TRAILING_OFFSETS,
                 "Header size mismatch");
   serialization::writePod(file, SECTION_FILE_VERSION);
   serialization::writePod(file, fontId);
@@ -125,6 +137,7 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for paragraph LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for li LUT offset (patched later)
+  serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for visible-text LUT offset (patched later)
 }
 
 bool Section::loadSectionFile(const int fontId, const float lineCompression, const bool extraParagraphSpacing,
@@ -311,10 +324,10 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
                          bionicReadingEnabled, textLayout);
   // One up-front block instead of ~log2(pages) grow-copy-free cycles while the
   // parser is fighting for contiguous heap. A page is ~2-3KB of XHTML, so
-  // 2KB/page slightly over-estimates; the cap bounds the block at 4KB (512 x 8B)
+  // 2KB/page slightly over-estimates; the cap bounds the block at 4KB (341 x 12B)
   // and anything longer just grows past it as before.
   constexpr uint32_t HTML_BYTES_PER_PAGE_ESTIMATE = 2048;
-  constexpr uint32_t MAX_LUT_RESERVE = 512;
+  constexpr uint32_t MAX_LUT_RESERVE = 4096 / sizeof(PageLutEntry);
   std::vector<PageLutEntry> lut;
   lut.reserve(std::min<uint32_t>(fileSize / HTML_BYTES_PER_PAGE_ESTIMATE + 1, MAX_LUT_RESERVE));
 
@@ -357,9 +370,10 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
   ChapterHtmlSlimParser visitor(
       epub, tmpHtmlPath, renderer, fontId, codeFontId, lineCompression, extraParagraphSpacing, paragraphAlignment,
       viewportWidth, viewportHeight, hyphenationEnabled,
-      [&pageSink](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex) {
-        pageSink.lut.push_back(
-            {pageSink.self.onPageComplete(std::move(page), pageSink.out), paragraphIndex, listItemIndex});
+      [&pageSink](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex,
+                  const uint32_t visibleTextOffset) {
+        pageSink.lut.push_back({pageSink.self.onPageComplete(std::move(page), pageSink.out), paragraphIndex,
+                                listItemIndex, visibleTextOffset});
       },
       embeddedStyle, contentBase, imageBasePath, imageRendering, popupFn, cssParser, footnoteDisplay == 0,
       bionicReadingEnabled);
@@ -427,13 +441,20 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
     serialization::writePod(file, entry.listItemIndex);
   }
 
-  // Patch header with final pageCount, lutOffset, anchorMapOffset, paragraphLutOffset, and liLutOffset
-  file.seek(HEADER_SIZE - sizeof(uint32_t) * 4 - sizeof(pageCount));
+  // One uint32_t per page: the visible-text offset where the page starts (non-decreasing).
+  const uint32_t visibleTextLutOffset = static_cast<uint32_t>(file.position());
+  for (const auto& entry : lut) {
+    serialization::writePod(file, entry.visibleTextOffset);
+  }
+
+  // Patch header with final pageCount and the five section offsets
+  file.seek(PAGE_COUNT_POS);
   serialization::writePod(file, pageCount);
   serialization::writePod(file, lutOffset);
   serialization::writePod(file, anchorMapOffset);
   serialization::writePod(file, paragraphLutOffset);
   serialization::writePod(file, liLutFileOffset);
+  serialization::writePod(file, visibleTextLutOffset);
   // Explicit close() required: member variable persists beyond function scope
   file.close();
   if (cssParser) {
@@ -447,7 +468,7 @@ std::unique_ptr<Page> Section::loadPageFromSectionFile() {
     return nullptr;
   }
 
-  file.seek(HEADER_SIZE - sizeof(uint32_t) * 4);
+  file.seek(OFFSET_SLOT_LUT);
   uint32_t lutOffset;
   serialization::readPod(file, lutOffset);
   file.seek(lutOffset + sizeof(uint32_t) * currentPage);
@@ -468,7 +489,7 @@ std::optional<uint16_t> Section::getPageForAnchor(const std::string& anchor) con
   }
 
   const uint32_t fileSize = f.size();
-  f.seek(HEADER_SIZE - sizeof(uint32_t) * 3);
+  f.seek(OFFSET_SLOT_ANCHORS);
   uint32_t anchorMapOffset;
   serialization::readPod(f, anchorMapOffset);
   if (anchorMapOffset == 0 || anchorMapOffset >= fileSize) {
@@ -501,10 +522,9 @@ uint16_t Section::readCachedPageCount(const std::string& path) {
     f.close();
     return 0;
   }
-  // pageCount sits before the four trailing uint32_t offsets (LUT, anchor map,
-  // paragraph LUT, list-item LUT) — must match the patch layout in
-  // createSectionFile (seek at HEADER_SIZE - sizeof(uint32_t) * 4 - sizeof(pageCount)).
-  f.seek(HEADER_SIZE - sizeof(uint32_t) * 4 - sizeof(uint16_t));
+  // pageCount sits before the five trailing uint32_t offsets (LUT, anchor map, paragraph
+  // LUT, list-item LUT, visible-text LUT) — the same PAGE_COUNT_POS createSectionFile patches.
+  f.seek(PAGE_COUNT_POS);
   uint16_t pc = 0;
   f.read(&pc, sizeof(pc));
   f.close();
@@ -518,7 +538,7 @@ std::optional<uint16_t> Section::getPageForParagraphIndex(const uint16_t pIndex)
   }
 
   const uint32_t fileSize = f.size();
-  f.seek(HEADER_SIZE - sizeof(uint32_t) * 2);
+  f.seek(OFFSET_SLOT_PARAGRAPHS);
   uint32_t paragraphLutOffset;
   serialization::readPod(f, paragraphLutOffset);
   if (paragraphLutOffset == 0 || paragraphLutOffset >= fileSize) {
@@ -557,7 +577,7 @@ std::optional<uint16_t> Section::getParagraphIndexForPage(const uint16_t page) c
   }
 
   const uint32_t fileSize = f.size();
-  f.seek(HEADER_SIZE - sizeof(uint32_t) * 2);
+  f.seek(OFFSET_SLOT_PARAGRAPHS);
   uint32_t paragraphLutOffset;
   serialization::readPod(f, paragraphLutOffset);
   if (paragraphLutOffset == 0 || paragraphLutOffset >= fileSize) {
@@ -589,7 +609,7 @@ std::optional<uint16_t> Section::getPageForListItemIndex(const uint16_t liIndex)
   }
 
   const uint32_t fileSize = f.size();
-  f.seek(HEADER_SIZE - sizeof(uint32_t));
+  f.seek(OFFSET_SLOT_LIST_ITEMS);
   uint32_t liLutOffset;
   serialization::readPod(f, liLutOffset);
   if (liLutOffset == 0 || liLutOffset >= fileSize) {
@@ -597,7 +617,7 @@ std::optional<uint16_t> Section::getPageForListItemIndex(const uint16_t liIndex)
   }
 
   // The li LUT shares count with the paragraph LUT; read count from paragraphLutOffset
-  f.seek(HEADER_SIZE - sizeof(uint32_t) * 2);
+  f.seek(OFFSET_SLOT_PARAGRAPHS);
   uint32_t paragraphLutOffset;
   serialization::readPod(f, paragraphLutOffset);
   if (paragraphLutOffset == 0 || paragraphLutOffset >= fileSize) {
@@ -628,4 +648,90 @@ std::optional<uint16_t> Section::getPageForListItemIndex(const uint16_t liIndex)
   }
 
   return resultPage;
+}
+
+std::optional<uint32_t> Section::getVisibleTextOffsetForPage(const uint16_t page) const {
+  FsFile f;
+  if (!Storage.openFileForRead("SCT", filePath, f) || f.size() < HEADER_SIZE) {
+    return std::nullopt;
+  }
+
+  uint8_t version;
+  serialization::readPod(f, version);
+  if (version != SECTION_FILE_VERSION) {
+    return std::nullopt;
+  }
+
+  f.seek(PAGE_COUNT_POS);
+  uint16_t count;
+  serialization::readPod(f, count);
+  if (page >= count) {
+    return std::nullopt;
+  }
+
+  f.seek(OFFSET_SLOT_VISIBLE_TEXT);
+  uint32_t visibleLutOffset;
+  serialization::readPod(f, visibleLutOffset);
+  const uint32_t entryOffset = visibleLutOffset + static_cast<uint32_t>(page) * sizeof(uint32_t);
+  if (visibleLutOffset < HEADER_SIZE || entryOffset + sizeof(uint32_t) > f.size()) {
+    return std::nullopt;
+  }
+
+  f.seek(entryOffset);
+  uint32_t result;
+  serialization::readPod(f, result);
+  return result;
+}
+
+std::optional<uint16_t> Section::getPageForVisibleTextOffset(const uint32_t offset,
+                                                             const bool preferFirstAtOffset) const {
+  FsFile f;
+  if (!Storage.openFileForRead("SCT", filePath, f) || f.size() < HEADER_SIZE) {
+    return std::nullopt;
+  }
+
+  uint8_t version;
+  serialization::readPod(f, version);
+  if (version != SECTION_FILE_VERSION) {
+    return std::nullopt;
+  }
+
+  f.seek(PAGE_COUNT_POS);
+  uint16_t count;
+  serialization::readPod(f, count);
+  if (count == 0) {
+    return std::nullopt;
+  }
+
+  f.seek(OFFSET_SLOT_VISIBLE_TEXT);
+  uint32_t visibleLutOffset;
+  serialization::readPod(f, visibleLutOffset);
+  if (visibleLutOffset < HEADER_SIZE || visibleLutOffset + static_cast<uint32_t>(count) * sizeof(uint32_t) > f.size()) {
+    return std::nullopt;
+  }
+
+  if (!f.seek(visibleLutOffset)) {
+    LOG_ERR("SCT", "Failed to seek visible-text LUT");
+    return std::nullopt;
+  }
+  // The last page starting at or before `offset` holds it. Read in batches: one SD read per
+  // 32 pages instead of one per page.
+  uint16_t result = 0;
+  constexpr uint32_t BATCH_PAGE_COUNT = 32;
+  uint32_t starts[BATCH_PAGE_COUNT];  // 128-byte stack buffer; offsets stay in file order for ties.
+  for (uint32_t base = 0; base < count; base += BATCH_PAGE_COUNT) {
+    const uint32_t batch = std::min<uint32_t>(BATCH_PAGE_COUNT, count - base);
+    const size_t bytes = batch * sizeof(uint32_t);
+    if (f.read(starts, bytes) != static_cast<int>(bytes)) {
+      LOG_ERR("SCT", "Failed to read visible-text LUT batch");
+      return std::nullopt;
+    }
+    for (uint32_t i = 0; i < batch; ++i) {
+      if (starts[i] > offset) return result;
+      result = static_cast<uint16_t>(base + i);
+      // Zero-width content (an image-only page) can give several pages the same start.
+      if (preferFirstAtOffset && starts[i] == offset) return result;
+    }
+  }
+  return result;
 }

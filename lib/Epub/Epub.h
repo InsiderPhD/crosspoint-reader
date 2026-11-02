@@ -89,6 +89,8 @@ class Epub {
   // ISBN-13 sidecar written on the metadata-build pass; absent when the book has
   // no valid ISBN or its cache predates the sidecar.
   std::string getIsbnPath() const;
+  // ASIN sidecar, same lifecycle as the ISBN one.
+  std::string getAsinPath() const;
   bool hasDescription() const;
   std::string getCoverBmpPath(bool cropped = false) const;
   bool generateCoverBmp(bool cropped = false) const;

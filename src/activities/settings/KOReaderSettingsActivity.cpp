@@ -20,17 +20,34 @@ enum Row : int {
   ROW_PASSWORD,
   ROW_SERVER_URL,
   ROW_SERVER_TYPE,
+  ROW_CUSTOM_HEADER_1,
+  ROW_CUSTOM_HEADER_2,
   ROW_DOCUMENT_MATCHING,
   ROW_SEND_METADATA,
   ROW_SYNC_CLIPPINGS,
+  ROW_SYNC_BEHAVIOR,
   ROW_SIGN_UP,
   ROW_AUTHENTICATE,
   MENU_ITEMS
 };
-constexpr StrId menuNames[MENU_ITEMS] = {
-    StrId::STR_USERNAME,           StrId::STR_PASSWORD,          StrId::STR_SYNC_SERVER_URL,
-    StrId::STR_KOSYNC_SERVER_TYPE, StrId::STR_DOCUMENT_MATCHING, StrId::STR_KOSYNC_SEND_METADATA,
-    StrId::STR_SYNC_CLIPPINGS,     StrId::STR_REGISTER,          StrId::STR_AUTHENTICATE};
+constexpr StrId menuNames[MENU_ITEMS] = {StrId::STR_USERNAME,          StrId::STR_PASSWORD,
+                                         StrId::STR_SYNC_SERVER_URL,   StrId::STR_KOSYNC_SERVER_TYPE,
+                                         StrId::STR_CUSTOM_HEADER_1,   StrId::STR_CUSTOM_HEADER_2,
+                                         StrId::STR_DOCUMENT_MATCHING, StrId::STR_KOSYNC_SEND_METADATA,
+                                         StrId::STR_SYNC_CLIPPINGS,    StrId::STR_SYNC_BEHAVIOR,
+                                         StrId::STR_REGISTER,          StrId::STR_AUTHENTICATE};
+
+const char* serverTypeLabel(const KOReaderServerType type) {
+  switch (type) {
+    case KOReaderServerType::CROSSPOINT:
+      return tr(STR_KOSYNC_TYPE_CROSSPOINT);
+    case KOReaderServerType::KOSYNC:
+      return tr(STR_KOSYNC_TYPE_STANDARD);
+    case KOReaderServerType::OTHER:
+      return tr(STR_KOSYNC_TYPE_EXTENDED);
+  }
+  return tr(STR_KOSYNC_TYPE_STANDARD);
+}
 }  // namespace
 
 void KOReaderSettingsActivity::onEnter() {
@@ -134,9 +151,32 @@ void KOReaderSettingsActivity::handleSelection() {
                              }
                            });
   } else if (selectedIndex == ROW_SERVER_TYPE) {
-    // Server Type - what the server accepts beyond standard KOSync
-    KOREADER_STORE.setServerType(KOREADER_STORE.supportsExtendedMetadata() ? KOReaderServerType::KOSYNC
-                                                                           : KOReaderServerType::OTHER);
+    // Server Type - what the server accepts beyond standard KOSync: CrossPoint -> Standard -> Extended
+    const auto next = static_cast<uint8_t>((static_cast<uint8_t>(KOREADER_STORE.getServerType()) + 1) %
+                                           (static_cast<uint8_t>(KOReaderServerType::OTHER) + 1));
+    KOREADER_STORE.setServerType(static_cast<KOReaderServerType>(next));
+    KOREADER_STORE.saveToFile();
+    requestUpdate();
+  } else if (selectedIndex == ROW_CUSTOM_HEADER_1 || selectedIndex == ROW_CUSTOM_HEADER_2) {
+    // Typed as "Name: Value"; an empty entry clears the slot.
+    const size_t slot = selectedIndex == ROW_CUSTOM_HEADER_1 ? 0 : 1;
+    const StrId label = selectedIndex == ROW_CUSTOM_HEADER_1 ? StrId::STR_CUSTOM_HEADER_1 : StrId::STR_CUSTOM_HEADER_2;
+    startActivityForResult(std::make_unique<KeyboardEntryActivity>(
+                               renderer, mappedInput, I18N.get(label),
+                               formatHttpHeaderLine(KOREADER_STORE.getCustomHeaders()[slot]), 256, InputType::Text),
+                           [slot](const ActivityResult& result) {
+                             if (result.isCancelled) return;
+                             HttpHeader header;
+                             parseHttpHeaderLine(std::get<KeyboardResult>(result.data).text, header);
+                             const HttpHeader& current = KOREADER_STORE.getCustomHeaders()[slot];
+                             if (header.name == current.name && header.value == current.value) return;
+                             KOREADER_STORE.setCustomHeader(slot, header.name, header.value);
+                             KOREADER_STORE.saveToFile();
+                           });
+  } else if (selectedIndex == ROW_SYNC_BEHAVIOR) {
+    KOREADER_STORE.setSyncBehavior(KOREADER_STORE.getSyncBehavior() == KOReaderSyncBehavior::SMART
+                                       ? KOReaderSyncBehavior::ASK_EVERY_TIME
+                                       : KOReaderSyncBehavior::SMART);
     KOREADER_STORE.saveToFile();
     requestUpdate();
   } else if (selectedIndex == ROW_SEND_METADATA) {
@@ -205,8 +245,17 @@ void KOReaderSettingsActivity::render(RenderLock&&) {
             return serverUrl.empty() ? std::string(tr(STR_DEFAULT_VALUE)) : serverUrl;
           }
           case ROW_SERVER_TYPE:
-            return std::string(KOREADER_STORE.supportsExtendedMetadata() ? tr(STR_KOSYNC_TYPE_EXTENDED)
-                                                                         : tr(STR_KOSYNC_TYPE_STANDARD));
+            return std::string(serverTypeLabel(KOREADER_STORE.getServerType()));
+          case ROW_CUSTOM_HEADER_1:
+          case ROW_CUSTOM_HEADER_2: {
+            const auto line = formatHttpHeaderLine(
+                KOREADER_STORE.getCustomHeaders()[index == ROW_CUSTOM_HEADER_1 ? 0 : 1], /*maskValue=*/true);
+            return line.empty() ? std::string(tr(STR_NOT_SET)) : line;
+          }
+          case ROW_SYNC_BEHAVIOR:
+            return std::string(KOREADER_STORE.getSyncBehavior() == KOReaderSyncBehavior::SMART
+                                   ? tr(STR_SMART_SYNC)
+                                   : tr(STR_ASK_EVERY_TIME));
           case ROW_SEND_METADATA:
             return std::string(KOREADER_STORE.getSendMetadata() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
           case ROW_DOCUMENT_MATCHING:

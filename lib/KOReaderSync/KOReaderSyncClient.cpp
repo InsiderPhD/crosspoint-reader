@@ -1,12 +1,14 @@
 #include "KOReaderSyncClient.h"
 
 #include <ArduinoJson.h>
+#include <BookFusionBookIdStore.h>
 #include <Epub.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <SecureHttpClient.h>
 #include <base64.h>
 
+#include <cctype>
 #include <cstdlib>
 #include <ctime>
 
@@ -56,6 +58,11 @@ bool beginRequest(freeink::SecureHttpClient& http, const std::string& url) {
     LOG_ERR("KOSync", "Bad URL: %s", url.c_str());
     return false;
   }
+  // Caller-configured headers (e.g. a Cloudflare Access service token) go
+  // first, so the KOSync auth scheme below always wins a name clash.
+  for (const auto& header : KOREADER_STORE.getCustomHeaders()) {
+    if (!header.name.empty()) http.addHeader(header.name, header.value);
+  }
   http.addHeader("Accept", "application/vnd.koreader.v1+json");
   http.addHeader("x-auth-user", KOREADER_STORE.getUsername());
   http.addHeader("x-auth-key", KOREADER_STORE.getMd5Password());
@@ -88,6 +95,18 @@ std::optional<KOReaderMetadata> KOReaderMetadata::fromBook(const Epub& epub) {
         meta.seriesIndex = value;
       }
     }
+    // ASIN sidecar, same lifecycle as the ISBN one below.
+    const std::string asinPath = epub.getAsinPath();
+    if (Storage.exists(asinPath.c_str())) {
+      const String asin = Storage.readFile(asinPath.c_str());
+      bool valid = asin.length() == 10;
+      for (unsigned int i = 0; valid && i < asin.length(); i++) {
+        valid = isalnum(static_cast<unsigned char>(asin[i])) != 0;
+      }
+      if (valid) {
+        meta.asin = asin.c_str();
+      }
+    }
     // ISBN-13 sidecar written when the book's metadata was cached; absent for a
     // book with no valid ISBN. Anything that is not 13 digits is not sent.
     const std::string isbnPath = epub.getIsbnPath();
@@ -100,6 +119,26 @@ std::optional<KOReaderMetadata> KOReaderMetadata::fromBook(const Epub& epub) {
       if (valid) {
         meta.isbn = isbn.c_str();
       }
+    }
+  }
+
+  // Service ids: the plugin sidecar a catalog download left next to the book
+  // (missing in the common case), plus our native BookFusion download id.
+  const std::string sidecarPath = path + ".meta.json";
+  if (Storage.exists(sidecarPath.c_str())) {
+    Storage.readFileToString("KOSync", sidecarPath, 2 * 1024, meta.extraJson);
+  }
+  const uint32_t bookFusionId = BookFusionBookIdStore::loadBookId(path.c_str());
+  if (bookFusionId != 0) {
+    JsonDocument extra;
+    if (meta.extraJson.empty() || deserializeJson(extra, meta.extraJson) != DeserializationError::Ok ||
+        !extra.is<JsonObject>()) {
+      extra.to<JsonObject>();
+    }
+    if (extra["bookfusion_id"].isNull()) {
+      extra["bookfusion_id"] = std::to_string(bookFusionId);
+      meta.extraJson.clear();
+      serializeJson(extra, meta.extraJson);
     }
   }
   return meta;
@@ -202,7 +241,8 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
 
   if (httpCode >= 200 && httpCode < 300) {
     JsonDocument doc;
-    const DeserializationError error = deserializeJson(doc, http.getString());
+    const auto body = http.getString();
+    const DeserializationError error = deserializeJson(doc, body.c_str());
     http.end();
 
     if (error) {
@@ -216,6 +256,25 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
     outProgress.device = doc["device"].as<std::string>();
     outProgress.deviceId = doc["device_id"].as<std::string>();
     outProgress.timestamp = doc["timestamp"].as<int64_t>();
+
+    outProgress.position.reset();
+    if (KOREADER_STORE.supportsRichProgress()) {
+      const JsonObjectConst pos = doc["position"].as<JsonObjectConst>();
+      if (!pos.isNull()) {
+        KOReaderRichPosition rich;
+        rich.pctQ = pos["pctQ"].as<uint32_t>();
+        rich.spineIndex = pos["spine"].as<uint16_t>();
+        rich.pageNumber = pos["page"].as<uint16_t>();
+        const uint16_t pages = pos["pages"].as<uint16_t>();
+        rich.totalPages = pages > 0 ? pages : 1;
+        const uint16_t para = pos["para"].as<uint16_t>();
+        if (para > 0) rich.paragraphIndex = para;
+        rich.xpath = pos["xpath"].as<const char*>() ? pos["xpath"].as<const char*>() : "";
+        LOG_DBG("KOSync", "Got rich position: spine=%u page=%u/%u para=%u", rich.spineIndex, rich.pageNumber,
+                rich.totalPages, para);
+        outProgress.position = std::move(rich);
+      }
+    }
 
     LOG_DBG("KOSync", "Got progress: %.2f%% at %s", outProgress.percentage * 100, outProgress.progress.c_str());
     return OK;
@@ -251,14 +310,38 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
     meta["authors"] = m.authors;
     if (KOREADER_STORE.supportsExtendedMetadata()) {
       if (!m.isbn.empty()) meta["isbn"] = m.isbn;
+      if (!m.asin.empty()) meta["asin"] = m.asin;
       if (!m.series.empty()) meta["series"] = m.series;
       if (m.seriesIndex.has_value()) meta["series_index"] = *m.seriesIndex;
+    }
+    JsonDocument extra;
+    if (!m.extraJson.empty() && deserializeJson(extra, m.extraJson) == DeserializationError::Ok) {
+      for (JsonPairConst kv : extra.as<JsonObjectConst>()) {
+        // Flat strings, numbers and booleans keep their JSON type; null and
+        // nested values are skipped, and the reserved keys above always win.
+        const JsonVariantConst value = kv.value();
+        if (!(value.is<const char*>() || value.is<bool>() || value.is<long long>() || value.is<double>())) continue;
+        if (!meta[kv.key().c_str()].isNull()) continue;
+        meta[kv.key().c_str()] = value;
+      }
     }
   }
   doc["progress"] = progress.progress;
   doc["percentage"] = progress.percentage;
   doc["device"] = DEVICE_NAME;
   doc["device_id"] = DEVICE_ID;
+  if (progress.position.has_value() && KOREADER_STORE.supportsRichProgress()) {
+    // Opt-in by server type; strict KOSync never receives it.
+    const KOReaderRichPosition& p = *progress.position;
+    auto pos = doc["position"].to<JsonObject>();
+    pos["pctQ"] = p.pctQ;
+    pos["spine"] = p.spineIndex;
+    pos["page"] = p.pageNumber;
+    pos["pages"] = p.totalPages;
+    if (p.paragraphIndex.has_value()) pos["para"] = *p.paragraphIndex;
+    // The server rejects the whole position object if xpath exceeds 120 bytes.
+    if (!p.xpath.empty() && p.xpath.size() <= 120) pos["xpath"] = p.xpath;
+  }
 
   std::string body;
   serializeJson(doc, body);

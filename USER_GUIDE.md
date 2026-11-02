@@ -545,7 +545,19 @@ curl -i "http://<server-ip>:17200/users/create" \
 
 **Document Matching** (KOReader Sync settings) chooses how books are matched across devices: **Filename** or **Binary** (content hash).
 
-**Send Book Details** (off by default) is the privacy switch for what a progress upload says about the book. Off, the server only ever sees the document hash and your position. On, the upload also carries the file name, title and author, which some self-hosted servers use to show a readable library. **Server Type** says what kind of server the URL points at: **Standard** for `sync.koreader.rocks`, `koreader/kosync` and anything else that speaks plain KOSync; **Extended** for a custom server that also wants the ISBN and the series name and number, which are then added when **Send Book Details** is on.
+**Send Book Details** (off by default) is the privacy switch for what a progress upload says about the book. Off, the server only ever sees the document hash and your position. On, the upload also carries the file name, title and author, which some self-hosted servers use to show a readable library. **Server Type** says what kind of server the URL points at:
+
+- **CrossPoint** (default for new setups on the default server) for `sync.crosspointreader.com` or a self-hosted crosspoint-sync. Uploads also carry the exact reading position (chapter, page and paragraph), which the CrossPoint Sync app and other CrossPoint devices use.
+- **Standard** for `sync.koreader.rocks`, `koreader/kosync` and anything else that speaks plain KOSync.
+- **Extended** for a custom server that takes the exact position and also wants the ISBN, ASIN and the series name and number, which are then added when **Send Book Details** is on.
+
+With **Send Book Details** on, a book downloaded from BookFusion (or by an SD plugin that leaves a `.meta.json` next to it) also sends its service id, so crosspoint-sync can pass your progress on to that service.
+
+**Sync Behavior** decides what **Sync** does once it has fetched the server's position. **Smart Sync** (default for new setups) handles the simple cases itself: no remote position, upload yours; the same position, say *Already synced*; one side further into the book, move the other to it. It only asks when it cannot tell. **Ask Every Time** always shows both positions and lets you choose. Settings saved before this option existed keep **Ask Every Time**.
+
+**Custom Header 1/2** add a header to every sync request, typed as `Name: Value` (for example a Cloudflare Access service token for a self-hosted server). Leave it empty to remove it.
+
+Positions are matched by the text on the page, not the page number, so two devices with different fonts or margins land on the same sentence. **Sync Clippings** sends the same text position with each highlight, so a highlight made on another device opens at the right page here.
 
 ---
 

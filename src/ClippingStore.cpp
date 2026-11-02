@@ -15,19 +15,21 @@
 namespace {
 // v2 appended bookFusionId after each record's timestamp; v3 follows it with
 // the BookFusion start/end offsets and flags; v4 then adds the clipping-sync
-// fields (flags byte, server revision, id string). Older files still load
-// (missing fields take their defaults, so every old clip is pending upload) and
-// are rewritten as v4 on the next save.
-constexpr uint8_t VERSION = 4;
+// fields (flags byte, server revision, id string); v5 adds the content offsets
+// after the id. Older files still load (missing fields take their defaults, so
+// every old clip is pending upload) and are rewritten as v5 on the next save.
+constexpr uint8_t VERSION = 5;
 constexpr uint8_t VERSION_V1 = 1;
 constexpr uint8_t VERSION_V2 = 2;
 constexpr uint8_t VERSION_V3 = 3;
+constexpr uint8_t VERSION_V4 = 4;
 
 bool isReadableVersion(const uint8_t version) { return version >= VERSION_V1 && version <= VERSION; }
 
 // v4 record flags byte
 constexpr uint8_t SYNC_PENDING_UPLOAD = 0x01;
 constexpr uint8_t SYNC_FOREIGN_ANCHOR = 0x02;
+constexpr uint8_t SYNC_OFFSETS_RESOLVED = 0x04;  // v5
 
 // Ids of synced clips deleted on this device, queued until the server has been
 // told. Fixed-size records, so a torn append is detectable and trimmed.
@@ -221,6 +223,20 @@ bool ClippingStore::setBookFusionOffsets(const size_t index, const bool found, c
   return true;
 }
 
+bool ClippingStore::setContentOffsets(const size_t index, const bool found, const uint32_t start, const uint32_t end) {
+  if (index >= clippings.size()) return false;
+  Clipping& clipping = clippings[index];
+  clipping.offsetsResolved = true;
+  if (found) {
+    clipping.startOffset = start;
+    clipping.endOffset = end;
+    // Already on the server without them: send it again so other devices get the anchor.
+    if (clipping.syncRevision != 0 && !clipping.foreignAnchor) clipping.pendingUpload = true;
+  }
+  dirty = true;
+  return true;
+}
+
 bool ClippingStore::setBookFusionPushed(const size_t index, const uint32_t id, const bool withOffsets) {
   if (index >= clippings.size()) return false;
   Clipping& clipping = clippings[index];
@@ -329,6 +345,12 @@ bool ClippingStore::applyRemote(const Clipping& remote, const bool deleted) {
     merged.bookFusionStart = previous.bookFusionStart;
     merged.bookFusionEnd = previous.bookFusionEnd;
     merged.bookFusionFlags = previous.bookFusionFlags;
+    // An offset lookup this device already ran still holds for the same text.
+    if (merged.startOffset == UINT32_MAX && previous.offsetsResolved && previous.text == merged.text) {
+      merged.startOffset = previous.startOffset;
+      merged.endOffset = previous.endOffset;
+      merged.offsetsResolved = true;
+    }
     clippings[index] = std::move(merged);
   }
   dirty = true;
@@ -413,7 +435,7 @@ bool ClippingStore::readFromFile(const std::string& path, std::vector<Clipping>&
       LOG_ERR("CLIP", "Clipping file truncated at record %u: %s", i, path.c_str());
       return false;
     }
-    if (version >= VERSION) {
+    if (version >= VERSION_V4) {
       uint8_t syncFlags = 0;
       std::string id;
       if (!serialization::tryReadPod(f, syncFlags) || !serialization::tryReadPod(f, clipping.syncRevision) ||
@@ -424,7 +446,14 @@ bool ClippingStore::readFromFile(const std::string& path, std::vector<Clipping>&
       }
       clipping.pendingUpload = (syncFlags & SYNC_PENDING_UPLOAD) != 0;
       clipping.foreignAnchor = (syncFlags & SYNC_FOREIGN_ANCHOR) != 0;
+      clipping.offsetsResolved = (syncFlags & SYNC_OFFSETS_RESOLVED) != 0;
       copyBounded(clipping.id, sizeof(clipping.id), id.c_str());
+    }
+    if (version >= VERSION &&
+        (!serialization::tryReadPod(f, clipping.startOffset) || !serialization::tryReadPod(f, clipping.endOffset))) {
+      f.close();
+      LOG_ERR("CLIP", "Clipping file truncated at offsets, record %u: %s", i, path.c_str());
+      return false;
     }
     if (f.read(reinterpret_cast<uint8_t*>(clipping.chapterTitle), sizeof(clipping.chapterTitle)) !=
         sizeof(clipping.chapterTitle)) {
@@ -479,9 +508,11 @@ bool ClippingStore::writeToFile() const {
         !serialization::tryWritePod(f, clipping.bookFusionEnd) ||
         !serialization::tryWritePod(f, clipping.bookFusionFlags) ||
         !serialization::tryWritePod(f, static_cast<uint8_t>((clipping.pendingUpload ? SYNC_PENDING_UPLOAD : 0) |
-                                                            (clipping.foreignAnchor ? SYNC_FOREIGN_ANCHOR : 0))) ||
+                                                            (clipping.foreignAnchor ? SYNC_FOREIGN_ANCHOR : 0) |
+                                                            (clipping.offsetsResolved ? SYNC_OFFSETS_RESOLVED : 0))) ||
         !serialization::tryWritePod(f, clipping.syncRevision) ||
         !serialization::tryWriteString(f, std::string(clipping.id)) ||
+        !serialization::tryWritePod(f, clipping.startOffset) || !serialization::tryWritePod(f, clipping.endOffset) ||
         f.write(reinterpret_cast<const uint8_t*>(clipping.chapterTitle), sizeof(clipping.chapterTitle)) !=
             sizeof(clipping.chapterTitle) ||
         !serialization::tryWriteString(f, clipping.text)) {

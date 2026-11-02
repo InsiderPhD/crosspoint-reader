@@ -204,7 +204,7 @@ File uploaded successfully: mybook.epub
 | 400    | `Unknown error during upload`                   | Unspecified error           |
 
 **Notes:**
-- Existing files with the same name will be overwritten
+- An existing file with the same name is replaced. The upload is written to `<name>.part` and replaces the file only once it is complete, so a failed upload keeps the old file (the card needs room for both while it runs). A folder with the name fails with `400`. The `overwrite` query parameter is accepted for upstream compatibility and changes nothing.
 - Uses a 4KB buffer for efficient SD card writes
 
 ---

@@ -142,11 +142,11 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
 #endif
   v.insert(v.end(),
            {
-               SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
-                                 {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER,
-                                  StrId::STR_NONE_OPT, StrId::STR_COVER_CUSTOM, StrId::STR_PAGE_OVERLAY,
-                                  StrId::STR_SLEEP_THEME_MODE},
-                                 "sleepScreen", StrId::STR_CAT_DISPLAY),
+               SettingInfo::Enum(
+                   StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
+                   {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER, StrId::STR_NONE_OPT,
+                    StrId::STR_COVER_CUSTOM, StrId::STR_PAGE_OVERLAY, StrId::STR_SLEEP_THEME_MODE},
+                   "sleepScreen", StrId::STR_CAT_DISPLAY),
                // Theme folder for the Theme sleep screen; the web UI's Sleep Themes page sets it.
                SettingInfo::String(StrId::STR_SLEEP_THEME, SETTINGS.sleepTheme, sizeof(SETTINGS.sleepTheme),
                                    "sleepTheme", StrId::STR_CAT_DISPLAY),
@@ -412,58 +412,99 @@ inline void appendSystemSettings(std::vector<SettingInfo>& v) {
 }
 
 // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
+// One custom header slot as two web fields. Saves only on a real change.
+inline SettingInfo koCustomHeaderName(const size_t slot, const StrId label, const char* key) {
+  return SettingInfo::DynamicString(
+      label, [slot] { return KOREADER_STORE.getCustomHeaders()[slot].name; },
+      [slot](const std::string& val) {
+        const HttpHeader& current = KOREADER_STORE.getCustomHeaders()[slot];
+        if (val == current.name) return;
+        KOREADER_STORE.setCustomHeader(slot, val, current.value);
+        KOREADER_STORE.saveToFile();
+      },
+      key, StrId::STR_KOREADER_SYNC);
+}
+inline SettingInfo koCustomHeaderValue(const size_t slot, const StrId label, const char* key) {
+  return SettingInfo::DynamicString(
+      label, [slot] { return KOREADER_STORE.getCustomHeaders()[slot].value; },
+      [slot](const std::string& val) {
+        const HttpHeader& current = KOREADER_STORE.getCustomHeaders()[slot];
+        if (val == current.value) return;
+        KOREADER_STORE.setCustomHeader(slot, current.name, val);
+        KOREADER_STORE.saveToFile();
+      },
+      key, StrId::STR_KOREADER_SYNC);
+}
+
 inline void appendKoReaderSettings(std::vector<SettingInfo>& v) {
-  v.insert(v.end(),
-           {
-               SettingInfo::DynamicString(
-                   StrId::STR_KOREADER_USERNAME, [] { return KOREADER_STORE.getUsername(); },
-                   [](const std::string& val) {
-                     KOREADER_STORE.setCredentials(val, KOREADER_STORE.getPassword());
-                     KOREADER_STORE.saveToFile();
-                   },
-                   "koUsername", StrId::STR_KOREADER_SYNC),
-               SettingInfo::DynamicString(
-                   StrId::STR_KOREADER_PASSWORD, [] { return KOREADER_STORE.getPassword(); },
-                   [](const std::string& val) {
-                     KOREADER_STORE.setCredentials(KOREADER_STORE.getUsername(), val);
-                     KOREADER_STORE.saveToFile();
-                   },
-                   "koPassword", StrId::STR_KOREADER_SYNC),
-               SettingInfo::DynamicString(
-                   StrId::STR_SYNC_SERVER_URL, [] { return KOREADER_STORE.getServerUrl(); },
-                   [](const std::string& val) {
-                     KOREADER_STORE.setServerUrl(val);
-                     KOREADER_STORE.saveToFile();
-                   },
-                   "koServerUrl", StrId::STR_KOREADER_SYNC),
-               SettingInfo::DynamicEnum(
-                   StrId::STR_DOCUMENT_MATCHING, {StrId::STR_FILENAME, StrId::STR_BINARY},
-                   [] { return static_cast<uint8_t>(KOREADER_STORE.getMatchMethod()); },
-                   [](uint8_t val) {
-                     KOREADER_STORE.setMatchMethod(static_cast<DocumentMatchMethod>(val));
-                     KOREADER_STORE.saveToFile();
-                   },
-                   "koMatchMethod", StrId::STR_KOREADER_SYNC),
-               SettingInfo::DynamicEnum(
-                   StrId::STR_KOSYNC_SERVER_TYPE, {StrId::STR_KOSYNC_TYPE_STANDARD, StrId::STR_KOSYNC_TYPE_EXTENDED},
-                   [] { return static_cast<uint8_t>(KOREADER_STORE.supportsExtendedMetadata() ? 1 : 0); },
-                   [](uint8_t val) {
-                     const auto type = val == 1 ? KOReaderServerType::OTHER : KOReaderServerType::KOSYNC;
-                     if (type == KOREADER_STORE.getServerType()) return;
-                     KOREADER_STORE.setServerType(type);
-                     KOREADER_STORE.saveToFile();
-                   },
-                   "koServerType", StrId::STR_KOREADER_SYNC),
-               SettingInfo::DynamicEnum(
-                   StrId::STR_KOSYNC_SEND_METADATA, {StrId::STR_STATE_OFF, StrId::STR_STATE_ON},
-                   [] { return static_cast<uint8_t>(KOREADER_STORE.getSendMetadata() ? 1 : 0); },
-                   [](uint8_t val) {
-                     if ((val != 0) == KOREADER_STORE.getSendMetadata()) return;
-                     KOREADER_STORE.setSendMetadata(val != 0);
-                     KOREADER_STORE.saveToFile();
-                   },
-                   "koSendMetadata", StrId::STR_KOREADER_SYNC),
-           });
+  v.insert(
+      v.end(),
+      {
+          SettingInfo::DynamicString(
+              StrId::STR_KOREADER_USERNAME, [] { return KOREADER_STORE.getUsername(); },
+              [](const std::string& val) {
+                KOREADER_STORE.setCredentials(val, KOREADER_STORE.getPassword());
+                KOREADER_STORE.saveToFile();
+              },
+              "koUsername", StrId::STR_KOREADER_SYNC),
+          SettingInfo::DynamicString(
+              StrId::STR_KOREADER_PASSWORD, [] { return KOREADER_STORE.getPassword(); },
+              [](const std::string& val) {
+                KOREADER_STORE.setCredentials(KOREADER_STORE.getUsername(), val);
+                KOREADER_STORE.saveToFile();
+              },
+              "koPassword", StrId::STR_KOREADER_SYNC),
+          SettingInfo::DynamicString(
+              StrId::STR_SYNC_SERVER_URL, [] { return KOREADER_STORE.getServerUrl(); },
+              [](const std::string& val) {
+                KOREADER_STORE.setServerUrl(val);
+                KOREADER_STORE.saveToFile();
+              },
+              "koServerUrl", StrId::STR_KOREADER_SYNC),
+          SettingInfo::DynamicEnum(
+              StrId::STR_DOCUMENT_MATCHING, {StrId::STR_FILENAME, StrId::STR_BINARY},
+              [] { return static_cast<uint8_t>(KOREADER_STORE.getMatchMethod()); },
+              [](uint8_t val) {
+                KOREADER_STORE.setMatchMethod(static_cast<DocumentMatchMethod>(val));
+                KOREADER_STORE.saveToFile();
+              },
+              "koMatchMethod", StrId::STR_KOREADER_SYNC),
+          // Option order is the enum's (CrossPoint, Standard KOSync, Extended).
+          SettingInfo::DynamicEnum(
+              StrId::STR_KOSYNC_SERVER_TYPE,
+              {StrId::STR_KOSYNC_TYPE_CROSSPOINT, StrId::STR_KOSYNC_TYPE_STANDARD, StrId::STR_KOSYNC_TYPE_EXTENDED},
+              [] { return static_cast<uint8_t>(KOREADER_STORE.getServerType()); },
+              [](uint8_t val) {
+                const auto type = static_cast<KOReaderServerType>(val);
+                if (type == KOREADER_STORE.getServerType()) return;
+                KOREADER_STORE.setServerType(type);
+                KOREADER_STORE.saveToFile();
+              },
+              "koServerType", StrId::STR_KOREADER_SYNC),
+          SettingInfo::DynamicEnum(
+              StrId::STR_SYNC_BEHAVIOR, {StrId::STR_ASK_EVERY_TIME, StrId::STR_SMART_SYNC},
+              [] { return static_cast<uint8_t>(KOREADER_STORE.getSyncBehavior()); },
+              [](uint8_t val) {
+                const auto behavior = static_cast<KOReaderSyncBehavior>(val);
+                if (behavior == KOREADER_STORE.getSyncBehavior()) return;
+                KOREADER_STORE.setSyncBehavior(behavior);
+                KOREADER_STORE.saveToFile();
+              },
+              "koSyncBehavior", StrId::STR_KOREADER_SYNC),
+          koCustomHeaderName(0, StrId::STR_KOREADER_CUSTOM_HEADER_1_NAME, "koCustomHeader1Name"),
+          koCustomHeaderValue(0, StrId::STR_KOREADER_CUSTOM_HEADER_1_VALUE, "koCustomHeader1Value"),
+          koCustomHeaderName(1, StrId::STR_KOREADER_CUSTOM_HEADER_2_NAME, "koCustomHeader2Name"),
+          koCustomHeaderValue(1, StrId::STR_KOREADER_CUSTOM_HEADER_2_VALUE, "koCustomHeader2Value"),
+          SettingInfo::DynamicEnum(
+              StrId::STR_KOSYNC_SEND_METADATA, {StrId::STR_STATE_OFF, StrId::STR_STATE_ON},
+              [] { return static_cast<uint8_t>(KOREADER_STORE.getSendMetadata() ? 1 : 0); },
+              [](uint8_t val) {
+                if ((val != 0) == KOREADER_STORE.getSendMetadata()) return;
+                KOREADER_STORE.setSendMetadata(val != 0);
+                KOREADER_STORE.saveToFile();
+              },
+              "koSendMetadata", StrId::STR_KOREADER_SYNC),
+      });
 }
 
 // --- Hardcover (web-only, uses HardcoverTokenStore) ---
@@ -635,7 +676,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 97;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 102;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

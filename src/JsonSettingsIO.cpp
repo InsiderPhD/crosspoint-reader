@@ -559,7 +559,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
 
 namespace {
 // v2: an empty serverUrl means the CrossPoint server, not sync.koreader.rocks.
-constexpr uint8_t KOREADER_CONFIG_VERSION = 2;
+// v3: the CrossPoint server type exists (v2 files could only say Standard/Extended).
+constexpr uint8_t KOREADER_CONFIG_VERSION = 3;
 }  // namespace
 
 bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const char* path) {
@@ -571,6 +572,14 @@ bool JsonSettingsIO::saveKOReader(const KOReaderCredentialStore& store, const ch
   doc["matchMethod"] = static_cast<uint8_t>(store.getMatchMethod());
   doc["sendMetadata"] = store.getSendMetadata();
   doc["syncClippings"] = store.getSyncClippings();
+  doc["syncBehavior"] = static_cast<uint8_t>(store.getSyncBehavior());
+  JsonArray headers = doc["customHeaders"].to<JsonArray>();
+  for (const auto& header : store.getCustomHeaders()) {
+    if (header.name.empty()) continue;
+    JsonObject obj = headers.add<JsonObject>();
+    obj["name"] = header.name;
+    obj["value_obf"] = obfuscation::obfuscateToBase64(header.value);
+  }
   doc["configVersion"] = KOREADER_CONFIG_VERSION;
 
   String json;
@@ -598,22 +607,48 @@ bool JsonSettingsIO::loadKOReader(KOReaderCredentialStore& store, const char* js
   // Before v2 an empty serverUrl meant sync.koreader.rocks; the default is now
   // the CrossPoint server. Pin the old URL so an existing account keeps working.
   const uint8_t configVersion = doc["configVersion"] | static_cast<uint8_t>(1);
-  if (configVersion < KOREADER_CONFIG_VERSION) {
+  if (configVersion < 2) {
     // No account yet means nothing to strand: let it take the new default.
     if (store.serverUrl.empty() && !store.username.empty()) {
       store.serverUrl = KOReaderCredentialStore::legacyDefaultServerUrl();
       LOG_DBG("KRS", "Pre-v2 config used the old default server; pinning %s", store.serverUrl.c_str());
     }
-    if (needsResave) *needsResave = true;
   }
-  // Absent (older file) or a type this firmware does not implement: standard KOSync.
-  const uint8_t type = doc["serverType"] | static_cast<uint8_t>(KOReaderServerType::KOSYNC);
-  store.serverType =
-      type == static_cast<uint8_t>(KOReaderServerType::OTHER) ? KOReaderServerType::OTHER : KOReaderServerType::KOSYNC;
+  if (configVersion < KOREADER_CONFIG_VERSION && needsResave) *needsResave = true;
+  // Absent: the CrossPoint type for the CrossPoint server, standard KOSync for
+  // anything else (as upstream). A v2 file could not say CrossPoint, so its
+  // Standard on the CrossPoint server becomes CrossPoint (the server takes both).
+  const JsonVariantConst typeValue = doc["serverType"];
+  const KOReaderServerType urlType =
+      store.usesDefaultServer() ? KOReaderServerType::CROSSPOINT : KOReaderServerType::KOSYNC;
+  if (typeValue.isNull()) {
+    store.serverType = urlType;
+    if (needsResave) *needsResave = true;
+  } else {
+    const uint8_t type = typeValue.as<uint8_t>();
+    store.serverType = type <= static_cast<uint8_t>(KOReaderServerType::OTHER) ? static_cast<KOReaderServerType>(type)
+                                                                               : KOReaderServerType::KOSYNC;
+    if (configVersion < 3 && store.serverType == KOReaderServerType::KOSYNC) store.serverType = urlType;
+  }
   uint8_t method = doc["matchMethod"] | (uint8_t)0;
   store.matchMethod = static_cast<DocumentMatchMethod>(method);
   store.sendMetadata = doc["sendMetadata"] | false;
   store.syncClippings = doc["syncClippings"] | false;
+  // A file from before the setting keeps asking every time; new setups get Smart.
+  const JsonVariantConst behaviorValue = doc["syncBehavior"];
+  const uint8_t behavior = behaviorValue | static_cast<uint8_t>(KOReaderSyncBehavior::ASK_EVERY_TIME);
+  store.syncBehavior = behavior <= static_cast<uint8_t>(KOReaderSyncBehavior::SMART)
+                           ? static_cast<KOReaderSyncBehavior>(behavior)
+                           : KOReaderSyncBehavior::ASK_EVERY_TIME;
+  if (behaviorValue.isNull() && needsResave) *needsResave = true;
+  for (auto& header : store.customHeaders) header = HttpHeader{};
+  size_t headerIndex = 0;
+  for (JsonObjectConst headerObj : doc["customHeaders"].as<JsonArrayConst>()) {
+    if (headerIndex >= store.customHeaders.size()) break;
+    store.customHeaders[headerIndex].name = headerObj["name"] | "";
+    store.customHeaders[headerIndex].value = obfuscation::deobfuscateFromBase64(headerObj["value_obf"] | "");
+    headerIndex++;
+  }
 
   LOG_DBG("KRS", "Loaded KOReader credentials for user: %s", store.username.c_str());
   return true;

@@ -135,6 +135,40 @@ std::string isbn13FromIdentifier(const std::string& raw) {
   }
   return {};
 }
+
+// Scheme attribute values that mean an Amazon id: "ASIN", "MOBI-ASIN", "AMAZON".
+bool schemeNamesAsin(const char* scheme) {
+  if (strcasecmp(scheme, "AMAZON") == 0) return true;
+  for (const char* p = scheme; *p; p++) {
+    if (strncasecmp(p, "ASIN", 4) == 0) return true;
+  }
+  return false;
+}
+
+// ASIN for a <dc:identifier>, or "" when it isn't one. Only trusted when the
+// scheme attribute or a "urn:asin:" / "asin:" prefix says so: a bare
+// 10-character id could be anything. An ASIN is 10 ASCII letters/digits.
+std::string asinFromIdentifier(const std::string& raw, const bool schemeSaysAsin) {
+  size_t start = 0;
+  while (start < raw.size() && isspace(static_cast<unsigned char>(raw[start]))) start++;
+  std::string text = raw.substr(start);
+  while (!text.empty() && isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
+  bool prefixed = false;
+  if (startsWithIgnoreCase(text, "urn:asin:")) {
+    text.erase(0, 9);
+    prefixed = true;
+  } else if (startsWithIgnoreCase(text, "asin:")) {
+    text.erase(0, 5);
+    prefixed = true;
+  }
+  if (!prefixed && !schemeSaysAsin) return "";
+  if (text.size() != 10) return "";
+  for (char& c : text) {
+    if (!isalnum(static_cast<unsigned char>(c))) return "";
+    c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
+  }
+  return text;
+}
 }  // namespace
 
 bool ContentOpfParser::setup() {
@@ -282,14 +316,18 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
 
   if (self->state == IN_METADATA && strcmp(name, "dc:identifier") == 0) {
     // Books carry several identifiers (UUID, ASIN, Calibre id); keep scanning
-    // until one is an ISBN, then ignore the rest.
-    if (self->isbn.empty()) {
+    // until one is an ISBN and one is an ASIN, then ignore the rest.
+    if (self->isbn.empty() || self->asin.empty()) {
       self->identifierText.clear();
       self->identifierSchemeIsbn = false;
+      self->identifierSchemeAsin = false;
       for (int i = 0; atts[i]; i += 2) {
-        if ((strcmp(atts[i], "opf:scheme") == 0 || strcmp(atts[i], "scheme") == 0) &&
-            strcasecmp(atts[i + 1], "ISBN") == 0) {
-          self->identifierSchemeIsbn = true;
+        if (strcmp(atts[i], "opf:scheme") == 0 || strcmp(atts[i], "scheme") == 0) {
+          if (strcasecmp(atts[i + 1], "ISBN") == 0) {
+            self->identifierSchemeIsbn = true;
+          } else if (schemeNamesAsin(atts[i + 1])) {
+            self->identifierSchemeAsin = true;
+          }
         }
       }
       self->state = IN_BOOK_IDENTIFIER;
@@ -650,8 +688,16 @@ void XMLCALL ContentOpfParser::endElement(void* userData, const XML_Char* name) 
   if (self->state == IN_BOOK_IDENTIFIER && strcmp(name, "dc:identifier") == 0) {
     std::string isbn13 = isbn13FromIdentifier(self->identifierText);
     if (!isbn13.empty()) {
-      LOG_DBG("COF", "ISBN %s (scheme attr: %d)", isbn13.c_str(), self->identifierSchemeIsbn ? 1 : 0);
-      self->isbn = std::move(isbn13);
+      if (self->isbn.empty()) {
+        LOG_DBG("COF", "ISBN %s (scheme attr: %d)", isbn13.c_str(), self->identifierSchemeIsbn ? 1 : 0);
+        self->isbn = std::move(isbn13);
+      }
+    } else if (self->asin.empty()) {
+      std::string asin = asinFromIdentifier(self->identifierText, self->identifierSchemeAsin);
+      if (!asin.empty()) {
+        LOG_DBG("COF", "ASIN %s", asin.c_str());
+        self->asin = std::move(asin);
+      }
     }
     self->identifierText.clear();
     self->identifierText.shrink_to_fit();

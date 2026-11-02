@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "BookmarkEntry.h"
+#include "CrossPointPosition.h"
 #include "CrossPointSettings.h"
 #include "EpubReaderMenuActivity.h"
 #include "ReaderActivity.h"
@@ -301,6 +302,9 @@ class EpubReaderActivity final : public Activity {
   void armHeldButtons();
   void performLongPressSync();
   void performKOReaderQuickSync();
+  // Position handed to KOReader sync: the page plus the paragraph and content
+  // offset the open section knows for it.
+  CrossPointPosition koSyncLocalPosition(int currentPage, int totalPages) const;
   void performBookFusionSync();
   void connectWifiForSyncWithPopup(std::function<void()> onSuccess, const char* syncTitle = "BookFusion Sync");
 

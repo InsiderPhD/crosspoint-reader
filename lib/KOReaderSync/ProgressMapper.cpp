@@ -1,5 +1,6 @@
 #include "ProgressMapper.h"
 
+#include <GfxRenderer.h>
 #include <Logging.h>
 
 #include <algorithm>
@@ -7,7 +8,9 @@
 #include <cstring>
 
 #include "ChapterXPathResolver.h"
+#include "Epub/Section.h"
 #include "Epub/SpineSizeLookup.h"
+#include "Epub/VisibleTextUtils.h"
 #include "Epub/htmlEntities.h"
 #include "Utf8.h"
 
@@ -29,8 +32,7 @@ int parseIndex(const std::string& xpath, const char* prefix, bool last = false) 
 
 int parseCharOffset(const std::string& xpath) {
   const size_t textPos = xpath.rfind("text()");
-  if (textPos == std::string::npos) return 0;
-  const size_t dotPos = xpath.find('.', textPos);
+  const size_t dotPos = (textPos != std::string::npos) ? xpath.find('.', textPos) : xpath.rfind('.');
   if (dotPos == std::string::npos || dotPos + 1 >= xpath.size()) return 0;
   int val = 0;
   for (size_t i = dotPos + 1; i < xpath.size(); i++) {
@@ -103,25 +105,43 @@ bool isChapterStartXPath(const std::string& xpath) {
   if (dotPos == std::string::npos || dotPos <= bodyContentStart || dotPos + 1 >= xpath.size()) {
     return false;
   }
-  if (xpath.find('/', bodyContentStart) != std::string::npos) {
+  size_t terminalEnd = dotPos;
+  static constexpr char kTextNode[] = "/text()";
+  const size_t textNodePos = xpath.rfind(kTextNode, dotPos);
+  if (textNodePos != std::string::npos && textNodePos >= bodyContentStart) {
+    terminalEnd = textNodePos;
+  }
+  if (xpath.find('/', bodyContentStart) < terminalEnd) {
     return false;
   }
 
   for (size_t i = dotPos + 1; i < xpath.size(); i++) {
     if (xpath[i] != '0') return false;
   }
-  return true;
+  return parseTextNodeIndex(xpath) <= 1;
+}
+
+bool isBodyTextXPath(const std::string& xpath) {
+  static constexpr char kBodyFrag[] = "/body/DocFragment[";
+  const size_t fragPos = xpath.find(kBodyFrag);
+  if (fragPos == std::string::npos) return false;
+  const size_t afterBracket = xpath.find(']', fragPos + strlen(kBodyFrag));
+  if (afterBracket == std::string::npos) return false;
+  static constexpr char kBody[] = "/body/";
+  if (xpath.compare(afterBracket + 1, strlen(kBody), kBody) != 0) return false;
+  const size_t contentPos = afterBracket + 1 + strlen(kBody);
+  return xpath.compare(contentPos, strlen("text()"), "text()") == 0;
 }
 
 // Parsed representation of one step in the XPath ancestry.
 struct XPathStep {
   char tag[12];      // element name, null-terminated
-  int siblingIndex;  // 1-based sibling index, or 0 if unspecified (treat as 1)
+  int siblingIndex;  // 1-based sibling index, or 0 if unspecified (match any)
 };
 
 static constexpr int MAX_XPATH_DEPTH = 16;
 
-// Parse the XPath segment between /body/DocFragment[N]/body/ and text()[N].offset
+// Parse the XPath segment between /body/DocFragment[N]/body/ and the terminal position
 // into an ordered sequence of steps. Returns step count, 0 on failure.
 // Example input: "/body/DocFragment[1]/body/div[1]/ul/li[4]/text()[1].51"
 // Fills steps with: {div,1}, {ul,1}, {li,4}
@@ -135,13 +155,20 @@ int parseXPathSteps(const std::string& xpath, XPathStep steps[MAX_XPATH_DEPTH]) 
   if (xpath.compare(afterBracket + 1, strlen(kBody), kBody) != 0) return 0;
   size_t pos = afterBracket + 1 + strlen(kBody);
 
-  const size_t textPos = xpath.rfind("/text()");
-  if (textPos == std::string::npos || textPos <= pos) return 0;
+  size_t stepsEnd = xpath.rfind("/text()");
+  if (stepsEnd == std::string::npos) {
+    stepsEnd = xpath.rfind('.');
+    if (stepsEnd == std::string::npos || stepsEnd <= pos || stepsEnd + 1 >= xpath.size()) return 0;
+    for (size_t i = stepsEnd + 1; i < xpath.size(); i++) {
+      if (xpath[i] < '0' || xpath[i] > '9') return 0;
+    }
+  }
+  if (stepsEnd <= pos) return 0;
 
   int count = 0;
-  while (pos < textPos && count < MAX_XPATH_DEPTH) {
+  while (pos < stepsEnd && count < MAX_XPATH_DEPTH) {
     const size_t slash = xpath.find('/', pos);
-    const size_t segEnd = (slash < textPos) ? slash : textPos;
+    const size_t segEnd = (slash < stepsEnd) ? slash : stepsEnd;
 
     XPathStep& step = steps[count];
     const size_t bracket = xpath.find('[', pos);
@@ -161,11 +188,11 @@ int parseXPathSteps(const std::string& xpath, XPathStep steps[MAX_XPATH_DEPTH]) 
       }
       step.siblingIndex = idx;
     } else {
-      step.siblingIndex = 1;
+      step.siblingIndex = 0;
     }
 
     count++;
-    pos = (slash < textPos) ? slash + 1 : textPos;
+    pos = (slash < stepsEnd) ? slash + 1 : stepsEnd;
   }
   return count;
 }
@@ -177,6 +204,7 @@ class ParagraphStreamer final : public Print {
   static constexpr size_t MAX_ENTITY_SIZE = 16;
   char entityBuffer[MAX_ENTITY_SIZE] = {};
   size_t entityLen = 0;
+  bool prevCR = false;  // last counted visible byte was a CR (XML line-ending normalization)
 
   // Forward mode: count <p> paragraphs at a byte offset (legacy, used by generateXPath)
   size_t fwdTarget;
@@ -207,7 +235,9 @@ class ParagraphStreamer final : public Print {
   int siblingCounters[MAX_XPATH_DEPTH] = {};
   bool insideStep[MAX_XPATH_DEPTH] = {};
   int htmlDepth = 0;
+  int bodyHtmlDepth = -1;
   int stepEnteredAtDepth[MAX_XPATH_DEPTH] = {};
+  bool relaxFirstStepDepth = false;
 
   // Tag name accumulation
   enum TagParseState { TAG_IDLE, TAG_IN_NAME, TAG_ATTRS } tagState = TAG_IDLE;
@@ -222,18 +252,158 @@ class ParagraphStreamer final : public Print {
   char capturedAnchorId[MAX_ANCHOR_ID] = {};
   int capturedAnchorIdLen = 0;
   bool capturingAnchorTag = false;
-  enum IdScanState { ID_SCAN, ID_I, ID_D, ID_EQ, ID_IN_VALUE_D, ID_IN_VALUE_S } idState = ID_SCAN;
+  enum AnchorAttrState {
+    ATTR_FIND_NAME,
+    ATTR_READ_NAME,
+    ATTR_AFTER_NAME,
+    ATTR_BEFORE_VALUE,
+    ATTR_CAPTURE_D,
+    ATTR_CAPTURE_S
+  } attrState = ATTR_FIND_NAME;
+  uint8_t attrNameLen = 0;
+  bool currentAttrIsId = false;
   bool inAttrQuote =
       false;  // true while inside a quoted attribute value (prevents '/' from being treated as self-close)
   char attrQuoteChar = 0;
+  uint8_t nonVisibleDepth = 0;
+  bool insideBody = false;
+  bool targetBodyText = false;
+
+  bool isNonVisibleTag() const { return VisibleTextUtils::isNonVisibleElement(tagName); }
+
+  static bool isAttrWhitespace(uint8_t c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+  static bool isAttrNameChar(uint8_t c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' ||
+           c == ':' || c == '.';
+  }
+
+  void resetAnchorAttrScan() {
+    attrState = ATTR_FIND_NAME;
+    attrNameLen = 0;
+    currentAttrIsId = false;
+  }
+
+  void finishCapturedAnchorId() {
+    capturedAnchorId[capturedAnchorIdLen] = '\0';
+    capturingAnchorTag = false;
+    resetAnchorAttrScan();
+  }
+
+  void beginAnchorIdScan() {
+    capturingAnchorTag = true;
+    resetAnchorAttrScan();
+  }
+
+  void endAnchorIdScan() {
+    if (capturingAnchorTag) {
+      capturedAnchorIdLen = 0;
+    }
+    capturingAnchorTag = false;
+    resetAnchorAttrScan();
+  }
+
+  void appendCapturedAnchorId(uint8_t c) {
+    if (capturedAnchorIdLen + 1 < MAX_ANCHOR_ID) {
+      capturedAnchorId[capturedAnchorIdLen++] = c;
+    }
+  }
+
+  void scanAnchorAttribute(uint8_t c) {
+    switch (attrState) {
+      case ATTR_FIND_NAME:
+        if (isAttrNameChar(c)) {
+          attrState = ATTR_READ_NAME;
+          attrNameLen = 1;
+          currentAttrIsId = c == 'i';
+        }
+        break;
+      case ATTR_READ_NAME:
+        if (isAttrNameChar(c)) {
+          if (attrNameLen == 1) {
+            currentAttrIsId = currentAttrIsId && c == 'd';
+          } else {
+            currentAttrIsId = false;
+          }
+          attrNameLen++;
+        } else {
+          currentAttrIsId = currentAttrIsId && attrNameLen == 2;
+          if (isAttrWhitespace(c)) {
+            attrState = ATTR_AFTER_NAME;
+          } else if (c == '=') {
+            attrState = ATTR_BEFORE_VALUE;
+          } else {
+            resetAnchorAttrScan();
+          }
+        }
+        break;
+      case ATTR_AFTER_NAME:
+        if (isAttrWhitespace(c)) {
+          break;
+        }
+        if (c == '=') {
+          attrState = ATTR_BEFORE_VALUE;
+        } else if (isAttrNameChar(c)) {
+          attrState = ATTR_READ_NAME;
+          attrNameLen = 1;
+          currentAttrIsId = c == 'i';
+        } else {
+          resetAnchorAttrScan();
+        }
+        break;
+      case ATTR_BEFORE_VALUE:
+        if (isAttrWhitespace(c)) {
+          break;
+        }
+        if (currentAttrIsId && c == '"') {
+          capturedAnchorIdLen = 0;
+          attrState = ATTR_CAPTURE_D;
+        } else if (currentAttrIsId && c == '\'') {
+          capturedAnchorIdLen = 0;
+          attrState = ATTR_CAPTURE_S;
+        } else if (c == '"') {
+          attrState = ATTR_CAPTURE_D;
+        } else if (c == '\'') {
+          attrState = ATTR_CAPTURE_S;
+        } else {
+          resetAnchorAttrScan();
+        }
+        break;
+      case ATTR_CAPTURE_D:
+        if (c == '"') {
+          if (currentAttrIsId) {
+            finishCapturedAnchorId();
+          } else {
+            resetAnchorAttrScan();
+          }
+        } else if (currentAttrIsId) {
+          appendCapturedAnchorId(c);
+        }
+        break;
+      case ATTR_CAPTURE_S:
+        if (c == '\'') {
+          if (currentAttrIsId) {
+            finishCapturedAnchorId();
+          } else {
+            resetAnchorAttrScan();
+          }
+        } else if (currentAttrIsId) {
+          appendCapturedAnchorId(c);
+        }
+        break;
+    }
+  }
 
   void onVisibleCodepoint() {
     totalVisChars++;
     if (revPFound && !revDone) {
       // Ancestry mode: count only while inside the fully-matched element and in the target text node.
       // Legacy mode: count only while still inside the matched paragraph and in the target text node.
-      const bool inTargetNode = (stepCount > 0) ? (matchedDepth == stepCount && currentTextNode == targetTextNode)
-                                                : (paragraphHtmlDepth >= 0 && currentTextNode == targetTextNode);
+      const bool inTargetNode =
+          (stepCount > 0)
+              ? (matchedDepth == stepCount && htmlDepth == stepEnteredAtDepth[stepCount - 1] &&
+                 currentTextNode == targetTextNode)
+              : (paragraphHtmlDepth >= 0 && htmlDepth == paragraphHtmlDepth && currentTextNode == targetTextNode);
       if (inTargetNode) {
         revVisChars++;
         if (revVisChars >= revChar) {
@@ -262,6 +432,10 @@ class ParagraphStreamer final : public Print {
     const char* resolved = lookupHtmlEntity(entityBuffer, entityLen);
     if (resolved)
       onVisibleText(resolved);
+    else if (entityLen >= 3 && entityBuffer[1] == '#')
+      // Numeric character reference (&#NNN; / &#xHH;): expat -- which builds the page LUT --
+      // decodes it to a single codepoint. Count one here too, not the raw "&#NNN" characters.
+      onVisibleCodepoint();
     else
       flushEntityAsLiteral();
     globalInEntity = false;
@@ -285,15 +459,35 @@ class ParagraphStreamer final : public Print {
   void onOpenTag() {
     htmlDepth++;
 
+    if (strcasecmp(tagName, "body") == 0) {
+      insideBody = true;
+      bodyHtmlDepth = htmlDepth;
+      if (targetBodyText) {
+        revPFound = true;
+        paragraphHtmlDepth = htmlDepth;
+        currentTextNode = 1;
+        if (revChar <= 0 && targetTextNode <= 1) {
+          targetVisChars = totalVisChars;
+          revDone = true;
+        }
+      }
+      return;
+    }
+    if (!insideBody) return;
+
+    if (nonVisibleDepth > 0 || isNonVisibleTag()) {
+      nonVisibleDepth++;
+      return;
+    }
+
     if (stepCount == 0) {
       if (strcasecmp(tagName, "p") == 0) onLegacyP();
       return;
     }
 
-    // Capture <a id> inside the fully-matched element even after target char is found
+    // Capture a child <a id> inside the fully-matched element even after target char is found.
     if (revPFound && matchedDepth == stepCount && capturedAnchorIdLen == 0 && strcasecmp(tagName, "a") == 0) {
-      capturingAnchorTag = true;
-      idState = ID_SCAN;
+      beginAnchorIdScan();
     }
 
     if (revDone) return;
@@ -306,14 +500,16 @@ class ParagraphStreamer final : public Print {
       if (strcasecmp(tagName, target.tag) == 0) {
         // Count only direct children of the previously matched ancestor step.
         // For step 0 any depth is valid; subsequent steps must be exactly one level deeper.
-        const bool atCorrectDepth = (matchedDepth == 0) || (htmlDepth == stepEnteredAtDepth[matchedDepth - 1] + 1);
+        const bool atCorrectDepth = (matchedDepth == 0) ? (relaxFirstStepDepth || htmlDepth == bodyHtmlDepth + 1)
+                                                        : (htmlDepth == stepEnteredAtDepth[matchedDepth - 1] + 1);
         if (!atCorrectDepth) return;
         siblingCounters[matchedDepth]++;
-        if (siblingCounters[matchedDepth] == target.siblingIndex) {
+        if (target.siblingIndex == 0 || siblingCounters[matchedDepth] == target.siblingIndex) {
           insideStep[matchedDepth] = true;
           stepEnteredAtDepth[matchedDepth] = htmlDepth;
           matchedDepth++;
           if (matchedDepth == stepCount) {
+            beginAnchorIdScan();
             paragraphAtMatch = pCount;
             liCountAtMatch = liCount;
             revPFound = true;
@@ -331,6 +527,22 @@ class ParagraphStreamer final : public Print {
   }
 
   void onCloseTag() {
+    if (strcasecmp(tagName, "body") == 0) {
+      insideBody = false;
+      if (htmlDepth > 0) htmlDepth--;
+      return;
+    }
+    if (!insideBody) {
+      if (htmlDepth > 0) htmlDepth--;
+      return;
+    }
+
+    if (nonVisibleDepth > 0) {
+      nonVisibleDepth--;
+      if (htmlDepth > 0) htmlDepth--;
+      return;
+    }
+
     // Legacy mode: each direct child element closing advances the text node index.
     if (stepCount == 0 && revPFound && !revDone && paragraphHtmlDepth >= 0 && htmlDepth == paragraphHtmlDepth + 1) {
       currentTextNode++;
@@ -418,42 +630,12 @@ class ParagraphStreamer final : public Print {
           attrQuoteChar = 0;
         }
         if (capturingAnchorTag) {
-          switch (idState) {
-            case ID_SCAN:
-              idState = (c == 'i' || c == 'I') ? ID_I : ID_SCAN;
-              break;
-            case ID_I:
-              idState = (c == 'd' || c == 'D') ? ID_D : ID_SCAN;
-              break;
-            case ID_D:
-              idState = (c == '=') ? ID_EQ : ID_SCAN;
-              break;
-            case ID_EQ:
-              if (c == '"')
-                idState = ID_IN_VALUE_D;
-              else if (c == '\'')
-                idState = ID_IN_VALUE_S;
-              break;
-            case ID_IN_VALUE_D:
-              if (c == '"') {
-                capturedAnchorId[capturedAnchorIdLen] = '\0';
-                capturingAnchorTag = false;
-              } else if (capturedAnchorIdLen + 1 < MAX_ANCHOR_ID)
-                capturedAnchorId[capturedAnchorIdLen++] = c;
-              break;
-            case ID_IN_VALUE_S:
-              if (c == '\'') {
-                capturedAnchorId[capturedAnchorIdLen] = '\0';
-                capturingAnchorTag = false;
-              } else if (capturedAnchorIdLen + 1 < MAX_ANCHOR_ID)
-                capturedAnchorId[capturedAnchorIdLen++] = c;
-              break;
-          }
+          scanAnchorAttribute(c);
         }
         // Only treat '/' as self-closing when outside a quoted attribute value.
         if (c == '/' && !inAttrQuote) {
+          endAnchorIdScan();
           onCloseTag();
-          capturingAnchorTag = false;
         }
         break;
     }
@@ -469,12 +651,19 @@ class ParagraphStreamer final : public Print {
     memset(stepEnteredAtDepth, -1, sizeof(stepEnteredAtDepth));
   }
 
-  ParagraphStreamer(const XPathStep* xpathSteps, int xpathStepCount, int charOff, int textNodeIdx = 1)
+  ParagraphStreamer(const XPathStep* xpathSteps, int xpathStepCount, int charOff, int textNodeIdx = 1,
+                    bool relaxFirstStep = false)
       : fwdTarget(SIZE_MAX),
         revChar(charOff),
         steps(xpathSteps),
         stepCount(xpathStepCount),
-        targetTextNode(textNodeIdx) {
+        targetTextNode(textNodeIdx),
+        relaxFirstStepDepth(relaxFirstStep) {
+    memset(stepEnteredAtDepth, -1, sizeof(stepEnteredAtDepth));
+  }
+
+  ParagraphStreamer(bool resolveBodyText, int charOff, int textNodeIdx)
+      : fwdTarget(SIZE_MAX), revChar(charOff), targetTextNode(textNodeIdx), targetBodyText(resolveBodyText) {
     memset(stepEnteredAtDepth, -1, sizeof(stepEnteredAtDepth));
   }
 
@@ -505,16 +694,26 @@ class ParagraphStreamer final : public Print {
       return 1;
     }
 
+    // XML 1.0 §2.11 line-ending normalization: expat (which builds the page LUT) collapses a
+    // "\r\n" pair and a lone "\r" to a single "\n". Mirror that so this byte counter -- which the
+    // resolved offset is measured against -- stays codepoint-for-codepoint identical. prevCR is
+    // set only by the visible-text branch below, so any non-text byte clears it here.
+    const bool afterCR = prevCR;
+    prevCR = false;
+
     if (c == '<') {
       globalInTag = true;
       tagState = TAG_IDLE;
       tagNameLen = 0;
       tagIsClose = false;
       capturingAnchorTag = false;
-      idState = ID_SCAN;
+      resetAnchorAttrScan();
       inAttrQuote = false;
       attrQuoteChar = 0;
     } else if (c == '>') {
+      if (tagState == TAG_ATTRS) {
+        endAnchorIdScan();
+      }
       globalInTag = false;
       inAttrQuote = false;
       if (tagState == TAG_IN_NAME && tagNameLen > 0) {
@@ -528,14 +727,20 @@ class ParagraphStreamer final : public Print {
       tagState = TAG_IDLE;
     } else if (globalInTag) {
       processByteInTag(c);
+    } else if (!insideBody || nonVisibleDepth > 0) {
+      // Ignore head/style/script/title text. KOReader XPaths are body-relative, and CSS text
+      // should not contribute to intra-spine progress.
     } else {
       if (c == '&') {
         globalInEntity = true;
         entityBuffer[0] = '&';
         entityLen = 1;
+      } else if (c == '\n' && afterCR) {
+        // Second half of a CRLF: the newline was already counted on the preceding CR.
       } else {
         const bool startsCodepoint = (c & 0xC0) != 0x80;
         if (startsCodepoint) onVisibleCodepoint();
+        prevCR = (c == '\r');  // a lone/leading CR is the newline; swallow any '\n' that follows
       }
     }
     return 1;
@@ -551,7 +756,7 @@ class ParagraphStreamer final : public Print {
   int getListItemAtMatch() const { return liCountAtMatch; }
   const char* getCapturedAnchorId() const { return capturedAnchorIdLen > 0 ? capturedAnchorId : nullptr; }
   size_t totalBytes() const { return bytesWritten; }
-  bool found() const { return revDone || revPFound; }
+  bool found() const { return revDone; }
   size_t getTotalVisChars() const { return totalVisChars; }
   size_t getTargetVisChars() const { return targetVisChars; }
   float progress() const {
@@ -570,8 +775,14 @@ KOReaderPosition ProgressMapper::toKOReader(const std::shared_ptr<Epub>& epub, c
   float intra =
       (pos.totalPages > 1) ? static_cast<float>(pos.pageNumber) / static_cast<float>(pos.totalPages - 1) : 0.0f;
   result.percentage = epub->calculateProgress(pos.spineIndex, intra);
+  // The page's exact content offset first: the same text on every device.
+  if (pos.hasVisibleTextOffset) {
+    result.xpath = ChapterXPathResolver::findXPathForVisibleTextOffset(epub, pos.spineIndex, pos.visibleTextOffset);
+  }
   // Progress-based XPath correctly handles both <p> and <li> positions.
-  result.xpath = ChapterXPathResolver::findXPathForProgress(epub, pos.spineIndex, intra);
+  if (result.xpath.empty()) {
+    result.xpath = ChapterXPathResolver::findXPathForProgress(epub, pos.spineIndex, intra);
+  }
   // Fall back to paragraph-index lookup when progress-based resolution fails.
   if (result.xpath.empty() && pos.hasParagraphIndex && pos.paragraphIndex > 0) {
     result.xpath = ChapterXPathResolver::findXPathForParagraph(epub, pos.spineIndex, pos.paragraphIndex);
@@ -604,9 +815,11 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
   const int xpathStepCount = parseXPathSteps(koPos.xpath, xpathSteps);
   // Use ancestry mode whenever the XPath has a structured path (always more accurate than global counting).
   const bool useAncestry = xpathStepCount > 0;
+  const bool useBodyText = !useAncestry && isBodyTextXPath(koPos.xpath);
 
   if (xpathSpine >= 0 && xpathSpine < spineCount) {
     result.spineIndex = xpathSpine;
+    result.hasResolvedSpineIndex = true;
   } else {
     // First spine item whose end offset reaches the target. Cumulative sizes are
     // nondecreasing, so this is the item the old front-to-back walk stopped at,
@@ -638,11 +851,19 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
 
   float intra = 0.0f;
   bool resolvedIntra = false;
+  // A resolved XPath gives the exact content offset (counted the way the page
+  // parser counts, so it matches the section's page-start LUT) and the
+  // intra-chapter fraction used until the caller refines against the layout.
+  const auto applyResolved = [&](const ParagraphStreamer& s) {
+    result.visibleTextOffset =
+        static_cast<uint32_t>(std::min<size_t>(s.getTargetVisChars(), static_cast<size_t>(UINT32_MAX)));
+    result.hasVisibleTextOffset = true;
+    intra = s.progress();
+    resolvedIntra = true;
+  };
   if (useAncestry) {
-    ParagraphStreamer s(xpathSteps, xpathStepCount, xpathChar, xpathTextNode);
-    if (streamSpine(epub, result.spineIndex, s) && s.found()) {
-      intra = s.progress();
-      resolvedIntra = true;
+    const auto applyResolvedXPath = [&](const ParagraphStreamer& s) {
+      applyResolved(s);
       const int pAtMatch = s.getParagraphAtMatch();
       if (pAtMatch > 0) {
         result.paragraphIndex = static_cast<uint16_t>(pAtMatch);
@@ -659,23 +880,45 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
       if (anchorId) {
         strncpy(result.xpathAnchorId, anchorId, sizeof(result.xpathAnchorId) - 1);
       }
-      LOG_DBG("PM", "XPath ancestry(%s[%d])/text()[%d]+%d -> %.1f%% (target=%zu total=%zu p~%d li~%d anchor=%s)",
+      LOG_DBG("PM", "XPath ancestry(%s[%d])/text()[%d]+%d -> offset %u, %.1f%% (total=%zu p~%d li~%d anchor=%s)",
               xpathSteps[xpathStepCount - 1].tag, xpathSteps[xpathStepCount - 1].siblingIndex, xpathTextNode, xpathChar,
-              intra * 100, s.getTargetVisChars(), s.getTotalVisChars(), pAtMatch,
+              result.visibleTextOffset, intra * 100, s.getTotalVisChars(), pAtMatch,
               result.hasLiIndex ? static_cast<int>(result.liIndex) : 0, anchorId ? anchorId : "none");
+    };
+
+    ParagraphStreamer strict(xpathSteps, xpathStepCount, xpathChar, xpathTextNode);
+    if (streamSpine(epub, result.spineIndex, strict) && strict.found()) {
+      applyResolvedXPath(strict);
+    } else {
+      // Some KOReader producers omit an unindexed wrapper from the ancestry.
+      // Retry only after the structurally exact path fails, allowing the first
+      // step at any body depth.
+      ParagraphStreamer relaxed(xpathSteps, xpathStepCount, xpathChar, xpathTextNode, true);
+      if (streamSpine(epub, result.spineIndex, relaxed) && relaxed.found()) {
+        applyResolvedXPath(relaxed);
+      }
+    }
+  } else if (useBodyText) {
+    ParagraphStreamer s(true, xpathChar, xpathTextNode);
+    if (streamSpine(epub, result.spineIndex, s) && s.found()) {
+      applyResolved(s);
+      LOG_DBG("PM", "XPath body/text()[%d]+%d -> offset=%u", xpathTextNode, xpathChar, result.visibleTextOffset);
     }
   } else if (xpathP > 0) {
     ParagraphStreamer s(xpathP, xpathChar, xpathTextNode);
     if (streamSpine(epub, result.spineIndex, s) && s.found()) {
-      intra = s.progress();
-      resolvedIntra = true;
-      LOG_DBG("PM", "XPath p[%d]/text()[%d]+%d -> %.1f%% (target=%zu total=%zu)", xpathP, xpathTextNode, xpathChar,
-              intra * 100, s.getTargetVisChars(), s.getTotalVisChars());
+      applyResolved(s);
+      LOG_DBG("PM", "XPath p[%d]/text()[%d]+%d -> offset %u, %.1f%% (total=%zu)", xpathP, xpathTextNode, xpathChar,
+              result.visibleTextOffset, intra * 100, s.getTotalVisChars());
     }
   }
   if (!resolvedIntra && xpathSpine >= 0 && xpathSpine < spineCount && isChapterStartXPath(koPos.xpath)) {
+    // Only when no intra-chapter offset resolved above: a resolved deep position
+    // (e.g. body/div[3]/text().0) must not be clobbered to page 0.
     intra = 0.0f;
     resolvedIntra = true;
+    result.visibleTextOffset = 0;
+    result.hasVisibleTextOffset = true;
     LOG_DBG("PM", "Chapter-start XPath %s -> spine=%d page start", koPos.xpath.c_str(), result.spineIndex);
   }
   if (!resolvedIntra) {
@@ -687,6 +930,125 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
       0, std::min(static_cast<int>(intra * static_cast<float>(result.totalPages - 1) + 0.5f), result.totalPages - 1));
   LOG_DBG("PM", "<- KO: %.2f%% %s -> spine=%d page=%d/%d", koPos.percentage * 100, koPos.xpath.c_str(),
           result.spineIndex, result.pageNumber, result.totalPages);
+  return result;
+}
+
+void ProgressMapper::refinePageFromLayout(const std::shared_ptr<Epub>& epub, GfxRenderer& renderer,
+                                          CrossPointPosition& pos) {
+  if (!pos.hasVisibleTextOffset && !pos.hasLiIndex && pos.xpathAnchorId[0] == '\0' && !pos.hasParagraphIndex) return;
+  Section tempSection(epub, pos.spineIndex, renderer);
+
+  if (pos.hasVisibleTextOffset) {
+    // An image-only page shares its offset with the text page after it; a
+    // chapter-start or image anchor wants the first of them.
+    const bool preferFirst = pos.visibleTextOffset == 0;
+    if (const auto offsetPage = tempSection.getPageForVisibleTextOffset(pos.visibleTextOffset, preferFirst)) {
+      pos.pageNumber = *offsetPage;
+      pos.totalPages = std::max(pos.totalPages, pos.pageNumber + 1);
+      pos.hasMappedPage = true;
+      LOG_DBG("PM", "Content offset %u -> page %d", pos.visibleTextOffset, pos.pageNumber);
+      return;
+    }
+    LOG_DBG("PM", "Content offset %u not in section cache", pos.visibleTextOffset);
+  }
+
+  if (pos.hasLiIndex) {
+    if (const auto liPage = tempSection.getPageForListItemIndex(pos.liIndex)) {
+      LOG_DBG("PM", "Li index %u -> page %d (was %d)", pos.liIndex, *liPage, pos.pageNumber);
+      pos.pageNumber = *liPage;
+      pos.hasMappedPage = true;
+      return;
+    }
+    LOG_DBG("PM", "Li index %u not found in section LUT", pos.liIndex);
+  }
+  if (pos.xpathAnchorId[0] != '\0') {
+    if (const auto anchorPage = tempSection.getPageForAnchor(std::string(pos.xpathAnchorId))) {
+      LOG_DBG("PM", "Anchor '%s' -> page %d (was %d)", pos.xpathAnchorId, *anchorPage, pos.pageNumber);
+      pos.pageNumber = *anchorPage;
+      pos.hasMappedPage = true;
+      return;
+    }
+    LOG_DBG("PM", "Anchor '%s' not found in section cache", pos.xpathAnchorId);
+  }
+  if (pos.hasParagraphIndex) {
+    const auto paragraphPage = tempSection.getPageForParagraphIndex(pos.paragraphIndex);
+    const auto nextParagraphPage = tempSection.getPageForParagraphIndex(pos.paragraphIndex + 1);
+    if (!paragraphPage.has_value()) {
+      LOG_DBG("PM", "Paragraph %u not found in section LUT", pos.paragraphIndex);
+      return;
+    }
+    int refinedPage = std::max(pos.pageNumber, static_cast<int>(*paragraphPage));
+    if (nextParagraphPage.has_value()) {
+      const int lutSpan = static_cast<int>(*nextParagraphPage) - static_cast<int>(*paragraphPage);
+      // Only cap when the LUT span is >1. A span of 1 means the LUT granularity is too
+      // coarse to trust over the intra-spine position (e.g. a stale cache where the paragraph
+      // occupies different pages than at build time).
+      if (lutSpan > 1 && refinedPage >= static_cast<int>(*nextParagraphPage)) {
+        refinedPage = static_cast<int>(*nextParagraphPage) - 1;
+      }
+    }
+    LOG_DBG("PM", "Paragraph %u -> LUT page %d, nextPara page %d, intra page %d, using %d", pos.paragraphIndex,
+            *paragraphPage, nextParagraphPage.has_value() ? static_cast<int>(*nextParagraphPage) : -1, pos.pageNumber,
+            refinedPage);
+    pos.pageNumber = refinedPage;
+    pos.hasMappedPage = true;
+  }
+}
+
+KOReaderRichPosition ProgressMapper::toRichPosition(const CrossPointPosition& pos, const KOReaderPosition& koPos) {
+  KOReaderRichPosition rich;
+  const float pct = std::max(0.0f, std::min(1.0f, koPos.percentage));
+  rich.pctQ = static_cast<uint32_t>(pct * 1000000.0f + 0.5f);
+  rich.spineIndex = static_cast<uint16_t>(std::max(0, pos.spineIndex));
+  rich.pageNumber = static_cast<uint16_t>(std::max(0, pos.pageNumber));
+  rich.totalPages = static_cast<uint16_t>(pos.totalPages > 0 ? pos.totalPages : 1);
+  if (pos.hasParagraphIndex && pos.paragraphIndex > 0) rich.paragraphIndex = pos.paragraphIndex;
+  rich.xpath = koPos.xpath;
+  return rich;
+}
+
+std::optional<CrossPointPosition> ProgressMapper::fromRichPosition(const std::shared_ptr<Epub>& epub,
+                                                                   const KOReaderRichPosition& rich) {
+  const int spineCount = epub->getSpineItemsCount();
+  if (static_cast<int>(rich.spineIndex) >= spineCount) {
+    LOG_DBG("PM", "Rich position spine %u out of range (%d spine items)", rich.spineIndex, spineCount);
+    return std::nullopt;
+  }
+
+  CrossPointPosition result{};
+  result.spineIndex = rich.spineIndex;
+  result.hasResolvedSpineIndex = true;
+
+  const int cachedCount =
+      Section::readCachedPageCount(epub->getCachePath() + "/sections/" + std::to_string(result.spineIndex) + ".bin");
+  if (cachedCount <= 0) {
+    // No local layout for the target spine yet; the percentage mapping handles
+    // density estimation better than a blind copy of remote pages.
+    LOG_DBG("PM", "Rich position spine %u has no cached page count", rich.spineIndex);
+    return std::nullopt;
+  }
+  result.totalPages = cachedCount;
+
+  const int remotePages = rich.totalPages > 0 ? rich.totalPages : 1;
+  if (result.totalPages == remotePages) {
+    // Identical layout (same render settings): the page transfers losslessly.
+    result.pageNumber = std::min<int>(rich.pageNumber, result.totalPages - 1);
+    result.hasMappedPage = true;
+    LOG_DBG("PM", "Rich position exact: spine=%d page=%d/%d", result.spineIndex, result.pageNumber, result.totalPages);
+    return result;
+  }
+
+  // Layout differs; the paragraph LUT is the most accurate anchor left.
+  if (rich.paragraphIndex.has_value()) {
+    result.paragraphIndex = *rich.paragraphIndex;
+    result.hasParagraphIndex = true;
+  }
+  const float intra =
+      (remotePages > 1) ? static_cast<float>(rich.pageNumber) / static_cast<float>(remotePages - 1) : 0.0f;
+  result.pageNumber = std::max(
+      0, std::min(static_cast<int>(intra * static_cast<float>(result.totalPages - 1) + 0.5f), result.totalPages - 1));
+  LOG_DBG("PM", "Rich position scaled: spine=%d remote %u/%d -> page=%d/%d", result.spineIndex, rich.pageNumber,
+          remotePages, result.pageNumber, result.totalPages);
   return result;
 }
 
