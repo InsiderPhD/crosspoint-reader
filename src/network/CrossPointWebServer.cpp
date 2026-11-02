@@ -1,6 +1,7 @@
 #include "CrossPointWebServer.h"
 
 #include <ArduinoJson.h>
+#include <BoardConfig.h>
 #include <DevicePolicy.h>
 #include <Epub.h>
 #include <FsHelpers.h>
@@ -506,7 +507,12 @@ void CrossPointWebServer::handleStatus() const {
   doc["rssi"] = apMode ? 0 : WiFi.RSSI();
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["uptime"] = millis() / 1000;
+#if FREEINK_DEVICE_X4 || FREEINK_DEVICE_X3
   doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";
+#else
+  // S3 boards (X4 Pro, X4C) reported "X4" here; use the board name as upstream does.
+  doc["device"] = BoardConfig::ACTIVE.name ? BoardConfig::ACTIVE.name : "";
+#endif
 
   String json;
   serializeJson(doc, json);
