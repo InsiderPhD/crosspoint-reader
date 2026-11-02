@@ -68,7 +68,7 @@ bool isWordByte(unsigned char c) { return c >= 0x80 || std::isalnum(c) != 0; }
 // headers are tiny and both keys always appear early when present.
 struct IfoFacts {
   bool offsets64 = false;        // idxoffsetbits=64 (unsupported)
-  bool htmlDefinitions = false;  // sametypesequence=h (definitions are HTML)
+  bool htmlDefinitions = false;  // sametypesequence=h or x (HTML or XDXF)
 };
 
 IfoFacts readIfoFacts(const std::string& ifoPath) {
@@ -85,9 +85,10 @@ IfoFacts readIfoFacts(const std::string& ifoPath) {
   line = strstr(buf, "sametypesequence");
   eq = line ? strchr(line, '=') : nullptr;
   if (eq) {
-    // Only the single-field sequence "h" is treated as HTML; multi-type
-    // entries keep the plain-text viewing path.
-    facts.htmlDefinitions = eq[1] == 'h' && (eq[2] == '\0' || eq[2] == '\r' || eq[2] == '\n');
+    // HTML (h) and XDXF (x) share the styled renderer: the XHTML normalizer
+    // keeps the text of tags it does not know (<k>, <dtrn>, <ex>...). Multi-type
+    // sequences keep the plain-text viewing path.
+    facts.htmlDefinitions = (eq[1] == 'h' || eq[1] == 'x') && (eq[2] == '\0' || eq[2] == '\r' || eq[2] == '\n');
   }
   return facts;
 }
@@ -561,6 +562,16 @@ bool Dictionary::readDefinition(const DictLocation& location, std::string& out, 
   if (dict.read(&out[0], size) != static_cast<int>(size)) {
     out.clear();
     return fail(LookupResult::ReadError);
+  }
+  // A styled definition can still fall back to plain text in the viewer, and
+  // htmlToPlainText() builds its output alongside this input (up to the same
+  // size again). Refuse here, where the failure has a name, rather than let
+  // that second allocation abort in the viewer under -fno-exceptions.
+  if (htmlDefinitions && ESP.getMaxAllocHeap() < out.size() + DEFINITION_HEAP_HEADROOM_BYTES) {
+    LOG_ERR("DICT", "Low heap for %lu byte definition fallback", static_cast<unsigned long>(out.size()));
+    out.clear();
+    out.shrink_to_fit();
+    return fail(LookupResult::LowMemory);
   }
   return true;
 }

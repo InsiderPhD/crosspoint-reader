@@ -52,8 +52,8 @@ class Dictionary {
   // missing or stale — call buildIndex() first so the UI can show an
   // "Indexing…" message for the slow first pass.
 
-  // True when the .ifo declares sametypesequence=h — definitions are HTML and
-  // the viewer may lay them out through the EPUB rendering pipeline.
+  // True when the .ifo declares sametypesequence=h or x (HTML or XDXF) — the
+  // viewer may lay definitions out through the EPUB rendering pipeline.
   bool definitionsAreHtml() const { return htmlDefinitions; }
 
   bool needsIndex();
