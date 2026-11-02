@@ -565,18 +565,23 @@ struct PageListBin {
 Entries with an empty label, a target outside the spine or an anchor of 50 bytes or more are
 skipped; a label longer than 11 bytes is cut on a UTF-8 boundary; at most 8000 entries are kept.
 
-## Clippings: `/.crosspoint/clippings/epub_<hash>.bin`
+## Clippings: `/.crosspoint/clippings/kp_epub_<hash>.bin`
 
 Saved clippings for one book, keyed by `std::hash` of the book path. Owned by
 `src/ClippingStore.cpp`. Strings are `u32` length + bytes (`lib/Serialization`).
-Versions 1-4 still load; missing fields take their defaults (every clip pending upload,
-no sync id, no content offsets) and the file is rewritten as version 5 on the next save.
+
+The folder is shared with upstream CrossPoint (`epub_<std::hash>.bin`, the same names
+our older firmware used) and CrossInk (`epub_<crc32>.bin`). Both start their files with a
+bare version byte whose numbers overlap ours with different record layouts, so our files
+carry a `"KPCL"` magic and a `kp_` name prefix. Neither firmware writes either, and both
+reject a file whose first byte is `'K'`.
 
 ### Version 5
 
 ```c++
 struct ClippingsBin {
-    u8     version;  // 5
+    char   magic[4]; // "KPCL"
+    u8     version;  // 5 (1..4 also load: a moved untagged file keeps its record version)
     u16    count;    // <= CLIPPING_MAX_PER_BOOK (64)
     string title;
     string author;
@@ -599,11 +604,38 @@ struct ClippingsBin {
 };
 ```
 
-### Deletion journal: `epub_<hash>.bin.deleted`
+Missing fields in older record versions take their defaults (every clip pending upload,
+no sync id, no content offsets).
+
+### Untagged files: `epub_<hash>.bin`
+
+Firmware before the magic wrote the same records without `magic`, under the name upstream
+also uses. When a book has no `kp_` file, the untagged file at its name is identified like
+this, and anything that cannot be attributed with certainty is skipped, never misparsed:
+
+| version | origin | handling |
+|---|---|---|
+| 5 | ours (nobody else wrote a v5) | loaded; rewritten as `kp_…` on the next save, untagged file removed |
+| 1 | identical bytes in ours and upstream's | loaded read-only; the untagged file is left in place |
+| 2-4 | records parsed both as our layout and as upstream 2.0.0's; only the one that ends exactly at EOF wins | ours: as v5. Upstream: imported read-only (below). Both or neither: skipped |
+
+Upstream 2.0.0 records (imported, never written): the common `u16`x8 + `u32 timestamp`,
+then `u32 layoutSignature` (v3+), then `u32 startOffset, endOffset; u64 syncRevision;
+u8 pendingUpload; char id[65]` (v4), then `char chapterTitle[48]`, `u16 textLength` (<= 4096)
+and the text. Imported clips are marked foreign-anchor (listed, not highlighted), text is
+cut to 512 bytes on a UTF-8 boundary and only the first 64 clips are kept. Upstream's file
+is shadowed, not changed, once a `kp_` file exists for the book.
+
+When listing clipped books, an untagged name must also equal `std::hash` of the path in its
+header, which rules out CrossInk's crc32 names; it is ignored when a `kp_` file for the same
+book exists. Journals, upstream's `.bak` / `.tmp` sidecars and other names are skipped.
+
+### Deletion journal: `kp_epub_<hash>.bin.deleted`
 
 Ids of synced clips deleted on this device, waiting to be sent to the clipping-sync
 server: back-to-back 65-byte NUL-padded records. A torn trailing record is trimmed on the
-next open; the file is removed once the server has acknowledged every entry.
+next open; the file is removed once the server has acknowledged every entry. An untagged
+file's journal (`epub_<hash>.bin.deleted`) is renamed along with it when it migrates.
 
 ## Sleep themes: `/sleep-themes/<name>/`
 

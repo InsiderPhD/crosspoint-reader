@@ -66,8 +66,9 @@ struct ClippedBookEntry {
 };
 
 // Per-book store of saved clippings, persisted as a small binary file under
-// /.crosspoint/clippings/. The in-app copy is bounded (CLIPPING_TEXT_MAX / CLIPPING_MAX_PER_BOOK);
-// the full text is also appended to /My Clippings.txt by ClippingsManager.
+// /.crosspoint/clippings/ (kp_<type>_<hash>.bin, "KPCL" magic; the folder is
+// shared with upstream CrossPoint and CrossInk, whose files are never rewritten). The in-app copy is bounded
+// (CLIPPING_TEXT_MAX / CLIPPING_MAX_PER_BOOK); the full text is also appended to /My Clippings.txt by ClippingsManager.
 class ClippingStore {
  public:
   enum class AddResult : uint8_t {
@@ -137,8 +138,14 @@ class ClippingStore {
   std::string storeFilePath;
   bool dirty = false;
 
+  // Set when the clips came from an untagged file of ours (written before the
+  // magic header): the next save writes the tagged file and removes it.
+  bool removeLegacyOnSave = false;
+
   bool readFromFile();
-  bool readFromFile(const std::string& path, std::vector<Clipping>& out) const;
+  // Reads any file we can attribute (see ClippingStore.cpp). `owned` is set when
+  // it is ours to rewrite or delete; false for upstream / shared files.
+  bool readFromFile(const std::string& path, std::vector<Clipping>& out, bool* owned = nullptr) const;
   bool writeToFile() const;
 };
 
