@@ -6,7 +6,10 @@
 #include <vector>
 
 #include "../Activity.h"
+#include "OpdsServerStore.h"
 #include "util/ButtonNavigator.h"
+
+struct Rect;
 
 /**
  * Activity for browsing and downloading books from an OPDS server.
@@ -14,7 +17,16 @@
  */
 class OpdsBookBrowserActivity final : public Activity {
  public:
-  enum class BrowserState { CHECK_WIFI, WIFI_SELECTION, LOADING, BROWSING, DOWNLOADING, ERROR, SEARCH_INPUT };
+  enum class BrowserState {
+    SERVER_SELECT,
+    CHECK_WIFI,
+    WIFI_SELECTION,
+    LOADING,
+    BROWSING,
+    DOWNLOADING,
+    ERROR,
+    SEARCH_INPUT
+  };
 
   explicit OpdsBookBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : Activity("OpdsBookBrowser", renderer, mappedInput), buttonNavigator() {}
@@ -25,7 +37,9 @@ class OpdsBookBrowserActivity final : public Activity {
   void render(RenderLock&&) override;
   // Only the BROWSING entry list has hit-testable rows; every other state (and
   // the empty feed) keeps the injected-Confirm tap behaviour.
-  bool handlesDirectTouch() const override { return state == BrowserState::BROWSING && !entries.empty(); }
+  bool handlesDirectTouch() const override {
+    return state == BrowserState::SERVER_SELECT || (state == BrowserState::BROWSING && !entries.empty());
+  }
 
  private:
   ButtonNavigator buttonNavigator;
@@ -39,6 +53,11 @@ class OpdsBookBrowserActivity final : public Activity {
   int selectorIndex = 0;
   std::string errorMessage;
   std::string statusMessage;
+  // The catalog being browsed, copied when it is picked so an edit made from
+  // the web UI meanwhile cannot change it under an open feed.
+  OpdsServer server;
+  // Cursor on the catalog picker (shown only when more than one is saved).
+  int serverIndex = 0;
 
   // Top edge of the first BROWSING row band; row i spans
   // [listTopY() + i*ROW_H, + ROW_H). Shared by render() and the Full Touch tap
@@ -48,6 +67,12 @@ class OpdsBookBrowserActivity final : public Activity {
   // The BROWSING Confirm action for the selected entry, also fired by a Full
   // Touch tap on the already-selected row.
   void activateSelectedEntry();
+
+  // Catalog picker: shown first when several catalogs are saved, and again on
+  // Back from a catalog's root feed.
+  void showServerSelect();
+  void openServer(size_t index);
+  Rect serverListRect() const;
 
   void checkAndConnectWifi();
   void launchWifiSelection();

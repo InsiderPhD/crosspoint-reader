@@ -512,15 +512,11 @@ inline void appendHardcoverSettings(SettingSink& v) {
       "hardcoverToken", StrId::STR_HARDCOVER));
 }
 
-// --- OPDS Browser (web-only, uses CrossPointSettings char arrays) ---
+// --- OPDS Browser (web-only) ---
+// The catalogs themselves live in OpdsServerStore (/.crosspoint/opds.json). The
+// old single-server opdsServerUrl/opdsUsername/opdsPassword fields are read and
+// written by JsonSettingsIO directly, only so the store can migrate them.
 inline void appendOpdsSettings(SettingSink& v) {
-  v.push_back(SettingInfo::String(StrId::STR_OPDS_SERVER_URL, SETTINGS.opdsServerUrl, sizeof(SETTINGS.opdsServerUrl),
-                                  "opdsServerUrl", StrId::STR_OPDS_BROWSER));
-  v.push_back(SettingInfo::String(StrId::STR_USERNAME, SETTINGS.opdsUsername, sizeof(SETTINGS.opdsUsername),
-                                  "opdsUsername", StrId::STR_OPDS_BROWSER));
-  v.push_back(SettingInfo::String(StrId::STR_PASSWORD, SETTINGS.opdsPassword, sizeof(SETTINGS.opdsPassword),
-                                  "opdsPassword", StrId::STR_OPDS_BROWSER)
-                  .withObfuscated());
   v.push_back(SettingInfo::Toggle(StrId::STR_OPDS_SERVER_FILENAMES, &CrossPointSettings::opdsUseServerFilename,
                                   "opdsUseServerFilename", StrId::STR_OPDS_BROWSER));
 }
@@ -675,7 +671,7 @@ inline void appendStatusBarSettings(SettingSink& v) {
 // more (the list is visited, never stored); forEachSetting() logs a mismatch so a
 // helper that stops emitting an entry (and so stops persisting it) shows up on
 // the serial log. Recount when adding or removing an entry.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 109;  // includes tiltPageTurn, tiltNextPageOnly, pluginsEnabled
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 106;  // includes tiltPageTurn, tiltNextPageOnly, pluginsEnabled
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

@@ -267,6 +267,14 @@ void JsonSettingsIO::serializeSettings(const CrossPointSettings& s, JsonDocument
   doc["bleFwdSigIndex"] = s.bleFwdSigIndex;
   doc["bleFwdSigValue"] = s.bleFwdSigValue;
 
+  // Legacy single OPDS server: kept only until OpdsServerStore migrates it into
+  // opds.json (which clears these), so an empty one is not written at all.
+  if (s.opdsServerUrl[0] != '\0') {
+    doc["opdsServerUrl"] = s.opdsServerUrl;
+    doc["opdsUsername"] = s.opdsUsername;
+    doc["opdsPassword_obf"] = obfuscation::obfuscateToBase64(s.opdsPassword);
+  }
+
   // longPressAction and shortPwrBtn live in CrossPointSettings but appear in the
   // SettingsList as DynamicEnum (the UI display order doesn't match the storage
   // enum order). The generic loop above skips Dynamic entries because the
@@ -442,6 +450,21 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
   s.bleBackSigValue = doc["bleBackSigValue"] | s.bleBackSigValue;
   s.bleFwdSigIndex = doc["bleFwdSigIndex"] | s.bleFwdSigIndex;
   s.bleFwdSigValue = doc["bleFwdSigValue"] | s.bleFwdSigValue;
+
+  // Legacy single OPDS server (see save side): read so OpdsServerStore can
+  // migrate it. The password is obfuscated, or plaintext in a hand-made file.
+  {
+    const auto copyField = [](char* dest, const size_t size, const char* value) {
+      strncpy(dest, value, size - 1);
+      dest[size - 1] = '\0';
+    };
+    copyField(s.opdsServerUrl, sizeof(s.opdsServerUrl), doc["opdsServerUrl"] | "");
+    copyField(s.opdsUsername, sizeof(s.opdsUsername), doc["opdsUsername"] | "");
+    bool ok = false;
+    std::string password = obfuscation::deobfuscateFromBase64(doc["opdsPassword_obf"] | "", &ok);
+    if (!ok || password.empty()) password = doc["opdsPassword"] | std::string("");
+    copyField(s.opdsPassword, sizeof(s.opdsPassword), password.c_str());
+  }
 
   // Counterpart to the explicit save above: pull longPressAction / shortPwrBtn
   // directly because their SettingInfo entries are DynamicEnum (no valuePtr,

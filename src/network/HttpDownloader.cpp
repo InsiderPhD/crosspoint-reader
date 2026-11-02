@@ -11,7 +11,6 @@
 
 #include <cstring>
 
-#include "CrossPointSettings.h"
 #include "DownloadFailureLog.h"
 #include "WifiPowerSaveGuard.h"
 
@@ -26,13 +25,15 @@ extern "C" int wolfSSL_Arduino_Serial_Print(const char* const msg) {
 
 namespace {
 
-// Shared request setup: trust model, redirects, UA and auth. Transport is
+// Shared request setup: trust model, redirects and UA. Transport is
 // freeink::SecureHttpClient (wolfSSL TLS 1.3) — it dispatches https/http
 // internally, decodes chunked framing itself, and streams the body through a
 // 2KB stack buffer, so no 16KB mbedTLS record pair and no 4KB
 // HTTPClient::writeToStream malloc ever hits this heap. setInsecure() is the
 // project's historical trust model (encrypted, server not authenticated).
-void configureRequest(freeink::SecureHttpClient& http, const std::string& url, bool allowConfiguredAuth) {
+// Credentials are never attached here: each caller passes its own (an OPDS
+// catalog's, a plugin's), so no request gets someone else's by default.
+void configureRequest(freeink::SecureHttpClient& http, const std::string& url) {
   http.setInsecure();
   http.setFollowRedirects(5);  // BookFusion pre-signed URLs redirect to a CDN
 
@@ -45,17 +46,16 @@ void configureRequest(freeink::SecureHttpClient& http, const std::string& url, b
   } else {
     http.setUserAgent("CrossPoint-ESP32-" CROSSPOINT_VERSION);
   }
-
-  // Basic HTTP auth if credentials are configured (not for BookFusion URLs,
-  // which use token auth)
-  if (allowConfiguredAuth && !isBookFusion && strlen(SETTINGS.opdsUsername) > 0 && strlen(SETTINGS.opdsPassword) > 0) {
-    http.setBasicAuth(SETTINGS.opdsUsername, SETTINGS.opdsPassword);
-  }
 }
 
 }  // namespace
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent) {
+  return fetchUrl(url, outContent, "", "", {});
+}
+
+bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
+                              const std::string& password, const std::vector<Header>& headers) {
   // Modem sleep off for the request; declared first so it outlives `http`.
   WifiPowerSaveGuard wifiPowerSaveGuard;
   freeink::SecureHttpClient http;
@@ -68,7 +68,9 @@ bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent) {
     LOG_ERR("HTTP", "Fetch failed: bad URL");
     return false;
   }
-  configureRequest(http, url, true);
+  configureRequest(http, url);
+  if (!username.empty()) http.setBasicAuth(username, password);
+  for (const auto& header : headers) http.addHeader(header.first, header.second);
 
   // getStatus() is valid inside the sink (headers parse before the body);
   // error bodies are drained without reaching the caller's stream.
@@ -114,7 +116,7 @@ int gLastHttpStatus = 0;
 int HttpDownloader::lastHttpStatus() { return gLastHttpStatus; }
 
 HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& url, const std::string& destPath,
-                                                             ProgressCallback progress, bool allowConfiguredAuth,
+                                                             ProgressCallback progress, bool /*legacyConfiguredAuth*/,
                                                              size_t expectedSize, const volatile bool* cancelFlag,
                                                              const std::string& username, const std::string& password,
                                                              const std::vector<Header>& headers, bool resumePartial,
@@ -136,7 +138,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     LOG_ERR("HTTP", "Download failed: bad URL");
     return HTTP_ERROR;
   }
-  configureRequest(http, url, allowConfiguredAuth);
+  configureRequest(http, url);
 
   // Per-request credentials/headers (SD plugins). Set after configureRequest so
   // a plugin's own auth wins over anything the shared setup attached.

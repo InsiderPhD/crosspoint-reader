@@ -256,12 +256,14 @@ Insert the SD card into a computer and copy files anywhere on it. KatiePoint sca
 2. **Calibre Wireless** — receive books sent from Calibre's *Send to device*. Install the [crosspoint_reader Calibre plugin](https://github.com/crosspoint-reader/calibre-plugins/releases) (Preferences → Plugins → Load plugin from file), then on the device choose *Calibre Wireless* and join a network. Your computer must be on the same WiFi.
 3. **Create Hotspot** — the device becomes its own access point when no shared WiFi is available; join it from your computer, then use the web uploader.
 4. **BookFusion Library** — browse and download from your linked [BookFusion](https://www.bookfusion.com/) cloud library (see **[Sync](#10-sync-bookfusion--koreader)** for account linking).
-5. **OPDS Browser** — browse and download from your OPDS catalogue. *Only shown once an OPDS server URL is set* (see below).
+5. **OPDS Browser** — browse and download from your OPDS catalogues. *Only shown once an OPDS server is added* (see below).
 6. **Plugins** *(X4 Pro / X4C)* — catalogs from plugins on the SD card. *Only shown once a plugin with an on-device screen is installed* (see below).
 
 ### OPDS Browser
 
-If you run an OPDS catalogue (e.g. Calibre Content Server), set it up in **Settings → System → OPDS Browser** (for Calibre Content Server, append `/opds` to the URL). Only HTTP **Basic** auth is supported — if using Calibre with auth, switch it from Digest to Basic. Once configured, **OPDS Browser** appears in **Home → File Transfer**.
+If you run an OPDS catalogue (e.g. Calibre Content Server), add it in **Settings → System → OPDS Browser → Add Server** (for Calibre Content Server, append `/opds` to the URL). Up to eight catalogues can be saved, each with its own name, login and up to two custom headers (`Name: Value`, e.g. a Cloudflare Access token); open one to edit it or delete it. Only HTTP **Basic** auth is supported — if using Calibre with auth, switch it from Digest to Basic. Once one is added, **OPDS Browser** appears in **Home → File Transfer**; with more than one, it first asks which to open.
+
+The catalogues are kept in `/.crosspoint/opds.json` (passwords obfuscated with the device key), the same file upstream CrossPoint and CrossInk use, so they carry over when you swap firmware on the same device. A server set up on an older KatiePoint version moves there automatically.
 
 ### Download from URL
 
@@ -747,6 +749,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **BookFusion Sync** *(action)* — link/manage your BookFusion account.
 - **OPDS Browser** *(action)* — server URL, username, password.
 - **Enable Plugins** *(X4 Pro / X4C)* — master switch for SD-card plugins. Off on a fresh install; on after an update if plugins are already on the card.
+- **OPDS Browser** *(action)* — your OPDS catalogues: add, edit or delete servers (name, URL, login, custom headers).
 - **Plugins** *(action, X4 Pro / X4C)* — installed SD-card plugins and their on-device catalogs (see **[Plugins](#plugins-x4-pro--x4c)**).
 - **Check for Updates** *(action)* — OTA firmware update over WiFi.
 - **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.

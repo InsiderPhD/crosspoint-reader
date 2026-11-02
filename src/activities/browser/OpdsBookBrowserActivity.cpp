@@ -33,19 +33,55 @@ constexpr int PAGE_ITEMS = 23;
 void OpdsBookBrowserActivity::onEnter() {
   Activity::onEnter();
 
-  state = BrowserState::CHECK_WIFI;
   entries.clear();
   navigationHistory.clear();
   searchTemplate = "";
   currentPath = "";
   selectorIndex = 0;
+  serverIndex = 0;
   consumeConfirm = false;
   consumeBack = false;
   errorMessage.clear();
+
+  const size_t count = OPDS_STORE.getCount();
+  if (count == 0) {
+    state = BrowserState::ERROR;
+    errorMessage = tr(STR_NO_SERVER_URL);
+    requestUpdate();
+  } else if (count == 1) {
+    openServer(0);
+  } else {
+    showServerSelect();
+  }
+}
+
+void OpdsBookBrowserActivity::showServerSelect() {
+  state = BrowserState::SERVER_SELECT;
+  entries.clear();
+  navigationHistory.clear();
+  searchTemplate.clear();
+  currentPath.clear();
+  selectorIndex = 0;
+  requestUpdate();
+}
+
+void OpdsBookBrowserActivity::openServer(const size_t index) {
+  const OpdsServer* picked = OPDS_STORE.getServer(index);
+  if (!picked) return;
+  server = *picked;
+  state = BrowserState::CHECK_WIFI;
   statusMessage = tr(STR_CHECKING_WIFI);
   requestUpdate();
-
   checkAndConnectWifi();
+}
+
+// Shared by render() and loop()'s tap hit-testing so the two can never disagree.
+Rect OpdsBookBrowserActivity::serverListRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentHeight =
+      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing * 2;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
 }
 
 void OpdsBookBrowserActivity::onExit() {
@@ -77,6 +113,45 @@ void OpdsBookBrowserActivity::activateSelectedEntry() {
 
 void OpdsBookBrowserActivity::loop() {
   if (state == BrowserState::WIFI_SELECTION || state == BrowserState::SEARCH_INPUT) {
+    return;
+  }
+
+  if (state == BrowserState::SERVER_SELECT) {
+    const int count = static_cast<int>(OPDS_STORE.getCount());
+    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+      finish();
+      return;
+    }
+    int tappedIndex;
+    switch (
+        TouchListNav::tapRow(mappedInput, serverListRect(), count, serverIndex, /*hasSubtitle=*/true, tappedIndex)) {
+      case TouchListNav::TapResult::SelectionMoved:
+        serverIndex = tappedIndex;
+        requestUpdate();
+        return;
+      case TouchListNav::TapResult::Activated:
+        serverIndex = tappedIndex;
+        openServer(static_cast<size_t>(serverIndex));
+        return;
+      case TouchListNav::TapResult::None:
+        break;
+    }
+    // On the press, not the release: the press that opened this screen from
+    // File Transfer releases here. The release that follows this press belongs
+    // to the picker, so it must not reach the catalog list.
+    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      consumeConfirm = true;
+      openServer(static_cast<size_t>(serverIndex));
+      return;
+    }
+    buttonNavigator.onNextRelease([this, count] {
+      serverIndex = ButtonNavigator::nextIndex(serverIndex, count);
+      requestUpdate();
+    });
+    buttonNavigator.onPreviousRelease([this, count] {
+      serverIndex = ButtonNavigator::previousIndex(serverIndex, count);
+      requestUpdate();
+    });
     return;
   }
 
@@ -178,6 +253,8 @@ void OpdsBookBrowserActivity::loop() {
 
 bool OpdsBookBrowserActivity::preventAutoSleep() {
   switch (state) {
+    case BrowserState::SERVER_SELECT:
+      return false;
     case BrowserState::CHECK_WIFI:
     case BrowserState::WIFI_SELECTION:
     case BrowserState::LOADING:
@@ -195,6 +272,26 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   renderer.clearScreen();
   const auto pageWidth = renderer.getScreenWidth();
   const auto pageHeight = renderer.getScreenHeight();
+
+  if (state == BrowserState::SERVER_SELECT) {
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_OPDS_SERVERS));
+    GUI.drawList(
+        renderer, serverListRect(), static_cast<int>(OPDS_STORE.getCount()), serverIndex,
+        [](int index) {
+          const OpdsServer* s = OPDS_STORE.getServer(static_cast<size_t>(index));
+          return s ? s->label() : std::string();
+        },
+        [](int index) {
+          const OpdsServer* s = OPDS_STORE.getServer(static_cast<size_t>(index));
+          return s && !s->name.empty() ? s->url : std::string();
+        });
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_OPEN), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+    return;
+  }
 
   renderer.drawCenteredText(UI_12_FONT_ID, 15, tr(STR_OPDS_BROWSER), true, EpdFontFamily::BOLD);
 
@@ -267,21 +364,21 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
 }
 
 void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
-  if (strlen(SETTINGS.opdsServerUrl) == 0) {
+  if (server.url.empty()) {
     state = BrowserState::ERROR;
     errorMessage = tr(STR_NO_SERVER_URL);
     requestUpdate();
     return;
   }
 
-  std::string url = (path.find("http") == 0) ? path : UrlUtils::buildUrl(SETTINGS.opdsServerUrl, path);
+  std::string url = (path.find("http") == 0) ? path : UrlUtils::buildUrl(server.url, path);
   OpdsParser parser;
   {
     // Lend the framebuffer to the catalog fetch's TLS session ("Loading…" is
     // already queued/painted; nothing renders during the call).
     TlsFramebufferBorrow borrow(renderer);
     OpdsParserStream stream{parser};
-    if (!HttpDownloader::fetchUrl(url, stream)) {
+    if (!HttpDownloader::fetchUrl(url, stream, server.username, server.password, server.activeCustomHeaders())) {
       state = BrowserState::ERROR;
       // A parser failure rejects the write and aborts the download; report it as a parse
       // error rather than hiding it behind a generic fetch failure.
@@ -319,7 +416,7 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
 void OpdsBookBrowserActivity::navigateToEntry(const OpdsEntry& entry) {
   navigationHistory.push_back(currentPath);
   // Resolve to a full URL so sub-sub-navigation retains parent path context
-  const std::string feedUrl = UrlUtils::buildUrl(SETTINGS.opdsServerUrl, currentPath);
+  const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
   currentPath = UrlUtils::buildUrl(feedUrl, entry.href);
 
   state = BrowserState::LOADING;
@@ -332,6 +429,12 @@ void OpdsBookBrowserActivity::navigateToEntry(const OpdsEntry& entry) {
 
 void OpdsBookBrowserActivity::navigateBack() {
   if (navigationHistory.empty()) {
+    // Back out of a catalog's root: to the picker when there is a choice,
+    // otherwise to File Transfer.
+    if (OPDS_STORE.getCount() > 1) {
+      showServerSelect();
+      return;
+    }
     finish();  // back to File Transfer
   } else {
     currentPath = navigationHistory.back();
@@ -385,7 +488,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   requestUpdateAndWait();
 
   // Build full download URL relative to the current feed, not the root server URL
-  const std::string feedUrl = UrlUtils::buildUrl(SETTINGS.opdsServerUrl, currentPath);
+  const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
   std::string downloadUrl = UrlUtils::buildUrl(feedUrl, book.href);
   std::string filename =
       "/" + StringUtils::sanitizeFilename((book.author.empty() ? "" : book.author + " - ") + book.title) + ".epub";
@@ -410,8 +513,9 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
             }
           }
         },
-        /*allowConfiguredAuth=*/true, /*expectedSize=*/0, /*cancelFlag=*/nullptr, /*username=*/"", /*password=*/"",
-        /*headers=*/{}, /*resumePartial=*/false, SETTINGS.opdsUseServerFilename ? &contentDisposition : nullptr);
+        /*legacyConfiguredAuth=*/false, /*expectedSize=*/0, /*cancelFlag=*/nullptr, server.username, server.password,
+        server.activeCustomHeaders(), /*resumePartial=*/false,
+        SETTINGS.opdsUseServerFilename ? &contentDisposition : nullptr);
   }
 
   if (result == HttpDownloader::OK && !contentDisposition.empty()) {

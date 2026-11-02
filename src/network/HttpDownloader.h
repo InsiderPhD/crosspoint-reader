@@ -45,12 +45,19 @@ class HttpDownloader {
 
   static bool fetchUrl(const std::string& url, Stream& stream);
 
+  // Same, with this request's own HTTP Basic credentials (sent when username is
+  // non-empty) and extra headers — an OPDS catalog's.
+  static bool fetchUrl(const std::string& url, Stream& stream, const std::string& username, const std::string& password,
+                       const std::vector<Header>& headers);
+
   /**
    * Download a file to the SD card.
    * @param url The URL to download
    * @param destPath The destination path on SD card
    * @param progress Optional progress callback
-   * @param allowConfiguredAuth Whether to attach configured OPDS Basic auth for non-BookFusion URLs
+   * @param legacyConfiguredAuth Ignored. It used to attach the single settings-stored
+   *        OPDS login to any URL; OPDS now passes its catalog's credentials through
+   *        `username`/`password`/`headers` like every other caller.
    * @param expectedSize Optional expected file size in bytes (e.g. BookFusion's API
    *        download_size). When non-zero, a final file that falls well short of this
    *        is rejected as a truncated download. 0 = no cross-check.
@@ -77,7 +84,7 @@ class HttpDownloader {
    * @return DownloadError indicating success or failure type
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
-                                      ProgressCallback progress = nullptr, bool allowConfiguredAuth = true,
+                                      ProgressCallback progress = nullptr, bool legacyConfiguredAuth = false,
                                       size_t expectedSize = 0, const volatile bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "",
                                       const std::vector<Header>& headers = {}, bool resumePartial = false,

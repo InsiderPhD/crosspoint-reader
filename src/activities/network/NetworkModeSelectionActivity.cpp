@@ -6,6 +6,7 @@
 
 #include "BookFusionTokenStore.h"
 #include "MappedInputManager.h"
+#include "OpdsServerStore.h"
 #include "activities/plugins/PluginCatalogActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -35,8 +36,8 @@ constexpr int MAX_MENU_ITEM_COUNT = static_cast<int>(sizeof(MENU_ROWS) / sizeof(
 // that would otherwise just fail with NO_TOKEN once the user tried to use it.
 bool rowVisible(const MenuRow& row) {
   if (row.mode == NetworkMode::BOOKFUSION) return BF_TOKEN_STORE.hasToken();
-  // Same for OPDS: until a server URL is set in Settings there is nothing to browse.
-  if (row.mode == NetworkMode::OPDS) return SETTINGS.opdsServerUrl[0] != '\0';
+  // Same for OPDS: until a catalog is added in Settings there is nothing to browse.
+  if (row.mode == NetworkMode::OPDS) return OPDS_STORE.hasServers();
   // Plugins: only on boards that build them, and only once a plugin with an
   // on-device catalog is on the card (rescanned each time this screen opens).
   if (row.mode == NetworkMode::PLUGINS) {

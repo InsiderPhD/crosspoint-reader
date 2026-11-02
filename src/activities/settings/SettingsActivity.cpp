@@ -13,7 +13,6 @@
 #include "BluetoothSettingsActivity.h"
 #include "BookFusionSettingsActivity.h"
 #include "ButtonRemapActivity.h"
-#include "CalibreSettingsActivity.h"
 #include "ClearCacheActivity.h"
 #include "CrossPointSettings.h"
 #include "DictionarySelectActivity.h"
@@ -29,6 +28,7 @@
 #include "LanguageSelectActivity.h"
 #include "ManualDateActivity.h"
 #include "MappedInputManager.h"
+#include "OpdsServerListActivity.h"
 #include "OtaUpdateActivity.h"
 #include "ReaderControlsActivity.h"
 #include "ReaderMenuSettingsActivity.h"
@@ -469,7 +469,7 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<BookFusionSettingsActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::OPDSBrowser:
-        startActivityForResult(std::make_unique<CalibreSettingsActivity>(renderer, mappedInput), resultHandler);
+        startActivityForResult(std::make_unique<OpdsServerListActivity>(renderer, mappedInput), resultHandler);
         break;
       case SettingAction::Network:
         startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false),
