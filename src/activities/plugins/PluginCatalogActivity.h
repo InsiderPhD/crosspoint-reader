@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "PluginCatalogPaging.h"
 #include "activities/Activity.h"
 #include "components/themes/BaseTheme.h"
 #include "util/ButtonNavigator.h"
@@ -97,7 +98,8 @@ class PluginCatalogActivity final : public Activity {
     // element (a WebDAV multistatus, an OPDS/Atom feed, ...) with optional
     // folder navigation — the format is data, so the firmware knows no protocol.
     std::string browseFormat;
-    // Browse request: templates may use {token}, {cfg.KEY}, {page}, {limit}.
+    // Browse request: templates may use {token}, {cfg.KEY}, {page}, {offset},
+    // {limit}, and the firmware identity ({firmware_family}, ...).
     std::string browseUrl, browseMethod, browseBody;
     std::vector<std::pair<std::string, std::string>> browseHeaders;
     std::string itemsPath;  // JSON: dotted path to the item array; "" = response root
@@ -135,7 +137,8 @@ class PluginCatalogActivity final : public Activity {
     std::vector<std::string> xmlExtensions;  // allowed file extensions ("" = all)
 
     bool isXmlList() const { return browseFormat == "xml"; }
-    // Download: templates may additionally use {id}, {title}, {author}, {url}.
+    // Download: templates may additionally use {id}, {title}, {author}, {url}
+    // and their percent-encoded forms {id_enc}, {title_enc}, {author_enc}, {url_enc}.
     // When dlUrlPath is empty, the substituted dlUrl IS the file URL;
     // otherwise a request is made and the file URL read from dlUrlPath.
     std::string dlUrl, dlMethod, dlBody, dlUrlPath;
@@ -291,6 +294,8 @@ class PluginCatalogActivity final : public Activity {
   // Browse url/body with the selected browse list's overrides applied.
   const std::string& activeBrowseUrl() const;
   const std::string& activeBrowseBody() const;
+  // How the active browse request pages, from the variables its templates use.
+  plugincatalogpaging::Paging browsePaging() const;
   // Copies `headers` with `substituted()` applied to each value.
   std::vector<std::pair<std::string, std::string>> substitutedHeaders(
       const std::vector<std::pair<std::string, std::string>>& headers, const Item* item) const;

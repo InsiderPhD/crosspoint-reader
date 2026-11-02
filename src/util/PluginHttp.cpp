@@ -25,7 +25,7 @@ freeink::SecureHttpClient* openClient(freeink::SecureHttpClient* session, freein
   // with the transport, so verification is skipped; traffic stays encrypted.
   http.setInsecure();
   http.setTimeout(30000);
-  if (!http.begin(url)) return nullptr;
+  if (!http.begin(pluginhttp::escapeUrl(url))) return nullptr;
   for (const auto& h : headers) http.addHeader(h.first, h.second);
   return &http;
 }
@@ -103,6 +103,25 @@ std::string urlEncodeQuery(const std::string& s) {
   out.reserve(s.size() * 3);
   for (const unsigned char c : s) {
     if (isalnum(c) || strchr("-_.~", c)) {
+      out += static_cast<char>(c);
+    } else {
+      char buf[4];
+      snprintf(buf, sizeof(buf), "%%%02X", c);
+      out += buf;
+    }
+  }
+  return out;
+}
+
+std::string escapeUrl(const std::string& url) {
+  const auto kept = [](const unsigned char c) { return c > 0x20 && c < 0x7F; };
+  size_t escaped = 0;
+  for (const unsigned char c : url) escaped += kept(c) ? 0 : 1;
+  if (escaped == 0) return url;
+  std::string out;
+  out.reserve(url.size() + 2 * escaped);
+  for (const unsigned char c : url) {
+    if (kept(c)) {
       out += static_cast<char>(c);
     } else {
       char buf[4];

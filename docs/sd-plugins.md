@@ -137,6 +137,29 @@ pushes for a browser-only plugin (`plugin.js` without a `device.json`), whose
 UI lives in the web interface. `discoverPlugins()` rescans the plugin folders
 each time the picker opens; nothing stays resident.
 
+### Firmware identity and plugin capabilities
+
+Catalogs decide what to offer from what the firmware says it can do, not from
+a version number. KatiePoint keeps upstream CrossPoint 2.0's plugin contract,
+so it reports the same family (`src/util/FirmwareIdentity.h`):
+
+| Value | KatiePoint (X4 Pro / X4C) | Purpose |
+|---|---|---|
+| `firmware_family` | `crosspoint` | broad compatibility family |
+| `plugin_api` | `1` | numeric plugin contract level |
+| `plugin_capabilities` | comma-separated names below | fine-grained feature list |
+
+A capability is listed only once its behaviour is implemented here, so a
+catalog entry that `requires` something this firmware lacks is never offered.
+Boards without plugin support (X3 / X4) report API `0` and no capabilities.
+
+| Capability | What it means |
+|---|---|
+| `catalog.lists` | the manifest can expose named browse `lists` |
+| `catalog.bundle_install` | a catalog entry can install a multi-file bundle (base URL + file list) |
+| `catalog.version_tracking` | catalog versions are compared with installed manifests (Installed / Update) |
+| `catalog.encoded_item_fields` | download and sidecar templates accept `{id_enc}`, `{title_enc}`, `{author_enc}`, `{url_enc}` |
+
 ### Schema
 
 Every string field is a template. Available substitutions:
@@ -145,12 +168,24 @@ Every string field is a template. Available substitutions:
 |---|---|---|
 | `{token}` | contents of the token file at `token.path` | everywhere |
 | `{cfg.KEY}` | value of `KEY` in the flat JSON config file at `config.file` | everywhere |
+| `{firmware_family}` | `crosspoint` (the plugin contract family this firmware keeps) | everywhere |
+| `{firmware_version}` | the firmware's `CROSSPOINT_VERSION` | everywhere |
+| `{plugin_api}` | numeric plugin API level (`1`) | everywhere |
+| `{plugin_capabilities}` | comma-separated advertised capabilities (see below) | everywhere |
 | `{page}` | current 1-based page | browse |
-| `{limit}` | `page_size + 1` (the extra row detects "more pages") | browse |
-| `{id}` `{title}` `{author}` `{url}` | fields of the selected item | download, sidecar |
+| `{offset}` | rows before the current page: `(page - 1) * page_size` | browse |
+| `{limit}` | `page_size` when the request uses `{page}` and not `{offset}`; otherwise `page_size + 1` (the extra row shows that another page exists) | browse |
+| `{id}` `{title}` `{author}` `{url}` | fields of the selected item, as received | download, sidecar |
+| `{id_enc}` `{title_enc}` `{author_enc}` `{url_enc}` | the same fields percent-encoded (everything except letters, digits, `-_.~`), for query values and path segments | download, sidecar |
 | `{md5}` | MD5 hex of the destination file path | sidecar |
 | `{dest}` | sanitized on-SD path of the downloaded file | sidecar |
 | `{device_code}` | from the auth request response | auth poll |
+
+Substitution inserts values as they are. Before a request is sent, spaces,
+control characters and non-ASCII (UTF-8) bytes in its URL are percent-encoded,
+so a raw `{title}` in a URL path still forms a valid request. Every other
+printable ASCII character is kept (`&`, `?`, `#`, `/`, `+`, `=`, `%`), so use
+the `_enc` forms for values inside a query string or a single path segment.
 
 Two browse formats:
 - **`"json"`** (default) — a paged JSON list, using `items`/`fields` below.
@@ -192,7 +227,7 @@ Two browse formats:
                                             // Installed / Update by comparing this to the
                                             // installed plugin's manifest.json (found by id)
     },
-    "page_size": 8,                         // 1..16; response should honor {limit}
+    "page_size": 8,                         // 1..16; see Pagination below
 
     "lists": [                              // optional named sub-catalogs (json only):
       { "title": "All Books" },             // a picker screen precedes browsing;
@@ -275,11 +310,26 @@ Two browse formats:
 - **Server certificates**: the X4 Pro / X4C accept RSA keys up to 4096 bits
   (`CROSSPOINT_WOLFSSL_SP_4096`); a host with a larger key fails the TLS
   handshake with `MP_INIT_E` in the serial log.
-- **Pagination** (json): the browse request should return up to `{limit}`
-  items; the firmware displays `page_size` and uses the extra row to know
-  another page exists. Navigation matches the OPDS browser: a "Previous
-  page" row precedes the items past page 1 and a "Next page" row follows
-  them while more pages exist — tappable and button-reachable like any row.
+- **Pagination** (json): the variables a request uses choose how it pages
+  (`{offset}` takes precedence over `{page}`), the same rules as upstream
+  CrossPoint 2.0 (`src/activities/plugins/PluginCatalogPaging.h`):
+  - `{page}` with `{limit}` (`?page={page}&per_page={limit}`): `{limit}` is
+    `page_size`, so pages line up with the server's. A full page shows
+    "Next page"; when the last page is exactly full, the next one is empty.
+  - `{offset}` (`?offset={offset}&limit={limit}`): `{limit}` is
+    `page_size + 1`, and the extra row shows that another page exists.
+  - `{page}` without `{limit}` (one file per page, e.g. `all-{page}.json`):
+    "Next page" appears when the response has more than `page_size` rows, so
+    add one extra row at the end of every file except the last.
+  - Neither `{page}` nor `{offset}`: the response is one static list, and the
+    firmware pages through it locally.
+
+  Rows without a title are not shown. When the request uses `{page}` or
+  `{offset}` they still count toward the server's page, so a page can show
+  fewer rows and still offer "Next page". Navigation matches the OPDS
+  browser: a "Previous page" row precedes the items past page 1 and a "Next
+  page" row follows them while more pages exist — tappable and
+  button-reachable like any row.
 - **Lists** (json): with `browse.lists`, opening the catalog shows a picker
   of the named entries first; each entry browses with its own url/body
   overrides (server-side categories, shelves, sort orders). Back from the

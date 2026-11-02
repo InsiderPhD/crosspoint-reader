@@ -57,6 +57,13 @@ void readRequest(JsonVariantConst node, const char* defaultMethod, RequestSpec& 
 // Percent-encodes a query value ('/' included).
 std::string urlEncodeQuery(const std::string& s);
 
+// Percent-encodes the bytes a request line cannot carry: spaces, control
+// characters and non-ASCII (UTF-8) bytes. Every other printable ASCII byte is
+// kept ('&', '?', '#', '/', '+', '=', '%'), so a URL that is already valid is
+// unchanged and a raw {title} in a path still forms a valid request. Applied to
+// every plugin request URL (upstream CrossPoint #4196).
+std::string escapeUrl(const std::string& url);
+
 // --- token / config files ---
 
 // Reads the token at `path` (dotted) from the JSON file at `file`.

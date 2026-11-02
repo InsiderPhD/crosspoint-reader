@@ -31,6 +31,7 @@
 #include "network/HttpDownloader.h"
 #include "util/BookCacheUtils.h"
 #include "util/ButtonNavigator.h"
+#include "util/FirmwareIdentity.h"
 #include "util/PluginHttp.h"
 #include "util/PluginLocations.h"
 #include "util/QrUtils.h"
@@ -519,11 +520,22 @@ std::string PluginCatalogActivity::substituted(std::string tpl, const Item* item
     LOG_DBG("PCAT", "config key %s not set; substituting empty", tpl.substr(at, end - at + 1).c_str());
     tpl.erase(at, end - at + 1);
   }
+  // Firmware identity, so a catalog server can tailor its answer (upstream
+  // CrossPoint 2.0 template vocabulary).
+  substituteAll(tpl, "{firmware_family}", firmwareidentity::FAMILY);
+  substituteAll(tpl, "{firmware_version}", CROSSPOINT_VERSION);
+  substituteAll(tpl, "{plugin_capabilities}", firmwareidentity::PLUGIN_CAPABILITIES);
   char num[16];
+  snprintf(num, sizeof(num), "%d", firmwareidentity::PLUGIN_API_VERSION);
+  substituteAll(tpl, "{plugin_api}", num);
   snprintf(num, sizeof(num), "%d", page);
   substituteAll(tpl, "{page}", num);
-  snprintf(num, sizeof(num), "%d", manifest.pageSize + 1);
+  // {limit} is the page size for {page}+{limit} requests (server-sized pages)
+  // and page size + 1 otherwise: the extra row says another page exists.
+  snprintf(num, sizeof(num), "%d", plugincatalogpaging::limitFor(browsePaging(), manifest.pageSize));
   substituteAll(tpl, "{limit}", num);
+  snprintf(num, sizeof(num), "%d", std::max(0, page - 1) * manifest.pageSize);
+  substituteAll(tpl, "{offset}", num);
   substituteAll(tpl, "{query}", urlEncodeQuery(searchQuery));
   substituteAll(tpl, "{query_raw}", searchQuery);
   if (item) {
@@ -531,6 +543,16 @@ std::string PluginCatalogActivity::substituted(std::string tpl, const Item* item
     substituteAll(tpl, "{title}", item->title);
     substituteAll(tpl, "{author}", item->author);
     substituteAll(tpl, "{url}", item->url);
+    // Percent-encoded forms for query values and path segments, built only
+    // when the template uses them: a field can be KBs and its encoding three
+    // times that.
+    const std::pair<const char*, const std::string*> encoded[] = {{"{id_enc}", &item->id},
+                                                                  {"{title_enc}", &item->title},
+                                                                  {"{author_enc}", &item->author},
+                                                                  {"{url_enc}", &item->url}};
+    for (const auto& [key, value] : encoded) {
+      if (tpl.find(key) != std::string::npos) substituteAll(tpl, key, urlEncodeQuery(*value));
+    }
   }
   return tpl;
 }
@@ -874,6 +896,10 @@ const std::string& PluginCatalogActivity::activeBrowseBody() const {
   return pick(manifest.browseLists[currentList].body, manifest.browseBody);
 }
 
+plugincatalogpaging::Paging PluginCatalogActivity::browsePaging() const {
+  return plugincatalogpaging::pagingOf(activeBrowseUrl(), activeBrowseBody(), manifest.browseHeaders);
+}
+
 void PluginCatalogActivity::fetchPage(const int newPage) {
   if (manifest.isXmlList()) {
     fetchXmlList();
@@ -942,10 +968,21 @@ void PluginCatalogActivity::fetchPage(const int newPage) {
   JsonVariantConst itemsNode = resolvePath(doc.as<JsonVariantConst>(), manifest.itemsPath);
   JsonArrayConst arr = itemsNode.as<JsonArrayConst>();
   items.clear();
+  // The variables the request uses decide the paging (upstream CrossPoint
+  // #4170/#4195/#4221): {page}/{offset} requests are already sliced by the
+  // server, and every row it sent counts toward its page, shown or not; a
+  // static feed (neither variable) holds every row, so the page window slides
+  // over the rows we show. Without that a static feed repeated page 1 forever.
+  const plugincatalogpaging::Paging paging = browsePaging();
+  const size_t pageOffset = paging == plugincatalogpaging::Paging::Static
+                                ? static_cast<size_t>(std::max(0, page - 1)) * static_cast<size_t>(manifest.pageSize)
+                                : 0;
+  plugincatalogpaging::PageWindow window(pageOffset, static_cast<size_t>(manifest.pageSize));
   if (!arr.isNull()) {
     items.reserve(manifest.pageSize);
     for (JsonVariantConst v : arr) {
-      if (static_cast<int>(items.size()) >= manifest.pageSize + 1) break;
+      const bool shown = !variantToString(resolvePath(v, manifest.titlePath)).empty();
+      if (!window.take(plugincatalogpaging::countsTowardPage(paging, shown)) || !shown) continue;
       Item item;
       item.title = variantToString(resolvePath(v, manifest.titlePath));
       item.author = variantToString(resolvePath(v, manifest.authorPath));
@@ -962,11 +999,10 @@ void PluginCatalogActivity::fetchPage(const int newPage) {
           }
         }
       }
-      if (!item.title.empty()) items.push_back(std::move(item));
+      items.push_back(std::move(item));
     }
   }
-  hasMore = static_cast<int>(items.size()) > manifest.pageSize;
-  if (hasMore) items.resize(manifest.pageSize);
+  hasMore = window.hasMore(paging);
   computeInstallStatus();
   selectedIndex = 0;
   state = State::BROWSING;
@@ -1137,7 +1173,7 @@ void PluginCatalogActivity::downloadItem(const Item& item) {
       // be attached to a plugin's own server; expectedSize=0 (bundles carry no
       // advertised size).
       const auto res = HttpDownloader::downloadToFile(
-          base + rel, dest,
+          pluginhttp::escapeUrl(base + rel), dest,
           [this](const size_t downloaded, const size_t total) { onDownloadProgress(downloaded, total); }, false, 0,
           &cancelDownload);
       if (res == HttpDownloader::ABORTED) {
@@ -1209,8 +1245,9 @@ void PluginCatalogActivity::downloadItem(const Item& item) {
   dlLastRenderedPercent = -1;
   dlLastProgressUpdateMs = 0;
   const auto result = HttpDownloader::downloadToFile(
-      fileUrl, dest, [this](const size_t downloaded, const size_t total) { onDownloadProgress(downloaded, total); },
-      false, 0, &cancelDownload, dlUser, dlPass, dlHeaders);
+      pluginhttp::escapeUrl(fileUrl), dest,
+      [this](const size_t downloaded, const size_t total) { onDownloadProgress(downloaded, total); }, false, 0,
+      &cancelDownload, dlUser, dlPass, dlHeaders);
 
   if (result == HttpDownloader::ABORTED) {
     finishCancelledDownload();
