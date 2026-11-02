@@ -49,7 +49,11 @@ constexpr uint32_t SECTION_CACHE_MAGIC = 0x53504BFF;  // bytes: 0xFF, "KPS"
 //     start stays in its own paragraph (#4030), CSS font inherit (#4072), line breaks after
 //     explicit hyphens/dashes (#3883), NBSP justification and carried NBSPs (#4142), and
 //     SD-font advances snapped per glyph during layout (#3985). Binary layout unchanged.
-constexpr uint8_t SECTION_FILE_VERSION = 51;
+// 52: 2.0 parity EPUB rendering: fieldset boxes, GIF images, line spacing as a percentage
+//     of the font size, #id / descendant / child selectors, small caps (word style bit 64),
+//     widow / orphan control, block font sizes on every board (the header's layout byte is
+//     now TextLayoutOptions::layoutSignature()). Binary layout otherwise unchanged.
+constexpr uint8_t SECTION_FILE_VERSION = 52;
 // Staging buffer for page serialization, one per section build (not per page). 2KB is four
 // SD sectors: a typical text page (~3-6KB serialized) goes out in two to four writes, and a
 // field larger than the buffer (a long line's word arena) bypasses it. Heap, not stack: 2KB

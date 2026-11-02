@@ -163,7 +163,7 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-> **Current version: 51** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> **Current version: 52** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
 > v50 prepends the fork magic `FF 'K' 'P' 'S'` (see *Fork namespace* above) before the version
 > byte; the rest of the header and the body are unchanged (header offsets shift by 4).
 > The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
@@ -236,6 +236,21 @@ if (parsedSize != fileSize) {
 > the next line; SD-font words are measured with per-glyph pixel snapping, as drawn.
 > The CSS rule cache moves from version 8 to 9 (`0x89` with block font sizes): the
 > font-style and font-weight bytes may now hold 2 (`inherit`); the payload size is unchanged.
+> v52 (fork magic unchanged) 2.0 parity rendering. Binary layout unchanged except: TextBlock
+> word style bytes may carry bit 64 (`SMALL_CAPS`: lowercase drawn as 3/4-scale capitals);
+> the header's `layoutFeatures u8` is now a signature of the font-size ladder the section
+> was laid out with (bit 0 = heading / CSS sizes in use, bits 1-7 = hash of the ladder's
+> point sizes; 0 = none). On the C3 that ladder is decided at layout time from the heap, and
+> while it is heap-gated a cached section with either signature is accepted. Layout-only
+> changes: fieldsets draw as outlined boxes; GIF images are laid out; line spacing is a
+> percentage of the font size (`lineHeight`); widow / orphan control moves lines to the next
+> page; `#id`, descendant and child selectors apply.
+> The CSS rule cache moves to version 10 (`0x8A` with block font sizes, now the default on
+> every board): after the four border bytes each rule carries one text byte (bit 0 small
+> caps, bit 1 small caps set, bits 2-3 orphans, bits 4-5 widows; 0 = unset, else 1-3), then
+> font-size as `u16` hundredths + `u8` unit (was `float` + unit). Rules whose selector holds
+> a space or `>` are descendant / child rules (stored normalised: compounds joined by one
+> `' '` or `'>'`) and follow the simple rules; `#id` and `tag#id` are simple keys.
 >
 > Any change to the on-disk structure **must** bump this constant — a stale cache read
 > against a new layout is how you get a hard fault, not a graceful failure.

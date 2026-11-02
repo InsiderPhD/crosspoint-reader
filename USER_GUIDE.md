@@ -682,7 +682,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Line Spacing** — space between lines as a percentage of the font size: 0%, +10%, +20% (default), +30%, +45%, +60% or +75%. Same steps as CrossPoint, so the setting carries over when you swap firmware; the old Tight / Normal / Wide become +10% / +20% / +30%.
 - **Screen Margin** — 5–40 px in 5-px steps.
 - **Paragraph Alignment** — Justify / Left / Center / Right / Book's Style.
-- **Embedded Style** — use the EPUB's own HTML/CSS formatting.
+- **Embedded Style** — use the EPUB's own HTML/CSS formatting. Supported: element, class and `#id` selectors and descendant / child chains of them (`div.note p`, `section > p`); headings and CSS `font-size` in other sizes of the reader font (built-in fonts, and SD-card `.cpfont` families with several sizes installed; on the X3/X4 only when memory allows, so with Bluetooth on headings keep the body size); `font-variant: small-caps`; `orphans` / `widows` (a page break never leaves fewer than two lines of a paragraph behind or carries fewer than two over, unless the book asks otherwise); borders and shading; fieldsets as outlined boxes.
 - **Hyphenation** — dictionary hyphenation at line breaks. Changing it re-lays out text, so cached pages regenerate.
 - **Orientation** — Portrait / Landscape CW / Inverted / Landscape CCW.
 - **Extra Paragraph Spacing** — space between paragraphs vs. first-line indent.

@@ -883,7 +883,7 @@ rm -rf /path/to/sd/.crosspoint/epub_<hash>/sections/
 
 **Current Versions** (as of docs/file-formats.md):
 - `book.bin`: **Version 14** (metadata structure) — `lib/Epub/Epub/BookMetadataCache.cpp`
-- `section.bin`: **Version 51** (layout structure) — `lib/Epub/Epub/Section.cpp`
+- `section.bin`: **Version 52** (layout structure) — `lib/Epub/Epub/Section.cpp`
 - TXT `index.bin`: **Version 5** — `src/activities/reader/TxtReaderActivity.cpp`
 
 All three start with a 4-byte fork magic (`FF 'K' 'P' 'B'/'S'/'T'`) before the version byte, so

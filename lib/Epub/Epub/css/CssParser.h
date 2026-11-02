@@ -107,10 +107,13 @@ class CssParser {
   // 8: rules carry direction (parsed before, but dropped by the cache), four packed border
   //    edges, and defined bits 17..29 (direction, page breaks, white-space, shade, borders).
   // 9: font-style / font-weight may hold Inherit (value 2), resolved at parse time (#4072).
-  // Bit 7 marks a cache written by a build with CROSSPOINT_EPUB_BLOCK_FONT_SIZES, whose
-  // rules carry one more length (font-size). The two layouts never match each other's
-  // version byte, so an SD card moved between a C3 and a PSRAM board rebuilds the cache.
-  static constexpr uint8_t CSS_CACHE_VERSION = 9 | (CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? 0x80 : 0);
+  // 10: #id / descendant / child selectors (contextual rules follow the simple ones), one
+  //     text byte after the borders (small caps, orphans, widows), font-size stored as u16
+  //     hundredths + unit (3 bytes) instead of float + unit.
+  // Bit 7 marks a cache written by a build with CROSSPOINT_EPUB_BLOCK_FONT_SIZES (every board
+  // by default since v10), whose rules carry font-size; the two layouts never match each
+  // other's version byte.
+  static constexpr uint8_t CSS_CACHE_VERSION = 10 | (CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? 0x80 : 0);
 
   explicit CssParser(std::string cachePath) : cachePath(std::move(cachePath)) {}
   ~CssParser() = default;
