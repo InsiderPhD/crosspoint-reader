@@ -374,6 +374,10 @@ curl http://crosspoint.local/api/settings
 
 Applies a partial settings update. Send a JSON object keyed by setting key; unknown
 keys are ignored, and enum/value settings are range-checked before being applied.
+The keys are KatiePoint's (the ones `GET /api/settings` lists), saved to
+`/.crosspoint/katiepoint-settings.json`; the shared subset is then mirrored into
+upstream CrossPoint's `/.crosspoint/settings.json` in its numbering. Neither file
+can be read or written through the file endpoints (see `ProtectedPaths.h`).
 
 **Request:**
 ```bash

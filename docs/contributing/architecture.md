@@ -168,7 +168,8 @@ Typical persisted areas on SD:
     progress.bin    # reading position
     cover.bmp       # cached cover
     sections/*.bin  # per-chapter layout cache
-  settings.json     # user settings (migrated from legacy settings.bin)
+  katiepoint-settings.json  # user settings (see docs/file-formats.md)
+  settings.json     # shared with upstream CrossPoint: imported once, then kept in step (SettingsCompat)
   state.json        # runtime/session state (migrated from legacy state.bin)
 ```
 

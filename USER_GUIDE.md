@@ -830,6 +830,17 @@ To replace the logo shown while the device starts: in **Browse Files**, hold **C
 
 Prebuilt firmware is on the [Releases page](https://github.com/InsiderPhD/crosspoint-reader/releases).
 
+### Switching firmware (CrossPoint, CrossInk)
+
+You can flash upstream CrossPoint or CrossInk and come back without losing your settings:
+
+- KatiePoint keeps its settings in `.crosspoint/katiepoint-settings.json`, so other firmware never rewrites them. CrossInk does the same with its own file.
+- The first time KatiePoint starts on a card that only has CrossPoint's `.crosspoint/settings.json`, it imports what both firmwares share: fonts and sizes, spacing, margins, orientation, sleep screen, sleep timeout, refresh, status bar, button actions, clock and time zone, dictionary and language. Settings CrossPoint has and KatiePoint doesn't stay at KatiePoint's defaults.
+- KatiePoint also keeps `settings.json` up to date with those shared settings, so going back to CrossPoint carries them over. CrossPoint-only settings in that file (plugins, line height, and so on) are left as they are. If you never changed a setting in KatiePoint, CrossPoint keeps its own exact value, even one KatiePoint can't show (the Cover Grid theme, for example).
+- Your language choice goes with you too.
+
+Once `katiepoint-settings.json` exists, KatiePoint ignores changes CrossPoint makes to `settings.json`. To import from it again, delete `katiepoint-settings.json`.
+
 ---
 
 ## Supported Languages
@@ -857,4 +868,4 @@ pio device monitor
 
 **Stuck in a bootloop?** Press and release **Reset**, then hold **Back + Power** to boot to the Home screen (skipping auto-reopen of the last book).
 
-**Corrupt cache or config?** Delete the `.crosspoint` directory on the SD card — or, more surgically, just `settings.bin`, `state.bin`, or an `epub_*` cache folder inside `.crosspoint/`. See also [docs/troubleshooting.md](./docs/troubleshooting.md).
+**Corrupt cache or config?** Delete the `.crosspoint` directory on the SD card — or, more surgically, just `katiepoint-settings.json`, `state.json`, or an `epub_*` cache folder inside `.crosspoint/`. See also [docs/troubleshooting.md](./docs/troubleshooting.md).

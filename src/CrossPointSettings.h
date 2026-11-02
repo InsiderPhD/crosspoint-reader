@@ -935,6 +935,13 @@ class CrossPointSettings {
 
  private:
   bool loadFromBinaryFile();
+  // katiepoint-settings.json (with .tmp / .bak recovery). Never falls through
+  // to an import, even when the file is damaged.
+  bool loadOwnFile();
+  // One-time import of /.crosspoint/settings.json (upstream CrossPoint's, or an
+  // older KatiePoint build's), saved straight to our own file. False when
+  // there is none or it does not parse.
+  bool importLegacyJson();
 
  public:
   float getReaderLineCompression() const;

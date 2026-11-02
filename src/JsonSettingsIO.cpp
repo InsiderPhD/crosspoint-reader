@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <HalStorage.h>
+#include <I18n.h>
 #include <Logging.h>
 #include <ObfuscationUtils.h>
 
@@ -208,6 +209,17 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
 
 bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path) {
   JsonDocument doc;
+  serializeSettings(s, doc);
+  String json;
+  serializeJson(doc, json);
+  return Storage.writeFile(path, json);
+}
+
+void JsonSettingsIO::serializeSettings(const CrossPointSettings& s, JsonDocument& doc) {
+  // UI language as its code ("EN", "DE", ...), the form upstream CrossPoint
+  // stores. language.bin stays the source of truth on this firmware; this copy
+  // is what survives a firmware swap (CrossInk renames language.bin away).
+  doc["language"] = I18n::languageCode(I18N.getLanguage());
 
   for (const auto& info : getSettingsList()) {
     if (!info.key) continue;
@@ -320,10 +332,6 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   doc["frontlightScheduleRestoreBrightness"] = s.frontlightScheduleRestoreBrightness;
   doc["frontlightScheduleRestoreWarmth"] = s.frontlightScheduleRestoreWarmth;
   doc["frontlightScheduleRestoreDarkMode"] = s.frontlightScheduleRestoreDarkMode;
-
-  String json;
-  serializeJson(doc, json);
-  return Storage.writeFile(path, json);
 }
 
 bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool* needsResave) {
@@ -334,7 +342,11 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     LOG_ERR("CPS", "JSON parse error: %s", error.c_str());
     return false;
   }
+  return loadSettings(s, doc, needsResave);
+}
 
+bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc, bool* needsResave) {
+  if (needsResave) *needsResave = false;
   auto clamp = [](uint8_t val, uint8_t maxVal, uint8_t def) -> uint8_t { return val < maxVal ? val : def; };
 
   // Legacy migration: if statusBarChapterPageCount is absent this is a pre-refactor settings file.

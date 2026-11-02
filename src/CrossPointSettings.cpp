@@ -1,7 +1,9 @@
 #include "CrossPointSettings.h"
 
+#include <ArduinoJson.h>
 #include <HalFrontlight.h>
 #include <HalStorage.h>
+#include <I18n.h>
 #include <JsonSettingsIO.h>
 #include <Logging.h>
 #include <Serialization.h>
@@ -9,6 +11,7 @@
 #include <cstring>
 #include <string>
 
+#include "SettingsCompat.h"
 #include "fontIds.h"
 
 // Initialize the static instance
@@ -25,11 +28,22 @@ void readAndValidate(FsFile& file, uint8_t& member, const uint8_t maxValue) {
 namespace {
 constexpr uint8_t SETTINGS_FILE_VERSION = 1;
 constexpr char SETTINGS_FILE_BIN[] = "/.crosspoint/settings.bin";
-constexpr char SETTINGS_FILE_JSON[] = "/.crosspoint/settings.json";
-// Atomic-save scratch and last-known-good copy; see saveToFile().
-constexpr char SETTINGS_FILE_JSON_TMP[] = "/.crosspoint/settings.json.tmp";
-constexpr char SETTINGS_FILE_JSON_BAK[] = "/.crosspoint/settings.json.bak";
-constexpr char SETTINGS_FILE_BAK[] = "/.crosspoint/settings.bin.bak";
+constexpr char SETTINGS_FILE_BIN_BAK[] = "/.crosspoint/settings.bin.bak";
+// KatiePoint's own settings, so upstream CrossPoint rewriting settings.json
+// (it rebuilds the file from its own key list) cannot drop ours. Atomic-save
+// scratch and last-known-good copy alongside; see saveToFile().
+constexpr char SETTINGS_FILE[] = "/.crosspoint/katiepoint-settings.json";
+constexpr char SETTINGS_FILE_TMP[] = "/.crosspoint/katiepoint-settings.json.tmp";
+constexpr char SETTINGS_FILE_BAK[] = "/.crosspoint/katiepoint-settings.json.bak";
+// Shared with upstream CrossPoint and older KatiePoint builds: imported once
+// when our own file does not exist yet, then kept up to date with the settings
+// both understand (SettingsCompat).
+constexpr char LEGACY_SETTINGS_FILE[] = "/.crosspoint/settings.json";
+constexpr char LEGACY_SETTINGS_FILE_TMP[] = "/.crosspoint/settings.json.tmp";
+constexpr char LEGACY_SETTINGS_FILE_BAK[] = "/.crosspoint/settings.json.bak";
+// Read caps. Our file is ~8KB; upstream's settings.json ~3-4KB.
+constexpr size_t SETTINGS_MAX_BYTES = 32 * 1024;
+constexpr size_t COMPAT_MAX_BYTES = 16 * 1024;
 
 // Convert legacy front button layout into explicit logical->hardware mapping.
 void applyLegacyFrontButtonLayout(CrossPointSettings& settings) {
@@ -342,101 +356,306 @@ bool CrossPointSettings::isUnavailableReaderAction(const uint8_t action) {
   return action == READER_ACTION_TOGGLE_FRONTLIGHT && !halFrontlight.present();
 }
 
+namespace {
+
+// FNV-1a over the serialised bytes, fed by serializeJson() as a custom writer
+// so hashing the compatibility payload allocates nothing.
+struct HashWriter {
+  uint32_t hash = 2166136261u;
+  size_t write(const uint8_t c) {
+    hash = (hash ^ c) * 16777619u;
+    return 1;
+  }
+  size_t write(const uint8_t* s, const size_t n) {
+    for (size_t i = 0; i < n; i++) write(s[i]);
+    return n;
+  }
+};
+
+// Hash of the last compatibility payload written to (or found already in)
+// settings.json this session. 0 = not checked yet. Static, not heap.
+uint32_t lastCompatHash = 0;
+
+// Publish a fully written scratch file over `path`. FAT has no
+// replace-by-rename (SdFat's rename refuses an existing target), so the
+// previous file is parked as `bak` first; on failure it is put back.
+bool publishScratch(const char* tmp, const char* path, const char* bak, const bool keepBak) {
+  const bool hadPrevious = Storage.exists(path);
+  if (hadPrevious) {
+    if (Storage.exists(bak) && !Storage.remove(bak)) {
+      LOG_ERR("CPS", "Could not drop the old %s", bak);
+      Storage.remove(tmp);
+      return false;
+    }
+    if (!Storage.rename(path, bak)) {
+      LOG_ERR("CPS", "Could not park %s as %s", path, bak);
+      Storage.remove(tmp);
+      return false;
+    }
+  }
+  if (!Storage.rename(tmp, path)) {
+    LOG_ERR("CPS", "Could not publish %s", tmp);
+    if (hadPrevious && !Storage.rename(bak, path)) {
+      // The loader promotes the .bak when the main file is missing.
+      LOG_ERR("CPS", "Previous settings remain at %s", bak);
+    }
+    Storage.remove(tmp);
+    return false;
+  }
+  if (hadPrevious && !keepBak) Storage.remove(bak);
+  return true;
+}
+
+// Finish (or undo) a save interrupted between its two renames: `path` is gone,
+// and either the complete scratch file or the parked previous file is still
+// there. The scratch file is the newer of the two.
+void recoverInterruptedSave(const char* path, const char* tmp, const char* bak) {
+  if (Storage.exists(path)) return;
+  if (Storage.exists(tmp) && Storage.rename(tmp, path)) {
+    LOG_INF("CPS", "Recovered %s from an interrupted save", path);
+  } else if (Storage.exists(bak) && Storage.rename(bak, path)) {
+    LOG_INF("CPS", "Restored %s from %s", path, bak);
+  }
+}
+
+// Apply a "language" code read from a settings document. language.bin stays
+// the source of truth here, so the code is used only when neither it nor
+// CrossInk's language.bin.bak is on the card — or, for a settings.json written by
+// upstream CrossPoint, always: that firmware keeps the user's current choice
+// there, and any language.bin left on the card predates it.
+void applyStoredLanguage(JsonVariantConst code, const bool overrideSaved) {
+  Language lang;
+  if (!I18n::languageFromCode(code.as<const char*>(), lang)) return;
+  if (!overrideSaved && I18n::hasSavedLanguage()) return;
+  if (lang != I18N.getLanguage() || !I18n::hasSavedLanguage()) I18N.setLanguage(lang);  // writes language.bin
+}
+
+// Write `shared` (upstream key names and numbering, from
+// SettingsCompat::exportShared) into settings.json for upstream CrossPoint.
+//
+// Heap: everything here is transient and freed before returning — the
+// existing file (capped at COMPAT_MAX_BYTES), its parsed document, two small
+// documents for the round-trip baseline and the output string, roughly 4x the
+// file size (~16KB at upstream's typical 3-4KB) at peak. It runs only after a
+// successful settings save (already value-change guarded by the callers) and
+// only when the shared payload hash moved, so it is not on any per-page path.
+// A stack buffer was rejected: 16KB is far over the 256-byte stack budget and
+// the document size is not fixed. Any allocation failure skips the write.
+void writeCompatSettings(const JsonDocument& shared) {
+  HashWriter hasher;
+  serializeJson(shared, hasher);
+  if (hasher.hash == lastCompatHash) return;
+
+  std::string existing;
+  if (Storage.exists(LEGACY_SETTINGS_FILE)) {
+    FsFile probe;
+    size_t size = 0;
+    if (Storage.openFileForRead("CPS", LEGACY_SETTINGS_FILE, probe)) {
+      size = probe.fileSize();
+      probe.close();
+    }
+    if (size > COMPAT_MAX_BYTES) {
+      LOG_ERR("CPS", "settings.json is %u bytes; not updating it", static_cast<unsigned>(size));
+      return;
+    }
+    if (size > 0 && !Storage.readFileToString("CPS", LEGACY_SETTINGS_FILE, COMPAT_MAX_BYTES, existing)) {
+      LOG_ERR("CPS", "Could not read settings.json; not updating it");
+      return;
+    }
+  }
+
+  JsonDocument merged;
+  if (!existing.empty()) {
+    const DeserializationError err = deserializeJson(merged, existing);
+    if (err) {
+      LOG_ERR("CPS", "settings.json does not parse (%s); not updating it", err.c_str());
+      return;
+    }
+    if (!SettingsCompat::isUpstreamDocument(merged)) {
+      // Written by an older KatiePoint, in this firmware's numbering: nothing
+      // in it is safe to hand upstream as-is, so start from the shared keys.
+      merged.clear();
+    }
+  }
+
+  if (!merged.isNull()) {
+    // Keep upstream's exact value for every setting not changed here since it
+    // was imported: translate the file to our numbering and back, and leave a
+    // key alone when that round trip already gives what we would write. This
+    // stops lossy mappings (Cover Grid theme, "Never" refresh, odd point
+    // sizes) overwriting upstream's choice when the user never touched them.
+    JsonDocument baseline;
+    {
+      JsonDocument imported;
+      SettingsCompat::importUpstream(merged.as<JsonVariantConst>(), imported);
+      SettingsCompat::exportShared(imported.as<JsonVariantConst>(), baseline);
+    }
+    // A key the round trip does not produce at all is one whose upstream value
+    // has no counterpart here (Cover Grid, Cover + Transparent sleep screen):
+    // upstream's choice is kept rather than replaced by our default.
+    for (const JsonPairConst kv : shared.as<JsonObjectConst>()) {
+      const JsonVariantConst current = merged[kv.key()];
+      const JsonVariantConst base = baseline[kv.key()];
+      if (!current.isNull() && (base.isNull() || base == kv.value())) continue;
+      merged[kv.key()] = kv.value();
+    }
+  } else {
+    merged.set(shared.as<JsonVariantConst>());
+  }
+  if (merged.overflowed()) {
+    LOG_ERR("CPS", "Out of memory building settings.json; not updating it");
+    return;
+  }
+
+  String out;
+  serializeJson(merged, out);
+  if (out.length() != measureJson(merged)) {
+    LOG_ERR("CPS", "Out of memory serialising settings.json; not updating it");
+    return;
+  }
+  if (existing.size() == out.length() && memcmp(existing.data(), out.c_str(), existing.size()) == 0) {
+    lastCompatHash = hasher.hash;  // already up to date: no SD write
+    return;
+  }
+  if (!Storage.writeFile(LEGACY_SETTINGS_FILE_TMP, out)) {
+    LOG_ERR("CPS", "Failed to write %s", LEGACY_SETTINGS_FILE_TMP);
+    Storage.remove(LEGACY_SETTINGS_FILE_TMP);
+    return;
+  }
+  if (publishScratch(LEGACY_SETTINGS_FILE_TMP, LEGACY_SETTINGS_FILE, LEGACY_SETTINGS_FILE_BAK, false)) {
+    lastCompatHash = hasher.hash;
+    LOG_DBG("CPS", "Updated settings.json for other firmware");
+  }
+}
+
+}  // namespace
+
 bool CrossPointSettings::saveToFile() const {
   if (frontlightBrightness > 0) frontlightLastBrightness = frontlightBrightness;
   Storage.mkdir("/.crosspoint");
 
-  // Never write settings.json in place: the old path removed the file and then
-  // streamed the new one, so a power cut or card error mid-write left a
-  // truncated document, which fails to parse and silently reset every setting
-  // to its default on the next boot. Write the whole document to a scratch
-  // file first; only a complete, closed file is ever published.
+  // Never write the settings file in place: a power cut or card error mid-write
+  // would leave a truncated document, which fails to parse and silently resets
+  // every setting on the next boot. The whole document goes to a scratch file
+  // first; only a complete, closed file is published, and the previous one is
+  // left behind as .bak, the last known good copy for loadFromFile().
   //
-  // FAT has no replace-by-rename (SdFat's rename refuses an existing target),
-  // so the previous file is parked as .bak, the scratch file renamed in, and
-  // the .bak deliberately left behind as the last known good copy for
-  // loadFromFile(). No extra heap: the document is serialised once, as before,
-  // and the three paths are flash constants.
-  if (!JsonSettingsIO::saveSettings(*this, SETTINGS_FILE_JSON_TMP)) {
-    LOG_ERR("CPS", "Failed to write %s; settings.json left untouched", SETTINGS_FILE_JSON_TMP);
-    Storage.remove(SETTINGS_FILE_JSON_TMP);
-    return false;
+  // The shared subset for settings.json is derived from the same document
+  // while it is in memory (a small extra document, ~2KB), so the full one is
+  // built once per save as before.
+  JsonDocument shared;
+  {
+    JsonDocument doc;
+    JsonSettingsIO::serializeSettings(*this, doc);
+    String json;
+    serializeJson(doc, json);
+    if (json.length() == 0 || !Storage.writeFile(SETTINGS_FILE_TMP, json)) {
+      LOG_ERR("CPS", "Failed to write %s; settings left untouched", SETTINGS_FILE_TMP);
+      Storage.remove(SETTINGS_FILE_TMP);
+      return false;
+    }
+    SettingsCompat::exportShared(doc.as<JsonVariantConst>(), shared);
   }
+  if (!publishScratch(SETTINGS_FILE_TMP, SETTINGS_FILE, SETTINGS_FILE_BAK, true)) return false;
 
-  const bool hadPrevious = Storage.exists(SETTINGS_FILE_JSON);
-  if (hadPrevious) {
-    if (Storage.exists(SETTINGS_FILE_JSON_BAK) && !Storage.remove(SETTINGS_FILE_JSON_BAK)) {
-      LOG_ERR("CPS", "Could not drop the old %s", SETTINGS_FILE_JSON_BAK);
-      Storage.remove(SETTINGS_FILE_JSON_TMP);
-      return false;
+  // Best effort: a failure here is logged and never fails this save.
+  if (!shared.overflowed()) writeCompatSettings(shared);
+  return true;
+}
+
+bool CrossPointSettings::loadOwnFile() {
+  // Our own file exists (or did, as .tmp / .bak), so it is authoritative even
+  // when damaged: falling through would import another firmware's settings.json
+  // over the user's KatiePoint preferences (CrossInk follows the same rule).
+  recoverInterruptedSave(SETTINGS_FILE, SETTINGS_FILE_TMP, SETTINGS_FILE_BAK);
+
+  bool resave = false;
+  bool result = false;
+  JsonDocument doc;
+  for (const char* path : {SETTINGS_FILE, SETTINGS_FILE_BAK}) {
+    std::string json;
+    if (!Storage.readFileToString("CPS", path, SETTINGS_MAX_BYTES, json)) continue;
+    doc.clear();
+    const DeserializationError err = deserializeJson(doc, json);
+    if (err) {
+      LOG_ERR("CPS", "%s does not parse: %s", path, err.c_str());
+      continue;
     }
-    if (!Storage.rename(SETTINGS_FILE_JSON, SETTINGS_FILE_JSON_BAK)) {
-      LOG_ERR("CPS", "Could not park settings.json as %s", SETTINGS_FILE_JSON_BAK);
-      Storage.remove(SETTINGS_FILE_JSON_TMP);
-      return false;
+    result = JsonSettingsIO::loadSettings(*this, doc, &resave);
+    if (result) {
+      if (path == SETTINGS_FILE_BAK) {
+        // Fell back to the copy the last successful save left behind; rewrite
+        // the main file from it.
+        LOG_ERR("CPS", "%s is unreadable; loaded %s", SETTINGS_FILE, SETTINGS_FILE_BAK);
+        resave = true;
+      }
+      break;
     }
   }
-  if (!Storage.rename(SETTINGS_FILE_JSON_TMP, SETTINGS_FILE_JSON)) {
-    LOG_ERR("CPS", "Could not publish %s", SETTINGS_FILE_JSON_TMP);
-    if (hadPrevious && !Storage.rename(SETTINGS_FILE_JSON_BAK, SETTINGS_FILE_JSON)) {
-      // loadFromFile() promotes the .bak when settings.json is missing.
-      LOG_ERR("CPS", "Previous settings remain at %s", SETTINGS_FILE_JSON_BAK);
+  if (!result) return false;
+
+  applyStoredLanguage(doc.as<JsonVariantConst>()["language"], false);
+  // Only write back when something actually changed: both migrations self-gate
+  // on a "migrated" flag a loaded file already carries, so a normal boot writes
+  // nothing.
+  if (migrateReaderActions(*this)) resave = true;
+  if (resave) {
+    if (saveToFile()) {
+      LOG_DBG("CPS", "Resaved settings to update format");
+    } else {
+      LOG_ERR("CPS", "Failed to resave settings after format update");
     }
-    Storage.remove(SETTINGS_FILE_JSON_TMP);
-    return false;
   }
   return true;
 }
 
-bool CrossPointSettings::loadFromFile() {
-  // Finish (or undo) a save that was interrupted between its two renames:
-  // settings.json is gone, and either the complete scratch file or the parked
-  // previous file is still there. The scratch file is the newer of the two.
-  if (!Storage.exists(SETTINGS_FILE_JSON)) {
-    if (Storage.exists(SETTINGS_FILE_JSON_TMP) && Storage.rename(SETTINGS_FILE_JSON_TMP, SETTINGS_FILE_JSON)) {
-      LOG_INF("CPS", "Recovered settings.json from an interrupted save");
-    } else if (Storage.exists(SETTINGS_FILE_JSON_BAK) && Storage.rename(SETTINGS_FILE_JSON_BAK, SETTINGS_FILE_JSON)) {
-      LOG_INF("CPS", "Restored settings.json from %s", SETTINGS_FILE_JSON_BAK);
-    }
-  }
+bool CrossPointSettings::importLegacyJson() {
+  // settings.json is shared with upstream CrossPoint (and older KatiePoint
+  // builds), so it is only read here, never moved: the other firmware still
+  // owns it.
+  recoverInterruptedSave(LEGACY_SETTINGS_FILE, LEGACY_SETTINGS_FILE_TMP, LEGACY_SETTINGS_FILE_BAK);
+  if (!Storage.exists(LEGACY_SETTINGS_FILE)) return false;
 
-  // Try JSON first
-  if (Storage.exists(SETTINGS_FILE_JSON)) {
-    String json = Storage.readFile(SETTINGS_FILE_JSON);
-    bool resave = false;
-    bool result = !json.isEmpty() && JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
-    if (!result && Storage.exists(SETTINGS_FILE_JSON_BAK)) {
-      // settings.json is empty or does not parse (loadSettings() fails only on
-      // a JSON parse error, before it has touched any field). Fall back to the
-      // copy the last successful save left behind rather than to defaults, and
-      // rewrite settings.json from it.
-      LOG_ERR("CPS", "settings.json is unreadable; loading %s", SETTINGS_FILE_JSON_BAK);
-      json = Storage.readFile(SETTINGS_FILE_JSON_BAK);
-      result = !json.isEmpty() && JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
-      if (result) resave = true;
+  bool loaded = false;
+  {
+    // Transient import buffers (boot only, freed at the end of this scope).
+    std::string json;
+    if (!Storage.readFileToString("CPS", LEGACY_SETTINGS_FILE, SETTINGS_MAX_BYTES, json)) {
+      LOG_ERR("CPS", "settings.json unreadable; not importing it");
+      return false;
     }
-    if (!json.isEmpty()) {
-      if (result) {
-        // Only write back when something actually changed. This used to set
-        // resave unconditionally, which re-serialised the whole settings
-        // document and wrote settings.json to the SD card on EVERY boot — a
-        // write on a path where nothing had changed, against the project's own
-        // write-throttling rule. Both migrations self-gate on a "migrated" flag
-        // that a loaded file already carries, so on a normal boot neither does
-        // any work and there is nothing to save.
-        const bool migratedActions = migrateReaderActions(*this);
-        resave = resave || migratedActions;
-      }
-      if (result && resave) {
-        if (saveToFile()) {
-          LOG_DBG("CPS", "Resaved settings to update format");
-        } else {
-          LOG_ERR("CPS", "Failed to resave settings after format update");
-        }
-      }
-      return result;
+    JsonDocument doc;
+    const DeserializationError err = deserializeJson(doc, json);
+    if (err) {
+      LOG_ERR("CPS", "settings.json does not parse (%s); not importing it", err.c_str());
+      return false;
+    }
+    json.clear();
+    json.shrink_to_fit();
+
+    if (SettingsCompat::isUpstreamDocument(doc)) {
+      JsonDocument translated;
+      SettingsCompat::importUpstream(doc.as<JsonVariantConst>(), translated);
+      loaded = JsonSettingsIO::loadSettings(*this, translated);
+      if (loaded) applyStoredLanguage(translated.as<JsonVariantConst>()["language"], true);
+      LOG_INF("CPS", "Imported upstream CrossPoint settings.json");
+    } else {
+      // An older KatiePoint build's own file: this firmware's numbering.
+      loaded = JsonSettingsIO::loadSettings(*this, doc);
+      if (loaded) migrateReaderActions(*this);
+      LOG_INF("CPS", "Imported KatiePoint settings.json");
     }
   }
+  if (!loaded) return false;
+  if (!saveToFile()) LOG_ERR("CPS", "Failed to save imported settings to %s", SETTINGS_FILE);
+  return true;
+}
+
+bool CrossPointSettings::loadFromFile() {
+  if (Storage.exists(SETTINGS_FILE) || Storage.exists(SETTINGS_FILE_TMP) || Storage.exists(SETTINGS_FILE_BAK)) {
+    return loadOwnFile();
+  }
+  if (importLegacyJson()) return true;
 
   // Fall back to binary migration
   if (Storage.exists(SETTINGS_FILE_BIN)) {
@@ -445,8 +664,8 @@ bool CrossPointSettings::loadFromFile() {
       migrateStatusBarBatteryStyles(*this);
       migrateHeaderStatusBar(*this);
       if (saveToFile()) {
-        Storage.rename(SETTINGS_FILE_BIN, SETTINGS_FILE_BAK);
-        LOG_DBG("CPS", "Migrated settings.bin to settings.json");
+        Storage.rename(SETTINGS_FILE_BIN, SETTINGS_FILE_BIN_BAK);
+        LOG_DBG("CPS", "Migrated settings.bin to %s", SETTINGS_FILE);
         return true;
       } else {
         LOG_ERR("CPS", "Failed to save migrated settings to JSON");

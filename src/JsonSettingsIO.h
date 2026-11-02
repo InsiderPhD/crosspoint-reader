@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ArduinoJson.h>
 #include <WString.h>
 
 #include <vector>
@@ -17,7 +18,13 @@ namespace JsonSettingsIO {
 
 // CrossPointSettings
 bool saveSettings(const CrossPointSettings& s, const char* path);
+// Fills `doc` with the on-disk form, so CrossPointSettings::saveToFile() can
+// both write it and derive the settings.json compatibility copy from it.
+void serializeSettings(const CrossPointSettings& s, JsonDocument& doc);
 bool loadSettings(CrossPointSettings& s, const char* json, bool* needsResave = nullptr);
+// Same, from an already-parsed document (an imported upstream settings.json
+// after SettingsCompat::importUpstream()).
+bool loadSettings(CrossPointSettings& s, const JsonDocument& doc, bool* needsResave = nullptr);
 
 // CrossPointState
 // Produces the on-disk form without writing it, so CrossPointState::saveToFile()

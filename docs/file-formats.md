@@ -512,6 +512,86 @@ struct PayloadHeader {          // 32 bytes, then title, author, series, tags ba
 };
 ```
 
+## Settings: `katiepoint-settings.json` and `settings.json`
+
+KatiePoint's settings live in `/.crosspoint/katiepoint-settings.json` (JSON object, one key per
+setting, written by `JsonSettingsIO::serializeSettings`). Saves go to `.tmp`, the previous file is
+parked as `.bak` (kept as the last known good copy) and the scratch file renamed in.
+
+`/.crosspoint/settings.json` belongs to upstream CrossPoint (and older KatiePoint builds, which
+used it as their own file). Upstream rebuilds it from its own key list on every boot, which is why
+KatiePoint no longer keeps its settings there. CrossInk uses `crossink-settings.json` for the same
+reason.
+
+**Load order** (`CrossPointSettings::loadFromFile`):
+
+1. `katiepoint-settings.json`, after recovering an interrupted save from `.tmp` / `.bak`. If any of
+   the three exists this file is authoritative: when damaged, its `.bak` is tried and otherwise
+   defaults are used. `settings.json` is never imported over it.
+2. Otherwise `settings.json` (or its `.tmp` / `.bak`) is imported once and our file saved straight
+   away. `settings.json` is not moved or deleted.
+   - **Upstream file**: it contains a key KatiePoint has never written (`lineHeight`,
+     `sleepTimeoutMinutes`, `pluginsEnabled`, `paragraphIndentSpaces`, `pageTurnGesture`,
+     `libraryUseMetadata`, `screenInverted`, `focusReadingEnabled`, `readerMenuStyle`). It is
+     translated by `SettingsCompat::importUpstream` (table below); unmapped settings keep our
+     defaults. Its `language` code sets the UI language.
+   - **Otherwise** it is an older KatiePoint build's own file and loads as-is.
+3. Otherwise legacy `settings.bin` (renamed to `settings.bin.bak` once migrated).
+
+**Compatibility copy.** After every successful save the shared settings are written into
+`settings.json` in upstream's key names and numbering (`SettingsCompat::exportShared`):
+
+- An upstream `settings.json` is read (capped at 16 KB), every key we don't own is kept, and each
+  shared key is replaced only when our value differs from what that file's own value translates to
+  and back. Upstream's exact value survives for settings not changed here, including values with no
+  KatiePoint equivalent.
+- A KatiePoint-format `settings.json` (older build) is replaced by the shared keys alone.
+- The write is atomic (`settings.json.tmp`, then renamed in). It is skipped when the content is
+  unchanged, or when the shared payload hash matches the last one written this session. A read,
+  parse or allocation failure only logs: it never fails our own save.
+- `lineHeight` and `sleepTimeoutMinutes` are always written, so the result reads back as upstream.
+
+**Language.** `language.bin` stays the source of truth. If it is missing, `language.bin.bak` is
+read; CrossInk renames `language.bin` to that. Both settings files also carry `"language": "<code>"`,
+which is used when neither binary file exists.
+
+### Translation table (KatiePoint <-> CrossPoint 2.0)
+
+Same name, value and range on both sides: `hideBatteryPercentage`, `fadingFix`, `wordSpacing`,
+`screenMargin`, `paragraphAlignment`, `embeddedStyle`, `hyphenationEnabled`, `textAntiAliasing`,
+`extraParagraphSpacing`, `orientation`, `frontButtonFollowOrientation`, `frontButtonBack/Confirm/Left/Right`,
+`tiltPageTurn`, `showHiddenFiles`, `statusBarProgressBar`, `statusBarProgressBarThickness`,
+`clockUtcOffsetQ`, `clockFormat`, `clockTimezone` (same 104-zone table), `clockDst`,
+`frontlightWarmth`, `dictionaryName`, `sdFontFamilyName`, `language`.
+
+| KatiePoint | CrossPoint 2.0 | Mapping |
+| --- | --- | --- |
+| `darkMode` | `screenInverted` | same 0/1 |
+| `bionicReading` | `focusReadingEnabled` | same 0/1 |
+| `sleepTheme` | `sleepScreen` | dark 0, light 1, custom 2, cover-crop 3 (+ `sleepScreenCoverMode` 1), cover-or-custom 4, blank 5, page-overlay 7. Downloaded themes: not exported. Upstream 8 (Cover + Transparent): not imported |
+| `seamlessSleepScreen` | `quickResumeSleepScreen`, `sleepScreen` | Never 0 / After timeout 1 <-> quickResume 0 / 1; Always <-> `sleepScreen` 6 (Quick Resume) |
+| `refreshFrequency` 0..4 | `refreshFrequency` 0..5 | same; upstream 5 (Never) imports as 4 (30 pages) |
+| `uiTheme` | `uiTheme` | 0..2 same; our retired 3 exports as 2; Carousel / Dashboard / Bookshelf not exported; upstream RoundedRaff 3 / Cover Grid 4 not imported |
+| `fontFamily` | `fontFamily` | upstream always 1 (Noto Sans) unless an SD family is set; our built-in OpenDyslexic <-> upstream legacy 2; Bookerly / Inter / Monospace export as 1 |
+| `fontSize` 0..3 | `fontSize` (pt) | slot i <-> 12 + 2i pt; other point sizes snap to the nearest slot; legacy 0..3 import as-is |
+| `lineSpacing` Tight / Normal / Wide | `lineHeight` 0..6 | i <-> i + 1 (upstream's own legacy migration); upstream 0 -> Tight, 4..6 -> Wide |
+| `characterSpacing` 0..6 (half px, 3 = 0) | `characterSpacing` 0..4 (whole px, 2 = 0) | import {0,1,3,5,6}; export {0,1,1,2,3,3,4} (round trip exact for upstream values) |
+| `paragraphIndent` (0 book, 1 none, 2..5 = 1..4 spaces) | `paragraphIndentSpaces` 0..5 | n spaces <-> n + 1; upstream 5 -> 4 spaces; "book" not exported |
+| `imageRendering` + `imageGrayscale` | `imageRendering` 0..3 | Display + grayscale off <-> 3 (Display B/W); others same |
+| `sleepTimeout` (1/5/10/15/30 min) | `sleepTimeoutMinutes` | minutes; import snaps to the nearest (31 = never -> 30) |
+| `finishedBookFolder` | `moveFinishedToReadFolder` | Off 0 / Read 1 same; Completed not exported |
+| `frontlightBrightness` (0 = off), `frontlightLastBrightness` | `frontlightBrightness`, `frontlightOn` | off <-> `frontlightOn` 0 with the last level as brightness |
+| `statusBar*Pos` (bottom bar) | `statusBarBattery`, `statusBarTitle`, `statusBarBookProgressPercentage`, `statusBarChapterPageCount`, `statusBarClock` | shown <-> 1; title Chapter wins over Book; clock Left <-> 2, other positions <-> 1 (Right) |
+| `xtcStatusBarMode` 0..3 | `xtcStatusBarMode` 0..2 | Both exports as Bottom |
+| `showClockOutsideReader` | `clockShowHeader` | same 0/1 |
+| `readerShortPressSideUp/Down`, `readerLongPressSideUp/Down` | `sideButtonLayout`, `longPressButtonBehavior` | layouts Prev/Next, Next/Prev, Disabled, Next/Next, Prev/Prev; long press Off / chapter skip / rotate |
+| `readerShortPressPower` | `shortPwrBtn` | None 0 (also Sleep 1 on import), Page forward 2, Refresh 3, Footnotes 4, Clipping 6, Bookmark 7, Sync 8, Menu 9 (also Confirm 5 on import) |
+| `readerLongPressConfirm` | `longPressMenuFunction` | Sync 0, None 1, Bookmark 2, Dictionary 3, Menu 4, Clipping 5, Footnotes 6 |
+
+Importing an upstream file sets `readerActionsMigrated`, so the legacy reader-action migration
+does not overwrite the translated actions. Everything else is KatiePoint-only or upstream-only and
+is not translated.
+
 ## Per-book reader settings: `book_settings.bin`
 
 Optional, in the book's cache directory (`/.crosspoint/epub_<hash>/`), so it follows a rename and is

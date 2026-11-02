@@ -603,11 +603,14 @@ void setup() {
 
   HalSystem::checkPanic();
 
+  // Language first: a settings save during the load (an import or a format
+  // update) writes the language code, and an imported settings.json may in
+  // turn set the language.
+  I18N.loadSettings();
   SETTINGS.loadFromFile();
   BOOT_PHASE("settings.json");
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
-  I18N.loadSettings();
   KOREADER_STORE.loadFromFile();
   UITheme::getInstance().reload();
   BOOT_PHASE("state/recents/i18n");

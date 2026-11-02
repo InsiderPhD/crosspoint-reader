@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <iterator>
 
+#include "CrossPointSettings.h"
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
 #include "fontIds.h"
@@ -74,9 +75,15 @@ void LanguageSelectActivity::loop() {
 }
 
 void LanguageSelectActivity::handleSelection() {
-  {
-    RenderLock lock(*this);
-    I18N.setLanguage(static_cast<Language>(SORTED_LANGUAGE_INDICES[selectedIndex]));
+  const auto lang = static_cast<Language>(SORTED_LANGUAGE_INDICES[selectedIndex]);
+  if (lang != I18N.getLanguage()) {
+    {
+      RenderLock lock(*this);
+      I18N.setLanguage(lang);
+    }
+    // The settings files carry the language code too (it survives a firmware
+    // swap; language.bin does not), so save them on a real change only.
+    SETTINGS.saveToFile();
   }
 
   // Return to previous page
