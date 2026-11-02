@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -7,6 +8,7 @@
 class GfxRenderer;
 class SdCardFont;
 struct SdCardFontFamilyInfo;
+struct SdCardFontFileInfo;
 
 class SdCardFontManager {
  public:
@@ -36,6 +38,10 @@ class SdCardFontManager {
   // 0 if nothing loaded.
   uint8_t currentPointSize() const { return loadedPointSize_; };
 
+  // The loaded sizes of the family, smallest first, for EPUB headings and CSS font-size:
+  // the body size plus the extra sizes loadFamily() could afford. Unused slots are 0.
+  void ladder(int* fontIds, uint8_t* points, size_t slots) const;
+
  private:
   struct LoadedFont {
     SdCardFont* font;  // heap-allocated, owned
@@ -43,6 +49,9 @@ class SdCardFontManager {
     uint8_t size;
   };
   static int computeFontId(uint32_t contentHash, const char* familyName, uint8_t pointSize);
+  // Loads one file and registers it with the renderer; returns its font id, 0 on failure.
+  int loadFile(const SdCardFontFamilyInfo& family, const SdCardFontFileInfo& file, GfxRenderer& renderer);
+  void loadExtraSizes(const SdCardFontFamilyInfo& family, GfxRenderer& renderer);
 
   std::string loadedFamilyName_;
   uint8_t loadedPointSize_ = 0;

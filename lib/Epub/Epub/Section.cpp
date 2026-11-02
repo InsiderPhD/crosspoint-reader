@@ -58,8 +58,18 @@ constexpr size_t PAGE_WRITE_BUFFER_SIZE = 2048;
 // Layout features compiled into this build that change where text lands without changing any
 // setting. Stored in the header and compared on load, so a card moved between boards with the
 // same panel (X4 and X4C) rebuilds instead of showing the other board's layout.
-constexpr uint8_t LAYOUT_FEATURE_BLOCK_FONT_SIZES = 0x01;
-constexpr uint8_t LAYOUT_FEATURES = CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? LAYOUT_FEATURE_BLOCK_FONT_SIZES : 0;
+// Computed per section from TextLayoutOptions::layoutSignature(): whether block font sizes
+// were in use and which sizes (they are decided at layout time on the C3).
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+// Under a heap-gated ladder (C3, tight heap) any cached layout is kept: rebuilding a chapter
+// is the most memory-hungry thing the reader does, and both kinds draw correctly.
+bool layoutSignatureAcceptable(const uint8_t fileSignature, const TextLayoutOptions& textLayout) {
+  (void)fileSignature;
+  return textLayout.fontSizesHeapGated;
+}
+#else
+bool layoutSignatureAcceptable(uint8_t, const TextLayoutOptions&) { return false; }
+#endif
 constexpr uint32_t HEADER_SIZE =
     sizeof(uint32_t) + sizeof(uint8_t) + sizeof(int) + sizeof(float) + sizeof(bool) + sizeof(uint8_t) +
     sizeof(uint16_t) + sizeof(uint16_t) + sizeof(uint16_t) + sizeof(bool) + sizeof(bool) + sizeof(uint8_t) +
@@ -127,7 +137,7 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
                                    sizeof(pageCount) + sizeof(hyphenationEnabled) + sizeof(embeddedStyle) +
                                    sizeof(imageRendering) + sizeof(footnoteDisplay) + sizeof(bionicReadingEnabled) +
                                    sizeof(textLayout.characterSpacing) + sizeof(textLayout.wordSpacingPercent) +
-                                   sizeof(textLayout.paragraphIndent) + sizeof(LAYOUT_FEATURES) +
+                                   sizeof(textLayout.paragraphIndent) + sizeof(uint8_t) +
                                    sizeof(uint32_t) * TRAILING_OFFSETS,
                 "Header size mismatch");
   serialization::writePod(file, SECTION_CACHE_MAGIC);
@@ -146,7 +156,7 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
   serialization::writePod(file, textLayout.characterSpacing);
   serialization::writePod(file, textLayout.wordSpacingPercent);
   serialization::writePod(file, textLayout.paragraphIndent);
-  serialization::writePod(file, LAYOUT_FEATURES);
+  serialization::writePod(file, textLayout.layoutSignature());
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for anchor map offset (patched later)
@@ -213,7 +223,9 @@ bool Section::loadSectionFile(const int fontId, const float lineCompression, con
         bionicReadingEnabled != fileBionicReadingEnabled ||
         textLayout.characterSpacing != fileTextLayout.characterSpacing ||
         textLayout.wordSpacingPercent != fileTextLayout.wordSpacingPercent ||
-        textLayout.paragraphIndent != fileTextLayout.paragraphIndent || fileLayoutFeatures != LAYOUT_FEATURES) {
+        textLayout.paragraphIndent != fileTextLayout.paragraphIndent ||
+        (fileLayoutFeatures != textLayout.layoutSignature() &&
+         !layoutSignatureAcceptable(fileLayoutFeatures, textLayout))) {
       // Explicit close() required: member variable persists beyond function scope
       file.close();
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");

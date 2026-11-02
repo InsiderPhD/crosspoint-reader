@@ -34,14 +34,38 @@ struct TextLayoutOptions {
   uint8_t paragraphIndent = PARAGRAPH_INDENT_BOOK;
 
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
-  // The reader font family at each of its sizes, smallest first, for headings and CSS
-  // font-size on blocks (PSRAM boards only). All zero when the family exists in one size
-  // only (an SD-card or TrueType family): sizing is then off and every block uses the
-  // reader font. Not part of the cache key: the ladder is a function of the reader font id,
-  // which already is.
+  // The reader font family at up to four of its sizes, smallest first, for headings and CSS
+  // font-size on blocks: the built-in family's four sizes, or the sizes of an SD family that
+  // SdCardFontManager has loaded. fontSizeLadderPoints holds each entry's nominal point size;
+  // an unused slot is 0 in both. All zero when sizing is off: a single-size family (TrueType),
+  // or a C3 heap too tight at layout time (CrossPointSettings::readerTextLayout). Which sizes
+  // were used is part of the section cache key (layoutSignature).
   static constexpr uint8_t FONT_SIZE_STEPS = 4;
   int fontSizeLadder[FONT_SIZE_STEPS] = {};
+  uint8_t fontSizeLadderPoints[FONT_SIZE_STEPS] = {};
+  // The ladder was dropped because the heap was too tight (C3). A cached section laid out
+  // with or without sizes is then kept as it is rather than rebuilt under memory pressure.
+  bool fontSizesHeapGated = false;
+
+  [[nodiscard]] bool hasFontSizeLadder() const {
+    int sizes = 0;
+    for (const int id : fontSizeLadder) sizes += id != 0 ? 1 : 0;
+    return sizes >= 2;
+  }
 #endif
+
+  // Layout features that change where text lands without being a setting, for the section
+  // cache header: bit 0 = block font sizes in use, bits 1..7 = a hash of the sizes' points.
+  [[nodiscard]] uint8_t layoutSignature() const {
+#if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
+    if (!hasFontSizeLadder()) return 0;
+    uint32_t hash = 2166136261u;
+    for (const uint8_t points : fontSizeLadderPoints) hash = (hash ^ points) * 16777619u;
+    return static_cast<uint8_t>(1u | ((hash & 0x7Fu) << 1));
+#else
+    return 0;
+#endif
+  }
 
   // True when neither spacing control changes anything: text then takes the renderer's
   // plain drawText / advance path, exactly as it did before the controls existed.

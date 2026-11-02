@@ -131,11 +131,13 @@
 // --- EPUB heading and block font sizes ----------------------------------------
 //
 // Lets a book's headings, and blocks its CSS sizes with font-size, be laid out in another
-// of the reader font's built-in sizes. A page then draws from two or three fonts instead of
-// one, and each font brings its own glyph cache and prewarm work; the chapter also gets
-// longer in pages. On the C3 boards that is paid out of the heap a section build and the
-// Bluetooth stack are already competing for, so there the feature is not compiled at all:
-// no CSS font-size parsing, no extra rule bytes, and layout is exactly what it was.
+// of the reader font's sizes (built-in, or the extra .cpfont sizes SdCardFontManager loads).
+// A page then draws from two or three fonts instead of one, each with its own glyph cache
+// and prewarm work. Compiled on every board since 2.0 parity (4 bytes per stored CSS rule
+// for font-size). On the C3 boards whether a section uses it is decided at layout time from
+// the heap (CrossPointSettings::readerTextLayout, BLOCK_FONT_MIN_FREE_HEAP): with Bluetooth
+// up or the heap fragmented, headings keep the body size, and the section cache records which
+// way it was laid out, so it rebuilds once there is room again.
 #ifndef CROSSPOINT_EPUB_BLOCK_FONT_SIZES
-#define CROSSPOINT_EPUB_BLOCK_FONT_SIZES (!CROSSPOINT_TIGHT_HEAP)
+#define CROSSPOINT_EPUB_BLOCK_FONT_SIZES 1
 #endif

@@ -831,17 +831,37 @@ TextLayoutOptions CrossPointSettings::readerTextLayout() const {
     options.paragraphIndent = paragraphIndent;
   }
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
-  // Only the built-in families ship every size. An SD-card or TrueType family is loaded at
-  // one size, so the ladder stays empty and headings keep the reader font.
+  // The reader family's sizes for headings and CSS font-size: the built-in family's four, or
+  // the sizes of an SD family SdCardFontManager loaded (sdFontLadderResolver). A TrueType
+  // family exists at one size, so its ladder stays empty and headings keep the reader font.
   const int readerFontId = getReaderFontId();
   static_assert(TextLayoutOptions::FONT_SIZE_STEPS == FONT_SIZE_COUNT, "one ladder step per font size setting");
-  bool builtIn = false;
-  for (uint8_t size = 0; size < FONT_SIZE_COUNT; ++size) {
-    options.fontSizeLadder[size] = builtInReaderFontId(fontFamily, size);
-    builtIn = builtIn || options.fontSizeLadder[size] == readerFontId;
+  static constexpr uint8_t BUILTIN_POINTS[FONT_SIZE_COUNT] = {6, 8, 10, 12};
+  bool onLadder = false;
+  if (sdFontFamilyName[0] != '\0' && sdFontLadderResolver) {
+    sdFontLadderResolver(sdFontResolverCtx, options.fontSizeLadder, options.fontSizeLadderPoints);
+  } else {
+    for (uint8_t size = 0; size < FONT_SIZE_COUNT; ++size) {
+      options.fontSizeLadder[size] = builtInReaderFontId(fontFamily, size);
+      options.fontSizeLadderPoints[size] = BUILTIN_POINTS[size];
+    }
   }
-  if (!builtIn) {
+  for (const int id : options.fontSizeLadder) onLadder = onLadder || (id != 0 && id == readerFontId);
+#if CROSSPOINT_TIGHT_HEAP
+  // C3: a page drawing two or three fonts needs a glyph cache for each, out of the heap a
+  // section build and Bluetooth already compete for. Below this the section is laid out at
+  // the body size (and a cached section of either kind is kept; see Section::loadSectionFile).
+  // ~60 KB is what a reader without Bluetooth runs at with room to spare; with the BLE stack
+  // up the C3 sits near 35 KB, so headings follow the body size there.
+  static constexpr uint32_t BLOCK_FONT_MIN_FREE_HEAP = 60 * 1024;
+  if (onLadder && ESP.getFreeHeap() < BLOCK_FONT_MIN_FREE_HEAP) {
+    onLadder = false;
+    options.fontSizesHeapGated = true;
+  }
+#endif
+  if (!onLadder) {
     for (int& id : options.fontSizeLadder) id = 0;
+    for (uint8_t& points : options.fontSizeLadderPoints) points = 0;
   }
 #endif
   return options;

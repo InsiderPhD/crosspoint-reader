@@ -634,6 +634,9 @@ class CrossPointSettings {
   // Set by SdCardFontSystem::begin() so getReaderFontId() can route to SD fonts without
   // a hard link from CrossPointSettings (which is also built into web/tests).
   int (*sdFontIdResolver)(void* ctx, const char* familyName, uint8_t fontSizeEnum) = nullptr;
+  // Fills the loaded SD family's size ladder (font ids + point sizes, smallest first, unused
+  // slots 0) for headings and CSS font-size. Set by SdCardFontSystem, like sdFontIdResolver.
+  void (*sdFontLadderResolver)(void* ctx, int* fontIds, uint8_t* points) = nullptr;
   void* sdFontResolverCtx = nullptr;
   uint8_t fontSize = MEDIUM;
   uint8_t lineSpacing = LINE_SPACING_120;

@@ -752,11 +752,6 @@ void ChapterHtmlSlimParser::preLeadingSpace(const int count, const uint32_t visi
 }
 
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
-namespace {
-// Nominal point sizes of the four reader sizes (CrossPointSettings::getReaderFontId).
-constexpr int FONT_STEP_POINTS[TextLayoutOptions::FONT_SIZE_STEPS] = {6, 8, 10, 12};
-}  // namespace
-
 int ChapterHtmlSlimParser::fontLadderIndex(const int id) const {
   if (id == 0) return -1;
   for (int i = 0; i < TextLayoutOptions::FONT_SIZE_STEPS; ++i) {
@@ -767,30 +762,32 @@ int ChapterHtmlSlimParser::fontLadderIndex(const int id) const {
 
 int ChapterHtmlSlimParser::blockFontFor(const char* tag, const CssStyle& cssStyle, const int parentFontOverride) const {
   const int base = fontLadderIndex(fontId);
-  if (base < 0) return 0;  // family with a single size: nothing to choose from
+  if (base < 0) return 0;  // no ladder, or the reader font is not on it: nothing to choose from
+  const uint8_t* points = textLayout.fontSizeLadderPoints;
+  if (points[base] == 0) return 0;
   const int parentIndex = fontLadderIndex(parentFontOverride);
   // Sizes in hundredths of the body size. Once per block element, never per glyph.
-  const int parentScale = FONT_STEP_POINTS[parentIndex >= 0 ? parentIndex : base] * 100 / FONT_STEP_POINTS[base];
+  const int parentScale = points[parentIndex >= 0 ? parentIndex : base] * 100 / points[base];
   int scale = parentScale;
   if (cssStyle.defined.fontSize) {
-    const CssLength& size = cssStyle.fontSize;
+    const CssFontSize& size = cssStyle.fontSize;
     float resolved = static_cast<float>(parentScale);
     switch (size.unit) {
       case CssUnit::Em:
-        resolved = parentScale * size.value;
+        resolved = parentScale * size.value();
         break;
       case CssUnit::Percent:
-        resolved = parentScale * size.value / 100.0f;
+        resolved = parentScale * size.value() / 100.0f;
         break;
       case CssUnit::Rem:
-        resolved = 100.0f * size.value;
+        resolved = 100.0f * size.value();
         break;
       // CSS `medium` (16px / 12pt) is the size the reader chose for body text.
       case CssUnit::Points:
-        resolved = size.value * 100.0f / 12.0f;
+        resolved = size.value() * 100.0f / 12.0f;
         break;
       case CssUnit::Pixels:
-        resolved = size.value * 100.0f / 16.0f;
+        resolved = size.value() * 100.0f / 16.0f;
         break;
     }
     scale = static_cast<int>(std::clamp(resolved, 25.0f, 400.0f));
@@ -802,11 +799,12 @@ int ChapterHtmlSlimParser::blockFontFor(const char* tag, const CssStyle& cssStyl
   }
 
   // Nearest available size; a tie goes to the step closer to the body size.
-  const int target = FONT_STEP_POINTS[base] * scale;  // hundredths of a point
+  const int target = points[base] * scale;  // hundredths of a point
   int best = base;
-  int bestError = std::abs(FONT_STEP_POINTS[base] * 100 - target);
+  int bestError = std::abs(points[base] * 100 - target);
   for (int i = 0; i < TextLayoutOptions::FONT_SIZE_STEPS; ++i) {
-    const int error = std::abs(FONT_STEP_POINTS[i] * 100 - target);
+    if (textLayout.fontSizeLadder[i] == 0 || points[i] == 0) continue;
+    const int error = std::abs(points[i] * 100 - target);
     if (error < bestError || (error == bestError && std::abs(i - base) < std::abs(best - base))) {
       best = i;
       bestError = error;

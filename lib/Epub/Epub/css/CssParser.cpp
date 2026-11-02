@@ -658,7 +658,7 @@ void CssParser::parseDeclarationIntoStyle(std::string_view decl, CssStyle& style
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
   } else if (iequalsAscii(name, "font-size")) {
     if (CssLength size; tryInterpretFontSize(value, size)) {
-      style.fontSize = size;
+      style.fontSize = CssFontSize(size);
       style.defined.fontSize = 1;
     }
 #endif
@@ -1213,7 +1213,8 @@ bool CssParser::saveToCache() const {
     file.write(static_cast<uint8_t>(style.smallCaps | (style.smallCapsDefined << 1) | (style.orphans << 2) |
                                     (style.widows << 4)));
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
-    writeLength(style.fontSize);
+    file.write(reinterpret_cast<const uint8_t*>(&style.fontSize.hundredths), sizeof(style.fontSize.hundredths));
+    file.write(static_cast<uint8_t>(style.fontSize.unit));
 #endif
 
     // Write defined flags as uint32_t
@@ -1303,7 +1304,7 @@ bool CssParser::loadFromCache() {
   // 4 enums + display, the lengths, verticalAlign + direction, 4 border edges, defined bits.
   constexpr size_t CSS_FIXED_STYLE_BYTES = 5 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
                                            2 * sizeof(uint8_t) + 4 * sizeof(uint8_t) + sizeof(uint8_t) +
-                                           sizeof(uint32_t) + (CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? CSS_LENGTH_BYTES : 0);
+                                           sizeof(uint32_t) + (CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? 3 : 0);
 
   // Read each rule
   for (uint16_t i = 0; i < ruleCount; ++i) {
@@ -1429,11 +1430,13 @@ bool CssParser::loadFromCache() {
     style.widows = (textBits >> 4) & 3;
 
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
-    if (!readLength(style.fontSize) ||
-        static_cast<uint8_t>(style.fontSize.unit) > static_cast<uint8_t>(CssUnit::Percent)) {
+    uint8_t fontSizeUnit = 0;
+    if (file.read(&style.fontSize.hundredths, sizeof(style.fontSize.hundredths)) != sizeof(style.fontSize.hundredths) ||
+        file.read(&fontSizeUnit, 1) != 1 || fontSizeUnit > static_cast<uint8_t>(CssUnit::Percent)) {
       clear();
       return false;
     }
+    style.fontSize.unit = static_cast<CssUnit>(fontSizeUnit);
 #endif
 
     // Read defined flags

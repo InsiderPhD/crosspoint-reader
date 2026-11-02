@@ -2074,14 +2074,14 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
         const int blockFontOverride = block.getBlockStyle().fontOverride;
         const int wordFontId = blockFontOverride != 0 ? blockFontOverride : readerFontId;
         const int wordLineHeight = blockFontOverride != 0 ? renderer.getLineHeight(wordFontId) : lineHeight;
-        if (renderer.isSdCardFont(readerFontId) && count > 0) {
+        if (renderer.isSdCardFont(wordFontId) && count > 0) {
           uint8_t styleMask = 0;
           std::string joined;
           for (uint16_t i = 0; i < count; ++i) {
             styleMask |= static_cast<uint8_t>(1u << (static_cast<uint8_t>(block.wordStyle(i)) & 0x03));
             joined += block.wordText(i);
           }
-          renderer.ensureSdCardFontReady(readerFontId, joined.c_str(), styleMask);
+          renderer.ensureSdCardFontReady(wordFontId, joined.c_str(), styleMask);
         }
         for (uint16_t i = 0; i < count; ++i) {
           const char* wordText = block.wordText(i);

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-// CROSSPOINT_EPUB_BLOCK_FONT_SIZES: font-size is parsed and stored on PSRAM boards only.
+// CROSSPOINT_EPUB_BLOCK_FONT_SIZES: font-size is parsed and stored (every board by default).
 #if __has_include(<DevicePolicy.h>)
 #include <DevicePolicy.h>
 #endif
@@ -52,6 +52,21 @@ struct CssLength {
     return static_cast<int16_t>(toPixels(emSize, containerWidth));
   }
 };
+
+// font-size as stored in a rule: 4 bytes instead of a CssLength's 8, since every stored rule
+// pays for it during section builds. value() is the CSS number (0.01 .. 655.35).
+struct CssFontSize {
+  uint16_t hundredths = 0;
+  CssUnit unit = CssUnit::Em;
+
+  CssFontSize() = default;
+  explicit CssFontSize(const CssLength& length) : unit(length.unit) {
+    const float scaled = length.value * 100.0f + 0.5f;
+    hundredths = static_cast<uint16_t>(scaled < 1.0f ? 1.0f : scaled > 65535.0f ? 65535.0f : scaled);
+  }
+  [[nodiscard]] float value() const { return static_cast<float>(hundredths) / 100.0f; }
+};
+static_assert(sizeof(CssFontSize) == 4, "CssFontSize must stay 4 bytes");
 
 // Font style options matching CSS font-style property
 // Inherit is resolved against the parent by ChapterHtmlSlimParser::startElement.
@@ -220,8 +235,8 @@ struct CssStyle {
   CssBorderSide borders[4];  // top, right, bottom, left; see defined.borderStyle / borderWidth
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
   // font-size on a block. Em and Percent are relative to the parent block, Rem to the reader's
-  // body size; Pixels and Points are read as "16px / 12pt is body size". PSRAM boards only.
-  CssLength fontSize;
+  // body size; Pixels and Points are read as "16px / 12pt is body size".
+  CssFontSize fontSize;
 #endif
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
@@ -366,7 +381,7 @@ struct CssStyle {
     verticalAlign = CssVerticalAlign::Baseline;
     for (auto& side : borders) side = CssBorderSide{};
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
-    fontSize = CssLength{};
+    fontSize = CssFontSize{};
 #endif
     smallCaps = smallCapsDefined = 0;
     orphans = widows = 0;
@@ -377,7 +392,7 @@ struct CssStyle {
 // A rule is held in RAM (one per selector) for the length of a section build, which is the
 // tightest heap state the reader has. New properties must be packed into what is here.
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
-static_assert(sizeof(CssStyle) <= 112, "CssStyle grew beyond the font-size field");
+static_assert(sizeof(CssStyle) <= 108, "CssStyle grew beyond the font-size field");
 #else
 static_assert(sizeof(CssStyle) <= 104, "CssStyle grew: every stored CSS rule pays for it during section builds");
 #endif

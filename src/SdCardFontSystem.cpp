@@ -50,6 +50,18 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
     return static_cast<SdCardFontSystem*>(ctx)->resolveFontId(familyName, fontSizeEnum);
   };
   SETTINGS.sdFontResolverCtx = this;
+  // Size ladder for EPUB headings / CSS font-size: the .cpfont sizes the manager loaded.
+  SETTINGS.sdFontLadderResolver = [](void* ctx, int* fontIds, uint8_t* points) {
+    const auto* self = static_cast<SdCardFontSystem*>(ctx);
+    if (self->manager_.currentFamilyName() != SETTINGS.sdFontFamilyName) {
+      for (size_t i = 0; i < TextLayoutOptions::FONT_SIZE_STEPS; ++i) {
+        fontIds[i] = 0;
+        points[i] = 0;
+      }
+      return;
+    }
+    self->manager_.ladder(fontIds, points, TextLayoutOptions::FONT_SIZE_STEPS);
+  };
 
   // If user has a saved SD font selection, load it
   if (SETTINGS.sdFontFamilyName[0] != '\0') {
