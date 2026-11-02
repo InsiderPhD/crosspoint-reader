@@ -51,6 +51,7 @@ int XtcReaderChapterSelectionActivity::findChapterIndexForPage(uint32_t page) co
 
 void XtcReaderChapterSelectionActivity::onEnter() {
   Activity::onEnter();
+  heldGuard.arm(mappedInput);
 
   if (!xtc) {
     return;
@@ -73,6 +74,8 @@ void XtcReaderChapterSelectionActivity::activateSelectedChapter() {
 }
 
 void XtcReaderChapterSelectionActivity::loop() {
+  if (heldGuard.consume(mappedInput)) return;
+
   const int pageItems = getPageItems();
   const int totalItems = static_cast<int>(xtc->getChapters().size());
 

@@ -5,6 +5,7 @@
 
 #include "../Activity.h"
 #include "util/ButtonNavigator.h"
+#include "util/HeldButtonGuard.h"
 
 struct Rect;
 
@@ -12,6 +13,9 @@ class EpubReaderChapterSelectionActivity final : public Activity {
   std::shared_ptr<Epub> epub;
   std::string epubPath;
   ButtonNavigator buttonNavigator;
+  // Opened by a reader shortcut that may still be held (Select Chapter on a
+  // long press): its release must not pick or move a row.
+  HeldButtonGuard heldGuard;
   int currentSpineIndex = 0;
   int selectorIndex = 0;
 

@@ -171,6 +171,9 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
       return false;
     }
 
+    // XTC has no reader menu: Open Menu has always opened the chapter list, so
+    // Select Chapter is the same screen under its own name.
+    case A::READER_ACTION_SELECT_CHAPTER:
     case A::READER_ACTION_OPEN_MENU:
       if (xtc && xtc->hasChapters() && !xtc->getChapters().empty()) {
         startActivityForResult(

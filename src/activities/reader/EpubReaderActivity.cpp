@@ -4117,6 +4117,12 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
       openDictionaryLookup();
       return false;
 
+    case A::READER_ACTION_SELECT_CHAPTER:
+      // Same list and result handling as the menu row. A long press that runs
+      // this is still held: the list's HeldButtonGuard eats its release.
+      onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER);
+      return true;
+
     case A::READER_ACTION_TOGGLE_FRONTLIGHT:
       // No repaint: the page is unchanged, only the light behind it.
       return FrontlightToggle::toggle();

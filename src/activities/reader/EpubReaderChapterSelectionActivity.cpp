@@ -37,6 +37,7 @@ int EpubReaderChapterSelectionActivity::getPageItems() const {
 
 void EpubReaderChapterSelectionActivity::onEnter() {
   Activity::onEnter();
+  heldGuard.arm(mappedInput);
 
   if (!epub) {
     return;
@@ -68,6 +69,8 @@ void EpubReaderChapterSelectionActivity::activateSelectedChapter() {
 }
 
 void EpubReaderChapterSelectionActivity::loop() {
+  if (heldGuard.consume(mappedInput)) return;
+
   const int pageItems = getPageItems();
   const int totalItems = getTotalItems();
 

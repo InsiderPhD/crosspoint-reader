@@ -371,6 +371,8 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
       return tr(STR_LOOKUP);
     case CrossPointSettings::READER_ACTION_TOGGLE_FRONTLIGHT:
       return tr(STR_READER_ACTION_FRONTLIGHT);
+    case CrossPointSettings::READER_ACTION_SELECT_CHAPTER:
+      return tr(STR_SELECT_CHAPTER);
     default:
       return tr(STR_NONE_OPT);
   }

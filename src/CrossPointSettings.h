@@ -359,6 +359,9 @@ class CrossPointSettings {
     // Light off, or back on at frontlightLastBrightness. Offered only on boards
     // with a frontlight (isUnavailableReaderAction).
     READER_ACTION_TOGGLE_FRONTLIGHT = 26,
+    // Opens the chapter list straight from the page (EPUB contents, XTC
+    // chapters) without going through the reader menu.
+    READER_ACTION_SELECT_CHAPTER = 27,
     READER_ACTION_COUNT
   };
 

@@ -62,6 +62,8 @@ const char* actionDescription(const uint8_t action) {
       return tr(STR_RA_DESC_DICTIONARY);
     case A::READER_ACTION_TOGGLE_FRONTLIGHT:
       return tr(STR_RA_DESC_FRONTLIGHT);
+    case A::READER_ACTION_SELECT_CHAPTER:
+      return tr(STR_RA_DESC_SELECT_CHAPTER);
     default:
       return tr(STR_RA_DESC_NONE);
   }
