@@ -47,15 +47,28 @@ void ButtonNavigator::onRelease(const Buttons& buttons, const Callback& callback
   });
 
   if (wasReleased) {
-    if (lastContinuousNavTime == 0) {
+    if (!hasRepeated) {
       callback();
     }
 
-    lastContinuousNavTime = 0;
+    hasRepeated = false;
   }
 }
 
 void ButtonNavigator::onContinuous(const Buttons& buttons, const Callback& callback) {
+  const bool wasPressed = std::any_of(buttons.begin(), buttons.end(), [](const MappedInputManager::Button button) {
+    return mappedInput != nullptr && mappedInput->wasPressed(button);
+  });
+  if (wasPressed) {
+    // A render can hold the loop long enough that a fresh press is already
+    // older than continuousStartMs when the activity first sees it. Give the
+    // press its own repeat window starting now, and never count it as a hold
+    // on the same frame (that stepped twice per tap on Home and menus).
+    lastPressTime = millis();
+    hasRepeated = false;
+    return;
+  }
+
   const bool isPressed = std::any_of(buttons.begin(), buttons.end(), [this](const MappedInputManager::Button button) {
     return mappedInput != nullptr && mappedInput->isPressed(button) && shouldNavigateContinuously(button);
   });
@@ -63,6 +76,7 @@ void ButtonNavigator::onContinuous(const Buttons& buttons, const Callback& callb
   if (isPressed) {
     callback();
     lastContinuousNavTime = millis();
+    hasRepeated = true;
   }
 }
 
@@ -74,8 +88,12 @@ bool ButtonNavigator::shouldNavigateContinuously(const MappedInputManager::Butto
   // nothing is held — so a one-frame injected press (touch swipe, BLE remote)
   // arriving after any earlier long hold (the power-on press qualifies) would
   // satisfy the threshold instantly and step twice per press.
-  const bool buttonHeldLongEnough = mappedInput->getHeldTime(button) > continuousStartMs;
-  const bool navigationIntervalElapsed = (millis() - lastContinuousNavTime) > continuousIntervalMs;
+  const uint32_t now = millis();
+  const bool buttonHeldLongEnough =
+      mappedInput->getHeldTime(button) > continuousStartMs && (now - lastPressTime) > continuousStartMs;
+  // hasRepeated rather than a zero timestamp sentinel: millis() can be 0 at a
+  // repeat after the 49-day wrap, which made the release fire a second step.
+  const bool navigationIntervalElapsed = !hasRepeated || (now - lastContinuousNavTime) > continuousIntervalMs;
 
   return buttonHeldLongEnough && navigationIntervalElapsed;
 }
