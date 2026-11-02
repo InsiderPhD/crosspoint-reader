@@ -118,8 +118,8 @@ bool BookMetadataCache::endTocPass() {
     pageListWriter.reset();
   }
 
+  // clear() frees all but one deque node; shrink_to_fit() cannot release more.
   spineHrefIndex.clear();
-  spineHrefIndex.shrink_to_fit();
   useSpineHrefIndex = false;
 
   return true;

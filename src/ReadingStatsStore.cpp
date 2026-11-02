@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <esp_heap_caps.h>
 
 #include <algorithm>
@@ -1604,13 +1605,13 @@ bool ReadingStatsStore::releaseMemoryForNetwork() {
   }
 
   books.clear();
-  books.shrink_to_fit();
+  shrinkToFit(books);
   legacyReadingDays.clear();
-  legacyReadingDays.shrink_to_fit();
+  shrinkToFit(legacyReadingDays);
   readingDays.clear();
-  readingDays.shrink_to_fit();
+  shrinkToFit(readingDays);
   sessionLog.clear();
-  sessionLog.shrink_to_fit();
+  shrinkToFit(sessionLog);
 
   activeSession = {};
   lastSessionSnapshot = {};

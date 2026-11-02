@@ -7,6 +7,7 @@
 #include <I18n.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <WiFi.h>
 
 #include <algorithm>
@@ -208,7 +209,7 @@ void RefreshBookFusionMetadataActivity::refreshAll() {
   }
   // The reserve above sized for the whole library; give back what the
   // BookFusion subset doesn't need before the walk starts.
-  localBooks.shrink_to_fit();
+  shrinkToFit(localBooks);
 
   totalLocal = static_cast<int>(localBooks.size());
   matched = coversOk = metaOk = positionsOk = failed = 0;

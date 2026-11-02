@@ -48,7 +48,7 @@ void EpubReaderBookmarksActivity::onEnter() {
     if (json.isEmpty()) {
       LOG_ERR("EPB", "Failed to load bookmarks from %s. Empty bookmark file", path.c_str());
       bookmarks.clear();
-      bookmarks.shrink_to_fit();
+      shrinkToFit(bookmarks);
     } else {
       JsonSettingsIO::loadBookmarks(bookmarks, json.c_str());
       for (auto& bookmark : bookmarks) {
@@ -61,7 +61,7 @@ void EpubReaderBookmarksActivity::onEnter() {
     }
   } else {
     bookmarks.clear();
-    bookmarks.shrink_to_fit();
+    shrinkToFit(bookmarks);
   }
 
   requestUpdate();

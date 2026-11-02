@@ -8,6 +8,7 @@
 #include <I18n.h>
 #include <LibraryBuilder.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Xtc.h>
 #include <esp_heap_caps.h>
 
@@ -117,15 +118,15 @@ void LibraryActivity::onExit() {
   scanCancelRequested = false;
   exitRequested = false;
   bookPaths.clear();
-  bookPaths.shrink_to_fit();
+  shrinkToFit(bookPaths);
   sortedIndices.clear();
-  sortedIndices.shrink_to_fit();
+  shrinkToFit(sortedIndices);
   authorCache.clear();
-  authorCache.shrink_to_fit();
+  shrinkToFit(authorCache);
   tagCache.clear();
-  tagCache.shrink_to_fit();
+  shrinkToFit(tagCache);
   dateAddedCache.clear();
-  dateAddedCache.shrink_to_fit();
+  shrinkToFit(dateAddedCache);
   bfBadgeCache.clear();
   bfBadgeCacheReady = false;
   authorCacheReady = false;
@@ -808,7 +809,7 @@ void LibraryActivity::render(RenderLock&&) {
     }
     initialLoadPending = false;
     renamedPaths.clear();
-    renamedPaths.shrink_to_fit();
+    shrinkToFit(renamedPaths);
     if (!pendingSelectPath.empty()) {
       selectBookByPath(pendingSelectPath);
       pendingSelectPath.clear();
