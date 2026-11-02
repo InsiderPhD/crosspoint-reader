@@ -20,6 +20,7 @@
 #include "SettingsList.h"
 #include "WifiCredentialStore.h"
 #include "activities/reader/ReaderMenuVisibility.h"
+#include "util/PluginLocations.h"
 #include "util/TimeZoneRegistry.h"
 
 namespace {
@@ -401,6 +402,15 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
     }
   };
   forEachSetting(loadOne);
+
+  // Plugins master switch: a file from before the key existed (an older
+  // KatiePoint, or a pre-2.0 upstream settings.json) keeps plugins working
+  // when plugin folders are already on the card, exactly as upstream migrates
+  // it, so the value both firmwares write agrees.
+  if (doc["pluginsEnabled"].isNull()) {
+    s.pluginsEnabled = PluginLocations::anyPluginInstalledOnDisk() ? 1 : 0;
+    if (needsResave) *needsResave = true;
+  }
 
   // Front button remap — managed by RemapFrontButtons sub-activity, not in SettingsList.
   using S = CrossPointSettings;

@@ -156,6 +156,8 @@ class CrossPointWebServer {
   // Reads the POST body as JSON into `out`, sending the matching 400 itself
   // on a missing/malformed body. Returns false when it already responded.
   bool readJsonBody(JsonDocument& out) const;
+  // 403 "plugin system disabled" (true) while the Plugins setting is off.
+  bool rejectIfPluginsDisabled() const;
   void handlePluginList() const;  // GET  /api/plugins   -> discovered plugins
   void handlePluginFile() const;  // GET  /plugin?name&file -> serve SD file
   // GET /plugins-run: the headless job runner — every plugin loaded with its

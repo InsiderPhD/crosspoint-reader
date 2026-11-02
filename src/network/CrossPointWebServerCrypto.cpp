@@ -362,6 +362,7 @@ bool pkcs12Extract(const uint8_t* p12, size_t len, const std::string& password, 
 
 // POST /api/crypto {op, ...base64 fields...} -> {data|public|private|key|cert} or {error}
 void CrossPointWebServer::handleCrypto() {
+  if (rejectIfPluginsDisabled()) return;
   JsonDocument req;
   if (!readJsonBody(req)) return;
   const std::string op = req["op"] | "";

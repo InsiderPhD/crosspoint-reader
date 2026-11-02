@@ -382,6 +382,15 @@ inline void appendSystemSettings(SettingSink& v) {
   v.push_back(SettingInfo::Toggle(StrId::STR_HIDE_FINISHED_BOOKS, &CrossPointSettings::libraryHideFinished,
                                   "libraryHideFinished", StrId::STR_CAT_DISPLAY));
   v.push_back(SettingInfo::Toggle(StrId::STR_DEV_MODE, &CrossPointSettings::devMode, "devMode", StrId::STR_CAT_SYSTEM));
+  // Plugins master switch. Persisted on every board (settings.json
+  // round-trips with upstream); shown only where plugins are built. The device
+  // Settings screen moves the row next to the Plugins list it gates.
+  v.push_back(SettingInfo::Toggle(StrId::STR_ENABLE_PLUGINS, &CrossPointSettings::pluginsEnabled, "pluginsEnabled"
+#if CROSSPOINT_SD_PLUGINS
+                                  ,
+                                  StrId::STR_CAT_SYSTEM
+#endif
+                                  ));
   // Dev tab: opting a device into beta/rc firmware. Lives behind Dev
   // Mode because the pre-release channel can hand this device an
   // unvalidated image, and the flasher deliberately bypasses
@@ -666,7 +675,7 @@ inline void appendStatusBarSettings(SettingSink& v) {
 // more (the list is visited, never stored); forEachSetting() logs a mismatch so a
 // helper that stops emitting an entry (and so stops persisting it) shows up on
 // the serial log. Recount when adding or removing an entry.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 108;  // includes tiltPageTurn + tiltNextPageOnly
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 109;  // includes tiltPageTurn, tiltNextPageOnly, pluginsEnabled
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

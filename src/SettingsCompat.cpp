@@ -94,13 +94,21 @@ constexpr SameKey SAME_KEYS[] = {
     {"clockTimezone", "clockTimezone", 0},
     {"clockDst", "clockDst", 3},
     {"frontlightWarmth", "frontlightWarmth", 101},
+    // Plugins master switch (upstream #3877): same key, same 0/1, same
+    // "on when plugin folders exist" migration on both sides.
+    {"pluginsEnabled", "pluginsEnabled", 2},
 };
 
 // Folder names, the same on both sides.
 constexpr const char* SAME_STRING_KEYS[] = {"dictionaryName", "language"};
 
-// Keys only upstream writes (KatiePoint has never written any of them);
-// exportShared() always writes the first two, so its output is recognised too.
+// Keys only upstream writes into settings.json in its own numbering: no
+// KatiePoint build ever wrote one of them there (older builds kept their own
+// settings in settings.json; current ones keep them in katiepoint-settings.json,
+// which is never run through isUpstreamDocument()). KatiePoint's own file does
+// carry "pluginsEnabled" now (same meaning as upstream's), but only settings.json
+// is tested here, and exportShared() writes the first two keys plus
+// pluginsEnabled into it, so its output is recognised too.
 constexpr const char* UPSTREAM_ONLY_KEYS[] = {
     "lineHeight",         "sleepTimeoutMinutes", "pluginsEnabled",      "paragraphIndentSpaces", "pageTurnGesture",
     "libraryUseMetadata", "screenInverted",      "focusReadingEnabled", "readerMenuStyle",

@@ -1,14 +1,40 @@
+#include "PluginLocations.h"
+
 #include <DevicePolicy.h>
+#include <HalStorage.h>
+
+#include <string>
+
+namespace PluginLocations {
+
+bool anyPluginInstalledOnDisk() {
+  for (const char* rootPath : kRoots) {
+    HalFile root = Storage.open(rootPath);
+    if (!root || !root.isDirectory()) continue;
+    for (HalFile entry = root.openNextFile(); entry; entry = root.openNextFile()) {
+      if (!entry.isDirectory()) continue;
+      char name[128];
+      if (entry.getName(name, sizeof(name)) == 0 || name[0] == '.') continue;
+      const std::string dir = std::string(rootPath) + "/" + name;
+      if (Storage.exists((dir + "/plugin.js").c_str()) || Storage.exists((dir + "/device.json").c_str()) ||
+          Storage.exists((dir + "/manifest.json").c_str())) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+}  // namespace PluginLocations
 
 #if CROSSPOINT_SD_PLUGINS  // SD-card plugins: PSRAM boards only, see lib/DevicePolicy
-#include <HalStorage.h>
 #include <Logging.h>
 #include <strings.h>
 
 #include <algorithm>
 #include <cstring>
 
-#include "PluginLocations.h"
+#include "CrossPointSettings.h"
 
 namespace PluginLocations {
 
@@ -21,6 +47,7 @@ bool isNativeFeature(const char* name) {
 }
 
 std::vector<Entry> scanPlugins() {
+  if (!SETTINGS.pluginsEnabled) return {};
   std::vector<Entry> plugins;
   plugins.reserve(8);
   std::vector<std::string> seen;
@@ -55,6 +82,7 @@ std::vector<Entry> scanPlugins() {
 }
 
 std::string findPluginDir(const char* name) {
+  if (!SETTINGS.pluginsEnabled) return {};
   if (isNativeFeature(name)) return {};  // never served, even if the folder exists
   for (size_t i = 0; i < kRootCount; i++) {
     std::string dir = std::string(kRoots[i]) + "/" + name;

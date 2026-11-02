@@ -19,6 +19,18 @@ list is `PluginLocations::kNativeFeaturePrefixes`. Use the built-in BookFusion
 downloader (Settings → Dictionary) instead; two implementations of the same
 account would fight over tokens and progress.
 
+**The Plugins switch.** **Settings → System → Enable Plugins**
+(`pluginsEnabled`, the same key and meaning as upstream CrossPoint 2.0's
+global toggle, #3877) gates every plugin surface: while it is off, discovery
+lists nothing, `/plugin` and `/api/plugins` find no plugin, and `/api/relay`,
+`/api/fetch`, `/api/crypto`, `/api/plugin-fs` and the job queue answer
+`403 plugin system disabled`. Turning it off never deletes or renames plugin
+files. New installs default to off; a settings file without the key (an
+update from an older build, or an older upstream `settings.json`) gets it
+switched on when plugin folders are already on the card, so an update never
+silently disables a working setup. The key is shared with upstream's
+`settings.json` both ways.
+
 **Where to find them on the reader:** **Settings → System → Plugins**, and
 **Home → File Transfer → Plugins** (that row appears once a plugin with a
 `device.json` is on the card). In the browser: the **Plugins** tab of the

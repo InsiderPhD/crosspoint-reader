@@ -163,6 +163,17 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BF_SYNC, SettingAction::BookFusionSync));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_OPDS_BROWSER, SettingAction::OPDSBrowser));
 #if CROSSPOINT_SD_PLUGINS
+  // The Plugins master switch sits right above the plugin list it gates.
+  {
+    auto it = std::find_if(systemSettings.begin(), systemSettings.end(), [](const SettingInfo& info) {
+      return info.valuePtr == &CrossPointSettings::pluginsEnabled;
+    });
+    if (it != systemSettings.end()) {
+      SettingInfo toggle = std::move(*it);
+      systemSettings.erase(it);
+      systemSettings.push_back(std::move(toggle));
+    }
+  }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_PLUGINS, SettingAction::Plugins));
 #endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));

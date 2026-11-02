@@ -2034,6 +2034,10 @@ std::string PluginCatalogActivity::browsingHeaderLabel() const {
 void PluginCatalogActivity::drawListScreen() {
   const int total = rowCount();
   if (total == 0) {
+    if (state == State::PLUGIN_PICKER && !SETTINGS.pluginsEnabled) {
+      drawCenteredLines(nullptr, tr(STR_PLUGINS_DISABLED_HINT), nullptr);
+      return;
+    }
     renderer.drawCenteredText(UI_10_FONT_ID, renderer.getScreenHeight() / 2,
                               state == State::PLUGIN_PICKER ? tr(STR_NO_PLUGINS_INSTALLED) : tr(STR_NO_ENTRIES));
     return;

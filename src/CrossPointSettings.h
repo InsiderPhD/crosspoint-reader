@@ -709,6 +709,14 @@ class CrossPointSettings {
   // "Mark as Read") out of the grid. They stay on the card and in the file
   // browser. Off by default.
   uint8_t libraryHideFinished = 0;
+  // SD-card plugins master switch (upstream CrossPoint #3877, same key and
+  // meaning). Off on a fresh install; a settings file without the key gets it
+  // switched on when plugin folders are already on the card (JsonSettingsIO),
+  // so an upgrade never silently disables an existing setup. Off hides every
+  // plugin (discovery, the web host endpoints, events) without touching the
+  // files. Exists on every build so settings.json round-trips; the UI only on
+  // the boards that build plugins (CROSSPOINT_SD_PLUGINS).
+  uint8_t pluginsEnabled = 0;
   // Full Touch (X4 Pro): taps hit-test the drawn UI directly (tap a row to
   // select and activate it) and every screen draws the tappable action bar. No
   // longer a choice -- the X4 Pro has no front buttons, so it is always on

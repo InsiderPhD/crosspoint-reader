@@ -278,6 +278,7 @@ If you run an OPDS catalogue (e.g. Calibre Content Server), set it up in **Setti
 
 Plugins are folders on the SD card (`/plugins/<name>/` or `/.crosspoint/plugins/<name>/`) that add a service without a firmware change: a JSON or OPDS-style catalog with its own sign-in, a plugin store, or browser-side tools that run on the device's web pages. They need the extra memory of the X4 Pro and X4C, so the X3/X4 do not offer them; the built-in OPDS, BookFusion and dictionary features work the same on every device.
 
+- **Turning plugins on:** **Settings → System → Enable Plugins** is the master switch. It is off on a fresh install and turns itself on after an update when plugin folders are already on the card. Off hides every plugin (on the reader and in the browser) without deleting anything.
 - **On the reader:** **Settings → System → Plugins** lists every installed plugin and opens the ones with a device screen (browse, sign in, download to SD). Opening a browser-only plugin shows its description and its `README.md` as scrollable usage instructions instead (Up/Down or swipe to scroll). Once one is installed, **Plugins** also appears in **Home → File Transfer**.
 - **In the browser:** join a network, then open the **Plugins** tab of the device's web pages. Browser plugins (and the plugin store) run there. `http://<device>/plugins-run` is a headless version of that tab: it loads every plugin with its UI hidden so that jobs queued by an external app or script keep running while the page stays open.
 - **Details before download:** catalogs that describe their items (plugin stores do) show a Details screen when you pick one: author, version, whether it is installed or has an update, and a description. Confirm there downloads or installs it; Back returns to the list.
@@ -744,6 +745,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **KOReader Sync** *(action)* — see **[KOReader Sync](#koreader-sync-quick-setup)**.
 - **BookFusion Sync** *(action)* — link/manage your BookFusion account.
 - **OPDS Browser** *(action)* — server URL, username, password.
+- **Enable Plugins** *(X4 Pro / X4C)* — master switch for SD-card plugins. Off on a fresh install; on after an update if plugins are already on the card.
 - **Plugins** *(action, X4 Pro / X4C)* — installed SD-card plugins and their on-device catalogs (see **[Plugins](#plugins-x4-pro--x4c)**).
 - **Check for Updates** *(action)* — OTA firmware update over WiFi.
 - **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.

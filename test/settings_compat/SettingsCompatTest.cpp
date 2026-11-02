@@ -154,8 +154,9 @@ void testImport() {
   expectInt(k, "readerShortPressPower", 1, L);
   expectInt(k, "readerLongPressConfirm", 10, L);
   expectInt(k, "readerActionsMigrated", 1, L);
+  // The plugins master switch maps straight across.
+  expectInt(k, "pluginsEnabled", 0, L);
   // Upstream-only keys never leak into ours.
-  expectAbsent(k, "pluginsEnabled", L);
   expectAbsent(k, "lineHeight", L);
   expectAbsent(k, "shortPwrBtn", L);
 }
@@ -163,6 +164,7 @@ void testImport() {
 // A KatiePoint document as JsonSettingsIO::saveSettings writes it (subset).
 constexpr const char* KATIEPOINT = R"({
   "language": "FR", "sleepTheme": "blank", "seamlessSleepScreen": 0, "refreshFrequency": 2, "uiTheme": 4,
+  "pluginsEnabled": 1,
   "fadingFix": 0, "darkMode": 0, "fontFamily": 2, "sdFontFamilyName": "", "dictionaryName": "",
   "fontSize": 3, "lineSpacing": 0, "wordSpacing": 100, "characterSpacing": 2, "screenMargin": 20,
   "paragraphAlignment": 0, "paragraphIndent": 0, "embeddedStyle": 1, "hyphenationEnabled": 0,
@@ -188,6 +190,7 @@ void testExport() {
   const char* L = "export";
 
   expectStr(u, "language", "FR", L);
+  expectInt(u, "pluginsEnabled", 1, L);
   expectInt(u, "sleepScreen", 5, L);  // blank
   expectInt(u, "quickResumeSleepScreen", 0, L);
   expectInt(u, "refreshFrequency", 2, L);
@@ -241,7 +244,7 @@ void testRoundTrip() {
       {"sideButtonLayout", 0, 4},      {"longPressButtonBehavior", 0, 2},
       {"orientation", 0, 3},           {"statusBarClock", 0, 2},
       {"statusBarTitle", 0, 2},        {"lineHeight", 1, 3},
-      {"xtcStatusBarMode", 0, 2},
+      {"xtcStatusBarMode", 0, 2},      {"pluginsEnabled", 0, 1},
   };
   for (const auto& c : CASES) {
     for (int v = c.from; v <= c.to; v++) {

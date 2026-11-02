@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "CrossPointSettings.h"
 #include "CrossPointWebServer.h"
 #include "ProtectedPaths.h"
 #include "util/PluginLocations.h"
@@ -60,6 +61,12 @@ bool CrossPointWebServer::readJsonBody(JsonDocument& out) const {
 // GET /api/plugins -> [{ "name", "title", "mount" }, ...]. Only plugins with a
 // plugin.js are listed (the page loads it); optional manifest.json supplies the
 // title and mount point.
+bool CrossPointWebServer::rejectIfPluginsDisabled() const {
+  if (SETTINGS.pluginsEnabled) return false;
+  server->send(403, "text/plain", "plugin system disabled");
+  return true;
+}
+
 void CrossPointWebServer::handlePluginList() const {
   JsonDocument doc;
   JsonArray arr = doc.to<JsonArray>();
@@ -146,6 +153,7 @@ void CrossPointWebServer::handlePluginFile() const {
 // Lets a plugin make an outbound HTTP(S) call the browser can't (CORS): the
 // device makes it via SecureNet.
 void CrossPointWebServer::handleRelay() {
+  if (rejectIfPluginsDisabled()) return;
   JsonDocument req;
   if (!readJsonBody(req)) return;
   const String plugin = req["plugin"] | "";
@@ -354,6 +362,7 @@ void sendNativeFeatureRefusal(WebServer* server, const char* what) {
 // Device downloads a URL straight to SD, so a large body never passes through
 // the browser.
 void CrossPointWebServer::handleFetch() {
+  if (rejectIfPluginsDisabled()) return;
   JsonDocument req;
   if (!readJsonBody(req)) return;
   const std::string url = req["url"] | "";
@@ -705,6 +714,7 @@ void CrossPointWebServer::handleFetch() {
 // POST /api/plugin-fs?plugin=<name>&path=<path> with the raw file contents as
 // the request body. A plugin writes a small file to SD.
 void CrossPointWebServer::handlePluginFs() {
+  if (rejectIfPluginsDisabled()) return;
   if (!server->hasArg("plain")) {
     server->send(400, "application/json", "{\"error\":\"missing body\"}");
     return;
@@ -785,6 +795,7 @@ CrossPointWebServer::PluginJob* CrossPointWebServer::allocPluginJob() {
 
 // POST /api/plugin-jobs {plugin, action, args?} -> {id}
 void CrossPointWebServer::handlePluginJobSubmit() {
+  if (rejectIfPluginsDisabled()) return;
   JsonDocument req;
   if (!readJsonBody(req)) return;
   const String plugin = req["plugin"] | "";
@@ -824,6 +835,7 @@ void CrossPointWebServer::handlePluginJobSubmit() {
 
 // GET /api/plugin-jobs/claim?plugin=<name> -> {id, action, args} or {id:0}
 void CrossPointWebServer::handlePluginJobClaim() {
+  if (rejectIfPluginsDisabled()) return;
   const String plugin = server->arg("plugin");
   const uint32_t now = millis();
   for (auto& job : pluginJobs) {
@@ -845,6 +857,7 @@ void CrossPointWebServer::handlePluginJobClaim() {
 
 // POST /api/plugin-jobs/complete {id, ok, result?} -> {ok}
 void CrossPointWebServer::handlePluginJobComplete() {
+  if (rejectIfPluginsDisabled()) return;
   JsonDocument req;
   if (!readJsonBody(req)) return;
   const uint32_t id = req["id"] | 0;

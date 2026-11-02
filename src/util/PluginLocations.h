@@ -2,10 +2,7 @@
 
 #include <DevicePolicy.h>
 
-#if CROSSPOINT_SD_PLUGINS  // SD-card plugins: PSRAM boards only, see lib/DevicePolicy
-#include <cstdint>
-#include <string>
-#include <vector>
+#include <cstddef>
 
 // Plugin folders may live under any of these SD roots; earlier roots win on
 // name collisions. /.crosspoint/plugins is the historical home; /plugins and
@@ -14,6 +11,20 @@
 namespace PluginLocations {
 inline constexpr const char* kRoots[] = {"/.crosspoint/plugins", "/plugins", "/.plugins"};
 inline constexpr size_t kRootCount = sizeof(kRoots) / sizeof(kRoots[0]);
+
+// Raw on-disk probe for the Plugins setting's migration: true when any root
+// holds a folder with plugin.js, device.json or manifest.json. Ignores the
+// Plugins switch and the native-feature list. Built on every board (the
+// setting exists everywhere), so a C3 writes the same value upstream would.
+bool anyPluginInstalledOnDisk();
+}  // namespace PluginLocations
+
+#if CROSSPOINT_SD_PLUGINS  // SD-card plugins: PSRAM boards only, see lib/DevicePolicy
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace PluginLocations {
 
 // Exactly MAJOR.MINOR.PATCH: three digit-only components, nothing else (no
 // sign, spaces, suffix or fourth part), each fitting in 32 bits.
@@ -69,10 +80,12 @@ bool isNativeFeature(const char* name);
 // Scans every root. The earliest root containing a folder name claims it —
 // matching findPluginDir, which serves that folder's files — and folders with
 // none of the marker files are omitted. This is the single definition of
-// "what is a plugin"; callers filter by the markers they need.
+// "what is a plugin"; callers filter by the markers they need. Empty while
+// the Plugins setting is off.
 std::vector<Entry> scanPlugins();
 
-// Directory of the named plugin ("<root>/<name>"), or "" when absent.
+// Directory of the named plugin ("<root>/<name>"), or "" when absent or the
+// Plugins setting is off.
 std::string findPluginDir(const char* name);
 }  // namespace PluginLocations
 
