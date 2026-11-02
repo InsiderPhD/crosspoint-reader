@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include "EpdFont.h"
 #include "EpdFontData.h"
@@ -199,11 +200,16 @@ class SdCardFont {
 
     // The EpdFont whose data pointer we manage
     EpdFont epdFont{&stubData};
-
-    bool present = false;
   };
 
-  PerStyle styles_[MAX_STYLES] = {};
+  // One record per style the file has, allocated once per load (it used to be
+  // MAX_STYLES fixed records whatever the file held). EpdFont pointers into it
+  // stay stable until unload.
+  std::unique_ptr<PerStyle[]> styles_;
+  // Zero means absent; a present style stores its array slot plus one.
+  uint8_t styleSlots_[MAX_STYLES] = {};
+  PerStyle& styleData(uint8_t style) { return styles_[styleSlots_[style] - 1]; }
+  const PerStyle& styleData(uint8_t style) const { return styles_[styleSlots_[style] - 1]; }
   uint8_t styleCount_ = 0;
 
   char filePath_[128] = {};
