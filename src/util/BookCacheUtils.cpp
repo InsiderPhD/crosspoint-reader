@@ -9,6 +9,7 @@
 #include <Xtc.h>
 
 #include "BookCacheUtils.h"
+#include "activities/home/LibraryActivity.h"
 
 bool isBookCacheDirectoryName(const char* name) {
   if (!name) {
@@ -37,6 +38,14 @@ void clearBookCache(const std::string& path) {
     return;
   }
   LOG_DBG("BookCache", "Done checking metadata cache for: %s", path.c_str());
+}
+
+void noteBookInstalled(const std::string& path) {
+  clearBookCache(path);
+  if (!FsHelpers::hasEpubExtension(path) && !FsHelpers::hasXtcExtension(path)) return;
+  // The Library never lists hidden files or folders, so they cannot make it stale.
+  if (path.find("/.") != std::string::npos || (!path.empty() && path[0] == '.')) return;
+  LibraryActivity::invalidateIndexCache();
 }
 
 #endif  // CROSSPOINT_SD_PLUGINS

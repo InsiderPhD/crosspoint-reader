@@ -1576,7 +1576,7 @@ void PluginCatalogActivity::downloadItem(const Item& item) {
     fail(StrId::STR_DOWNLOAD_FAILED);
     return;
   }
-  clearBookCache(dest);
+  noteBookInstalled(dest);
 
   // Optional per-book sidecar (e.g. a service book id keyed by the file's
   // path hash) so a later sync stage can associate the file with the service.

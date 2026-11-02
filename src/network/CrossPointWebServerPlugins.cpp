@@ -26,6 +26,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointWebServer.h"
 #include "ProtectedPaths.h"
+#include "util/BookCacheUtils.h"
 #include "util/PluginLocations.h"
 
 namespace {
@@ -661,6 +662,7 @@ void CrossPointWebServer::handleFetch() {
   }
   file.flush();
   file.close();
+  if (complete && status >= 200 && status < 300) noteBookInstalled(dest);
 
   if (segmentBoundary && !complete && status >= 200 && status < 300) {
     JsonDocument resp;
@@ -774,6 +776,7 @@ void CrossPointWebServer::handlePluginFs() {
   const size_t n = dataSize == 0 ? 0 : f.write(data, dataSize);
   f.flush();
   f.close();
+  if (n == dataSize && dataSize > 0) noteBookInstalled(path);
 
   JsonDocument resp;
   resp["ok"] = (n == dataSize);

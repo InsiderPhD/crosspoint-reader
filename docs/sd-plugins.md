@@ -449,7 +449,10 @@ Two browse formats:
   origin. A `config.file` lets values like a server URL and credentials be
   user-entered (via a browser `plugin.js`) rather than baked into the manifest.
 - **After download**: the book's layout cache is invalidated and the optional
-  sidecar is written. Use the `{dest}.meta.json` convention so the fields ride
+  sidecar is written. Downloading a book the Library lists (`.epub`, `.xtc`)
+  also marks the Library index stale, so the book appears the next time the
+  Library opens; hidden files and folders (names starting with `.`) do not.
+  Files written by `/api/fetch` and `/api/plugin-fs` get the same treatment. Use the `{dest}.meta.json` convention so the fields ride
   KOSync progress uploads and event handlers (see `plugin-events.md`).
 
 ### Heap budget (ESP32-C3, ~380KB total)
