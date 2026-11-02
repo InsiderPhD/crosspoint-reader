@@ -20,6 +20,13 @@ void sortFileList(std::vector<std::string>& strs);
 // be the name asked for). Bytes >= 0x80 (UTF-8) are allowed.
 bool isValidFileName(std::string_view name);
 
+// True for a whole entry name that is a card-management folder the reader
+// never lists: "System Volume Information" (Windows) and "XTCache" (the stock
+// Xteink firmware's cache). FAT names are case-insensitive, so the match is
+// too; prefixes such as "XTCacheArchive" do not match.
+bool isSystemFolderName(const char* name);
+inline bool isSystemFolderName(const String& name) { return isSystemFolderName(name.c_str()); }
+
 /**
  * Check if the given filename ends with the specified extension (case-insensitive).
  */

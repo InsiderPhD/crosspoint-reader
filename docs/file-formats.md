@@ -386,10 +386,15 @@ if (parsedSize != fileSize) {
 
 The `CLX1` index behind the Library screen and the Tags / Authors / Series browser when
 `libraryUseIndex` is on (Dev tab, default on). A hand port of CrossInk's `lib/LibraryIndex`;
-the layout is byte-identical to CrossInk's `library.idx` **format version 7, fold version 3**
+the layout is byte-identical to CrossInk's `library.idx` **format version 8, fold version 3**
 (`lib/LibraryIndex/LibraryFormat.h`). The file has a different name here because three
 fields mean something different in this fork (below), so the two firmwares must not reuse
 each other's indexes.
+
+Version 8 keeps the version 7 layout; the bump only forces one rebuild that drops books
+under `XTCache` (stock Xteink cache) and `System Volume Information`, matched in any FAT
+casing. A version 7 file is still read for reconciliation, so metadata and arrival order
+carry over; the rebuild never deletes files on the card.
 
 One sorted snapshot of up to 32,767 `.epub` / `.xtc` books. Every section starts on a
 512-byte boundary:

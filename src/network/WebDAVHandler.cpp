@@ -11,8 +11,6 @@
 #include "util/BookMoveUtils.h"
 
 namespace {
-const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
-constexpr size_t HIDDEN_ITEMS_COUNT = sizeof(HIDDEN_ITEMS) / sizeof(HIDDEN_ITEMS[0]);
 
 // RFC 1123 date format helper: "Sun, 06 Nov 1994 08:49:37 GMT"
 // ESP32 doesn't have real-time clock set by default, so we use a fixed epoch date
@@ -260,14 +258,7 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
 
       // Skip hidden/protected items
       bool shouldHide = fileName.startsWith(".");
-      if (!shouldHide) {
-        for (size_t i = 0; i < HIDDEN_ITEMS_COUNT; i++) {
-          if (fileName.equals(HIDDEN_ITEMS[i])) {
-            shouldHide = true;
-            break;
-          }
-        }
-      }
+      if (!shouldHide) shouldHide = FsHelpers::isSystemFolderName(fileName);
 
       if (!shouldHide) {
         String childPath = path;
@@ -836,9 +827,7 @@ bool WebDAVHandler::isProtectedPath(const String& path) const {
 
     if (segment.startsWith(".")) return true;
 
-    for (size_t i = 0; i < HIDDEN_ITEMS_COUNT; i++) {
-      if (segment.equals(HIDDEN_ITEMS[i])) return true;
-    }
+    if (FsHelpers::isSystemFolderName(segment)) return true;
 
     start = end + 1;
   }

@@ -59,10 +59,6 @@ class CrossPointHttpServer final : public WebServer {
   }
 };
 
-// Folders/files to hide from the web interface file browser
-// Note: Items starting with "." are automatically hidden
-const char* HIDDEN_ITEMS[] = {"System Volume Information", "XTCache"};
-constexpr size_t HIDDEN_ITEMS_COUNT = sizeof(HIDDEN_ITEMS) / sizeof(HIDDEN_ITEMS[0]);
 constexpr uint16_t UDP_PORTS[] = {54982, 48123, 39001, 44044, 59678};
 constexpr uint16_t LOCAL_UDP_PORT = 8134;
 
@@ -158,12 +154,7 @@ bool isProtectedItemName(const String& name) {
   if (name.startsWith(".")) {
     return true;
   }
-  for (size_t i = 0; i < HIDDEN_ITEMS_COUNT; i++) {
-    if (name.equals(HIDDEN_ITEMS[i])) {
-      return true;
-    }
-  }
-  return false;
+  return FsHelpers::isSystemFolderName(name);
 }
 }  // namespace
 
@@ -554,14 +545,7 @@ bool CrossPointWebServer::scanFiles(const char* path, uint32_t offset, uint32_t 
     bool shouldHide = !SETTINGS.showHiddenFiles && fileName.startsWith(".");
 
     // Check against explicitly hidden items list
-    if (!shouldHide) {
-      for (size_t i = 0; i < HIDDEN_ITEMS_COUNT; i++) {
-        if (fileName.equals(HIDDEN_ITEMS[i])) {
-          shouldHide = true;
-          break;
-        }
-      }
-    }
+    if (!shouldHide) shouldHide = FsHelpers::isSystemFolderName(fileName);
 
     if (!shouldHide) {
       if (visibleIdx >= offset + limit) {
@@ -731,11 +715,9 @@ void CrossPointWebServer::handleDownload() const {
     server->send(403, "text/plain", "Cannot access system files");
     return;
   }
-  for (size_t i = 0; i < HIDDEN_ITEMS_COUNT; i++) {
-    if (itemName.equals(HIDDEN_ITEMS[i])) {
-      server->send(403, "text/plain", "Cannot access protected items");
-      return;
-    }
+  if (FsHelpers::isSystemFolderName(itemName)) {
+    server->send(403, "text/plain", "Cannot access protected items");
+    return;
   }
 
   if (!Storage.exists(itemPath.c_str())) {
@@ -1335,14 +1317,7 @@ void CrossPointWebServer::handleDelete() const {
     }
 
     // Check against explicitly protected items
-    bool isProtected = false;
-    for (size_t i = 0; i < HIDDEN_ITEMS_COUNT; i++) {
-      if (itemName.equals(HIDDEN_ITEMS[i])) {
-        isProtected = true;
-        break;
-      }
-    }
-    if (isProtected) {
+    if (FsHelpers::isSystemFolderName(itemName)) {
       failedItems += itemPath + " (protected file); ";
       allSuccess = false;
       continue;

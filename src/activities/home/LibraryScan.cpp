@@ -405,9 +405,10 @@ void enumerateBooks(std::vector<std::string>& outPaths) {
 
     for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
       file.getName(name, sizeof(name));
-      // Skip hidden entries and Windows-managed metadata folders. Notably this
-      // skips .crosspoint itself, which would otherwise be recursed into.
-      if (name[0] == '.' || std::strcmp(name, "System Volume Information") == 0) continue;
+      // Skip hidden entries and card-management folders (System Volume
+      // Information, the stock firmware's XTCache; any FAT casing). Notably
+      // this skips .crosspoint itself, which would otherwise be recursed into.
+      if (name[0] == '.' || FsHelpers::isSystemFolderName(name)) continue;
 
       std::string fullPath = dirPath;
       if (fullPath.back() != '/') fullPath.push_back('/');

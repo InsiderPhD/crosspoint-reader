@@ -7,6 +7,10 @@
 #include <cstring>
 #include <vector>
 
+namespace {
+constexpr const char* const SYSTEM_FOLDER_NAMES[] = {"System Volume Information", "XTCache"};
+}  // namespace
+
 namespace FsHelpers {
 
 namespace {
@@ -154,6 +158,20 @@ bool hasImageExtension(std::string_view fileName) {
 }
 
 bool hasGifExtension(std::string_view fileName) { return checkFileExtension(fileName, ".gif"); }
+
+bool isSystemFolderName(const char* name) {
+  if (!name) return false;
+  for (const char* system : SYSTEM_FOLDER_NAMES) {
+    const char* candidate = name;
+    while (*candidate && *system &&
+           std::tolower(static_cast<unsigned char>(*candidate)) == std::tolower(static_cast<unsigned char>(*system))) {
+      ++candidate;
+      ++system;
+    }
+    if (!*candidate && !*system) return true;
+  }
+  return false;
+}
 
 bool isValidFileName(std::string_view name) {
   if (name.empty() || name == "." || name == "..") return false;

@@ -350,8 +350,9 @@ bool isBookName(const std::string_view name) {
 }
 
 // Hidden entries (which covers macOS AppleDouble sidecars and /.crosspoint
-// itself) and the Windows-managed metadata folder, as LibraryScan skips them.
-bool isHiddenOrSidecar(const char* name) { return name[0] == '.' || strcmp(name, "System Volume Information") == 0; }
+// itself) and the card-management folders (System Volume Information, the
+// stock firmware's XTCache, any FAT casing), as LibraryScan skips them.
+bool isHiddenOrSidecar(const char* name) { return name[0] == '.' || FsHelpers::isSystemFolderName(name); }
 
 std::string stemOf(const std::string& name) {
   const size_t dot = name.find_last_of('.');
