@@ -76,16 +76,18 @@ void SettingsActivity::onEnter() {
   systemSettings.clear();
   devSettings.clear();
 
-  for (const auto& setting : getSettingsList()) {
-    if (setting.category == StrId::STR_NONE_OPT) continue;
+  // Each kept row is copied into its category list; the shared list itself is
+  // visited, never stored, so it is not resident once this returns.
+  auto addRow = [this](const SettingInfo& setting) {
+    if (setting.category == StrId::STR_NONE_OPT) return;
     // Device-only override: hide the built-in fontFamily Enum so the FontFamily
     // Action (appended below) is the single picker entry. Web UI still sees the
-    // Enum because CrossPointWebServer iterates getSettingsList() directly.
-    if (setting.type == SettingType::ENUM && setting.key && std::strcmp(setting.key, "fontFamily") == 0) continue;
+    // Enum because CrossPointWebServer visits the same list itself.
+    if (setting.type == SettingType::ENUM && setting.key && std::strcmp(setting.key, "fontFamily") == 0) return;
     // Device-only override: these reader settings are now edited through the
     // Font & Layout preview (with live sample text), so hide the redundant flat
     // rows from the device Settings list. They remain in the web UI, which
-    // iterates getSettingsList() directly.
+    // visits the same list itself.
     if (setting.key &&
         (std::strcmp(setting.key, "fontSize") == 0 || std::strcmp(setting.key, "lineSpacing") == 0 ||
          std::strcmp(setting.key, "wordSpacing") == 0 || std::strcmp(setting.key, "characterSpacing") == 0 ||
@@ -93,16 +95,16 @@ void SettingsActivity::onEnter() {
          std::strcmp(setting.key, "screenMargin") == 0 || std::strcmp(setting.key, "extraParagraphSpacing") == 0 ||
          std::strcmp(setting.key, "bionicReading") == 0 || std::strcmp(setting.key, "textAntiAliasing") == 0 ||
          std::strcmp(setting.key, "orientation") == 0)) {
-      continue;
+      return;
     }
     // Device-only override: the "if found" contact is a free-text field with no
     // on-device keyboard entry path, so it is edited from the web UI only. The
-    // web UI iterates getSettingsList() directly, so it still sees this entry.
-    if (setting.key && std::strcmp(setting.key, "returnContact") == 0) continue;
+    // web UI visits the same list itself, so it still sees this entry.
+    if (setting.key && std::strcmp(setting.key, "returnContact") == 0) return;
     // Device-only override: the theme folder is a free-text field too; on the
     // device it is picked from the installed themes by the SleepTheme action row
     // inserted below.
-    if (setting.key && std::strcmp(setting.key, "sleepTheme") == 0) continue;
+    if (setting.key && std::strcmp(setting.key, "sleepTheme") == 0) return;
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       displaySettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_READER) {
@@ -117,7 +119,8 @@ void SettingsActivity::onEnter() {
       devSettings.push_back(setting);
     }
     // Web-only categories (KOReader Sync, OPDS Browser) are skipped for device UI
-  }
+  };
+  forEachUiSetting(addRow);
 
   // Schedules sit right under the rows they time: brightness/warmth on a lit
   // board, Dark Mode on boards without a light (where they only drive it).

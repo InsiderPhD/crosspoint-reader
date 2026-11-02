@@ -221,10 +221,10 @@ void JsonSettingsIO::serializeSettings(const CrossPointSettings& s, JsonDocument
   // is what survives a firmware swap (CrossInk renames language.bin away).
   doc["language"] = I18n::languageCode(I18N.getLanguage());
 
-  for (const auto& info : getSettingsList()) {
-    if (!info.key) continue;
+  auto saveOne = [&](const SettingInfo& info) {
+    if (!info.key) return;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
-    if (!info.valuePtr && !info.stringOffset) continue;
+    if (!info.valuePtr && !info.stringOffset) return;
 
     // While a book's own reader settings are live in SETTINGS (BookSettings),
     // what is written here must still be the global value of each field.
@@ -238,7 +238,8 @@ void JsonSettingsIO::serializeSettings(const CrossPointSettings& s, JsonDocument
     } else {
       doc[info.key] = BookSettings::globalValue(s, info.valuePtr);
     }
-  }
+  };
+  forEachSetting(saveOne);
 
   // Front button remap — managed by RemapFrontButtons sub-activity, not in SettingsList.
   doc["frontButtonBack"] = s.frontButtonBack;
@@ -355,10 +356,10 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
     applyLegacyStatusBarSettings(s);
   }
 
-  for (const auto& info : getSettingsList()) {
-    if (!info.key) continue;
+  auto loadOne = [&](const SettingInfo& info) {
+    if (!info.key) return;
     // Dynamic entries (KOReader etc.) are stored in their own files — skip.
-    if (!info.valuePtr && !info.stringOffset) continue;
+    if (!info.valuePtr && !info.stringOffset) return;
 
     if (info.stringOffset) {
       const char* strPtr = (const char*)&s + info.stringOffset;
@@ -379,7 +380,7 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
         LOG_ERR("CPS", "Misconfigured SettingInfo: stringMaxLen is 0 for key '%s'", info.key);
         destPtr[0] = '\0';
         if (needsResave) *needsResave = true;
-        continue;
+        return;
       }
       strncpy(destPtr, val.c_str(), info.stringMaxLen - 1);
       destPtr[info.stringMaxLen - 1] = '\0';
@@ -398,7 +399,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
       }
       s.*(info.valuePtr) = v;
     }
-  }
+  };
+  forEachSetting(loadOne);
 
   // Front button remap — managed by RemapFrontButtons sub-activity, not in SettingsList.
   using S = CrossPointSettings;

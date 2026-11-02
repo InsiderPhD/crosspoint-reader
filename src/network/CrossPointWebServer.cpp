@@ -1406,8 +1406,6 @@ void CrossPointWebServer::handleSettingsPage() const {
 }
 
 void CrossPointWebServer::handleGetSettings() const {
-  const auto& settings = getSettingsList();
-
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
   server->sendContent("[");
@@ -1417,11 +1415,11 @@ void CrossPointWebServer::handleGetSettings() const {
   bool seenFirst = false;
   JsonDocument doc;
 
-  for (const auto& s : settings) {
-    if (!s.key) continue;  // Skip ACTION-only entries
+  auto sendOne = [&](const SettingInfo& s) {
+    if (!s.key) return;  // Skip ACTION-only entries
     // Mirror the device UI (SettingsActivity.cpp): entries with STR_NONE_OPT category are
     // legacy/hidden/round-trip-only and must not surface as a bogus "None" group on the web.
-    if (s.category == StrId::STR_NONE_OPT) continue;
+    if (s.category == StrId::STR_NONE_OPT) return;
 
     doc.clear();
     doc["key"] = s.key;
@@ -1469,7 +1467,7 @@ void CrossPointWebServer::handleGetSettings() const {
         break;
       }
       default:
-        continue;
+        return;
     }
 
     const char* json = output;
@@ -1483,7 +1481,7 @@ void CrossPointWebServer::handleGetSettings() const {
       large.reset(new (std::nothrow) char[len + 1]);
       if (!large) {
         LOG_ERR("WEB", "OOM: setting JSON for %s (%zu bytes)", s.key, len);
-        continue;
+        return;
       }
       serializeJson(doc, large.get(), len + 1);
       json = large.get();
@@ -1496,7 +1494,8 @@ void CrossPointWebServer::handleGetSettings() const {
     }
     server->sendContent(json, len);
     yield();  // each sendContent() is a blocking network write
-  }
+  };
+  forEachUiSetting(sendOne);
 
   server->sendContent("]");
   server->sendContent("");
@@ -1517,12 +1516,11 @@ void CrossPointWebServer::handlePostSettings() {
     return;
   }
 
-  const auto& settings = getSettingsList();
   int applied = 0;
 
-  for (const auto& s : settings) {
-    if (!s.key) continue;
-    if (!doc[s.key].is<JsonVariant>()) continue;
+  auto applyOne = [&](const SettingInfo& s) {
+    if (!s.key) return;
+    if (!doc[s.key].is<JsonVariant>()) return;
 
     switch (s.type) {
       case SettingType::TOGGLE: {
@@ -1570,7 +1568,8 @@ void CrossPointWebServer::handlePostSettings() {
       default:
         break;
     }
-  }
+  };
+  forEachUiSetting(applyOne);
 
   SETTINGS.saveToFile();
 
