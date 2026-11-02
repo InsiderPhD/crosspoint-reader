@@ -163,7 +163,7 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
-> **Current version: 50** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
+> **Current version: 51** (`SECTION_FILE_VERSION` in `lib/Epub/Epub/Section.cpp`).
 > v50 prepends the fork magic `FF 'K' 'P' 'S'` (see *Fork namespace* above) before the version
 > byte; the rest of the header and the body are unchanged (header offsets shift by 4).
 > The ImHex pattern below documents v24 and has not been kept in sync. Changes since:
@@ -228,6 +228,14 @@ if (parsedSize != fileSize) {
 > `<title>` and `<rp>` subtrees and synthetic text such as image alt fallbacks, counted the
 > same way upstream CrossPoint counts it so offsets are portable between devices. Those five
 > elements are also no longer rendered when they appear inside `<body>`.
+> v51 no structural change: completed and partial sections rebuild for upstream 2.0 layout
+> fixes. Text running straight into a heading or block start (`text<h3>`) stays in its own
+> paragraph; `font-weight` / `font-style: inherit` keep the parent's emphasis; a line may
+> break after an explicit hyphen or dash (`foo—bar`); only no-break spaces followed by a
+> continuation stretch in justified lines, and one carried across a wrap no longer indents
+> the next line; SD-font words are measured with per-glyph pixel snapping, as drawn.
+> The CSS rule cache moves from version 8 to 9 (`0x89` with block font sizes): the
+> font-style and font-weight bytes may now hold 2 (`inherit`); the payload size is unchanged.
 >
 > Any change to the on-disk structure **must** bump this constant — a stale cache read
 > against a new layout is how you get a hard fault, not a graceful failure.

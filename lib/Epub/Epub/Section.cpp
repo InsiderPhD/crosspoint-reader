@@ -45,7 +45,11 @@ constexpr uint32_t SECTION_CACHE_MAGIC = 0x53504BFF;  // bytes: 0xFF, "KPS"
 //     uint32_t per page giving the visible-text offset where the page starts. Also stops
 //     rendering <style>/<script>/<title>/<rp> found inside <body>.
 // 50: header gains the SECTION_CACHE_MAGIC prefix (fork namespace); body unchanged.
-constexpr uint8_t SECTION_FILE_VERSION = 50;
+// 51: layout-only rebuild for the upstream 2.0 layout fixes: text before a block/heading
+//     start stays in its own paragraph (#4030), CSS font inherit (#4072), line breaks after
+//     explicit hyphens/dashes (#3883), NBSP justification and carried NBSPs (#4142), and
+//     SD-font advances snapped per glyph during layout (#3985). Binary layout unchanged.
+constexpr uint8_t SECTION_FILE_VERSION = 51;
 // Staging buffer for page serialization, one per section build (not per page). 2KB is four
 // SD sectors: a typical text page (~3-6KB serialized) goes out in two to four writes, and a
 // field larger than the buffer (a long line's word arena) bypasses it. Heap, not stack: 2KB
