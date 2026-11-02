@@ -651,7 +651,7 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 ### Reader tab
 
-- **Font Family** — Bookerly / Inter / Open Dyslexic / Monospace. SD-card fonts can also be loaded, and on the X4 Pro and X4C a `.ttf`/`.otf` file can be used directly (see [sd-card-fonts](./docs/sd-card-fonts.md)).
+- **Font Family** — Bookerly / Inter / Open Dyslexic / Monospace. SD-card fonts can also be loaded, and on the X4 Pro and X4C a `.ttf`/`.otf` file can be used directly (see [sd-card-fonts](./docs/sd-card-fonts.md)). If the reader shows **Damaged font file**, a `.cpfont` file on the SD card is broken (for example, from an interrupted copy); the affected characters are drawn blank. Delete the font family's folder and install it again.
 - **Font Size** — Small / Medium / Large / X-Large (plus an X-Small size).
 - **Line Spacing** — Tight / Normal / Wide.
 - **Screen Margin** — 5–40 px in 5-px steps.

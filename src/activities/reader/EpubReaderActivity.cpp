@@ -59,6 +59,7 @@
 #include "ReaderUtils.h"
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
+#include "SdCardFont.h"
 #include "SdCardFontGlobals.h"
 #include "TlsFramebufferBorrow.h"
 #include "WifiCredentialStore.h"
@@ -820,6 +821,11 @@ void EpubReaderActivity::loop() {
 
   if (showDictionaryMessage && (millis() - dictionaryMessageTime) >= bookmarkMessageDurationMs) {
     showDictionaryMessage = false;
+    requestUpdate();
+  }
+
+  if (showFontDamagedMessage && (millis() - fontDamagedMessageTime) >= bookmarkMessageDurationMs) {
+    showFontDamagedMessage = false;
     requestUpdate();
   }
 
@@ -2771,6 +2777,12 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     ScreenshotUtil::takeScreenshot(renderer);
   }
 
+  // Glyphs of a damaged .cpfont draw as blanks; say why, once per loaded font.
+  if (SdCardFont::takeCorruptGlyphNotice()) {
+    showFontDamagedMessage = true;
+    fontDamagedMessageTime = millis();
+  }
+
   if (showBookmarkMessage) {
     GUI.drawPopup(renderer, bookmarkMessageWasRemoval ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED));
     if (SETTINGS.darkMode) {
@@ -2783,6 +2795,14 @@ void EpubReaderActivity::render(RenderLock&& lock) {
     // I18N.get, not tr(): the message is chosen at runtime and tr() only accepts
     // a literal key name.
     GUI.drawPopup(renderer, I18N.get(dictionaryMessage));
+    if (SETTINGS.darkMode) {
+      renderer.invertScreen();
+    }
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  }
+
+  if (showFontDamagedMessage) {
+    GUI.drawPopup(renderer, tr(STR_FONT_DAMAGED));
     if (SETTINGS.darkMode) {
       renderer.invertScreen();
     }

@@ -92,6 +92,9 @@ class EpubReaderActivity final : public Activity {
   // Transient dictionary popup ("Not found", "No dictionary set", a named
   // failure). Reuses the bookmark message's expiry timing rather than adding a
   // second popup lifetime to keep in step.
+  // One-shot "Damaged font file" popup: glyphs of a corrupt .cpfont draw blank.
+  bool showFontDamagedMessage = false;
+  unsigned long fontDamagedMessageTime = 0UL;
   bool showDictionaryMessage = false;
   StrId dictionaryMessage = StrId::STR_DICT_NOT_FOUND;
   unsigned long dictionaryMessageTime = 0UL;
