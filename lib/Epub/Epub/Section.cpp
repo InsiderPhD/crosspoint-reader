@@ -11,6 +11,7 @@
 #include <esp_heap_caps.h>
 
 #include <algorithm>
+#include <deque>
 
 #include "Epub/css/CssParser.h"
 #include "Page.h"
@@ -333,14 +334,11 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
   writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
                          viewportHeight, hyphenationEnabled, embeddedStyle, imageRendering, footnoteDisplay,
                          bionicReadingEnabled, textLayout);
-  // One up-front block instead of ~log2(pages) grow-copy-free cycles while the
-  // parser is fighting for contiguous heap. A page is ~2-3KB of XHTML, so
-  // 2KB/page slightly over-estimates; the cap bounds the block at 4KB (341 x 12B)
-  // and anything longer just grows past it as before.
-  constexpr uint32_t HTML_BYTES_PER_PAGE_ESTIMATE = 2048;
-  constexpr uint32_t MAX_LUT_RESERVE = 4096 / sizeof(PageLutEntry);
-  std::vector<PageLutEntry> lut;
-  lut.reserve(std::min<uint32_t>(fileSize / HTML_BYTES_PER_PAGE_ESTIMATE + 1, MAX_LUT_RESERVE));
+  // In-RAM page table, written to the file after the parse. A deque grows in ~512-byte nodes
+  // (42 entries each) while the parser is fighting for heap, so a long chapter never needs one
+  // large contiguous block: a vector doubling past 1024 pages needs 24 KB, and a failed
+  // allocation aborts under -fno-exceptions.
+  std::deque<PageLutEntry> lut;
 
   // Derive the content base directory and image cache path prefix for the parser
   size_t lastSlash = localPath.find_last_of('/');
@@ -374,7 +372,7 @@ bool Section::createSectionFile(const int fontId, const int codeFontId, const fl
   // and move the closure to the heap.
   struct PageSink {
     Section& self;
-    std::vector<PageLutEntry>& lut;
+    std::deque<PageLutEntry>& lut;
     BufferedPrint& out;
   } pageSink{*this, lut, pageOut};
 

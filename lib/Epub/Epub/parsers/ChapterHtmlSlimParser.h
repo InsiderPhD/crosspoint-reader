@@ -5,6 +5,7 @@
 #include <climits>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <new>
@@ -310,9 +311,11 @@ class ChapterHtmlSlimParser {
   std::unique_ptr<BufferedTable> currentTable;
   BufferedTableCell* currentTableCell = nullptr;  // non-null while inside <td>/<th>
 
-  // Anchor-to-page mapping: tracks which page each HTML id attribute lands on
+  // Anchor-to-page mapping: tracks which page each HTML id attribute lands on. A deque grows in
+  // ~512-byte nodes, so a long chapter never needs one large free block (a vector doubling past
+  // 512 anchors needs ~28 KB contiguous, and a failed allocation aborts under -fno-exceptions).
   int completedPageCount = 0;
-  std::vector<std::pair<std::string, uint16_t>> anchorData;
+  std::deque<std::pair<std::string, uint16_t>> anchorData;
   std::string pendingAnchorId;          // deferred until after previous text block is flushed
   std::vector<std::string> tocAnchors;  // the list of anchors that are TOC chapter boundaries
   bool recordPageBreakAnchors = false;
@@ -443,7 +446,7 @@ class ChapterHtmlSlimParser {
   void setTextLayout(const TextLayoutOptions& options) { textLayout = options; }
   bool parseAndBuildPages();
   void addLineToPage(std::unique_ptr<TextBlock> line, uint32_t visibleOffset);
-  const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
+  const std::deque<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
   // Also record the ids of page-break markers (epub:type="pagebreak"), which are
   // usually <span>s and so skipped as anchors. Only worth its RAM for a book that
   // has a publisher page list to jump by (see PageList.h); off by default.
