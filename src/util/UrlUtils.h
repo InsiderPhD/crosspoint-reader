@@ -32,6 +32,8 @@ std::string buildUrl(const std::string& serverUrl, const std::string& path);
  * "files/12") are left alone.
  */
 bool resolveServerPath(std::string& path, const std::string& requestUrl);
+
+/**
  * Resolve a link found in a document fetched from baseUrl, the way a browser
  * does (RFC 3986 section 5): an absolute URL as is, "//host/x" with the base's
  * scheme, "/x" against the base's host, "?q" against the base's path, and a

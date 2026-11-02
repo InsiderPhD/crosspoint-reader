@@ -61,6 +61,8 @@ bool resolveServerPath(std::string& path, const std::string& requestUrl) {
   const size_t hostEnd = requestUrl.find_first_of("/?#", scheme + 3);
   path.insert(0, requestUrl, 0, hostEnd == std::string::npos ? requestUrl.size() : hostEnd);
   return true;
+}
+
 namespace {
 // RFC 3986 5.2.4, on a path without query or fragment.
 std::string removeDotSegments(const std::string& path) {
