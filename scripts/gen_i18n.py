@@ -406,6 +406,10 @@ def generate_keys_header(
     lines.append("// Language display names (defined in I18nStrings.cpp)")
     lines.append("extern const char* const LANGUAGE_NAMES[];")
     lines.append("")
+    lines.append("// Language codes (each YAML file's _language_code), stable across enum")
+    lines.append("// reorders and the same strings upstream CrossPoint stores (defined in I18nStrings.cpp)")
+    lines.append("extern const char* const LANGUAGE_CODES[];")
+    lines.append("")
     lines.append("// Character sets for each language (defined in I18nStrings.cpp)")
     lines.append("extern const char* const CHARACTER_SETS[];")
     lines.append("")
@@ -517,6 +521,14 @@ def generate_strings_cpp(
     lines.append("const char* const LANGUAGE_NAMES[] = {")
     for name in language_names:
         _append_string_entry(lines, name)
+    lines.append("};")
+    lines.append("")
+
+    # LANGUAGE_CODES array
+    lines.append("// Language codes")
+    lines.append("const char* const LANGUAGE_CODES[] = {")
+    for code in languages:
+        _append_string_entry(lines, code)
     lines.append("};")
     lines.append("")
 

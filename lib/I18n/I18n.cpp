@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 #include <HardwareSerial.h>
 #include <Serialization.h>
+#include <strings.h>
 
 #include "I18nStrings.h"
 
@@ -10,6 +11,7 @@ using namespace i18n_strings;
 
 // Settings file path
 static constexpr const char* SETTINGS_FILE = "/.crosspoint/language.bin";
+static constexpr const char* SETTINGS_FILE_BAK = "/.crosspoint/language.bin.bak";
 static constexpr uint8_t SETTINGS_VERSION = 1;
 
 I18n& I18n::getInstance() {
@@ -60,10 +62,32 @@ void I18n::saveSettings() {
   Serial.printf("[I18N] Settings saved: language=%d\n", static_cast<int>(_language));
 }
 
+bool I18n::hasSavedLanguage() { return Storage.exists(SETTINGS_FILE) || Storage.exists(SETTINGS_FILE_BAK); }
+
+const char* I18n::languageCode(const Language lang) {
+  const auto index = static_cast<size_t>(lang);
+  return index < static_cast<size_t>(Language::_COUNT) ? LANGUAGE_CODES[index] : "EN";
+}
+
+bool I18n::languageFromCode(const char* code, Language& out) {
+  if (!code) return false;
+  for (uint8_t i = 0; i < getLanguageCount(); i++) {
+    if (strcasecmp(code, LANGUAGE_CODES[i]) == 0) {
+      out = static_cast<Language>(i);
+      return true;
+    }
+  }
+  return false;
+}
+
 void I18n::loadSettings() {
   FsFile file;
-  if (!Storage.openFileForRead("I18N", SETTINGS_FILE, file)) {
-    Serial.printf("[I18N] No settings file, using default (English)\n");
+  // CrossInk imports language.bin and renames it to .bak; after a swap back
+  // the .bak still holds this firmware's last choice (same enum numbering).
+  if (!Storage.exists(SETTINGS_FILE) && Storage.exists(SETTINGS_FILE_BAK)) {
+    if (!Storage.openFileForRead("I18N", SETTINGS_FILE_BAK, file)) return;
+  } else if (!Storage.openFileForRead("I18N", SETTINGS_FILE, file)) {
+    Serial.printf("[I18N] No settings file, keeping current language\n");
     return;
   }
 

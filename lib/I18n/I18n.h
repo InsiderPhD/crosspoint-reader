@@ -26,6 +26,14 @@ class I18n {
 
   void saveSettings();
   void loadSettings();
+  // True when language.bin (or the language.bin.bak CrossInk leaves after
+  // importing it) exists, i.e. loadSettings() has a saved choice to read.
+  static bool hasSavedLanguage();
+
+  // Language code ("EN", "DE", ...): the stable form upstream CrossPoint keeps
+  // in settings.json. Unknown values give "EN" / false.
+  static const char* languageCode(Language lang);
+  static bool languageFromCode(const char* code, Language& out);
 
   // Get all unique characters used in a specific language
   // Returns a sorted string of unique characters
