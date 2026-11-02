@@ -3911,37 +3911,41 @@ void EpubReaderActivity::openReaderMenu() {
   // sync row that the handler would silently drop on the floor.
   const auto syncProvider = ProgressAutoSync::providerFor(epub->getPath()).provider;
 
-  startActivityForResult(
-      std::make_unique<EpubReaderMenuActivity>(renderer, mappedInput, epub->getTitle(), currentPage, totalPages,
-                                               bookProgressPercent, SETTINGS.orientation, currentPageHasFootnotes,
-                                               syncProvider, timeLeftChapter, timeLeftBook, publisherPageCount > 0),
-      [this](const ActivityResult& result) {
-        const auto& menu = std::get<MenuResult>(result.data);
-        applyOrientation(menu.orientation);
-        toggleAutoPageTurn(menu.pageTurnOption);
-        if (menu.buttonHints != SETTINGS.showButtonHints) {
-          SETTINGS.showButtonHints = menu.buttonHints;
-          SETTINGS.saveToFile();
-          reflowCurrentChapter();  // hint reservation changed — repaginate
-        }
-        // Autosync mode cycles in the menu and applies here on exit. It's a
-        // pure setting change — no cache invalidation or reflow needed.
-        if (menu.autosyncMode != SETTINGS.autosyncMode) {
-          SETTINGS.autosyncMode = menu.autosyncMode;
-          SETTINGS.saveToFile();
-        }
-        // Frontlight was already driven live while cycling; persist the final
-        // levels once here so the menu doesn't hit SPIFFS on every step.
-        if (menu.frontlightBrightness != SETTINGS.frontlightBrightness ||
-            menu.frontlightWarmth != SETTINGS.frontlightWarmth) {
-          SETTINGS.frontlightBrightness = menu.frontlightBrightness;
-          SETTINGS.frontlightWarmth = menu.frontlightWarmth;
-          SETTINGS.saveToFile();
-        }
-        if (!result.isCancelled) {
-          onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
-        }
-      });
+  auto menuActivity = std::make_unique<EpubReaderMenuActivity>(
+      renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent, SETTINGS.orientation,
+      currentPageHasFootnotes, syncProvider, timeLeftChapter, timeLeftBook, publisherPageCount > 0);
+  // Chapter under the book title: the same TOC lookup the status bar makes.
+  // One short string, owned by the menu and freed with it.
+  if (const int tocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex); tocIndex != -1) {
+    menuActivity->setChapterTitle(epub->getTocItem(tocIndex).title);
+  }
+  startActivityForResult(std::move(menuActivity), [this](const ActivityResult& result) {
+    const auto& menu = std::get<MenuResult>(result.data);
+    applyOrientation(menu.orientation);
+    toggleAutoPageTurn(menu.pageTurnOption);
+    if (menu.buttonHints != SETTINGS.showButtonHints) {
+      SETTINGS.showButtonHints = menu.buttonHints;
+      SETTINGS.saveToFile();
+      reflowCurrentChapter();  // hint reservation changed — repaginate
+    }
+    // Autosync mode cycles in the menu and applies here on exit. It's a
+    // pure setting change — no cache invalidation or reflow needed.
+    if (menu.autosyncMode != SETTINGS.autosyncMode) {
+      SETTINGS.autosyncMode = menu.autosyncMode;
+      SETTINGS.saveToFile();
+    }
+    // Frontlight was already driven live while cycling; persist the final
+    // levels once here so the menu doesn't hit SPIFFS on every step.
+    if (menu.frontlightBrightness != SETTINGS.frontlightBrightness ||
+        menu.frontlightWarmth != SETTINGS.frontlightWarmth) {
+      SETTINGS.frontlightBrightness = menu.frontlightBrightness;
+      SETTINGS.frontlightWarmth = menu.frontlightWarmth;
+      SETTINGS.saveToFile();
+    }
+    if (!result.isCancelled) {
+      onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
+    }
+  });
 }
 
 bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION action) {

@@ -274,13 +274,18 @@ void EpubReaderMenuActivity::loop() {
   }
 }
 
+int EpubReaderMenuActivity::chapterLineHeight() const {
+  return chapterTitle.empty() ? 0 : renderer.getLineHeight(UI_10_FONT_ID);
+}
+
 int EpubReaderMenuActivity::menuTopY() const {
   // Mirrors render()'s vertical flow: title block (45 + whatever the hints
-  // reserve above it), summary line, status line, 10px gap. Any change to those
-  // offsets in render() must be reflected here or taps land on the wrong row.
+  // reserve above it), chapter line, summary line, status line, 10px gap. Any
+  // change to those offsets in render() must be reflected here or taps land on
+  // the wrong row.
   const int contentY = hintReserve().top;
   const int summaryLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const int summaryY = 45 + contentY;
+  const int summaryY = 45 + contentY + chapterLineHeight();
   const int statusY = summaryY + summaryLineHeight + 2;
   return statusY + summaryLineHeight + 10;
 }
@@ -319,6 +324,14 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
   const int titleX =
       contentX + (contentWidth - renderer.getTextWidth(UI_12_FONT_ID, truncTitle.c_str(), EpdFontFamily::BOLD)) / 2;
   renderer.drawText(UI_12_FONT_ID, titleX, 15 + contentY, truncTitle.c_str(), true, EpdFontFamily::BOLD);
+
+  // Chapter title, one line under the book title. Costs one row of the list in
+  // landscape; the list pages, so nothing is lost.
+  if (!chapterTitle.empty()) {
+    const std::string truncChapter = renderer.truncatedText(UI_10_FONT_ID, chapterTitle.c_str(), contentWidth - 40);
+    const int chapterX = contentX + (contentWidth - renderer.getTextWidth(UI_10_FONT_ID, truncChapter.c_str())) / 2;
+    renderer.drawText(UI_10_FONT_ID, chapterX, 45 + contentY, truncChapter.c_str(), true);
+  }
 
   // Progress summary
   auto formatMins = [](uint32_t secs) -> std::string {
@@ -362,7 +375,7 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
     progressLine += " " + formatMins(timeLeftBookSeconds);
   }
 
-  const int summaryY = 45 + contentY;
+  const int summaryY = 45 + contentY + chapterLineHeight();
   renderer.drawCenteredText(UI_10_FONT_ID, summaryY, progressLine.c_str());
 
   // Status line: clock + date (hidden while the clock has never been set —

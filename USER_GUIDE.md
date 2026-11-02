@@ -327,7 +327,7 @@ Press **Confirm** while reading to open the reader menu.
 
 <img src="docs/images/user-guide/reader-menu.png" alt="Reader menu showing chapter position, time-left estimate, and the list of actions" width="300">
 
-At the top the menu shows a **two-line summary** of where you are:
+At the top the menu shows the book title, the **current chapter title** under it, and a **two-line summary** of where you are:
 
 - **Line 1** — your calibrated reading speed (e.g. `24s/pg`), chapter position and time left (`Ch 4/18 12m`), and book progress with time left (`Book 37% 5h20m`).
 - **Line 2** — the clock and date (once the clock has been set), a warning if **Progress Autosync** is on but couldn't reach the network this boot, and today's reading time against your daily goal (e.g. `17m / 15m`).

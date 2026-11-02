@@ -54,6 +54,10 @@ class EpubReaderMenuActivity final : public Activity {
                                   const uint32_t timeLeftChapterSeconds = 0, const uint32_t timeLeftBookSeconds = 0,
                                   const bool hasPageList = false);
 
+  // Set before the menu is started; a setter rather than one more defaulted
+  // constructor argument.
+  void setChapterTitle(std::string chapter) { chapterTitle = std::move(chapter); }
+
   void onEnter() override;
   void onExit() override;
   void loop() override;
@@ -82,6 +86,9 @@ class EpubReaderMenuActivity final : public Activity {
   // Shared by render() and the Full Touch tap hit-testing in loop().
   static constexpr int MENU_ROW_H = 30;
   int menuTopY() const;
+  // Height of the chapter-title line under the book title (0 without one);
+  // pushes the summary, status line and rows down by that much.
+  int chapterLineHeight() const;
   // Rows that fit between menuTopY() and the bottom of the usable area. The
   // list pages by this window (render, tap hit-testing, and swipe paging all
   // derive from it, so they can never disagree).
@@ -100,6 +107,8 @@ class EpubReaderMenuActivity final : public Activity {
 
   ButtonNavigator buttonNavigator;
   std::string title = "Reader Menu";
+  // Current chapter's TOC title, drawn under the book title. Empty: no line.
+  std::string chapterTitle;
   uint8_t pendingOrientation = 0;
   uint8_t selectedPageTurnOption = 0;
   uint8_t pendingButtonHints = 0;
