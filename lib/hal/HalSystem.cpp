@@ -14,6 +14,16 @@
 #include "esp_private/esp_system_attr.h"
 #include "esp_private/panic_internal.h"
 
+// sdkconfig.h (via Arduino.h above) defines the CONFIG_* this gate reads.
+#if defined(BOARD_HAS_PSRAM) && CONFIG_IDF_TARGET_ESP32S3 && CONFIG_SPIRAM_BOOT_INIT && !defined(SIMULATOR)
+#define HAL_SYSTEM_LATE_PSRAM_INIT 1
+#include "esp32-hal-psram.h"
+#include "esp_heap_caps.h"
+#include "esp_psram.h"
+#else
+#define HAL_SYSTEM_LATE_PSRAM_INIT 0
+#endif
+
 #define MAX_PANIC_STACK_DEPTH 32
 
 RTC_NOINIT_ATTR char panicMessage[256];
@@ -81,6 +91,25 @@ void IRAM_ATTR __wrap_panic_print_backtrace(const void* frame, int core) {
 namespace HalSystem {
 
 void begin() {
+#if HAL_SYSTEM_LATE_PSRAM_INIT
+  // X4 Pro / X4C: an SD-card or OTA update replaces only the app and keeps the
+  // installed bootloader. With an older bootloader the app's boot-time PSRAM
+  // init can fail and, because this SDK sets CONFIG_SPIRAM_IGNORE_NOTFOUND,
+  // the board boots with no PSRAM heap at all, so every PSRAM-gated feature
+  // (vector fonts, plugins, big caches) silently degrades or OOMs. Retry the
+  // init once here, early in setup() before anything sizes itself off PSRAM.
+  // Costs nothing when PSRAM came up normally (one heap_caps query).
+  if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
+    const esp_err_t initResult = esp_psram_is_initialized() ? ESP_OK : esp_psram_init();
+    if (initResult != ESP_OK) {
+      LOG_ERR("HAL", "PSRAM initialization failed: %d", static_cast<int>(initResult));
+    } else if (!psramInit() || !psramAddToHeap()) {
+      LOG_ERR("HAL", "Could not add PSRAM to heap");
+    } else {
+      LOG_INF("HAL", "Initialized PSRAM for app-only firmware update");
+    }
+  }
+#endif
   // This is mostly for the first boot, we need to initialize the panic info and logs to empty state
   // If we reboot from a panic state, we want to keep the panic info until we successfully dump it to the SD card, use
   // `clearPanic()` to clear it after dumping
