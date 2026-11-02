@@ -208,15 +208,19 @@ void SdCardFontSystem::loadTtfFamily(const SdCardFontFamilyInfo& family, GfxRend
   // files[] holds one entry per style role (registry): 0=regular is required,
   // the others replace a synthesised style with the real design.
   TtfEpdFont::LoadResult result = TtfEpdFont::LoadResult::INVALID_FONT;
+  // Discovery only registers files whose path fits this buffer.
+  char path[SdCardFontFamilyInfo::PATH_BUFFER_SIZE];
   for (const auto& file : family.files) {
-    if (file.style == TtfEpdFont::REGULAR) result = ttf_->addSource(TtfEpdFont::REGULAR, file.path.c_str());
+    if (file.style == TtfEpdFont::REGULAR && family.filePath(file, path, sizeof(path))) {
+      result = ttf_->addSource(TtfEpdFont::REGULAR, path);
+    }
   }
   if (result == TtfEpdFont::LoadResult::OK) {
     for (const auto& file : family.files) {
-      if (file.style != TtfEpdFont::REGULAR && file.style < TtfEpdFont::STYLE_COUNT) {
-        if (ttf_->addSource(file.style, file.path.c_str()) != TtfEpdFont::LoadResult::OK) {
-          LOG_ERR("SDFS", "%s: style file %s not loaded; that style will be synthesised", family.name.c_str(),
-                  file.path.c_str());
+      if (file.style != TtfEpdFont::REGULAR && file.style < TtfEpdFont::STYLE_COUNT &&
+          family.filePath(file, path, sizeof(path))) {
+        if (ttf_->addSource(file.style, path) != TtfEpdFont::LoadResult::OK) {
+          LOG_ERR("SDFS", "%s: style file %s not loaded; that style will be synthesised", family.name.c_str(), path);
         }
       }
     }

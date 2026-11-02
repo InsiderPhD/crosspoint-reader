@@ -6,8 +6,13 @@
 #include <strings.h>  // strcasecmp
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+// One file entry per installed size is resident from boot; keep it to the
+// name pointer plus two bytes.
+static_assert(sizeof(SdCardFontFileInfo) == 2 * sizeof(void*), "SdCardFontFileInfo grew");
 
 #if CROSSPOINT_VECTOR_FONTS
 #include "TtfEpdFont.h"
@@ -116,6 +121,47 @@ std::vector<uint8_t> SdCardFontFamilyInfo::availableSizes() const {
   return sizes;
 }
 
+namespace {
+// "_<size>.cpfont": the part of a canonical v4 filename after the family name.
+void cpfontTail(const uint8_t size, char* out, const size_t outSize) { snprintf(out, outSize, "_%u.cpfont", size); }
+constexpr size_t CPFONT_TAIL_SIZE = sizeof("_255.cpfont");
+
+// Heap copy of a filename for SdCardFontFileInfo::name; null when out of memory.
+std::unique_ptr<char[]> copyFileName(const char* filename) {
+  const size_t bytes = strlen(filename) + 1;
+  auto copy = makeUniqueNoThrow<char[]>(bytes);
+  if (!copy) {
+    LOG_ERR("SDREG", "OOM: %u byte filename %s", static_cast<unsigned>(bytes), filename);
+    return nullptr;
+  }
+  memcpy(copy.get(), filename, bytes);
+  return copy;
+}
+
+// Loaders rebuild the path through filePath() into a PATH_BUFFER_SIZE buffer,
+// so a file whose path does not fit could never be opened: drop it at discovery.
+// `family` must already carry its name, root and loose flag.
+bool pathFits(const SdCardFontFamilyInfo& family, const SdCardFontFileInfo& file) {
+  char path[SdCardFontFamilyInfo::PATH_BUFFER_SIZE];
+  return family.filePath(file, path, sizeof(path));
+}
+}  // namespace
+
+bool SdCardFontFamilyInfo::filePath(const SdCardFontFileInfo& file, char* out, const size_t outSize) const {
+  if (!root) return false;
+  int n;
+  if (!file.name) {
+    char tail[CPFONT_TAIL_SIZE];
+    cpfontTail(file.pointSize, tail, sizeof(tail));
+    n = snprintf(out, outSize, "%s/%s/%s%s", root, name.c_str(), name.c_str(), tail);
+  } else if (loose) {
+    n = snprintf(out, outSize, "%s/%s", root, file.name.get());
+  } else {
+    n = snprintf(out, outSize, "%s/%s/%s", root, name.c_str(), file.name.get());
+  }
+  return n > 0 && static_cast<size_t>(n) < outSize;
+}
+
 // --- SdCardFontRegistry ---
 
 bool SdCardFontRegistry::parseFilename(const char* filename, uint8_t& size, uint8_t& style) {
@@ -154,6 +200,13 @@ bool SdCardFontRegistry::parseFilename(const char* filename, uint8_t& size, uint
   return true;
 }
 
+bool SdCardFontRegistry::isCanonicalCpfontName(const char* filename, const std::string& family, const uint8_t size) {
+  if (strncmp(filename, family.c_str(), family.size()) != 0) return false;
+  char tail[CPFONT_TAIL_SIZE];
+  cpfontTail(size, tail, sizeof(tail));
+  return strcmp(filename + family.size(), tail) == 0;
+}
+
 #if CROSSPOINT_VECTOR_FONTS
 
 bool SdCardFontRegistry::parseVectorFontName(const char* filename, size_t& baseLen) {
@@ -182,15 +235,19 @@ void SdCardFontRegistry::assignVectorStyles(const char* dirPath, std::vector<SdC
   };
   std::vector<Candidate> candidates;
   candidates.reserve(files.size());
+  char path[SdCardFontFamilyInfo::PATH_BUFFER_SIZE];
   for (size_t i = 0; i < files.size(); i++) {
     // files[i].style holds the filename-derived role until the face answers.
     Candidate candidate{i, static_cast<uint16_t>((files[i].style & 1) ? 700 : 400), (files[i].style & 2) != 0};
-    if (files.size() > 1) inspectVectorFace(files[i].path.c_str(), candidate.weight, candidate.italic);
+    if (files.size() > 1) {
+      snprintf(path, sizeof(path), "%s/%s", dirPath, files[i].name.get());
+      inspectVectorFace(path, candidate.weight, candidate.italic);
+    }
     candidates.push_back(candidate);
   }
 
   // Nearest to `target` within the upright or italic group; ties go to the
-  // lower weight, then the smaller path. `exclude` stops bold re-picking the
+  // lower weight, then the smaller filename. `exclude` stops bold re-picking the
   // regular file.
   const auto pick = [&](const bool italic, const int target, const Candidate* exclude) -> const Candidate* {
     const Candidate* best = nullptr;
@@ -202,10 +259,10 @@ void SdCardFontRegistry::assignVectorStyles(const char* dirPath, std::vector<SdC
       }
       const int distance = std::abs(static_cast<int>(candidate.weight) - target);
       const int bestDistance = std::abs(static_cast<int>(best->weight) - target);
-      if (distance < bestDistance ||
-          (distance == bestDistance &&
-           (candidate.weight < best->weight ||
-            (candidate.weight == best->weight && files[candidate.index].path < files[best->index].path)))) {
+      if (distance < bestDistance || (distance == bestDistance && (candidate.weight < best->weight ||
+                                                                   (candidate.weight == best->weight &&
+                                                                    strcmp(files[candidate.index].name.get(),
+                                                                           files[best->index].name.get()) < 0)))) {
         best = &candidate;
       }
     }
@@ -220,7 +277,7 @@ void SdCardFontRegistry::assignVectorStyles(const char* dirPath, std::vector<SdC
       files.clear();
       return;
     }
-    LOG_DBG("SDREG", "No upright face in %s; using %s as regular", dirPath, files[regular->index].path.c_str());
+    LOG_DBG("SDREG", "No upright face in %s; using %s as regular", dirPath, files[regular->index].name.get());
   }
   // A "bold" no heavier than the regular pick would render identically, so the
   // synthesised bold is the better answer. Same rule for bold-italic.
@@ -233,9 +290,12 @@ void SdCardFontRegistry::assignVectorStyles(const char* dirPath, std::vector<SdC
 
   std::vector<SdCardFontFileInfo> selected;
   selected.reserve(4);
+  // Each candidate is picked for at most one role (the exclusions above), so
+  // its entry can be moved out of `files`. A second pick of the same index
+  // would leave a null name that filePath() reads as a canonical .cpfont.
   const auto add = [&](const Candidate* candidate, const uint8_t role) {
     if (!candidate) return;
-    SdCardFontFileInfo info = files[candidate->index];
+    SdCardFontFileInfo info = std::move(files[candidate->index]);
     info.style = role;
     selected.push_back(std::move(info));
   };
@@ -289,10 +349,14 @@ void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo
         } else if (vectorFiles.size() < MAX_VECTOR_FILES_PER_FAMILY) {
           if (vectorFiles.empty()) vectorFiles.reserve(4);
           SdCardFontFileInfo info;
-          info.path = std::string(dirPath) + "/" + nameBuffer;
+          info.name = copyFileName(nameBuffer);
           info.pointSize = 0;
           info.style = styleFromName(nameBuffer, baseLen);
-          vectorFiles.push_back(std::move(info));
+          if (info.name && !pathFits(family, info)) {
+            LOG_ERR("SDREG", "Path too long for %s in %s, skipping", nameBuffer, dirPath);
+          } else if (info.name) {
+            vectorFiles.push_back(std::move(info));
+          }
         }
       }
 #endif
@@ -316,9 +380,16 @@ void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo
     }
 
     SdCardFontFileInfo info;
-    info.path = std::string(dirPath) + "/" + nameBuffer;
+    if (!isCanonicalCpfontName(nameBuffer, family.name, size)) {
+      info.name = copyFileName(nameBuffer);
+      if (!info.name) continue;
+    }
     info.pointSize = size;
     info.style = style;
+    if (!pathFits(family, info)) {
+      LOG_ERR("SDREG", "Path too long for %s in %s, skipping", nameBuffer, dirPath);
+      continue;
+    }
     family.files.push_back(std::move(info));
   }
 
@@ -371,6 +442,7 @@ void SdCardFontRegistry::scanRoot(const char* rootPath, std::vector<SdCardFontFa
 
       SdCardFontFamilyInfo family;
       family.name = nameBuffer;
+      family.root = rootPath;
       std::string subDirPath = std::string(rootPath) + "/" + nameBuffer;
       SdCardFontRegistry::scanDirectory(subDirPath.c_str(), family);
 
@@ -398,11 +470,18 @@ void SdCardFontRegistry::scanRoot(const char* rootPath, std::vector<SdCardFontFa
       SdCardFontFamilyInfo family;
       family.name.assign(nameBuffer, baseLen);
       if (familyExists(family.name.c_str())) continue;
+      family.root = rootPath;
       family.vector = true;
+      family.loose = true;
       SdCardFontFileInfo info;
-      info.path = std::string(rootPath) + "/" + nameBuffer;
+      info.name = copyFileName(nameBuffer);
+      if (!info.name) continue;
       info.pointSize = 0;
       info.style = 0;
+      if (!pathFits(family, info)) {
+        LOG_ERR("SDREG", "Path too long for %s in %s, skipping", nameBuffer, rootPath);
+        continue;
+      }
       family.files.push_back(std::move(info));
       out.push_back(std::move(family));
       LOG_DBG("SDREG", "Found vector font: %s in %s", out.back().name.c_str(), rootPath);
