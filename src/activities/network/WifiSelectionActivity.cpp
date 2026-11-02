@@ -40,6 +40,8 @@ void WifiSelectionActivity::onEnter() {
   savePromptSelection = 0;
   forgetPromptSelection = 0;
   autoConnecting = false;
+  autoRetryUsed = false;
+  autoRetryAfterScan = false;
 
   // Cache MAC address for display
   uint8_t mac[6];
@@ -117,6 +119,7 @@ void WifiSelectionActivity::processWifiScanResults() {
   }
 
   if (scanResult == WIFI_SCAN_FAILED) {
+    autoRetryAfterScan = false;
     state = WifiSelectionState::NETWORK_LIST;
     requestUpdate();
     return;
@@ -160,9 +163,37 @@ void WifiSelectionActivity::processWifiScanResults() {
   });
 
   WiFi.scanDelete();
-  state = WifiSelectionState::NETWORK_LIST;
   selectedNetworkIndex = 0;
+
+  if (autoRetryAfterScan) {
+    autoRetryAfterScan = false;
+    // selectedSSID / enteredPassword still hold the saved credential from the
+    // failed quick attempt. Retry only when the scan actually sees it; an
+    // out-of-range network goes to the picker instead of the forget prompt.
+    const bool visible = std::any_of(networks.begin(), networks.end(),
+                                     [this](const WifiNetworkInfo& n) { return n.ssid == selectedSSID; });
+    if (visible) {
+      LOG_DBG("WIFI", "Retrying saved network after scan: %s", selectedSSID.c_str());
+      autoConnecting = true;
+      usedSavedPassword = true;
+      attemptConnection();
+      return;
+    }
+    LOG_DBG("WIFI", "Saved network not in scan, showing list: %s", selectedSSID.c_str());
+  }
+
+  state = WifiSelectionState::NETWORK_LIST;
   requestUpdate();
+}
+
+bool WifiSelectionActivity::scanBeforeAutoRetry() {
+  if (!autoConnecting || autoRetryUsed) return false;
+  autoRetryUsed = true;
+  autoRetryAfterScan = true;
+  LOG_DBG("WIFI", "Saved network failed, scanning before one retry: %s", selectedSSID.c_str());
+  WiFi.disconnect();
+  startWifiScan();  // clears autoConnecting; processWifiScanResults re-arms it
+  return true;
 }
 
 void WifiSelectionActivity::selectNetwork(const int index) {
@@ -285,6 +316,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
   }
 
   if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
+    if (scanBeforeAutoRetry()) return;
     connectionError = tr(STR_ERROR_GENERAL_FAILURE);
     if (status == WL_NO_SSID_AVAIL) {
       connectionError = tr(STR_ERROR_NETWORK_NOT_FOUND);
@@ -296,6 +328,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
 
   // Check for timeout
   if (millis() - connectionStartTime > CONNECTION_TIMEOUT_MS) {
+    if (scanBeforeAutoRetry()) return;
     WiFi.disconnect();
     connectionError = tr(STR_ERROR_CONNECTION_TIMEOUT);
     state = WifiSelectionState::CONNECTION_FAILED;

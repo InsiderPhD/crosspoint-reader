@@ -73,6 +73,12 @@ class WifiSelectionActivity final : public Activity {
   // Whether we are attempting to auto-connect
   bool autoConnecting = false;
 
+  // The quick auto-connect before any scan can fail while the radio or AP is
+  // still settling. On that first failure we scan once and, if the saved
+  // network is visible, retry it once (bounded: a second failure is final).
+  bool autoRetryUsed = false;
+  bool autoRetryAfterScan = false;
+
   // Save/forget prompt selection (0 = Yes, 1 = No)
   int savePromptSelection = 0;
   int forgetPromptSelection = 0;
@@ -98,6 +104,7 @@ class WifiSelectionActivity final : public Activity {
   void selectNetwork(int index);
   void attemptConnection();
   void checkConnectionStatus();
+  bool scanBeforeAutoRetry();
   std::string getSignalStrengthIndicator(int32_t rssi) const;
 
   void onComplete(bool connected);
