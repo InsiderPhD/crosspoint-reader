@@ -562,6 +562,10 @@ inline void appendStatusBarSettings(SettingSink& v) {
       StrId::STR_BATTERY_STYLE, &CrossPointSettings::statusBarBatteryStyle,
       {StrId::STR_BATTERY_ICON_AND_PERCENT, StrId::STR_BATTERY_ICON_ONLY, StrId::STR_BATTERY_PERCENT_ONLY},
       "statusBarBatteryStyle", StrId::STR_BOTTOM_STATUS_BAR));
+  v.push_back(SettingInfo::Enum(StrId::STR_SB_CENTERED, &CrossPointSettings::statusBarLayout,
+                                {StrId::STR_STATE_OFF, StrId::STR_SB_CENTER_BULLET, StrId::STR_SB_CENTER_DOT,
+                                 StrId::STR_SB_CENTER_DASH, StrId::STR_SB_CENTER_PIPE},
+                                "statusBarLayout", StrId::STR_BOTTOM_STATUS_BAR));
   v.push_back(SettingInfo::Enum(StrId::STR_BOOK_TITLE, &CrossPointSettings::statusBarBookTitlePos,
                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                 "statusBarBookTitlePos", StrId::STR_BOTTOM_STATUS_BAR));
@@ -605,6 +609,10 @@ inline void appendStatusBarSettings(SettingSink& v) {
       StrId::STR_BATTERY_STYLE, &CrossPointSettings::statusBarTopBatteryStyle,
       {StrId::STR_BATTERY_ICON_AND_PERCENT, StrId::STR_BATTERY_ICON_ONLY, StrId::STR_BATTERY_PERCENT_ONLY},
       "statusBarTopBatteryStyle", StrId::STR_TOP_STATUS_BAR));
+  v.push_back(SettingInfo::Enum(StrId::STR_SB_CENTERED, &CrossPointSettings::statusBarTopLayout,
+                                {StrId::STR_STATE_OFF, StrId::STR_SB_CENTER_BULLET, StrId::STR_SB_CENTER_DOT,
+                                 StrId::STR_SB_CENTER_DASH, StrId::STR_SB_CENTER_PIPE},
+                                "statusBarTopLayout", StrId::STR_TOP_STATUS_BAR));
   v.push_back(SettingInfo::Enum(StrId::STR_BOOK_TITLE, &CrossPointSettings::statusBarTopBookTitlePos,
                                 {StrId::STR_HIDE, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT},
                                 "statusBarTopBookTitlePos", StrId::STR_TOP_STATUS_BAR));
@@ -645,7 +653,7 @@ inline void appendStatusBarSettings(SettingSink& v) {
 // more (the list is visited, never stored); forEachSetting() logs a mismatch so a
 // helper that stops emitting an entry (and so stops persisting it) shows up on
 // the serial log. Recount when adding or removing an entry.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 102;  // includes tiltPageTurn + tiltNextPageOnly
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 104;  // includes tiltPageTurn + tiltNextPageOnly
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

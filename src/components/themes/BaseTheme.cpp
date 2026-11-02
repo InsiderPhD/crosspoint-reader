@@ -1381,6 +1381,88 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     if (w > 0) items.push_back(SbItem{CPS::SB_POS_MIDDLE, 0, centerOverride, w});
   }
 
+  // One item at x on the text lane; shared by both layouts below.
+  auto drawItem = [&](const SbItem& it, const int x) {
+    if (it.kind == 1) {
+      if (fontId == SMALL_FONT_ID) {
+        // The theme draws icon and percentage together in the Small font.
+        GUI.drawBatteryLeft(renderer, Rect{x, contentY, metrics.batteryWidth, metrics.batteryHeight},
+                            showBatteryPercentage);
+      } else {
+        // Larger sizes: the theme draws the icon alone and the percentage is
+        // set here in the bar's font.
+        GUI.drawBatteryLeft(renderer, Rect{x, contentY + iconDrop, metrics.batteryWidth, metrics.batteryHeight},
+                            /*showPercentage=*/false);
+        if (showBatteryPercentage) {
+          char pctBuf[8];
+          snprintf(pctBuf, sizeof(pctBuf), "%u%%", powerManager.getBatteryPercentage());
+          renderer.drawText(fontId, x + metrics.batteryWidth + batteryPercentSpacing, contentY, pctBuf);
+        }
+      }
+    } else if (it.kind == 2) {
+      drawBookmarkStatusIcon(renderer, x, contentY + 5 + iconDrop);
+    } else if (it.kind == 3) {
+      renderer.drawIcon(it.icon, x, contentY + 4 + iconDrop, btStatusIconSize, btStatusIconSize);
+    } else {
+      renderer.drawText(fontId, x, contentY, it.text.c_str());
+    }
+  };
+
+  const int leftEdge = metrics.statusBarHorizontalMargin + orientedMarginLeft + 1;
+  const int rightEdge = screenWidth - metrics.statusBarHorizontalMargin - orientedMarginRight;
+  const int innerWidth = rightEdge - leftEdge;
+
+  // --- Center Status Bar: every placed element in one centred row ---
+  // Order is the user's placement read left to right (the Left cluster, then
+  // Center, then Right, each in its usual order), joined by the separator.
+  if (const uint8_t layout = SETTINGS.statusBarLayoutOf(configTop); layout != CPS::SB_LAYOUT_CLUSTERS) {
+    static constexpr const char* SEPARATORS[CPS::STATUS_BAR_LAYOUT_COUNT] = {"", "\xE2\x80\xA2", "\xC2\xB7",
+                                                                             "\xE2\x80\x93", "|"};
+    const char* glyph = SEPARATORS[layout];
+    constexpr int separatorGap = 6;
+    // The glyph's advance, not its ink width: getTextWidth() counts the left
+    // side bearing but not the right one, which pushes a narrow "|" visibly
+    // off-centre between its neighbours.
+    const int joinCost = renderer.getTextAdvanceX(fontId, glyph, EpdFontFamily::REGULAR) + 2 * separatorGap;
+    auto rowWidth = [&items, joinCost]() {
+      int total = 0;
+      int count = 0;
+      for (const auto& it : items) {
+        if (it.pos == CPS::SB_POS_HIDE || it.pos > CPS::SB_POS_RIGHT) continue;
+        total += it.width;
+        count++;
+      }
+      return count > 1 ? total + joinCost * (count - 1) : total;
+    };
+    // Too wide (long titles): shorten the widest text, as the clusters do.
+    for (int guard = 0; guard < 6 && rowWidth() > innerWidth; guard++) {
+      const int over = rowWidth() - innerWidth;
+      SbItem* widest = nullptr;
+      for (auto& it : items)
+        if (it.kind == 0 && it.pos != CPS::SB_POS_HIDE && (!widest || it.width > widest->width)) widest = &it;
+      if (!widest || widest->width <= 8) break;
+      const int newW = std::max(8, widest->width - over);
+      widest->text = renderer.truncatedText(fontId, widest->text.c_str(), newW);
+      widest->width = renderer.getTextWidth(fontId, widest->text.c_str());
+    }
+    const int total = rowWidth();
+    int x = std::max(leftEdge, std::min((screenWidth - total) / 2, rightEdge - total));
+    bool first = true;
+    for (uint8_t zone = CPS::SB_POS_LEFT; zone <= CPS::SB_POS_RIGHT; zone++) {
+      for (const auto& it : items) {
+        if (it.pos != zone) continue;
+        if (!first) {
+          renderer.drawText(fontId, x + separatorGap, contentY, glyph);
+          x += joinCost;
+        }
+        drawItem(it, x);
+        x += it.width;
+        first = false;
+      }
+    }
+    return;
+  }
+
   // --- Cluster layout: left grows rightward, right grows leftward, middle centres ---
   auto zoneWidth = [&items](const uint8_t zone) {
     int total = 0;
@@ -1393,10 +1475,6 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     if (count > 1) total += elementGap * (count - 1);
     return total;
   };
-
-  const int leftEdge = metrics.statusBarHorizontalMargin + orientedMarginLeft + 1;
-  const int rightEdge = screenWidth - metrics.statusBarHorizontalMargin - orientedMarginRight;
-  const int innerWidth = rightEdge - leftEdge;
 
   // Over-wide clusters (long titles) get their widest text element truncated to fit.
   auto fitZone = [&](const uint8_t zone, const int available) {
@@ -1436,29 +1514,7 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
     if (it.pos == CPS::SB_POS_HIDE || it.pos > CPS::SB_POS_RIGHT) continue;
     const int x = cursor[it.pos];
     cursor[it.pos] += it.width + elementGap;
-    if (it.kind == 1) {
-      if (fontId == SMALL_FONT_ID) {
-        // The theme draws icon and percentage together in the Small font.
-        GUI.drawBatteryLeft(renderer, Rect{x, contentY, metrics.batteryWidth, metrics.batteryHeight},
-                            showBatteryPercentage);
-      } else {
-        // Larger sizes: the theme draws the icon alone and the percentage is
-        // set here in the bar's font.
-        GUI.drawBatteryLeft(renderer, Rect{x, contentY + iconDrop, metrics.batteryWidth, metrics.batteryHeight},
-                            /*showPercentage=*/false);
-        if (showBatteryPercentage) {
-          char pctBuf[8];
-          snprintf(pctBuf, sizeof(pctBuf), "%u%%", powerManager.getBatteryPercentage());
-          renderer.drawText(fontId, x + metrics.batteryWidth + batteryPercentSpacing, contentY, pctBuf);
-        }
-      }
-    } else if (it.kind == 2) {
-      drawBookmarkStatusIcon(renderer, x, contentY + 5 + iconDrop);
-    } else if (it.kind == 3) {
-      renderer.drawIcon(it.icon, x, contentY + 4 + iconDrop, btStatusIconSize, btStatusIconSize);
-    } else {
-      renderer.drawText(fontId, x, contentY, it.text.c_str());
-    }
+    drawItem(it, x);
   }
 }
 

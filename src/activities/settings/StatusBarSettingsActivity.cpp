@@ -54,7 +54,8 @@ constexpr int BAR_ELEMENT_ROWS = sizeof(barElements) / sizeof(barElements[0]);
 constexpr int BAR_PROGRESS_BAR = BAR_ELEMENT_ROWS;
 constexpr int BAR_PROGRESS_BAR_THICKNESS = BAR_ELEMENT_ROWS + 1;
 constexpr int BAR_BATTERY_STYLE = BAR_ELEMENT_ROWS + 2;  // How this bar's Battery element renders
-constexpr int BAR_CLOCK = BAR_ELEMENT_ROWS + 3;          // X3 only
+constexpr int BAR_LAYOUT = BAR_ELEMENT_ROWS + 3;         // Center Status Bar + separator
+constexpr int BAR_CLOCK = BAR_ELEMENT_ROWS + 4;          // X3 only
 constexpr int BAR_BASE_ITEMS = BAR_CLOCK;
 constexpr int BAR_FULL_ITEMS = BAR_CLOCK + 1;
 const StrId barNames[BAR_FULL_ITEMS] = {
@@ -70,6 +71,7 @@ const StrId barNames[BAR_FULL_ITEMS] = {
     StrId::STR_PROGRESS_BAR,
     StrId::STR_PROGRESS_BAR_THICKNESS,
     StrId::STR_BATTERY_STYLE,
+    StrId::STR_SB_CENTERED,
     StrId::STR_CLOCK,
 };
 
@@ -102,6 +104,8 @@ uint8_t& progressBarThicknessField(const bool topBar) {
   return topBar ? SETTINGS.statusBarTopProgressBarThickness : SETTINGS.statusBarProgressBarThickness;
 }
 
+uint8_t& layoutField(const bool topBar) { return topBar ? SETTINGS.statusBarTopLayout : SETTINGS.statusBarLayout; }
+
 uint8_t& batteryStyleField(const bool topBar) {
   return SETTINGS.statusBarBatteryStyleRef(topBar ? CPS::SB_BAR_TOP : CPS::SB_BAR_BOTTOM);
 }
@@ -109,6 +113,10 @@ uint8_t& batteryStyleField(const bool topBar) {
 constexpr int BATTERY_STYLE_ITEMS = CPS::STATUS_BAR_BATTERY_STYLE_COUNT;
 const StrId batteryStyleNames[BATTERY_STYLE_ITEMS] = {StrId::STR_BATTERY_ICON_AND_PERCENT, StrId::STR_BATTERY_ICON_ONLY,
                                                       StrId::STR_BATTERY_PERCENT_ONLY};
+
+constexpr int LAYOUT_ITEMS = CPS::STATUS_BAR_LAYOUT_COUNT;
+const StrId layoutNames[LAYOUT_ITEMS] = {StrId::STR_STATE_OFF, StrId::STR_SB_CENTER_BULLET, StrId::STR_SB_CENTER_DOT,
+                                         StrId::STR_SB_CENTER_DASH, StrId::STR_SB_CENTER_PIPE};
 
 constexpr int CLOCK_FORMAT_ITEMS = 2;
 const StrId clockFormatNames[CLOCK_FORMAT_ITEMS] = {StrId::STR_CLOCK_FORMAT_24H, StrId::STR_CLOCK_FORMAT_12H};
@@ -185,6 +193,7 @@ void StatusBarSettingsActivity::onEnter() {
     if (batteryStyleField(top) >= BATTERY_STYLE_ITEMS) {
       batteryStyleField(top) = CPS::SB_BATTERY_ICON_AND_PERCENT;
     }
+    if (layoutField(top) >= LAYOUT_ITEMS) layoutField(top) = CPS::SB_LAYOUT_CLUSTERS;
   }
   if (SETTINGS.statusBarPercentageFormat >= PERCENTAGE_FORMAT_ITEMS) {
     SETTINGS.statusBarPercentageFormat = CPS::PERCENTAGE_WHOLE;
@@ -351,6 +360,9 @@ void StatusBarSettingsActivity::handleSelection() {
   } else if (selectedIndex == BAR_BATTERY_STYLE) {
     uint8_t& style = batteryStyleField(top);
     style = (style + 1) % BATTERY_STYLE_ITEMS;
+  } else if (selectedIndex == BAR_LAYOUT) {
+    uint8_t& layout = layoutField(top);
+    layout = (layout + 1) % LAYOUT_ITEMS;
   } else {
     return;
   }
@@ -413,6 +425,7 @@ std::string StatusBarSettingsActivity::valueText(const int index) const {
   if (index == BAR_PROGRESS_BAR) return I18N.get(progressBarNames[progressBarField(top)]);
   if (index == BAR_PROGRESS_BAR_THICKNESS) return I18N.get(progressBarThicknessNames[progressBarThicknessField(top)]);
   if (index == BAR_BATTERY_STYLE) return I18N.get(batteryStyleNames[batteryStyleField(top)]);
+  if (index == BAR_LAYOUT) return I18N.get(layoutNames[SETTINGS.statusBarLayoutOf(top)]);
   return tr(STR_HIDE);
 }
 

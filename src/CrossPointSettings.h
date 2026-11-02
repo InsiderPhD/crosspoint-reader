@@ -118,6 +118,18 @@ class CrossPointSettings {
     SB_BATTERY_PERCENT_ONLY = 2,
     STATUS_BAR_BATTERY_STYLE_COUNT
   };
+  // How a reader bar lays its elements out. CLUSTERS is the classic Left /
+  // Center / Right placement; the CENTER_* values draw every placed element as
+  // one centred row (Left elements first, then Center, then Right) joined by
+  // the named separator. One choice per bar. Persisted: append only.
+  enum STATUS_BAR_LAYOUT : uint8_t {
+    SB_LAYOUT_CLUSTERS = 0,
+    SB_LAYOUT_CENTER_BULLET = 1,  // U+2022
+    SB_LAYOUT_CENTER_DOT = 2,     // U+00B7
+    SB_LAYOUT_CENTER_DASH = 3,    // U+2013
+    SB_LAYOUT_CENTER_PIPE = 4,    // |
+    STATUS_BAR_LAYOUT_COUNT
+  };
   // Font of both reader status bars: Noto Sans 8 / Ubuntu 10 / Ubuntu 12, the
   // three UI fonts that are always resident. Persisted: append only.
   enum STATUS_BAR_TEXT_SIZE : uint8_t {
@@ -509,6 +521,9 @@ class CrossPointSettings {
   // load (migrateStatusBarBatteryStyles), so existing screens do not change.
   uint8_t statusBarBatteryStyle = SB_BATTERY_ICON_AND_PERCENT;
   uint8_t statusBarTopBatteryStyle = SB_BATTERY_ICON_AND_PERCENT;
+  // Per-bar STATUS_BAR_LAYOUT (Center Status Bar + its separator).
+  uint8_t statusBarLayout = SB_LAYOUT_CLUSTERS;
+  uint8_t statusBarTopLayout = SB_LAYOUT_CLUSTERS;
   // Outside Reader bar: the strip the themes draw along the top of every
   // non-reader screen. Its own position set, parallel to the two reader bars,
   // for the elements that make sense without a book (no Bluetooth: the remote
@@ -936,6 +951,11 @@ class CrossPointSettings {
   // reader bar) reads as SB_POS_HIDE.
   uint8_t statusBarPos(uint8_t element, STATUS_BAR_ID bar) const;
   uint8_t& statusBarPosRef(uint8_t element, STATUS_BAR_ID bar);
+  // A reader bar's STATUS_BAR_LAYOUT; the read is clamped.
+  uint8_t statusBarLayoutOf(const bool topBar) const {
+    const uint8_t layout = topBar ? statusBarTopLayout : statusBarLayout;
+    return layout < STATUS_BAR_LAYOUT_COUNT ? layout : static_cast<uint8_t>(SB_LAYOUT_CLUSTERS);
+  }
   // A bar's battery style (STATUS_BAR_BATTERY_STYLE); the read is clamped.
   uint8_t statusBarBatteryStyleOf(STATUS_BAR_ID bar) const;
   uint8_t& statusBarBatteryStyleRef(STATUS_BAR_ID bar);

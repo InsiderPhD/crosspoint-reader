@@ -708,6 +708,7 @@ The **Outside Reader** page places **Date**, **Clock** and **Battery** (default:
 
 The **Customise Status Bar** screen itself holds the settings both bars share:
 
+- **Center Status Bar** *(on each reader bar's page)* — **Off** keeps the Left / Center / Right placement; **On •**, **On ·**, **On –** or **On |** draws every placed element as one centred row (Left elements first, then Center, then Right) joined by that separator.
 - **Hide status bar** — master toggle for both bars. The layout still reserves their strips so your cached pages stay valid; the reader just skips drawing them and re-centres the page in the freed space. Also available as a bindable **Hide Status Bar** reader action.
 - **Percentage Format** — show book progress as `10%`, `10.1%` or `10.12%`.
 - **Text Size** — Small / Medium / Large text for both bars. A larger size reserves a slightly taller bar, so the book re-paginates the next time a chapter is opened.
