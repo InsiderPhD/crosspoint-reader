@@ -5017,6 +5017,17 @@ function uploadFile() {
 
     let file = files[currentIndex];
     const originalFile = file;
+    // macOS hands the uploader NFD (decomposed) names; a Mac copying straight
+    // to the card writes NFC. NFD names written here are invisible in Finder
+    // and miss the device's same-name overwrite check against an NFC file, so
+    // upload under the NFC form (upstream #3961).
+    if (typeof file.name.normalize === 'function') {
+      const nfcName = file.name.normalize('NFC');
+      if (nfcName !== file.name) {
+        console.log(`[Upload] Normalized filename to NFC: ${file.name} -> ${nfcName}`);
+        file = new File([file], nfcName, { type: file.type, lastModified: file.lastModified });
+      }
+    }
     // Reset progress bar instantly without transition when starting a new file
     progressFill.classList.add('no-transition');
     progressFill.style.width = '0%';
