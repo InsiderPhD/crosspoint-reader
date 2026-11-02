@@ -265,6 +265,8 @@ If you run an OPDS catalogue (e.g. Calibre Content Server), add it in **Settings
 
 The catalogues are kept in `/.crosspoint/opds.json` (passwords obfuscated with the device key), the same file upstream CrossPoint and CrossInk use, so they carry over when you swap firmware on the same device. A server set up on an older KatiePoint version moves there automatically.
 
+A catalogue's login and headers are only sent to that catalogue's own site: if it redirects elsewhere (another host, or from `http://` to `https://`), the credentials stay behind. When a catalogue fails to load, the screen says why: *Check username and password*, *Server redirected. Try its https:// URL* (the redirect target asked for a login it was not given), *Server error, try again later*, or *Can't reach server*.
+
 ### Download from URL
 
 **Settings → Developer → Download from URL** (Developer Mode) fetches a file (e.g. a `firmware.bin` or an EPUB) directly to the SD card by URL.

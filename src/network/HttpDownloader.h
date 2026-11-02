@@ -31,6 +31,23 @@ class HttpDownloader {
     TRUNCATED_ERROR,    // Body stopped short of its framing or the expected size
   };
 
+  // Credentials that belong to one site (an OPDS catalog's). They are sent only
+  // to requests whose UrlUtils::origin() equals `origin`, and redirects are
+  // followed hop by hop here (not inside the transport) so a hop to another
+  // site, or from https to http on the same host, never receives them.
+  struct ScopedAuth {
+    std::string origin;
+    std::string username;  // HTTP Basic, sent when non-empty
+    std::string password;
+    std::vector<Header> headers;
+  };
+
+  // How a scoped fetch ended, for telling the user why it failed.
+  struct FetchResult {
+    int status = 0;          // HTTP status of the final answer; 0 when none arrived
+    bool offOrigin = false;  // the final answer came from outside ScopedAuth::origin
+  };
+
   // HTTP status of the most recent downloadToFile() call (0 if none arrived).
   // Single-task use only: downloads never overlap on this firmware.
   static int lastHttpStatus();
@@ -45,10 +62,9 @@ class HttpDownloader {
 
   static bool fetchUrl(const std::string& url, Stream& stream);
 
-  // Same, with this request's own HTTP Basic credentials (sent when username is
-  // non-empty) and extra headers — an OPDS catalog's.
-  static bool fetchUrl(const std::string& url, Stream& stream, const std::string& username, const std::string& password,
-                       const std::vector<Header>& headers);
+  // Same, with credentials scoped to their own site (see ScopedAuth). `result`
+  // (optional) says how the request ended, success or not.
+  static bool fetchUrl(const std::string& url, Stream& stream, const ScopedAuth& auth, FetchResult* result);
 
   /**
    * Download a file to the SD card.
@@ -81,6 +97,8 @@ class HttpDownloader {
    * @param outContentDisposition When non-null, receives the response's raw
    *        Content-Disposition header value (empty if absent or over 1KB). Opt-in
    *        so no other download pays for the copy; the caller parses it.
+   * @param scopedAuth Credentials scoped to one site (OPDS); see ScopedAuth. Use
+   *        instead of `username`/`password`/`headers`, which follow every redirect.
    * @return DownloadError indicating success or failure type
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
@@ -88,5 +106,6 @@ class HttpDownloader {
                                       size_t expectedSize = 0, const volatile bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "",
                                       const std::vector<Header>& headers = {}, bool resumePartial = false,
-                                      std::string* outContentDisposition = nullptr);
+                                      std::string* outContentDisposition = nullptr,
+                                      const ScopedAuth* scopedAuth = nullptr);
 };

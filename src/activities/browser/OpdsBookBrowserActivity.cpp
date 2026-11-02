@@ -22,13 +22,32 @@
 #include "fontIds.h"
 #include "network/HttpDownloadFilename.h"
 #include "network/HttpDownloader.h"
+#include "util/OpdsFeedError.h"
 #include "util/StringUtils.h"
 #include "util/TouchListNav.h"
 #include "util/UrlUtils.h"
 
 namespace {
 constexpr int PAGE_ITEMS = 23;
+
+// Tells a dead server from a catalog that wants a password; both are a bare
+// "failed" to the fetch itself.
+StrId feedFailureMessage(const HttpDownloader::FetchResult& fetch) {
+  switch (classifyFeedFailure(fetch.status, fetch.offOrigin)) {
+    case OpdsFeedError::Unreachable:
+      return StrId::STR_FEED_UNREACHABLE;
+    case OpdsFeedError::Unauthorized:
+      return StrId::STR_FEED_UNAUTHORIZED;
+    case OpdsFeedError::Redirected:
+      return StrId::STR_FEED_REDIRECTED;
+    case OpdsFeedError::ServerError:
+      return StrId::STR_FEED_SERVER_ERROR;
+    case OpdsFeedError::Other:
+      break;
+  }
+  return StrId::STR_FETCH_FEED_FAILED;
 }
+}  // namespace
 
 void OpdsBookBrowserActivity::onEnter() {
   Activity::onEnter();
@@ -69,6 +88,8 @@ void OpdsBookBrowserActivity::openServer(const size_t index) {
   const OpdsServer* picked = OPDS_STORE.getServer(index);
   if (!picked) return;
   server = *picked;
+  auth = HttpDownloader::ScopedAuth{UrlUtils::origin(UrlUtils::ensureProtocol(server.url)), server.username,
+                                    server.password, server.activeCustomHeaders()};
   state = BrowserState::CHECK_WIFI;
   statusMessage = tr(STR_CHECKING_WIFI);
   requestUpdate();
@@ -378,11 +399,12 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
     // already queued/painted; nothing renders during the call).
     TlsFramebufferBorrow borrow(renderer);
     OpdsParserStream stream{parser};
-    if (!HttpDownloader::fetchUrl(url, stream, server.username, server.password, server.activeCustomHeaders())) {
+    HttpDownloader::FetchResult fetch;
+    if (!HttpDownloader::fetchUrl(url, stream, auth, &fetch)) {
       state = BrowserState::ERROR;
       // A parser failure rejects the write and aborts the download; report it as a parse
       // error rather than hiding it behind a generic fetch failure.
-      errorMessage = parser.error() ? tr(STR_PARSE_FEED_FAILED) : tr(STR_FETCH_FEED_FAILED);
+      errorMessage = parser.error() ? tr(STR_PARSE_FEED_FAILED) : I18N.get(feedFailureMessage(fetch));
       requestUpdate();
       return;
     }
@@ -516,9 +538,9 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
             }
           }
         },
-        /*legacyConfiguredAuth=*/false, /*expectedSize=*/0, /*cancelFlag=*/nullptr, server.username, server.password,
-        server.activeCustomHeaders(), /*resumePartial=*/false,
-        SETTINGS.opdsUseServerFilename ? &contentDisposition : nullptr);
+        /*legacyConfiguredAuth=*/false, /*expectedSize=*/0, /*cancelFlag=*/nullptr, /*username=*/"",
+        /*password=*/"", /*headers=*/{}, /*resumePartial=*/false,
+        SETTINGS.opdsUseServerFilename ? &contentDisposition : nullptr, &auth);
   }
 
   if (result == HttpDownloader::OK && !contentDisposition.empty()) {

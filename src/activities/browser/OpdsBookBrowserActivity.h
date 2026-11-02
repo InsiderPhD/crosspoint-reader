@@ -7,6 +7,7 @@
 
 #include "../Activity.h"
 #include "OpdsServerStore.h"
+#include "network/HttpDownloader.h"
 #include "util/ButtonNavigator.h"
 
 struct Rect;
@@ -56,6 +57,9 @@ class OpdsBookBrowserActivity final : public Activity {
   // The catalog being browsed, copied when it is picked so an edit made from
   // the web UI meanwhile cannot change it under an open feed.
   OpdsServer server;
+  // That catalog's login and headers, sent only to its own origin (a redirect
+  // to a CDN or another host does not receive them).
+  HttpDownloader::ScopedAuth auth;
   // Cursor on the catalog picker (shown only when more than one is saved).
   int serverIndex = 0;
 

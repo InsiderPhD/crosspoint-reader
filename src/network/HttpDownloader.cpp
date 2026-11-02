@@ -13,6 +13,7 @@
 
 #include "DownloadFailureLog.h"
 #include "WifiPowerSaveGuard.h"
+#include "util/UrlUtils.h"
 
 // wolfSSL's Arduino port leaves its logging hook to the application
 // (wolfcrypt/src/logging.c calls it whenever logging is enabled; the reference
@@ -48,34 +49,61 @@ void configureRequest(freeink::SecureHttpClient& http, const std::string& url) {
   }
 }
 
+constexpr int MAX_REDIRECT_HOPS = 5;
+
+bool isRedirectStatus(const int status) {
+  return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
+}
+
+// Attaches `auth` when `url` is on its site. Returns whether it did. `attached`
+// is what the previous hop left on the client: SecureHttpClient keeps Basic
+// auth across begin(), so a hop off the site has to clear it explicitly.
+bool applyScopedAuth(freeink::SecureHttpClient& http, const std::string& url, const HttpDownloader::ScopedAuth& auth,
+                     const bool attached) {
+  const bool onSite = !auth.origin.empty() && UrlUtils::origin(url) == auth.origin;
+  if (!onSite) {
+    if (attached) http.setBasicAuth("", "");
+    return false;
+  }
+  if (!auth.username.empty()) http.setBasicAuth(auth.username, auth.password);
+  for (const auto& header : auth.headers) http.addHeader(header.first, header.second);
+  return true;
+}
+
+// The next hop of a redirect answer, resolved against the current URL. False
+// when there is none to follow: not a redirect, out of hops, no Location, or
+// a step down from https to http (refused, as the transport does).
+bool nextRedirectHop(const freeink::SecureHttpClient& http, const int status, const int hop, std::string& url) {
+  if (!isRedirectStatus(status) || hop >= MAX_REDIRECT_HOPS) return false;
+  const std::string location = http.getHeader("location");
+  if (location.empty()) return false;
+  std::string next = UrlUtils::resolveReference(url, location);
+  if (UrlUtils::isHttpsUrl(url) && !UrlUtils::isHttpsUrl(next)) {
+    LOG_ERR("HTTP", "Refusing redirect from https to http");
+    return false;
+  }
+  url = std::move(next);
+  return true;
+}
+
 }  // namespace
 
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent) {
-  return fetchUrl(url, outContent, "", "", {});
+  return fetchUrl(url, outContent, ScopedAuth{}, nullptr);
 }
 
-bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
-                              const std::string& password, const std::vector<Header>& headers) {
+bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const ScopedAuth& auth, FetchResult* result) {
   // Modem sleep off for the request; declared first so it outlives `http`.
   WifiPowerSaveGuard wifiPowerSaveGuard;
   freeink::SecureHttpClient http;
+  if (result) *result = FetchResult{};
 
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
 
-  // begin() resets the per-request header list, so it must run BEFORE
-  // configureRequest adds the BookFusion Accept/Referer headers.
-  if (!http.begin(url)) {
-    LOG_ERR("HTTP", "Fetch failed: bad URL");
-    return false;
-  }
-  configureRequest(http, url);
-  if (!username.empty()) http.setBasicAuth(username, password);
-  for (const auto& header : headers) http.addHeader(header.first, header.second);
-
   // getStatus() is valid inside the sink (headers parse before the body);
-  // error bodies are drained without reaching the caller's stream.
+  // error and redirect bodies are drained without reaching the caller's stream.
   bool sinkError = false;
-  const int httpCode = http.GET([&](const uint8_t* data, size_t len) {
+  const auto sink = [&](const uint8_t* data, size_t len) {
     esp_task_wdt_reset();  // download length is network-bound; feed the loop WDT per chunk
     if (http.getStatus() != 200) return true;
     if (outContent.write(data, len) != len) {
@@ -83,7 +111,35 @@ bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const 
       return false;
     }
     return true;
-  });
+  };
+
+  // Without scoped credentials the transport follows redirects itself, as
+  // before. With them, each hop is a fresh request here so the credentials
+  // can be dropped when a hop leaves their site.
+  const bool scoped = !auth.origin.empty();
+  std::string currentUrl = url;
+  bool authAttached = false;
+  int httpCode = -1;
+  for (int hop = 0;; ++hop) {
+    // begin() resets the per-request header list, so it must run BEFORE
+    // configureRequest adds the BookFusion Accept/Referer headers.
+    if (!http.begin(currentUrl)) {
+      LOG_ERR("HTTP", "Fetch failed: bad URL");
+      return false;
+    }
+    configureRequest(http, currentUrl);
+    if (scoped) {
+      http.setFollowRedirects(0);
+      authAttached = applyScopedAuth(http, currentUrl, auth, authAttached);
+    }
+    httpCode = http.GET(sink);
+    if (!scoped || sinkError || !nextRedirectHop(http, httpCode, hop, currentUrl)) break;
+    LOG_DBG("HTTP", "Redirected to %s", currentUrl.c_str());
+  }
+  if (result) {
+    result->status = httpCode > 0 ? httpCode : 0;
+    result->offOrigin = scoped && !authAttached;
+  }
 
   if (httpCode != 200 || sinkError) {
     // -1 = transport (TCP connect / write / status line). Log where THIS
@@ -120,7 +176,8 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
                                                              size_t expectedSize, const volatile bool* cancelFlag,
                                                              const std::string& username, const std::string& password,
                                                              const std::vector<Header>& headers, bool resumePartial,
-                                                             std::string* outContentDisposition) {
+                                                             std::string* outContentDisposition,
+                                                             const ScopedAuth* scopedAuth) {
   gLastHttpStatus = 0;
   if (outContentDisposition) outContentDisposition->clear();
   // Modem sleep off for the whole transfer (BookFusion, OPDS, plugins, fonts,
@@ -147,6 +204,13 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   }
   for (const auto& header : headers) {
     http.addHeader(header.first, header.second);
+  }
+  // Site-scoped credentials (OPDS): redirects are then followed below, hop by
+  // hop, so they never reach another host (a CDN the catalog redirects to).
+  bool scopedAuthAttached = false;
+  if (scopedAuth) {
+    http.setFollowRedirects(0);
+    scopedAuthAttached = applyScopedAuth(http, url, *scopedAuth, false);
   }
 
   // Resume: bytes already on disk from an earlier interrupted transfer. A
@@ -244,7 +308,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   const unsigned long startMs = millis();
 #endif
 
-  const int httpCode = http.GET([&](const uint8_t* data, size_t len) {
+  const auto sink = [&](const uint8_t* data, size_t len) {
     esp_task_wdt_reset();  // download length is network-bound; feed the loop WDT per chunk
     const int status = http.getStatus();
     if (status != 200 && status != 206) return true;  // drain error body
@@ -320,7 +384,27 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     }
     delay(0);  // yield to other tasks / feed the watchdog
     return true;
-  });
+  };
+
+  int httpCode = http.GET(sink);
+  if (scopedAuth) {
+    // Redirect bodies were drained by the sink (status not 200/206), so no
+    // file exists yet; each hop repeats the request setup on the new URL.
+    std::string currentUrl = url;
+    for (int hop = 0; !fileOpen && !cancelled && nextRedirectHop(http, httpCode, hop, currentUrl); ++hop) {
+      LOG_DBG("HTTP", "Redirected to %s", currentUrl.c_str());
+      if (!http.begin(currentUrl)) break;
+      configureRequest(http, currentUrl);
+      http.setFollowRedirects(0);
+      scopedAuthAttached = applyScopedAuth(http, currentUrl, *scopedAuth, scopedAuthAttached);
+      if (resumeBase > 0) {
+        char range[40];
+        snprintf(range, sizeof(range), "bytes=%u-", (unsigned)resumeBase);
+        http.addHeader("Range", range);
+      }
+      httpCode = http.GET(sink);
+    }
+  }
 
 #if CROSSPOINT_DOWNLOAD_WRITE_BUFFER > 0
   // Tail flush before the file closes and before any of the size checks below,
