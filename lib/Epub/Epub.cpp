@@ -361,6 +361,7 @@ void Epub::parseCssFiles() const {
   }
 
   // No cache yet - parse CSS files
+  const unsigned long parseStartMs = millis();
   for (const auto& cssPath : cssFiles) {
     LOG_DBG("EBP", "Parsing CSS file: %s", cssPath.c_str());
 
@@ -412,12 +413,12 @@ void Epub::parseCssFiles() const {
   }
 
   // Save to cache for next time
+  LOG_DBG("EBP", "Parsed %zu CSS rules (%zu descendant/child) from %zu files in %lu ms", cssParser->ruleCount(),
+          cssParser->contextualRuleCount(), cssFiles.size(), millis() - parseStartMs);
   if (!cssParser->saveToCache()) {
     LOG_ERR("EBP", "Failed to save CSS rules to cache");
   }
   cssParser->clear();
-
-  LOG_DBG("EBP", "Loaded %zu CSS style rules from %zu files", cssParser->ruleCount(), cssFiles.size());
 }
 
 std::string Epub::resolveCachePath(const std::string& filepath, const std::string& cacheDir) {

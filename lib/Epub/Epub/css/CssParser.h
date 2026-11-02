@@ -2,6 +2,7 @@
 
 #include <HalStorage.h>
 
+#include <cstdint>
 #include <initializer_list>
 #include <string>
 #include <string_view>
@@ -22,14 +23,83 @@
  *   - Element selectors: p, div, h1, etc.
  *   - Class selectors: .classname
  *   - Combined: element.classname
+ *   - ID selectors: #id, element#id
+ *   - Descendant / child chains of those (div.note p, section > p.first), up to
+ *     MAX_CONTEXT_COMPOUNDS parts, held in a small bounded list (see contextRules_)
  *   - Grouped: selector1, selector2 { }
+ * Rules apply in specificity order (ids, classes, elements); equal specificity
+ * puts a descendant/child rule after a simple one.
  *
  * Not supported (silently ignored):
- *   - Descendant/child selectors
+ *   - Sibling combinators (+, ~), attribute selectors, *
  *   - Pseudo-classes and pseudo-elements
  *   - Media queries (content is skipped)
  *   - @import, @font-face, etc.
  */
+
+// One element as selector matching sees it. Views into storage owned elsewhere.
+struct CssElementView {
+  std::string_view tag;
+  std::string_view classes;  // the raw class attribute, whitespace separated
+  std::string_view id;
+};
+
+// The open ancestors of the element being styled, outermost first, for descendant / child
+// selectors. ChapterHtmlSlimParser keeps one only while the book has such rules. All the
+// strings live in one buffer, so an open element costs an Entry (12 bytes) and its names,
+// with no per-element allocation; both are freed with the parser at the end of a section.
+class CssAncestorStack {
+ public:
+  // Names past MAX_CHARS are dropped (the element still counts for depth bookkeeping).
+  static constexpr size_t MAX_CHARS = 4096;
+
+  void push(const int depth, const std::string_view tag, const std::string_view classes, const std::string_view id) {
+    if (entries_.empty()) {
+      entries_.reserve(16);
+      chars_.reserve(256);
+    }
+    Entry e{};
+    e.depth = static_cast<int16_t>(depth);
+    if (chars_.size() + tag.size() + classes.size() + id.size() <= MAX_CHARS) {
+      e.tagOff = static_cast<uint16_t>(chars_.size());
+      e.tagLen = static_cast<uint16_t>(tag.size());
+      chars_.append(tag);
+      e.classOff = static_cast<uint16_t>(chars_.size());
+      e.classLen = static_cast<uint16_t>(classes.size());
+      chars_.append(classes);
+      e.idOff = static_cast<uint16_t>(chars_.size());
+      e.idLen = static_cast<uint16_t>(id.size());
+      chars_.append(id);
+    } else {
+      e.tagOff = e.classOff = e.idOff = static_cast<uint16_t>(chars_.size());
+    }
+    entries_.push_back(e);
+  }
+  // Pops every element opened at `depth` or deeper.
+  void popTo(const int depth) {
+    while (!entries_.empty() && entries_.back().depth >= depth) {
+      chars_.resize(entries_.back().tagOff);
+      entries_.pop_back();
+    }
+  }
+  [[nodiscard]] size_t size() const { return entries_.size(); }
+  [[nodiscard]] CssElementView at(const size_t i) const {
+    const Entry& e = entries_[i];
+    const std::string_view all(chars_);
+    return {all.substr(e.tagOff, e.tagLen), all.substr(e.classOff, e.classLen), all.substr(e.idOff, e.idLen)};
+  }
+
+ private:
+  struct Entry {
+    int16_t depth;
+    uint16_t tagOff, tagLen;
+    uint16_t classOff, classLen;
+    uint16_t idOff, idLen;
+  };
+  std::vector<Entry> entries_;
+  std::string chars_;
+};
+
 class CssParser {
  public:
   // Bump when CSS cache format or rules change; section caches are invalidated when this changes
@@ -65,7 +135,22 @@ class CssParser {
    * @param classAttr The class attribute value (may contain multiple space-separated classes)
    * @return Combined style with all applicable rules merged
    */
-  [[nodiscard]] CssStyle resolveStyle(std::string_view tagName, std::string_view classAttr) const;
+  [[nodiscard]] CssStyle resolveStyle(std::string_view tagName, std::string_view classAttr) const {
+    return resolveStyle(tagName, classAttr, {}, nullptr);
+  }
+
+  /**
+   * Full cascade: also #id rules and descendant / child rules matched against `ancestors`
+   * (may be null when the book has no such rules or the caller does not track them).
+   */
+  [[nodiscard]] CssStyle resolveStyle(std::string_view tagName, std::string_view classAttr, std::string_view idAttr,
+                                      const CssAncestorStack* ancestors) const;
+
+  /** True when descendant / child rules exist, i.e. callers should keep a CssAncestorStack. */
+  [[nodiscard]] bool hasContextualRules() const { return !contextRules_.empty(); }
+
+  /** Descendant / child rules held (also counted in ruleCount()). */
+  [[nodiscard]] size_t contextualRuleCount() const { return contextRules_.size(); }
 
   /**
    * Parse an inline style attribute string.
@@ -77,17 +162,20 @@ class CssParser {
   /**
    * Check if any rules have been loaded
    */
-  [[nodiscard]] bool empty() const { return rulesBySelector_.empty(); }
+  [[nodiscard]] bool empty() const { return rulesBySelector_.empty() && contextRules_.empty(); }
 
   /**
    * Get count of loaded rule sets
    */
-  [[nodiscard]] size_t ruleCount() const { return rulesBySelector_.size(); }
+  [[nodiscard]] size_t ruleCount() const { return rulesBySelector_.size() + contextRules_.size(); }
 
   /**
    * Clear all loaded rules
    */
-  void clear() { rulesBySelector_.clear(); }
+  void clear() {
+    rulesBySelector_.clear();
+    std::vector<ContextRule>().swap(contextRules_);  // release the capacity, not just the rules
+  }
 
   /**
    * Check if CSS rules cache file exists
@@ -153,6 +241,28 @@ class CssParser {
 
   // Storage: maps selector -> style properties. Hash/equal are case-insensitive.
   std::unordered_map<std::string, CssStyle, SvHash, SvEqual> rulesBySelector_;
+
+  // Descendant / child rules, in source order. The selector is stored normalised: compounds
+  // separated by a single ' ' (descendant) or '>' (child). ~132 bytes each on the C3 (a 24-byte
+  // std::string, longer selectors also own a heap block, + CssStyle + specificity), held for a
+  // section build like the simple rules; capped so a stylesheet built on them cannot take the
+  // heap a build needs. Matching walks each rule right to left, with no allocation.
+ public:
+  static constexpr size_t MAX_CONTEXT_COMPOUNDS = 6;
+#if defined(BOARD_HAS_PSRAM)
+  static constexpr size_t MAX_CONTEXT_RULES = 256;
+#else
+  static constexpr size_t MAX_CONTEXT_RULES = 64;  // <= ~8.5 KB (+ long selector strings)
+#endif
+
+ private:
+  struct ContextRule {
+    std::string selector;
+    CssStyle style;
+    uint32_t specificity;
+  };
+  std::vector<ContextRule> contextRules_;
+  void storeRule(std::string_view selector, const CssStyle& style);
 
   std::string cachePath;
 

@@ -149,6 +149,10 @@ class ChapterHtmlSlimParser {
   // User spacing controls, handed to every ParsedText layout pass (body and table cells).
   TextLayoutOptions textLayout;
   const CssParser* cssParser;
+  // Open elements for descendant / child CSS selectors; filled only when the book's CSS has
+  // such rules (see AncestorScope in the .cpp). Freed with the parser.
+  CssAncestorStack ancestorStack;
+  [[nodiscard]] bool tracksAncestors() const { return cssParser && cssParser->hasContextualRules(); }
   bool embeddedStyle;
   uint8_t imageRendering;
   bool footnoteDisplayOnPage;

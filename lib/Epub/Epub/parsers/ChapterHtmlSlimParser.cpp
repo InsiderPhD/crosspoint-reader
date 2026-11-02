@@ -989,8 +989,41 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
   }
 }
 
+namespace {
+// Keeps ChapterHtmlSlimParser::ancestorStack in step with the element tree without touching
+// startElement's many early returns: on the way out of startElement, an element that opened a
+// depth level is pushed (after its own style was resolved against its ancestors); on the way
+// out of endElement, everything at or below the closed depth is popped.
+struct AncestorPush {
+  CssAncestorStack* stack;
+  const int& depth;
+  const int depthBefore;
+  const XML_Char* name;
+  const XML_Char** atts;
+  ~AncestorPush() {
+    if (!stack || depth <= depthBefore) return;
+    std::string_view classes;
+    std::string_view id;
+    for (int i = 0; atts && atts[i]; i += 2) {
+      if (strcmp(atts[i], "class") == 0) classes = atts[i + 1];
+      if (strcmp(atts[i], "id") == 0) id = atts[i + 1];
+    }
+    stack->push(depthBefore, name, classes, id);
+  }
+};
+struct AncestorPop {
+  CssAncestorStack* stack;
+  const int& depth;
+  ~AncestorPop() {
+    if (stack) stack->popTo(depth);
+  }
+};
+}  // namespace
+
 void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+  const AncestorPush ancestorPush{self->tracksAncestors() ? &self->ancestorStack : nullptr, self->depth, self->depth,
+                                  name, atts};
   // Visible-text bookkeeping runs before every early return, so skipped content (display:none,
   // nested tables, page-break markers) still counts exactly as upstream counts it.
   if (strcasecmp(name, "body") == 0) {
@@ -1040,6 +1073,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   std::string classAttr;
   std::string styleAttr;
   std::string dirAttr;
+  std::string_view idAttr;  // into atts, valid for this call
   if (atts != nullptr) {
     for (int i = 0; atts[i]; i += 2) {
       if (strcmp(atts[i], "class") == 0) {
@@ -1055,6 +1089,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         // of thousands of them per chapter, exhausting the heap. TOC anchors are
         // always recorded regardless of element type, since they drive page breaks.
         const char* idValue = atts[i + 1];
+        idAttr = idValue;
         const bool isTocAnchor =
             std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idValue) != self->tocAnchors.end();
         if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER)) {
@@ -1118,7 +1153,8 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     cssStyle.defined.paddingLeft = cssStyle.defined.paddingRight = 1;
   }
   if (self->cssParser) {
-    cssStyle.applyOver(self->cssParser->resolveStyle(name, classAttr));
+    cssStyle.applyOver(self->cssParser->resolveStyle(name, classAttr, idAttr,
+                                                     self->tracksAncestors() ? &self->ancestorStack : nullptr));
     if (!styleAttr.empty()) {
       CssStyle inlineStyle = CssParser::parseInlineStyle(styleAttr);
       cssStyle.applyOver(inlineStyle);
@@ -2139,6 +2175,7 @@ void XMLCALL ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const X
 
 void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* name) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+  const AncestorPop ancestorPop{self->tracksAncestors() ? &self->ancestorStack : nullptr, self->depth};
   if (self->nonVisibleTextDepth > 0) {
     self->nonVisibleTextDepth--;
   }
