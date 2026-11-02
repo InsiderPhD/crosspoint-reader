@@ -158,8 +158,9 @@ class CrossPointWebServer {
   bool readJsonBody(JsonDocument& out) const;
   // 403 "plugin system disabled" (true) while the Plugins setting is off.
   bool rejectIfPluginsDisabled() const;
-  void handlePluginList() const;  // GET  /api/plugins   -> discovered plugins
-  void handlePluginFile() const;  // GET  /plugin?name&file -> serve SD file
+  void handlePluginHostJs() const;  // GET /plugin-host.js, /js/plugin-host.js -> shared browser host
+  void handlePluginList() const;    // GET  /api/plugins   -> discovered plugins
+  void handlePluginFile() const;    // GET  /plugin?name&file -> serve SD file
   // GET /plugins-run: the headless job runner — every plugin loaded with its
   // UI hidden, so registered actions execute jobs while the page stays open.
   void handlePluginRunnerPage() const;

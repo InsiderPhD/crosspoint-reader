@@ -37,6 +37,9 @@
 #endif
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
+#if CROSSPOINT_SD_PLUGINS
+#include "html/js/plugin_hostJs.generated.h"
+#endif
 
 namespace {
 // Arduino's WebServer retains parsed request arguments until the next request.
@@ -276,6 +279,9 @@ void CrossPointWebServer::begin() {
   // get a one-line explanation instead of the host page.
   server->on("/plugins", HTTP_GET, [this] { handlePluginsPage(); });
 #if CROSSPOINT_SD_PLUGINS
+  // The shared browser plugin host, at CrossInk's path and upstream's.
+  server->on("/plugin-host.js", HTTP_GET, [this] { handlePluginHostJs(); });
+  server->on("/js/plugin-host.js", HTTP_GET, [this] { handlePluginHostJs(); });
   server->on("/api/plugins", HTTP_GET, [this] { handlePluginList(); });
   server->on("/plugin", HTTP_GET, [this] { handlePluginFile(); });
   server->on("/plugins-run", HTTP_GET, [this] { handlePluginRunnerPage(); });
@@ -507,6 +513,13 @@ void CrossPointWebServer::handleJszip() const {
   server->send_P(200, "application/javascript", jszip_minJs, jszip_minJsCompressedSize);
   LOG_DBG("WEB", "Served jszip.min.js");
 }
+
+#if CROSSPOINT_SD_PLUGINS
+void CrossPointWebServer::handlePluginHostJs() const {
+  server->sendHeader("Content-Encoding", "gzip");
+  server->send_P(200, "application/javascript", plugin_hostJs, plugin_hostJsCompressedSize);
+}
+#endif
 
 void CrossPointWebServer::handleNotFound() const {
   String message = "404 Not Found\n\n";

@@ -93,6 +93,11 @@ PKCS#7 padded on encrypt), `keygen` (RSA-1024, SPKI + PKCS#8), `pubencrypt`
 because a page served over plain HTTP has no `crypto.subtle`. See the
 sd-plugins repository for the JS contract.
 
+The host script itself (discovery, `plugin.js` loading, the `api` object and
+the job poller) is one shared asset, `GET /plugin-host.js` (also at
+`/js/plugin-host.js`, upstream's path): the Plugins page and `/plugins-run`
+load it, and a page a plugin brings can too.
+
 Plugin files are served by `GET /plugin?name=&file=` with an `ETag` (MD5 of
 the file's content) and `Cache-Control: no-cache`: the browser keeps the file
 and revalidates it on every page load, and an unchanged file answers
