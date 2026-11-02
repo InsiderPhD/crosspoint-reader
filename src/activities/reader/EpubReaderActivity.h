@@ -287,7 +287,13 @@ class EpubReaderActivity final : public Activity {
   // overlay opens ONLY if a word is under that point (and, for a lookup, the
   // lookup is allowed). Returns true when the overlay was opened; on false with
   // liveContact the caller still owns the contact and must suppress it.
-  bool startClipSelection(int anchorX = -1, int anchorY = -1, bool forLookup = false, bool liveContact = false);
+  // selectMode: Hold Action = Select Text -- handles plus a Look Up / Clip
+  // toolbar, so the result may be either a lookup or a clipping.
+  bool startClipSelection(int anchorX = -1, int anchorY = -1, bool forLookup = false, bool liveContact = false,
+                          bool selectMode = false);
+  // Stores a finished selection as a clipping and shows the saved/failed popup.
+  void saveClipping(const ClippingResult& clip, const std::string& bookTitle, const std::string& author,
+                    const std::string& chapterTitle);
   // True when a lookup can run now; otherwise raises the on-page message saying
   // why not (no dictionary set, or Bluetooth holding the heap a lookup needs).
   bool dictionaryLookupAllowed();

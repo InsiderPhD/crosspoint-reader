@@ -24,7 +24,8 @@ constexpr unsigned long LOOKUP_ANCHOR_HOLD_MS = 500;
 ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList,
                                              const int fontId, Section& section, const int startPageInSection,
                                              const int marginTop, const int marginLeft, const int initialCursorIdx,
-                                             const bool preAnchored, const bool lookupMode, const bool adoptContact)
+                                             const bool preAnchored, const bool lookupMode, const bool adoptContact,
+                                             const bool selectMode, const bool lookupAvailable)
     : Activity("ClipSelection", renderer, mappedInput),
       wordList(std::move(wordList)),
       fontId(fontId),
@@ -32,7 +33,9 @@ ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputM
       startPageInSection(startPageInSection),
       marginTop(marginTop),
       marginLeft(marginLeft),
-      lookupMode(lookupMode) {
+      lookupMode(lookupMode),
+      selectMode(selectMode),
+      lookupAvailable(lookupAvailable) {
   const int wordCount = static_cast<int>(this->wordList.words.size());
   if (initialCursorIdx > 0 && initialCursorIdx < wordCount) {
     cursorIdx = initialCursorIdx;
@@ -144,6 +147,7 @@ void ClipSelectionActivity::loop() {
   // down, a side key or page-turn remote must not move the cursor out from
   // under the word it is holding.
   if (handleAdoptedContact()) return;
+  if (selectMode && handleSelectTouch()) return;
 #endif
 
   auto moveCursor = [this](const int nextIdx) {
@@ -170,7 +174,9 @@ void ClipSelectionActivity::loop() {
   buttonNavigator.onContinuous({Button::Up}, [this, &moveCursor] { moveCursor(lineBackward(cursorIdx)); });
 
 #if FREEINK_DEVICE_X4PRO
-  if (!lookupMode) {
+  if (selectMode) {
+    // Touch is handleSelectTouch()'s alone; the buttons below still work.
+  } else if (!lookupMode) {
     if (handleRangeTouch()) return;
   } else {
     // Phrase: drag from the highlighted word to the last word of the phrase.
@@ -237,7 +243,9 @@ void ClipSelectionActivity::loop() {
   }
 
   if (mappedInput.wasReleased(Button::Back)) {
-    if (startMarkIdx != -1) {
+    // Select mode always has a range (there is no unanchored state to step
+    // back to), so Back leaves.
+    if (startMarkIdx != -1 && !selectMode) {
       startMarkIdx = -1;
 #if FREEINK_DEVICE_X4PRO
       startTapped = false;
@@ -288,6 +296,13 @@ bool ClipSelectionActivity::handleAdoptedContact() {
   // during the hold, not a range.
   const bool draggedRange = dragging && cursorIdx != contactStartWord;
   dragging = false;
+  if (selectMode) {
+    // Lifting never finishes here: it settles the range and brings up the
+    // handles and the toolbar.
+    if (!draggedRange) startMarkIdx = cursorIdx = contactStartWord;
+    requestUpdate();
+    return true;
+  }
   // Lookup: lifting is the lookup, of the held word or the dragged phrase.
   // Clip: lifting after a drag saves, as a drag begun on this screen does; with
   // no drag the held word stays anchored (as it is after a Shortcut-mode hold)
@@ -383,6 +398,284 @@ bool ClipSelectionActivity::handleRangeTouch() {
   }
   return false;
 }
+
+// --- Select mode -----------------------------------------------------------
+namespace {
+// Logical pixels. The hit box keeps a handle around 7 mm wide on the X4 Pro.
+constexpr int STEM_W = 3;
+constexpr int DOT_SIZE = 16;
+constexpr int HANDLE_HIT = 60;
+constexpr int BAR_MIN_H = 56;
+constexpr int BAR_PAD_Y = 10;
+constexpr int SEGMENT_MIN_W = 116;
+constexpr int SEGMENT_PAD_X = 16;
+constexpr int BORDER = 2;
+constexpr int RADIUS = 4;
+constexpr int DIVIDER_INSET = 10;
+constexpr int POINTER_HALF_W = 12;
+constexpr int POINTER_H = 12;
+constexpr int SELECTION_GAP = 6;
+constexpr int BAR_FONT_ID = UI_12_FONT_ID;
+
+const char* selectActionLabel(const int action) { return action == 0 ? tr(STR_LOOKUP) : tr(STR_CLIP); }
+}  // namespace
+
+ClipSelectionActivity::Box ClipSelectionActivity::wordBox(const int idx) const {
+  const WordRef& word = wordList.words[idx];
+  const char* text = wordList.textOf(word);
+  const auto textStyle = static_cast<EpdFontFamily::Style>(word.style & ~EpdFontFamily::UNDERLINE);
+  // The paragraph-indent em space is not part of the word as seen.
+  const int skipX = clipword::hasEmSpacePrefix(text) ? renderer.getTextAdvanceX(fontId, "\xe2\x80\x83", textStyle) : 0;
+  return {word.x + skipX, word.y, std::max(1, word.w - skipX), word.h};
+}
+
+ClipSelectionActivity::SelectLayout ClipSelectionActivity::selectLayout() const {
+  SelectLayout layout;
+  int top = 0, right = 0, bottom = 0, left = 0;
+  renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+  const Box safe{left, top, renderer.getScreenWidth() - left - right, renderer.getScreenHeight() - top - bottom};
+  if (safe.w <= DOT_SIZE || safe.h <= DOT_SIZE) return layout;
+
+  const int from = startMarkIdx == -1 ? cursorIdx : std::min(startMarkIdx, cursorIdx);
+  const int to = startMarkIdx == -1 ? cursorIdx : std::max(startMarkIdx, cursorIdx);
+  const Box first = wordBox(from);
+  const Box last = wordBox(to);
+
+  // Handles: a stem along the selection's outer edge, a dot past the line
+  // (above the start, below the end). The hit box is split at the word's
+  // middle, so on a one-word selection the two never overlap.
+  const auto makeHandle = [&safe](const Box& word, const bool isStart) {
+    SelectHandle h;
+    const int stemX = std::clamp(isStart ? word.x - STEM_W : word.x + word.w, safe.x, safe.x + safe.w - STEM_W);
+    const int stemTop = std::max(safe.y, word.y - 2);
+    const int stemBottom = std::min(safe.y + safe.h, word.y + word.h + 2);
+    h.stem = {stemX, stemTop, STEM_W, std::max(1, stemBottom - stemTop)};
+    const int midX = stemX + STEM_W / 2;
+    const int dotX = std::clamp(midX - DOT_SIZE / 2, safe.x, safe.x + safe.w - DOT_SIZE);
+    const int dotY = std::clamp(isStart ? stemTop - DOT_SIZE + 1 : stemBottom - 1, safe.y, safe.y + safe.h - DOT_SIZE);
+    h.dot = {dotX, dotY, DOT_SIZE, DOT_SIZE};
+    const int wordMid = word.y + word.h / 2;
+    const int dotMid = dotY + DOT_SIZE / 2;
+    const int hitTop = isStart ? std::min(dotMid - HANDLE_HIT / 2, dotY) : wordMid;
+    const int hitBottom = isStart ? wordMid : std::max(dotMid + HANDLE_HIT / 2, dotY + DOT_SIZE);
+    h.hit = {midX - HANDLE_HIT / 2, hitTop, HANDLE_HIT, hitBottom - hitTop};
+    return h;
+  };
+  layout.start = makeHandle(first, true);
+  layout.end = makeHandle(last, false);
+
+  // Toolbar: Look Up (only with a dictionary set) | Clip.
+  const bool visible[ACTION_COUNT] = {lookupAvailable, true};
+  int widths[ACTION_COUNT] = {};
+  int barW = 0;
+  for (int i = 0; i < ACTION_COUNT; ++i) {
+    if (!visible[i]) continue;
+    const int labelW = renderer.getTextWidth(BAR_FONT_ID, selectActionLabel(i), EpdFontFamily::BOLD);
+    widths[i] = std::max(SEGMENT_MIN_W, labelW + 2 * SEGMENT_PAD_X);
+    barW += widths[i];
+  }
+  if (barW > safe.w) {
+    for (int& w : widths) w = w * safe.w / barW;
+    barW = safe.w;
+  }
+  const int barH = std::min(safe.h, std::max(BAR_MIN_H, renderer.getLineHeight(BAR_FONT_ID) + 2 * BAR_PAD_Y));
+
+  const int selTop = std::min(first.y, layout.start.dot.y);
+  const int selBottom = std::max(last.y + last.h, layout.end.dot.y + layout.end.dot.h);
+  const int reach = SELECTION_GAP + POINTER_H;
+  const auto clampX = [&](const int x) { return std::clamp(x, safe.x, safe.x + safe.w - barW); };
+  int anchorX = first.x + first.w / 2;
+  int barX = clampX(anchorX - barW / 2);
+  int barY;
+  if (selTop - reach - barH >= safe.y) {
+    // 1. Above the selection, pointing down at its first word.
+    barY = selTop - reach - barH;
+    layout.showPointer = true;
+  } else if (selBottom + reach + barH <= safe.y + safe.h) {
+    // 2. Below it, pointing up at its last word.
+    barY = selBottom + reach;
+    anchorX = last.x + last.w / 2;
+    barX = clampX(anchorX - barW / 2);
+    layout.showPointer = true;
+    layout.pointerUp = true;
+  } else {
+    // 3. The selection fills the page: cover the end of it that hides less,
+    //    sliding sideways off any handle so a handle press never hits the bar.
+    const auto covered = [&](const int y) { return std::max(0, std::min(y + barH, selBottom) - std::max(y, selTop)); };
+    const int topY = safe.y;
+    const int bottomY = safe.y + safe.h - barH;
+    barY = covered(bottomY) < covered(topY) ? bottomY : topY;
+    const auto hidesHandle = [&](const int x) {
+      const Box bar{x, barY, barW, barH};
+      for (const auto* h : {&layout.start, &layout.end}) {
+        for (const auto* b : {&h->dot, &h->stem}) {
+          if (b->x < bar.x + bar.w && bar.x < b->x + b->w && b->y < bar.y + bar.h && bar.y < b->y + b->h) return true;
+        }
+      }
+      return false;
+    };
+    for (const int x : {barX, clampX(layout.start.hit.x + layout.start.hit.w), clampX(layout.start.hit.x - barW),
+                        clampX(layout.end.hit.x + layout.end.hit.w), clampX(layout.end.hit.x - barW)}) {
+      if (!hidesHandle(x)) {
+        barX = x;
+        break;
+      }
+    }
+  }
+  layout.bar = {barX, barY, barW, barH};
+  const int pointerMargin = RADIUS + BORDER + POINTER_HALF_W;
+  layout.pointerX = barW > 2 * pointerMargin ? std::clamp(anchorX, barX + pointerMargin, barX + barW - pointerMargin)
+                                             : barX + barW / 2;
+  int x = barX;
+  for (int i = 0; i < ACTION_COUNT; ++i) {
+    if (!visible[i]) continue;
+    layout.actions[i] = {x, barY, widths[i], barH};
+    x += widths[i];
+  }
+  return layout;
+}
+
+void ClipSelectionActivity::drawSelectOverlay(const SelectLayout& layout, const bool showActions) const {
+  for (const auto* h : {&layout.start, &layout.end}) {
+    renderer.fillRect(h->stem.x, h->stem.y, h->stem.w, h->stem.h, true);
+    renderer.fillRoundedRect(h->dot.x, h->dot.y, h->dot.w, h->dot.h, DOT_SIZE / 2, Color::Black);
+  }
+  if (!showActions || layout.bar.w <= 0) return;
+
+  const Box& bar = layout.bar;
+  renderer.fillRoundedRect(bar.x, bar.y, bar.w, bar.h, RADIUS, Color::White);
+  renderer.drawRoundedRect(bar.x, bar.y, bar.w, bar.h, BORDER, RADIUS, true);
+  if (layout.showPointer) {
+    // A black triangle from inside the border, then a white one inside it that
+    // erases that stretch of border, so the outline runs unbroken.
+    const int dir = layout.pointerUp ? -1 : 1;
+    const int edge = layout.pointerUp ? bar.y : bar.y + bar.h;
+    const int baseY = edge - dir * BORDER;
+    const int tipY = edge + dir * POINTER_H;
+    const int px = layout.pointerX;
+    const int outerX[] = {px - POINTER_HALF_W, px + POINTER_HALF_W, px};
+    const int outerY[] = {baseY, baseY, tipY};
+    renderer.fillPolygon(outerX, outerY, 3, true);
+    const int innerX[] = {px - POINTER_HALF_W + 4, px + POINTER_HALF_W - 4, px};
+    const int innerY[] = {baseY, baseY, tipY - dir * 5};
+    renderer.fillPolygon(innerX, innerY, 3, false);
+  }
+  bool firstSegment = true;
+  const int lineH = renderer.getLineHeight(BAR_FONT_ID);
+  for (int i = 0; i < ACTION_COUNT; ++i) {
+    const Box& seg = layout.actions[i];
+    if (seg.w <= 0) continue;
+    if (!firstSegment) {
+      renderer.fillRect(seg.x - BORDER / 2, seg.y + DIVIDER_INSET, BORDER, seg.h - 2 * DIVIDER_INSET, true);
+    }
+    firstSegment = false;
+    const char* label = selectActionLabel(i);
+    const int labelW = renderer.getTextWidth(BAR_FONT_ID, label, EpdFontFamily::BOLD);
+    renderer.drawText(BAR_FONT_ID, seg.x + (seg.w - labelW) / 2, seg.y + (seg.h - lineH) / 2, label, true,
+                      EpdFontFamily::BOLD);
+  }
+}
+
+void ClipSelectionActivity::runSelectAction(const int action) {
+  if (action == ACTION_LOOKUP) {
+    if (lookupAvailable) finishLookup();
+    return;
+  }
+  finishSelection();  // not lookupMode: builds and returns the clipping
+}
+
+bool ClipSelectionActivity::handleSelectTouch() {
+  const int page = wordList.words[cursorIdx].pageIdx;
+  int lx, ly;
+
+  if (selectDrag != SelectDrag::None) {
+    if (mappedInput.heldTouchPoint(lx, ly)) {
+      const int idx = clipword::findWordAt(wordList, page, lx + dragOffsetX, ly + dragOffsetY);
+      if (idx >= 0 && idx != cursorIdx) {
+        cursorIdx = idx;
+        requestUpdate();
+      }
+      return true;
+    }
+    // Lifted (or a second finger / the action bar took over): the range stands.
+    mappedInput.suppressTouchContact();
+    selectDrag = SelectDrag::None;
+    requestUpdate();
+    return true;
+  }
+
+  if (mappedInput.wasTouchDownPoint(lx, ly)) {
+    const SelectLayout layout = selectLayout();
+    const int from = std::min(startMarkIdx, cursorIdx);
+    const int to = std::max(startMarkIdx, cursorIdx);
+    const bool onStart = layout.start.hit.contains(lx, ly);
+    if (onStart || layout.end.hit.contains(lx, ly)) {
+      // The dragged end becomes the cursor, the other end the anchor.
+      selectDrag = onStart ? SelectDrag::Start : SelectDrag::End;
+      startMarkIdx = onStart ? to : from;
+      cursorIdx = onStart ? from : to;
+      const Box word = wordBox(cursorIdx);
+      dragOffsetX = word.x + word.w / 2 - lx;
+      dragOffsetY = word.y + word.h / 2 - ly;
+      pressedAction = -1;
+      requestUpdate();  // hides the toolbar while dragging
+      return true;
+    }
+    pressedAction = -1;
+    for (int i = 0; i < ACTION_COUNT; ++i) {
+      if (layout.actions[i].contains(lx, ly)) pressedAction = i;
+    }
+    return true;
+  }
+
+  // Hold another word: start a fresh selection there, with the same finger
+  // free to drag it out (handleAdoptedContact takes the contact over).
+  if (mappedInput.wasTouchLongPressPoint(lx, ly)) {
+    const SelectLayout layout = selectLayout();
+    const bool onOverlay =
+        layout.bar.contains(lx, ly) || layout.start.hit.contains(lx, ly) || layout.end.hit.contains(lx, ly);
+    const int idx = onOverlay ? -1 : clipword::findWordAt(wordList, page, lx, ly);
+    if (idx >= 0) {
+      startMarkIdx = cursorIdx = idx;
+      contactAdopted = true;
+      touchWasHeld = true;
+      contactStartWord = idx;
+      dragging = false;
+      pressedAction = -1;
+      requestUpdate();
+    } else {
+      mappedInput.suppressTouchContact();
+    }
+    return true;
+  }
+
+  if (mappedInput.wasTapPoint(lx, ly)) {
+    const SelectLayout layout = selectLayout();
+    const int pressed = pressedAction;
+    pressedAction = -1;
+    for (int i = 0; i < ACTION_COUNT; ++i) {
+      if (layout.actions[i].contains(lx, ly)) {
+        if (i == pressed) runSelectAction(i);
+        return true;
+      }
+    }
+    if (layout.bar.contains(lx, ly) || layout.start.hit.contains(lx, ly) || layout.end.hit.contains(lx, ly)) {
+      return true;
+    }
+    const int from = std::min(startMarkIdx, cursorIdx);
+    const int to = std::max(startMarkIdx, cursorIdx);
+    for (int i = from; i <= to; ++i) {
+      if (wordBox(i).contains(lx, ly)) return true;  // a tap on the selection keeps it
+    }
+    // Anywhere else: done with the selection, back to the page.
+    ActivityResult result;
+    result.isCancelled = true;
+    setResult(std::move(result));
+    finish();
+    return true;
+  }
+  return false;
+}
 #endif
 
 void ClipSelectionActivity::render(RenderLock&&) {
@@ -392,8 +685,14 @@ void ClipSelectionActivity::render(RenderLock&&) {
 
   prewarmHighlightedWords();
   drawHighlights();
+#if FREEINK_DEVICE_X4PRO
+  // The toolbar is hidden while a finger is dragging either end of the range.
+  if (selectMode) drawSelectOverlay(selectLayout(), !contactAdopted && selectDrag == SelectDrag::None);
+#endif
 
-  const auto confirmLabel = lookupMode ? tr(STR_LOOKUP) : (startMarkIdx == -1 ? tr(STR_SELECT) : tr(STR_DONE));
+  const auto confirmLabel = selectMode   ? tr(STR_CLIP)
+                            : lookupMode ? tr(STR_LOOKUP)
+                                         : (startMarkIdx == -1 ? tr(STR_SELECT) : tr(STR_DONE));
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
@@ -518,7 +817,9 @@ void ClipSelectionActivity::drawHighlights() {
     }
   }
 
-  if (words[cursorIdx].pageIdx == currentDisplayPage) {
+  // Select mode marks its ends with handles; an inverted cursor word on top of
+  // the range would read as a second, different selection.
+  if (!selectMode && words[cursorIdx].pageIdx == currentDisplayPage) {
     applyWordStyle(words[cursorIdx], cursorStyle);
   }
 }

@@ -304,6 +304,8 @@ const char* ReaderControlsActivity::getRowActionName(const uint8_t row) const {
         return tr(STR_DICTIONARY);
       case CrossPointSettings::READER_HOLD_HIGHLIGHT:
         return tr(STR_HOLD_ACTION_HIGHLIGHT);
+      case CrossPointSettings::READER_HOLD_SELECT:
+        return tr(STR_HOLD_ACTION_SELECT);
       case CrossPointSettings::READER_HOLD_SHORTCUT:
       case CrossPointSettings::READER_HOLD_MODE_COUNT:
         break;
@@ -463,7 +465,7 @@ void ReaderControlsActivity::activateRow(const uint8_t row) {
     return;
   }
   if (row == kHoldModeRow) {
-    // Three values, cycled in place like the row above. The hold-zone rows
+    // Four values, cycled in place like the row above. The hold-zone rows
     // follow it in the list, so hiding or restoring them never moves this row
     // out from under the selection.
     SETTINGS.readerHoldMode =

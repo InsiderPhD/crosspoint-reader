@@ -1046,7 +1046,8 @@ void EpubReaderActivity::loop() {
         // it when it ends. No word under the finger: nothing happens, and the
         // contact is dropped here so its lift cannot turn the page.
         const bool forLookup = SETTINGS.readerHoldMode == CrossPointSettings::READER_HOLD_DICTIONARY;
-        if (!startClipSelection(holdX, holdY, forLookup, /*liveContact=*/true)) {
+        const bool selectMode = SETTINGS.readerHoldMode == CrossPointSettings::READER_HOLD_SELECT;
+        if (!startClipSelection(holdX, holdY, forLookup, /*liveContact=*/true, selectMode)) {
           mappedInput.suppressTouchContact();
         }
         return;
@@ -1980,7 +1981,7 @@ const char* clipVisibleText(const char* text) { return clipword::hasEmSpacePrefi
 }  // namespace
 
 bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY, const bool forLookup,
-                                            const bool liveContact) {
+                                            const bool liveContact, const bool selectMode) {
   if (!section || !epub) {
     requestUpdate();
     return false;
@@ -2007,7 +2008,8 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
     // A lookup is about the word on screen, so it builds only the visible page:
     // letting the cursor wander onto pages the reader is not showing would be
     // confusing, and the extra two pages are pure heap for a one-word pick.
-    const int pagesToLoad = forLookup ? 1 : std::min(3, section->pageCount - startPage);
+    // Select mode's handles live on the visible page too.
+    const int pagesToLoad = (forLookup || selectMode) ? 1 : std::min(3, section->pageCount - startPage);
 
     for (int pageIdx = 0; pageIdx < pagesToLoad; ++pageIdx) {
       section->currentPage = startPage + pageIdx;
@@ -2154,6 +2156,33 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
     if (forLookup && !dictionaryLookupAllowed()) return false;
   }
 
+  if (selectMode) {
+    // Look Up is offered only with a dictionary set; Clip always is, so a
+    // selection is never a dead end on a device without one.
+    const bool lookupAvailable = SETTINGS.dictionaryName[0] != '\0';
+    startActivityForResult(
+        std::make_unique<ClipSelectionActivity>(renderer, mappedInput, std::move(clipWords), readerFontId, *section,
+                                                startPage, orientedMarginTop, orientedMarginLeft, initialCursorIdx,
+                                                /*preAnchored=*/true, /*lookupMode=*/false, liveContact,
+                                                /*selectMode=*/true, lookupAvailable),
+        [this, bookTitle = std::move(bookTitle), author = std::move(author),
+         chapterTitle = std::move(chapterTitle)](const ActivityResult& result) {
+          // get_if, not get: see the handlers below.
+          if (!result.isCancelled) {
+            if (const auto* pick = std::get_if<WordPickResult>(&result.data)) {
+              if (!pick->word.empty() && dictionaryLookupAllowed()) {
+                performDictionaryLookup(pick->word);
+                return;
+              }
+            } else if (const auto* clip = std::get_if<ClippingResult>(&result.data)) {
+              saveClipping(*clip, bookTitle, author, chapterTitle);
+            }
+          }
+          requestUpdate();
+        });
+    return true;
+  }
+
   if (forLookup) {
     startActivityForResult(
         std::make_unique<ClipSelectionActivity>(renderer, mappedInput, std::move(clipWords), readerFontId, *section,
@@ -2181,32 +2210,33 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
         // get_if, not get: a default ActivityResult is NOT cancelled but holds monostate, and
         // std::get on the wrong alternative aborts under -fno-exceptions.
         const auto* clipPtr = result.isCancelled ? nullptr : std::get_if<ClippingResult>(&result.data);
-        if (clipPtr) {
-          const auto& clip = *clipPtr;
-          if (!clip.text.empty()) {
-            const size_t clippingIndex = CLIPPINGS.getClippings().size();
-            const auto addResult =
-                CLIPPINGS.addClipping(static_cast<uint16_t>(currentSpineIndex), clip.sectionPage, clip.endSectionPage,
-                                      clip.sectionPageCount, clip.startPageWordIndex, clip.endPageWordIndex,
-                                      clip.wordCount, chapterTitle.c_str(), clip.paragraphIndex, clip.text);
-            bool exported = false;
-            if (addResult == ClippingStore::AddResult::Added) {
-              exported = ClippingsManager::saveClipping(bookTitle, author, chapterTitle,
-                                                        static_cast<int>(clip.sectionPage) + 1, clip.text);
-              if (!exported && !CLIPPINGS.removeClippingAt(clippingIndex)) {
-                LOG_ERR("CLIP", "Failed to roll back clipping after export failure");
-              }
-            }
-            const bool saved = addResult == ClippingStore::AddResult::Added && exported;
-            GUI.drawPopup(renderer, addResult == ClippingStore::AddResult::LimitReached ? tr(STR_CLIPPING_LIMIT_REACHED)
-                                    : saved                                             ? tr(STR_CLIPPING_SAVED)
-                                                                                        : tr(STR_CLIPPING_FAILED));
-            delay(1000);
-          }
-        }
+        if (clipPtr) saveClipping(*clipPtr, bookTitle, author, chapterTitle);
         requestUpdate();
       });
   return true;
+}
+
+void EpubReaderActivity::saveClipping(const ClippingResult& clip, const std::string& bookTitle,
+                                      const std::string& author, const std::string& chapterTitle) {
+  if (clip.text.empty()) return;
+  const size_t clippingIndex = CLIPPINGS.getClippings().size();
+  const auto addResult =
+      CLIPPINGS.addClipping(static_cast<uint16_t>(currentSpineIndex), clip.sectionPage, clip.endSectionPage,
+                            clip.sectionPageCount, clip.startPageWordIndex, clip.endPageWordIndex, clip.wordCount,
+                            chapterTitle.c_str(), clip.paragraphIndex, clip.text);
+  bool exported = false;
+  if (addResult == ClippingStore::AddResult::Added) {
+    exported = ClippingsManager::saveClipping(bookTitle, author, chapterTitle, static_cast<int>(clip.sectionPage) + 1,
+                                              clip.text);
+    if (!exported && !CLIPPINGS.removeClippingAt(clippingIndex)) {
+      LOG_ERR("CLIP", "Failed to roll back clipping after export failure");
+    }
+  }
+  const bool saved = addResult == ClippingStore::AddResult::Added && exported;
+  GUI.drawPopup(renderer, addResult == ClippingStore::AddResult::LimitReached ? tr(STR_CLIPPING_LIMIT_REACHED)
+                          : saved                                             ? tr(STR_CLIPPING_SAVED)
+                                                                              : tr(STR_CLIPPING_FAILED));
+  delay(1000);
 }
 
 bool EpubReaderActivity::dictionaryLookupAllowed() {

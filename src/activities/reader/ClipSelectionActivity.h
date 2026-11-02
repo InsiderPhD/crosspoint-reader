@@ -53,10 +53,18 @@ class ClipSelectionActivity final : public Activity {
   // finishes (lookup: looks the word or phrase up; clip: saves a dragged range,
   // or leaves the held word anchored when the finger never left it). The
   // contact is never read as a tap or a hold of this screen's own.
+  // selectMode (X4 Pro, Hold Action = Select Text; CrossInk's touch text
+  // selection): the held word opens selected, a drag of the adopted contact
+  // extends it, and lifting leaves the range on screen with a drag handle at
+  // each end and a floating toolbar -- Look Up (only when lookupAvailable) and
+  // Clip. Dragging a handle moves that end; a tap on the toolbar acts; a tap
+  // off the selection cancels, and holding another word starts over there.
+  // Lookup returns a WordPickResult, Clip a ClippingResult, so the caller
+  // handles both. Built on the visible page only (no cross-page handles).
   ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList, int fontId,
                         Section& section, int startPageInSection, int marginTop, int marginLeft,
                         int initialCursorIdx = 0, bool preAnchored = false, bool lookupMode = false,
-                        bool adoptContact = false);
+                        bool adoptContact = false, bool selectMode = false, bool lookupAvailable = false);
 
   void onEnter() override;
   void onExit() override;
@@ -74,7 +82,7 @@ class ClipSelectionActivity final : public Activity {
   // claims the contact once it has become a phrase drag (see handleLookupDrag).
   bool ownsSwipes() const override {
 #if FREEINK_DEVICE_X4PRO
-    return !lookupMode || dragging || contactAdopted;
+    return !lookupMode || dragging || contactAdopted || selectMode;
 #else
     return !lookupMode;
 #endif
@@ -88,6 +96,8 @@ class ClipSelectionActivity final : public Activity {
   int marginTop = 0;
   int marginLeft = 0;
   bool lookupMode = false;
+  bool selectMode = false;
+  bool lookupAvailable = false;
   // Lookup mode: the current Confirm press began on this screen (the press that
   // opened it may still be down), and it has already been spent on anchoring.
   bool confirmPressedHere = false;
@@ -125,6 +135,43 @@ class ClipSelectionActivity final : public Activity {
   // Lookup mode: a drag that starts on the cursor word selects a phrase and
   // looks it up on lift. True while it owns the contact.
   bool handleLookupDrag();
+
+  // --- Select mode (handles + toolbar) ---
+  struct Box {
+    int x = 0, y = 0, w = 0, h = 0;
+    bool contains(const int px, const int py) const { return w > 0 && px >= x && px < x + w && py >= y && py < y + h; }
+  };
+  struct SelectHandle {
+    Box stem, dot, hit;
+  };
+  static constexpr int ACTION_LOOKUP = 0;
+  static constexpr int ACTION_CLIP = 1;
+  static constexpr int ACTION_COUNT = 2;
+  // Geometry of the overlay for the current range. Pure function of the word
+  // boxes and the UI font, so render() paints and loop() hit-tests the same
+  // rectangles without caching anything between the two tasks.
+  struct SelectLayout {
+    SelectHandle start, end;
+    Box bar;
+    Box actions[ACTION_COUNT];  // an empty box = action hidden
+    int pointerX = 0;
+    bool pointerUp = false;  // bar below the selection
+    bool showPointer = false;
+  };
+  enum class SelectDrag : uint8_t { None, Start, End };
+  SelectDrag selectDrag = SelectDrag::None;
+  // Finger-to-word-centre offset when a handle drag began, so the end being
+  // dragged does not jump to whatever word sits under the fingertip.
+  int dragOffsetX = 0;
+  int dragOffsetY = 0;
+  // Toolbar segment the current contact came down on; a tap acts only when it
+  // lifts on the same one.
+  int pressedAction = -1;
+  SelectLayout selectLayout() const;
+  Box wordBox(int idx) const;
+  bool handleSelectTouch();
+  void drawSelectOverlay(const SelectLayout& layout, bool showActions) const;
+  void runSelectAction(int action);
 #endif
 
   // Anchor at the cursor if unset, then build and return the clipping for the

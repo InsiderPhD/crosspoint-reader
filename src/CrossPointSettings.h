@@ -173,12 +173,15 @@ class CrossPointSettings {
   //               extend to a phrase; lifting runs the lookup
   //   HIGHLIGHT   hold a word to anchor a clipping there; drag to extend; lifting
   //               after a drag saves it, exactly as a drag inside the selector does
+  //   SELECT      hold a word to select it, drag to extend; lifting leaves the
+  //               range with drag handles and a Look Up / Clip toolbar (CrossInk)
   // Outside SHORTCUT the readerHold* values are ignored but kept as stored.
   // Persisted: append only, never renumber.
   enum READER_HOLD_MODE {
     READER_HOLD_SHORTCUT = 0,
     READER_HOLD_DICTIONARY = 1,
     READER_HOLD_HIGHLIGHT = 2,
+    READER_HOLD_SELECT = 3,
     READER_HOLD_MODE_COUNT
   };
 
