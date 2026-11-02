@@ -22,6 +22,36 @@ const uint8_t* getHwKey() {
   }
   return key;
 }
+
+// CrossInk's "validated" payload: XOR-obfuscated "CPV1" + FNV-1a(key, plaintext)
+// as uint32 LE + plaintext. Same hardware key and base64 wrapping as the legacy
+// form, so wifi.json / opds.json / koreader.json written by CrossInk decode here.
+// This firmware keeps WRITING the legacy form, the one upstream CrossPoint and
+// CrossInk both read.
+constexpr char VALIDATED_PREFIX[] = {'C', 'P', 'V', '1'};
+constexpr size_t VALIDATED_PREFIX_LEN = sizeof(VALIDATED_PREFIX);
+constexpr size_t VALIDATED_CHECKSUM_LEN = 4;
+
+uint32_t validatedChecksum(const char* plaintext, size_t len) {
+  uint32_t hash = 2166136261UL;
+  const uint8_t* key = getHwKey();
+  for (size_t i = 0; i < HW_KEY_LEN; i++) hash = (hash ^ key[i]) * 16777619UL;
+  for (size_t i = 0; i < len; i++) hash = (hash ^ static_cast<uint8_t>(plaintext[i])) * 16777619UL;
+  return hash;
+}
+
+// Strips a CrossInk validated header in place when its checksum matches. A
+// mismatch leaves the string alone: it is then a legacy payload whose
+// plaintext merely happens to start with those bytes.
+void unwrapValidated(std::string& data) {
+  constexpr size_t headerLen = VALIDATED_PREFIX_LEN + VALIDATED_CHECKSUM_LEN;
+  if (data.size() < headerLen || memcmp(data.data(), VALIDATED_PREFIX, VALIDATED_PREFIX_LEN) != 0) return;
+  const auto* c = reinterpret_cast<const uint8_t*>(data.data() + VALIDATED_PREFIX_LEN);
+  const uint32_t expected = static_cast<uint32_t>(c[0]) | (static_cast<uint32_t>(c[1]) << 8) |
+                            (static_cast<uint32_t>(c[2]) << 16) | (static_cast<uint32_t>(c[3]) << 24);
+  if (validatedChecksum(data.data() + headerLen, data.size() - headerLen) != expected) return;
+  data.erase(0, headerLen);
+}
 }  // namespace
 
 void xorTransform(std::string& data) {
@@ -70,6 +100,7 @@ std::string deobfuscateFromBase64(const char* encoded, bool* ok) {
   }
   result.resize(decodedLen);
   xorTransform(result);
+  unwrapValidated(result);
   return result;
 }
 
@@ -81,6 +112,20 @@ void selfTest() {
     std::string decoded = deobfuscateFromBase64(encoded.c_str());
     if (decoded != input) {
       LOG_ERR("OBF", "FAIL: \"%s\" -> \"%s\" -> \"%s\"", input, encoded.c_str(), decoded.c_str());
+      allPassed = false;
+    }
+  }
+  {
+    // A CrossInk-written (validated) payload decodes to its plaintext.
+    const std::string plain = "swap me";
+    std::string payload(VALIDATED_PREFIX, VALIDATED_PREFIX_LEN);
+    const uint32_t sum = validatedChecksum(plain.data(), plain.size());
+    for (int shift = 0; shift < 32; shift += 8) payload.push_back(static_cast<char>((sum >> shift) & 0xFF));
+    payload += plain;
+    xorTransform(payload);
+    const String encoded = base64::encode(reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
+    if (deobfuscateFromBase64(encoded.c_str()) != plain) {
+      LOG_ERR("OBF", "FAIL: validated (CrossInk) payload did not decode");
       allPassed = false;
     }
   }
