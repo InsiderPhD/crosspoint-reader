@@ -879,7 +879,14 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
   scratch.clear();
   lineImages.clear();
   const size_t lineBreak = lineBreakIndices[breakIndex];
-  const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
+  size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
+  // A no-break space carried across a soft wrap (e.g. "word—" + NBSP, where a break is
+  // allowed) must not indent the next line. A paragraph's own leading NBSPs are kept.
+  if (breakIndex > 0 || firstLineConsumed) {
+    while (lastBreakAt + 1 < lineBreak && continuesVec[lastBreakAt] && words[lastBreakAt] == " ") {
+      ++lastBreakAt;
+    }
+  }
   const uint32_t lineVisibleOffset = visibleOffsetAt(lastBreakAt);
 
   // Expand this line's whole words into bionic render fragments (bold prefix + regular suffix
@@ -935,8 +942,10 @@ void ParsedText::extractLine(const size_t breakIndex, const int pageWidth, const
       totalNaturalGaps += gapBetween(renderer, fontId, ew[wordIdx - 1], ew[wordIdx], es[wordIdx - 1], false, layout);
     } else if (wordIdx > 0 && ec[wordIdx]) {
       // Non-breaking space tokens (" " with continues=true) are visible, stretchable spaces —
-      // count them as justifiable gaps so justifyExtra is distributed to them too.
-      if (ew[wordIdx] == " ") {
+      // count them as justifiable gaps so justifyExtra is distributed to them too. Only one
+      // followed by a continuation on this line is stretched below, so only that one counts:
+      // a trailing NBSP took a share of the spare space and left the line short (ragged right).
+      if (ew[wordIdx] == " " && wordIdx + 1 < lineWordCount && ec[wordIdx + 1]) {
         actualGapCount++;
       }
       // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
