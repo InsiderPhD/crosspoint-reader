@@ -54,10 +54,11 @@ struct CssLength {
 };
 
 // Font style options matching CSS font-style property
-enum class CssFontStyle : uint8_t { Normal = 0, Italic = 1 };
+// Inherit is resolved against the parent by ChapterHtmlSlimParser::startElement.
+enum class CssFontStyle : uint8_t { Normal = 0, Italic = 1, Inherit = 2 };
 
 // Font weight options - CSS supports 100-900, we simplify to normal/bold
-enum class CssFontWeight : uint8_t { Normal = 0, Bold = 1 };
+enum class CssFontWeight : uint8_t { Normal = 0, Bold = 1, Inherit = 2 };
 
 // Text decoration options
 enum class CssTextDecoration : uint8_t { None = 0, Underline = 1 };

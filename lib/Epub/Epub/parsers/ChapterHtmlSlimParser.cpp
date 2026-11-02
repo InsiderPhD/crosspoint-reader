@@ -1113,6 +1113,27 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     cssStyle.defined.direction = 1;
   }
 
+  // Resolve explicit inheritance after the cascade, before this element changes the
+  // active style: `inherit` takes the parent's current emphasis instead of resetting it.
+  switch (cssStyle.fontWeight) {
+    case CssFontWeight::Normal:
+    case CssFontWeight::Bold:
+      break;
+    case CssFontWeight::Inherit:
+      cssStyle.fontWeight =
+          (self->effectiveBold || self->boldUntilDepth < self->depth) ? CssFontWeight::Bold : CssFontWeight::Normal;
+      break;
+  }
+  switch (cssStyle.fontStyle) {
+    case CssFontStyle::Normal:
+    case CssFontStyle::Italic:
+      break;
+    case CssFontStyle::Inherit:
+      cssStyle.fontStyle =
+          (self->effectiveItalic || self->italicUntilDepth < self->depth) ? CssFontStyle::Italic : CssFontStyle::Normal;
+      break;
+  }
+
   // Skip elements with display:none before all fast paths (tables, links, etc.).
   if (cssStyle.hasDisplay() && cssStyle.display == CssDisplay::None) {
     self->skipUntilDepth = self->depth;
