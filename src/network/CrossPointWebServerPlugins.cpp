@@ -16,6 +16,7 @@
 #include <wolfssl/wolfcrypt/coding.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -318,7 +319,7 @@ void sendNativeFeatureRefusal(WebServer* server, const char* what) {
 }
 }  // namespace
 
-// POST /api/fetch {plugin, url, dest, headers?, offset?, maxBytes?}
+// POST /api/fetch {plugin, url, dest, headers?, offset?, maxBytes?, method?, body?}
 //   -> {status, bytes, complete, total?}
 // Device downloads a URL straight to SD, so a large body never passes through
 // the browser.
@@ -347,6 +348,44 @@ void CrossPointWebServer::handleFetch() {
   // is not required (and not touched) for one.
   if (probeOnly && url.empty()) {
     server->send(400, "application/json", "{\"error\":\"bad url\"}");
+    return;
+  }
+
+  // A plugin's POST (an API login, a search) used to go out as a GET. Honour
+  // method and body as upstream 2.0 does; a probe is always a HEAD.
+  const JsonVariantConst methodField = req["method"];
+  if (!methodField.isNull() && !methodField.is<const char*>()) {
+    server->send(400, "application/json", "{\"error\":\"method must be a string\"}");
+    return;
+  }
+  std::string method = methodField | "GET";
+  std::transform(method.begin(), method.end(), method.begin(),
+                 [](unsigned char c) { return static_cast<char>(toupper(c)); });
+  // HEAD would wait for a body that never comes; other verbs are not plugin downloads.
+  if (method != "GET" && method != "POST" && method != "PUT" && method != "PATCH" && method != "DELETE") {
+    server->send(400, "application/json", "{\"error\":\"unsupported method\"}");
+    return;
+  }
+  // The body stays in DRAM (and goes out as one TLS record) while the session
+  // needs its heap: keep it small, and check the size before copying it.
+  static constexpr size_t FETCH_MAX_REQUEST_BODY = 4 * 1024;
+  const JsonVariantConst bodyField = req["body"];
+  if (!bodyField.isNull() && !bodyField.is<const char*>()) {
+    server->send(400, "application/json", "{\"error\":\"body must be a string\"}");
+    return;
+  }
+  // JsonString keeps the decoded length, so a \u0000 in the body is sent too.
+  const JsonString rawBody = bodyField.as<JsonString>();
+  if (rawBody.size() > FETCH_MAX_REQUEST_BODY) {
+    server->send(400, "application/json", "{\"error\":\"body over 4KB\"}");
+    return;
+  }
+  const std::string requestBody = rawBody.isNull() ? std::string() : std::string(rawBody.c_str(), rawBody.size());
+  // Only a GET without a body resumes with Range. Any other request is sent
+  // exactly once: replaying it could repeat its effect on the server.
+  const bool resumable = method == "GET" && requestBody.empty();
+  if (!probeOnly && !resumable && (requestedOffset != 0 || segmentLimit != 0)) {
+    server->send(400, "application/json", "{\"error\":\"offset and maxBytes need a GET without a body\"}");
     return;
   }
 
@@ -470,7 +509,8 @@ void CrossPointWebServer::handleFetch() {
     }
   };
 
-  for (int attempt = 0; attempt < FETCH_MAX_TOTAL_ATTEMPTS && stalled < FETCH_MAX_STALLED_ATTEMPTS; ++attempt) {
+  const int maxAttempts = resumable ? FETCH_MAX_TOTAL_ATTEMPTS : 1;
+  for (int attempt = 0; attempt < maxAttempts && stalled < FETCH_MAX_STALLED_ATTEMPTS; ++attempt) {
     freeink::SecureHttpClient http;
     http.setUserAgent("CrossPoint");
     // The SecureNet transport ships no CA bundle, so peer verification always
@@ -497,7 +537,8 @@ void CrossPointWebServer::handleFetch() {
     bool rewindFailed = false;
     bool firstChunk = true;
     size_t attemptStart = written;
-    status = http.GET(
+    status = http.sendRequest(
+        method.c_str(), reinterpret_cast<const uint8_t*>(requestBody.data()), requestBody.size(),
         [&](const uint8_t* data, size_t len) {
           esp_task_wdt_reset();
           if (firstChunk) {

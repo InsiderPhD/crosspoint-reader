@@ -126,7 +126,21 @@
       return window.confirm('This download is ' + mb + ' MB (approx. ' + eta +
         ' over Wi-Fi). Continue?');
     },
-    async fetchToSd(plugin, url, dest, headers) {
+    async fetchToSd(plugin, url, dest, headers, options) {
+      const method = ((options && options.method) || 'GET').toUpperCase();
+      const body = (options && options.body) || '';
+      // The device sends a non-GET request, or one with a body, exactly once and
+      // without segments (a replay could repeat its effect). A failure throws,
+      // as on the GET path, with the device's result attached.
+      if (method !== 'GET' || body) {
+        const result = await this._post('/api/fetch', { plugin, url, dest, headers: headers || {}, method, body });
+        if (result.complete === false) {
+          const err = new Error('/api/fetch: ' + (result.error || 'failed') + ' (HTTP ' + result.status + ')');
+          err.result = result;
+          throw err;
+        }
+        return result;
+      }
       if (!(await this.confirmLargeFetch(plugin, url, headers))) {
         throw new Error('download cancelled');
       }
@@ -181,7 +195,7 @@
             cookiesFrom: (resp, existing) => CrossPoint.cookiesFrom(resp, existing),
             crypto: (op, f) => CrossPoint.crypto(op, f),
             writeFile: (path, d) => CrossPoint.writeFile(p.name, path, d),
-            fetchToSd: (u, dest, h) => CrossPoint.fetchToSd(p.name, u, dest, h),
+            fetchToSd: (u, dest, h, o) => CrossPoint.fetchToSd(p.name, u, dest, h, o),
             registerAction: (a, fn) => CrossPoint.registerAction(p.name, a, fn),
             pluginFile: (f) => '/plugin?name=' + encodeURIComponent(p.name) + '&file=' + encodeURIComponent(f)
           });

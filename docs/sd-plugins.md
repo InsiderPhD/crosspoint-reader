@@ -402,7 +402,7 @@ browser-side.
 | Need | Use |
 |---|---|
 | Outbound HTTP(S), any method (CORS-free) | `api.relay(method, url, headers, body)` |
-| Download a URL straight to SD | `api.fetchToSd(url, dest, headers)` |
+| Download a URL straight to SD | `api.fetchToSd(url, dest, headers, {method, body})` (options optional; `body` is a string up to 4 KB; with a method other than GET, or a non-empty body, the request is sent once with no resume, and on failure the thrown error carries the `/api/fetch` result in `err.result`) |
 | Write a small file to SD | `api.writeFile(path, base64)` |
 | The plugin's own folder (keep files beside yourself) | `api.dir` (`<root>/<name>`, from `/api/plugins`) |
 | Crypto (hash, HMAC, AES, RSA, PKCS#12) | `api.crypto(op, fields)` |
