@@ -14,10 +14,14 @@ bool isTagStart(const std::string& input, size_t pos) {
   return next == '/' || next == '!' || next == '?' || std::isalpha(next);
 }
 
-enum class TagBreak : uint8_t { None, Line, Paragraph };
+enum class TagBreak : uint8_t { None, Line, Paragraph, HeadingOpen, HeadingClose };
 
 TagBreak tagBreak(const std::string& input, size_t start, size_t end) {
-  while (start < end && (input[start] == '/' || std::isspace(static_cast<unsigned char>(input[start])))) start++;
+  bool closing = false;
+  while (start < end && (input[start] == '/' || std::isspace(static_cast<unsigned char>(input[start])))) {
+    if (input[start] == '/') closing = true;
+    start++;
+  }
   const size_t nameStart = start;
   // Alphanumeric, not alphabetic: a name scan that stops at the first digit
   // reads "h1" as "h", so none of the heading names below could ever match and
@@ -35,10 +39,10 @@ TagBreak tagBreak(const std::string& input, size_t start, size_t end) {
     return true;
   };
 
-  if (equals("p") || equals("h1") || equals("h2") || equals("h3") || equals("h4") || equals("h5") || equals("h6") ||
-      equals("hr")) {
-    return TagBreak::Paragraph;
+  if (equals("h1") || equals("h2") || equals("h3") || equals("h4") || equals("h5") || equals("h6")) {
+    return closing ? TagBreak::HeadingClose : TagBreak::HeadingOpen;
   }
+  if (equals("p") || equals("hr")) return TagBreak::Paragraph;
   if (equals("br") || equals("div") || equals("li") || equals("tr")) return TagBreak::Line;
   return TagBreak::None;
 }
@@ -101,7 +105,7 @@ void appendBreak(std::string& output, size_t count = 1) {
 
 }  // namespace
 
-std::string htmlToPlainText(const std::string& html) {
+std::string htmlToPlainText(const std::string& html, const char headingMarker) {
   std::string output;
   output.reserve(html.size());
 
@@ -113,10 +117,18 @@ std::string htmlToPlainText(const std::string& html) {
         continue;
       }
       const TagBreak separator = tagBreak(html, i + 1, close);
-      if (separator == TagBreak::Line)
+      if (separator == TagBreak::Line) {
         appendBreak(output);
-      else if (separator == TagBreak::Paragraph)
+      } else if (separator == TagBreak::Paragraph) {
         appendBreak(output, 2);
+      } else if (separator == TagBreak::HeadingOpen) {
+        appendBreak(output, 2);
+        if (headingMarker != '\0') output.push_back(headingMarker);
+      } else if (separator == TagBreak::HeadingClose) {
+        // With a marker the heading is one bold label line, so the text after it
+        // starts on the next line; without one it stays a paragraph.
+        appendBreak(output, headingMarker != '\0' ? 1 : 2);
+      }
       i = close + 1;
       continue;
     }

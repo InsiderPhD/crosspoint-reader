@@ -3,6 +3,7 @@
 #include <HalStorage.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,61 @@ struct DictLocation {
   // Set when the search was cut short by an .idx open or seek failure rather than
   // reaching a verdict, so a failed search isn't reported as a genuine miss.
   bool readError = false;
+};
+
+// Marks the headword label line of a combined plain-text definition, and a
+// heading line after htmlToPlainText(): the definition viewer draws a line
+// that starts with this byte in bold. A control byte no dictionary text uses.
+inline constexpr char DICTIONARY_PLAIN_HEADWORD_MARKER = '\x01';
+
+// The entries one looked-up word resolves to, with the headword each is filed
+// under. A .syn can point one synonym at several headwords (よんで -> 読む and
+// 呼ぶ), so a word can map to several definitions.
+//
+// Fixed capacity, no growth: how many entries a word has is unknown until the
+// index has been scanned, and a container that doubles while it scans is three
+// heap operations per growth on the C3. Allocated once per lookup (~1.4KB),
+// freed when the lookup returns. A longer group is cut at MAX_ENTRIES (or when
+// the headword pool is full) and logged; 32 definitions of one word is already
+// far more than anyone pages through on e-ink.
+class DictEntryList {
+ public:
+  static constexpr size_t MAX_ENTRIES = 32;
+  static constexpr size_t POOL_BYTES = 1024;
+
+  void clear() {
+    count = 0;
+    poolUsed = 0;
+    truncated = false;
+  }
+  bool empty() const { return count == 0; }
+  size_t size() const { return count; }
+  bool wasTruncated() const { return truncated; }
+  const char* headword(size_t i) const { return pool + entries[i].headwordOffset; }
+  DictLocation location(size_t i) const {
+    DictLocation loc;
+    loc.offset = entries[i].offset;
+    loc.size = entries[i].size;
+    loc.found = true;
+    return loc;
+  }
+
+  // Append unless an entry with the same .dict range is already listed (the
+  // same definition reached twice). False when the list or the headword pool
+  // is full — the caller stops scanning; what was collected is still shown.
+  bool appendUnique(const char* headword, const DictLocation& location);
+
+ private:
+  struct Entry {
+    uint32_t offset;
+    uint32_t size;
+    uint16_t headwordOffset;
+  };
+  Entry entries[MAX_ENTRIES] = {};
+  char pool[POOL_BYTES] = {};
+  uint16_t count = 0;
+  uint16_t poolUsed = 0;
+  bool truncated = false;
 };
 
 // Slim StarDict reader: exact-match lookup with a synonym and mini stemming
@@ -79,7 +135,10 @@ class Dictionary {
   // synonyms then mini stem variants (French elisions l'/d'/qu'/j'..., else
   // English -'s/-s/-es/-ies/-ed/-ing). On a hit fills
   // the definition text (capped at MAX_DEFINITION_BYTES) and the headword as
-  // stored in the index. Returns true on a hit. *outResult (if provided)
+  // stored in the index. A synonym that resolves to several headwords returns
+  // all their definitions in dictionary order, each labelled with its
+  // headword (<h2> in HTML, DICTIONARY_PLAIN_HEADWORD_MARKER line in plain
+  // text), and the looked-up word as the headword. Returns true on a hit. *outResult (if provided)
   // reports the precise outcome so the UI can distinguish a genuine miss from a
   // decompression / low-memory / read failure.
   bool lookup(const char* word, std::string& definitionOut, std::string& matchedHeadwordOut,
@@ -115,7 +174,7 @@ class Dictionary {
   // ~10 SD opens and ~10 std::string path temporaries per word, churning the
   // same heap whose fragmentation makes lookups fail mid-session. Opened once
   // per lookup instead, with the paths built via buildPath(). The .syn / .sidx
-  // handles are opened lazily by locateSynonym() — only an exact miss consults
+  // handles are opened lazily by locateSynonyms() — only an exact miss consults
   // them, so a hit never pays for two extra SD opens.
   struct LookupSession {
     HalFile idx;
@@ -155,12 +214,15 @@ class Dictionary {
   DictLocation locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
 
   // Resolve an ordinal (the N-th .idx entry, 0-based) to its .dict location via
-  // the .qidx samples. Used to follow a .syn synonym back to its headword.
-  DictLocation locateByOrdinal(LookupSession& session, uint32_t ordinal, std::string* matchedHeadwordOut);
+  // the .qidx samples. Used to follow a .syn synonym back to its headword,
+  // which it leaves in wordBuf.
+  DictLocation locateByOrdinal(LookupSession& session, uint32_t ordinal);
 
-  // Bisect the .syn/.sidx synonym index for target; on a hit follow its ordinal
-  // through locateByOrdinal(). Returns not-found when no .syn exists.
-  DictLocation locateSynonym(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
+  // Bisect the .syn/.sidx synonym index for target and follow EVERY matching
+  // record's ordinal through locateByOrdinal(), appending each resolved entry
+  // to out. *readError is set when the search could not reach a verdict (a
+  // .syn that would not open, or a failed seek) rather than genuinely missing.
+  void locateSynonyms(LookupSession& session, const char* target, DictEntryList& out, bool* readError);
 
   // One streaming pass over sourcePath writing a sampled-offset sidecar. Each
   // source entry is a NUL-terminated word followed by suffixBytes fixed bytes
@@ -176,7 +238,15 @@ class Dictionary {
 
   // Read the definition at location. On failure returns false and, if outResult
   // is given, sets it to the specific reason (Decompress / LowMemory / ReadError).
-  bool readDefinition(const DictLocation& location, std::string& out, LookupResult* outResult = nullptr);
+  // append: add to the end of out instead of replacing it (out is restored to
+  // its previous length on failure); the combined text stays under
+  // MAX_DEFINITION_BYTES.
+  bool readDefinition(const DictLocation& location, std::string& out, LookupResult* outResult = nullptr,
+                      bool append = false);
+
+  // Read every entry of a multi-entry group into out, each behind its headword
+  // label. Entries that would push past MAX_DEFINITION_BYTES are skipped.
+  bool readLabelledGroup(const DictEntryList& group, std::string& out, LookupResult* outResult);
   static void stemVariants(const std::string& word, std::vector<std::string>& out);
 
   // Read a null-terminated word from an open file into buf (max bufSize-1

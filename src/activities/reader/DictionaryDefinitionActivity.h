@@ -38,9 +38,12 @@ class DictionaryDefinitionActivity final : public Activity {
  private:
   // One wrapped display line: a byte span of `definition`. Wrapping keeps
   // lines under the screen width, so uint16_t length is ample.
+  // bold: the line began with DICTIONARY_PLAIN_HEADWORD_MARKER (an entry's
+  // headword label, or a heading in the HTML fallback); still 8 bytes.
   struct Line {
     uint32_t start;
     uint16_t len;
+    bool bold;
   };
 
   // Usable body-text area between the header and the button hints.
@@ -52,7 +55,7 @@ class DictionaryDefinitionActivity final : public Activity {
   BodyArea bodyArea() const;
   bool layoutHtmlPages();
   void wrapText();
-  int measureSpan(int fontId, const char* text, size_t len) const;
+  int measureSpan(int fontId, const char* text, size_t len, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   void drawBody(int fontId, int x, int startY) const;
 
   const std::string headword;

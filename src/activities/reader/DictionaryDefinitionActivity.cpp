@@ -12,6 +12,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/DictHtmlPages.h"
+#include "util/Dictionary.h"
 #include "util/HtmlToPlainText.h"
 #include "util/TouchListNav.h"
 
@@ -39,7 +40,7 @@ void DictionaryDefinitionActivity::onEnter() {
   // C-string font APIs below both see the whole definition.
   std::replace(definition.begin(), definition.end(), '\0', '\n');
   if (!(htmlDefinition && definition.size() <= MAX_STYLED_HTML_BYTES && layoutHtmlPages())) {
-    definition = htmlToPlainText(definition);
+    definition = htmlToPlainText(definition, DICTIONARY_PLAIN_HEADWORD_MARKER);
     wrapText();
   }
   requestUpdate();
@@ -75,12 +76,13 @@ bool DictionaryDefinitionActivity::layoutHtmlPages() {
   return true;
 }
 
-int DictionaryDefinitionActivity::measureSpan(const int fontId, const char* text, size_t len) const {
+int DictionaryDefinitionActivity::measureSpan(const int fontId, const char* text, size_t len,
+                                              const EpdFontFamily::Style style) const {
   char buf[MAX_LINE_BYTES + 1];
   len = std::min(len, MAX_LINE_BYTES);
   memcpy(buf, text, len);
   buf[len] = '\0';
-  return renderer.getTextAdvanceX(fontId, buf, EpdFontFamily::REGULAR);
+  return renderer.getTextAdvanceX(fontId, buf, style);
 }
 
 // Greedy word-wrap of `definition` into byte spans. '\n' breaks lines (blank
@@ -95,7 +97,7 @@ void DictionaryDefinitionActivity::wrapText() {
   // SD-card fonts: merge every definition codepoint into the persistent
   // advance table up front. Otherwise each unseen codepoint measured below
   // falls back to an on-demand glyph load from SD (8-slot overflow ring).
-  renderer.ensureSdCardFontReady(fontId, definition.c_str(), 0x01 /* REGULAR */);
+  renderer.ensureSdCardFontReady(fontId, definition.c_str(), 0x03 /* REGULAR + BOLD (labels) */);
 
   const BodyArea body = bodyArea();
   const int maxWidth = body.width;
@@ -108,16 +110,26 @@ void DictionaryDefinitionActivity::wrapText() {
   uint32_t lineStart = 0;
   uint32_t lineEnd = 0;  // one past the last token byte on the current line
   int lineWidth = 0;
+  bool lineBold = false;
+  const auto style = [&lineBold] { return lineBold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR; };
 
   const auto flushLine = [&](uint32_t nextStart) {
-    lines.push_back({lineStart, static_cast<uint16_t>(lineEnd - lineStart)});
+    lines.push_back({lineStart, static_cast<uint16_t>(lineEnd - lineStart), lineBold});
     lineStart = nextStart;
     lineEnd = nextStart;
     lineWidth = 0;
+    lineBold = false;
   };
 
   uint32_t i = 0;
   while (i < n) {
+    // A marker opening a source line makes that line (and its wrapped
+    // continuation) bold: an entry's headword label, or a heading.
+    if (text[i] == DICTIONARY_PLAIN_HEADWORD_MARKER && lineEnd == lineStart && i == lineStart) {
+      lineStart = lineEnd = ++i;
+      lineBold = true;
+      continue;
+    }
     const char c = text[i];
     if (c == '\n' || c == '\0') {
       flushLine(i + 1);
@@ -141,7 +153,7 @@ void DictionaryDefinitionActivity::wrapText() {
     // continuation byte, so this is a no-op there.
     while (i - tokenStart > 1 && (text[i] & 0xC0) == 0x80) i--;
     const uint32_t tokenLen = i - tokenStart;
-    const int tokenWidth = measureSpan(fontId, text + tokenStart, tokenLen);
+    const int tokenWidth = measureSpan(fontId, text + tokenStart, tokenLen, style());
 
     if (lineEnd == lineStart) {
       lineStart = tokenStart;
@@ -152,7 +164,9 @@ void DictionaryDefinitionActivity::wrapText() {
       lineEnd = tokenStart + tokenLen;
       lineWidth += spaceWidth + tokenWidth;
     } else {
+      const bool bold = lineBold;
       flushLine(tokenStart);
+      lineBold = bold;  // a wrapped label stays bold
       lineEnd = tokenStart + tokenLen;
       lineWidth = tokenWidth;
     }
@@ -165,7 +179,7 @@ void DictionaryDefinitionActivity::wrapText() {
       uint32_t lastFit = 0;
       for (uint32_t f = 1; f <= len; f++) {
         if (f == len || (text[lineStart + f] & 0xC0) != 0x80) {  // codepoint boundary
-          if (measureSpan(fontId, text + lineStart, f) > maxWidth) break;
+          if (measureSpan(fontId, text + lineStart, f, style()) > maxWidth) break;
           lastFit = f;
         }
       }
@@ -177,9 +191,11 @@ void DictionaryDefinitionActivity::wrapText() {
       }
       const uint32_t rest = lineStart + lastFit;
       lineEnd = rest;
+      const bool bold = lineBold;
       flushLine(rest);
+      lineBold = bold;
       lineEnd = rest + (len - lastFit);
-      lineWidth = measureSpan(fontId, text + lineStart, lineEnd - lineStart);
+      lineWidth = measureSpan(fontId, text + lineStart, lineEnd - lineStart, style());
     }
   }
   if (lineEnd > lineStart) flushLine(n);
@@ -270,7 +286,8 @@ void DictionaryDefinitionActivity::drawBody(const int fontId, const int x, const
     const size_t len = std::min(static_cast<size_t>(lines[i].len), MAX_LINE_BYTES);
     memcpy(buf, definition.c_str() + lines[i].start, len);
     buf[len] = '\0';
-    renderer.drawText(fontId, x, startY + (i - firstLine) * lineHeight, buf);
+    renderer.drawText(fontId, x, startY + (i - firstLine) * lineHeight, buf, true,
+                      lines[i].bold ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR);
   }
 }
 

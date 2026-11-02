@@ -14,16 +14,15 @@
 static int testsPassed = 0;
 static int testsFailed = 0;
 
-#define ASSERT_STR(actual, expected)                                                              \
-  do {                                                                                            \
-    const std::string _a = (actual);                                                              \
-    const std::string _e = (expected);                                                            \
-    if (_a != _e) {                                                                               \
-      fprintf(stderr, "  FAIL: %s:%d: got \"%s\", expected \"%s\"\n", __FILE__, __LINE__,         \
-              _a.c_str(), _e.c_str());                                                            \
-      testsFailed++;                                                                              \
-      return;                                                                                     \
-    }                                                                                             \
+#define ASSERT_STR(actual, expected)                                                                               \
+  do {                                                                                                             \
+    const std::string _a = (actual);                                                                               \
+    const std::string _e = (expected);                                                                             \
+    if (_a != _e) {                                                                                                \
+      fprintf(stderr, "  FAIL: %s:%d: got \"%s\", expected \"%s\"\n", __FILE__, __LINE__, _a.c_str(), _e.c_str()); \
+      testsFailed++;                                                                                               \
+      return;                                                                                                      \
+    }                                                                                                              \
   } while (0)
 
 static void stripsTagsAndKeepsText() {
@@ -52,6 +51,19 @@ static void headingsBreakLikeParagraphs() {
     ASSERT_STR(htmlToPlainText(html), "title\n\nbody");
   }
   ASSERT_STR(htmlToPlainText("<hr>after"), "after");
+  testsPassed++;
+}
+
+static void headingMarkerLabelsTheHeadingLine() {
+  // The dictionary's combined definitions label each entry with an <h2>; the
+  // plain-text fallback keeps it as one marked line the viewer draws in bold.
+  ASSERT_STR(htmlToPlainText("<h2>go</h2>to move<h2>wend</h2>to go slowly", '\x01'),
+             "\x01go\nto move\n\n\x01wend\nto go slowly");
+  ASSERT_STR(htmlToPlainText("<p>a</p><H3 class=\"x\">b</H3>c", '\x01'),
+             "a\n\n\x01"
+             "b\nc");
+  // No marker: headings stay paragraphs, as before.
+  ASSERT_STR(htmlToPlainText("<h2>go</h2>to move"), "go\n\nto move");
   testsPassed++;
 }
 
@@ -87,6 +99,7 @@ int main() {
   stripsTagsAndKeepsText();
   blockElementsBecomeBreaks();
   headingsBreakLikeParagraphs();
+  headingMarkerLabelsTheHeadingLine();
   decodesEntities();
   trimsSurroundingWhitespace();
   survivesMalformedMarkup();
