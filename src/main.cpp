@@ -47,6 +47,7 @@
 #include "util/HardcoverSync.h"
 #include "util/HeapReport.h"
 #include "util/HeapTrace.h"
+#include "util/PluginEvents.h"
 #include "util/PowerHistory.h"
 #include "util/ReaderCombos.h"
 #include "util/ScreenshotUtil.h"
@@ -371,6 +372,12 @@ void enterDeepSleep(bool fromTimeout) {
 
   PowerHistory::commitBeforeSleep(gpio.isUsbConnectedCached());
   APP_STATE.saveToFile();
+
+#if CROSSPOINT_SD_PLUGINS
+  // Plugin events: queue reader.session / sleep.enter while the reader is still
+  // on screen, and deliver the ones whose handler opted in (bounded WiFi join).
+  pluginevents::prepareSleep(/*allowNetwork=*/true);
+#endif
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
@@ -776,6 +783,11 @@ void setup() {
   BOOT_PHASE("reading stats");
   BF_TOKEN_STORE.loadFromFile();
   HC_TOKEN_STORE.loadFromFile();
+#if CROSSPOINT_SD_PLUGINS
+  // Plugin event subscriptions (a few small device.json reads; nothing when
+  // the Plugins setting is off), so reader tracking is armed from the first page.
+  pluginevents::refreshSubscriptions();
+#endif
 
   // Silent NTP attempt against the last-connected WiFi network, on a background
   // task — non-blocking. Up to 3 SNTP retries, ~10s worst case, no UI shown.
@@ -1196,6 +1208,10 @@ void loop() {
 
   const unsigned long activityStartTime = millis();
   activityManager.loop();
+#if CROSSPOINT_SD_PLUGINS
+  // Plugin reader events from the pages the render task painted.
+  pluginevents::pollReader();
+#endif
   const unsigned long activityDuration = millis() - activityStartTime;
 
   const unsigned long loopDuration = millis() - loopStartTime;

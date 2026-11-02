@@ -19,13 +19,14 @@ constexpr size_t MAX_TOKEN_FILE_SIZE = 2 * 1024;
 // Resolves the caller's reused TLS session (or `tmp`) into a configured,
 // connected client, or nullptr if begin() failed.
 freeink::SecureHttpClient* openClient(freeink::SecureHttpClient* session, freeink::SecureHttpClient& tmp,
-                                      const std::string& url, const pluginhttp::Headers& headers) {
+                                      const std::string& url, const pluginhttp::Headers& headers,
+                                      const uint32_t timeoutMs) {
   freeink::SecureHttpClient& http = session ? *session : tmp;
   http.setUserAgent("CrossPoint");
   // Same trust posture as every other SecureNet consumer: no CA bundle ships
   // with the transport, so verification is skipped; traffic stays encrypted.
   http.setInsecure();
-  http.setTimeout(30000);
+  http.setTimeout(timeoutMs);
   if (!http.begin(pluginhttp::escapeUrl(url))) return nullptr;
   for (const auto& h : headers) http.addHeader(h.first, h.second);
   return &http;
@@ -198,9 +199,10 @@ void loadConfigFile(const std::string& file, Headers& out) {
 }
 
 int request(freeink::SecureHttpClient* session, const std::string& url, const std::string& method,
-            const std::string& body, const Headers& headers, std::string& out, const size_t maxResponse) {
+            const std::string& body, const Headers& headers, std::string& out, const size_t maxResponse,
+            const uint32_t timeoutMs) {
   freeink::SecureHttpClient tmp;
-  freeink::SecureHttpClient* httpPtr = openClient(session, tmp, url, headers);
+  freeink::SecureHttpClient* httpPtr = openClient(session, tmp, url, headers, timeoutMs);
   if (!httpPtr) return -1;
   freeink::SecureHttpClient& http = *httpPtr;
 
@@ -242,9 +244,10 @@ int request(freeink::SecureHttpClient* session, const std::string& url, const st
 }
 
 int requestToFile(freeink::SecureHttpClient* session, const std::string& url, const std::string& method,
-                  const std::string& body, const Headers& headers, const char* destPath, const size_t maxResponse) {
+                  const std::string& body, const Headers& headers, const char* destPath, const size_t maxResponse,
+                  const uint32_t timeoutMs) {
   freeink::SecureHttpClient tmp;
-  freeink::SecureHttpClient* httpPtr = openClient(session, tmp, url, headers);
+  freeink::SecureHttpClient* httpPtr = openClient(session, tmp, url, headers, timeoutMs);
   if (!httpPtr) return -1;
   freeink::SecureHttpClient& http = *httpPtr;
 
@@ -281,10 +284,10 @@ int requestToFile(freeink::SecureHttpClient* session, const std::string& url, co
 
 bool mintPasswordToken(freeink::SecureHttpClient* session, const std::string& url, const std::string& method,
                        const std::string& body, const Headers& headers, const std::string& tokenPath,
-                       std::string& outToken) {
+                       std::string& outToken, const uint32_t timeoutMs) {
   std::string response;
   constexpr size_t MAX_AUTH_RESPONSE = 8 * 1024;
-  const int status = request(session, url, method, body, headers, response, MAX_AUTH_RESPONSE);
+  const int status = request(session, url, method, body, headers, response, MAX_AUTH_RESPONSE, timeoutMs);
   if (status < 200 || status >= 300) return false;
   JsonDocument doc;
   if (deserializeJson(doc, response) != DeserializationError::Ok) return false;

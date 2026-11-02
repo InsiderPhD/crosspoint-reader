@@ -28,7 +28,12 @@ inline constexpr const char* PLUGIN_CAPABILITIES =
     "catalog.encoded_item_fields,"
     "catalog.list_index_mapping,"
     "catalog.list_requirements,"
-    "catalog.server_paths";
+    "catalog.server_paths,"
+    "events.reader.open,"
+    "events.reader.exit,"
+    "events.reader.session,"
+    "events.book.downloaded,"
+    "events.sleep.enter";
 // clang-format on
 #else
 // Boards without plugin support (lib/DevicePolicy) run no plugin contract.

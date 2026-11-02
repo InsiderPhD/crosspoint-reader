@@ -36,6 +36,7 @@
 #include "util/ButtonNavigator.h"
 #include "util/FirmwareIdentity.h"
 #include "util/HtmlToPlainText.h"
+#include "util/PluginEvents.h"
 #include "util/PluginHttp.h"
 #include "util/PluginLocations.h"
 #include "util/QrUtils.h"
@@ -441,17 +442,41 @@ class XmlListParser {
 
 namespace {
 // Reads "title"/"description" from a plugin JSON file into the ref, only
-// overwriting non-empty values (so device.json wins over manifest.json).
-void readTitleDesc(const std::string& path, PluginRef& ref) {
+// overwriting non-empty values (so device.json wins over manifest.json). For
+// device.json also records whether it is a catalog (browse.url) or only
+// declares events.
+void readTitleDesc(const std::string& path, PluginRef& ref, const bool deviceManifest = false) {
   std::string raw;
   if (!Storage.readFileToString("PCAT", path, MAX_MANIFEST_SIZE, raw)) return;
   JsonDocument filter;
   filter["title"] = true;
   filter["description"] = true;
+  if (deviceManifest) filter["browse"]["url"] = true;
   JsonDocument doc;
   if (deserializeJson(doc, raw, DeserializationOption::Filter(filter)) != DeserializationError::Ok) return;
   if (doc["title"].is<const char*>()) ref.title = doc["title"].as<const char*>();
   if (doc["description"].is<const char*>()) ref.description = doc["description"].as<const char*>();
+  if (deviceManifest) {
+    const char* browseUrl = doc["browse"]["url"] | "";
+    ref.hasCatalog = browseUrl[0] != '\0';
+  }
+}
+
+// Plugin folder name from its "<root>/<name>/device.json" manifest path.
+std::string pluginNameFromManifestPath(const std::string& manifestPath) {
+  const size_t slash = manifestPath.rfind('/');
+  if (slash == std::string::npos || slash == 0) return "";
+  const size_t parent = manifestPath.rfind('/', slash - 1);
+  if (parent == std::string::npos) return "";
+  return manifestPath.substr(parent + 1, slash - parent - 1);
+}
+
+// book.downloaded plugin event, after a catalog download lands on SD.
+void emitBookDownloaded(const std::string& manifestPath, const std::string& path, const std::string& title) {
+  if (!pluginevents::anySubscriber(pluginevents::Event::BookDownloaded)) return;
+  const std::string plugin = pluginNameFromManifestPath(manifestPath);
+  const pluginevents::Var vars[] = {{"path", path.c_str()}, {"title", title.c_str()}, {"plugin", plugin.c_str()}};
+  pluginevents::emit(pluginevents::Event::BookDownloaded, vars, 3);
 }
 }  // namespace
 
@@ -472,7 +497,7 @@ std::vector<PluginRef> discoverPlugins() {
     if (Storage.exists(readmePath.c_str())) ref.readmePath = readmePath;
     // manifest.json first, then device.json overrides (on-device authority).
     if (e.hasManifest) readTitleDesc(e.dir + "/manifest.json", ref);
-    if (e.hasDevice) readTitleDesc(ref.manifestPath, ref);
+    if (e.hasDevice) readTitleDesc(ref.manifestPath, ref, true);
     plugins.push_back(std::move(ref));
   }
   return plugins;
@@ -778,6 +803,29 @@ void PluginCatalogActivity::onEnter() {
 
 void PluginCatalogActivity::enterPluginPicker() {
   installedPlugins = discoverPlugins();
+  // Discovery just re-read the plugin folders: keep the event subscriptions in
+  // step (a plugin installed since boot starts receiving events, a removed one
+  // stops), then disclose under each plugin which device events it receives,
+  // i.e. what reading activity it can send off the device.
+  pluginevents::refreshSubscriptions();
+  static constexpr StrId EVENT_LABELS[] = {StrId::STR_EVENT_BOOK_OPEN, StrId::STR_EVENT_BOOK_CLOSE,
+                                           StrId::STR_EVENT_READING_SESSION, StrId::STR_EVENT_DOWNLOAD,
+                                           StrId::STR_EVENT_SLEEP};
+  static_assert(sizeof(EVENT_LABELS) / sizeof(EVENT_LABELS[0]) == static_cast<size_t>(pluginevents::Event::COUNT),
+                "event label table out of sync");
+  for (auto& plugin : installedPlugins) {
+    const uint8_t mask = pluginevents::subscriptionMask(plugin.name.c_str());
+    if (mask == 0) continue;
+    std::string events;
+    for (size_t i = 0; i < std::size(EVENT_LABELS); i++) {
+      if (!(mask & (1u << i))) continue;
+      if (!events.empty()) events += ", ";
+      events += I18N.get(EVENT_LABELS[i]);
+    }
+    char line[192];
+    snprintf(line, sizeof(line), tr(STR_PLUGIN_RECEIVES_EVENTS), events.c_str());
+    plugin.description = plugin.description.empty() ? line : std::string(line) + ". " + plugin.description;
+  }
 
   manifestPath.clear();
   manifest = Manifest{};
@@ -1484,6 +1532,9 @@ void PluginCatalogActivity::downloadItem(const Item& item) {
       }
       written.push_back(dest);
     }
+    emitBookDownloaded(manifestPath, written.empty() ? "" : written.front(), item.title);
+    // Bundles are how plugins install: pick up new event subscriptions now.
+    pluginevents::refreshSubscriptions();
     state = State::DONE;
     statusMessage = item.title;
     requestUpdate();
@@ -1612,6 +1663,7 @@ void PluginCatalogActivity::downloadItem(const Item& item) {
     }
   }
 
+  emitBookDownloaded(manifestPath, dest, item.title);
   state = State::DONE;
   statusMessage = item.title;
   requestUpdate();
@@ -1851,9 +1903,9 @@ void PluginCatalogActivity::activateIndex(const int index) {
     if (index < 0 || index >= rowCount()) return;
     const PluginRef& plugin = installedPlugins[index];
     pickerReturnRow = index;
-    if (plugin.manifestPath.empty()) {
-      // Web-only: no catalog to open, so show its description + README (how
-      // to use it from the web interface) instead.
+    if (plugin.manifestPath.empty() || !plugin.hasCatalog) {
+      // Web-only or events-only: no catalog to open, so show its description
+      // + README (how to set it up) instead.
       infoOpen = true;
       startActivityForResult(std::make_unique<PluginInfoActivity>(renderer, mappedInput, plugin),
                              [this](const ActivityResult&) {

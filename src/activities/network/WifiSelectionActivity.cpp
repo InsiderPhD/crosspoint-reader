@@ -15,6 +15,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/HardcoverSync.h"
+#include "util/PluginEvents.h"
 #include "util/TouchListNav.h"
 #include "util/WifiTimeSync.h"
 
@@ -298,6 +299,11 @@ void WifiSelectionActivity::checkConnectionStatus() {
       RenderLock lock(*this);
       WIFI_STORE.setLastConnectedSsid(selectedSSID);
     }
+
+#if CROSSPOINT_SD_PLUGINS
+    // Online now: deliver queued plugin events (bounded; a no-op without any).
+    pluginevents::drain();
+#endif
 
     // If we entered a new password, ask if user wants to save it
     // Otherwise, immediately complete so parent can start web server

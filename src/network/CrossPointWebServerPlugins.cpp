@@ -8,6 +8,7 @@
 // CrossPointWebServer.cpp so the C3 boards compile none of it.
 
 #include <ArduinoJson.h>
+#include <FsHelpers.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <MD5Builder.h>
@@ -27,6 +28,7 @@
 #include "CrossPointWebServer.h"
 #include "ProtectedPaths.h"
 #include "util/BookCacheUtils.h"
+#include "util/PluginEvents.h"
 #include "util/PluginLocations.h"
 
 namespace {
@@ -62,6 +64,19 @@ bool CrossPointWebServer::readJsonBody(JsonDocument& out) const {
 // GET /api/plugins -> [{ "name", "title", "mount" }, ...]. Only plugins with a
 // plugin.js are listed (the page loads it); optional manifest.json supplies the
 // title and mount point.
+namespace {
+// book.downloaded for a book a browser plugin put on the card (not for the
+// small config / token files plugins also write).
+void emitPluginBookDownloaded(const std::string& path, const char* plugin) {
+  if (!FsHelpers::hasEpubExtension(path) && !FsHelpers::hasXtcExtension(path) && !FsHelpers::hasTxtExtension(path)) {
+    return;
+  }
+  if (!pluginevents::anySubscriber(pluginevents::Event::BookDownloaded)) return;
+  const pluginevents::Var vars[] = {{"path", path.c_str()}, {"title", ""}, {"plugin", plugin}};
+  pluginevents::emit(pluginevents::Event::BookDownloaded, vars, 3);
+}
+}  // namespace
+
 bool CrossPointWebServer::rejectIfPluginsDisabled() const {
   if (SETTINGS.pluginsEnabled) return false;
   server->send(403, "text/plain", "plugin system disabled");
@@ -368,6 +383,7 @@ void CrossPointWebServer::handleFetch() {
   if (!readJsonBody(req)) return;
   const std::string url = req["url"] | "";
   const std::string dest = req["dest"] | "";
+  const std::string plugin = req["plugin"] | "";
   const bool probeOnly = req["probe"] | false;
   const size_t requestedOffset = req["offset"] | 0;
   size_t segmentLimit = req["maxBytes"] | 0;
@@ -662,7 +678,10 @@ void CrossPointWebServer::handleFetch() {
   }
   file.flush();
   file.close();
-  if (complete && status >= 200 && status < 300) noteBookInstalled(dest);
+  if (complete && status >= 200 && status < 300) {
+    noteBookInstalled(dest);
+    emitPluginBookDownloaded(dest, plugin.c_str());
+  }
 
   if (segmentBoundary && !complete && status >= 200 && status < 300) {
     JsonDocument resp;
@@ -776,7 +795,10 @@ void CrossPointWebServer::handlePluginFs() {
   const size_t n = dataSize == 0 ? 0 : f.write(data, dataSize);
   f.flush();
   f.close();
-  if (n == dataSize && dataSize > 0) noteBookInstalled(path);
+  if (n == dataSize && dataSize > 0) {
+    noteBookInstalled(path);
+    emitPluginBookDownloaded(path, plugin.c_str());
+  }
 
   JsonDocument resp;
   resp["ok"] = (n == dataSize);

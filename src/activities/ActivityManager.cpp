@@ -20,6 +20,7 @@
 #include "reader/ReaderActivity.h"
 #include "settings/SettingsActivity.h"
 #include "util/FullScreenMessageActivity.h"
+#include "util/PluginEvents.h"
 
 namespace {
 // Guards waitingTaskHandle against concurrent access by the render task and the
@@ -91,6 +92,19 @@ void ActivityManager::renderTaskLoop() {
       // and moves with its state (a modal opening puts the slot back).
       ActionBar::setConfirmRedundant(currentActivity->tapActivatesConfirm());
       currentActivity->render(std::move(lock));
+#if CROSSPOINT_SD_PLUGINS
+      // Plugin reader events: a scalar snapshot of the page just painted.
+      // render() consumed `lock`, so take it again: the main task changes the
+      // activity stack only under RenderLock.
+      if (pluginevents::readerEventsWanted()) {
+        RenderLock snapshotLock;
+        if (currentActivity && currentActivity->isReaderActivity()) {
+          pluginevents::noteReaderRender(currentActivity->getScreenshotInfo(), true);
+        } else {
+          pluginevents::noteReaderRender(ScreenshotInfo{}, readerOnStack());
+        }
+      }
+#endif
     }
     renderDoneSeq.store(renderSeq);
     // Notify any task blocked in requestUpdateAndWait() that the render is done.
@@ -336,6 +350,14 @@ void ActivityManager::popActivity() {
 bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
 
 bool ActivityManager::isReaderActivity() const { return currentActivity && currentActivity->isReaderActivity(); }
+
+bool ActivityManager::readerOnStack() const {
+  if (currentActivity && currentActivity->isReaderActivity()) return true;
+  for (const auto& activity : stackActivities) {
+    if (activity && activity->isReaderActivity()) return true;
+  }
+  return false;
+}
 
 bool ActivityManager::isAtHome() const {
   return currentActivity && currentActivity->name == "Home" && stackActivities.empty() &&

@@ -32,6 +32,9 @@ struct PluginRef {
   std::string description;   // one-line summary, if provided
   std::string manifestPath;  // device.json path, "" for a web-only plugin
   std::string readmePath;    // README.md path, "" when absent
+  // device.json has browse.url: an openable catalog. An events-only
+  // device.json (background plugin) opens its info screen instead.
+  bool hasCatalog = false;
 };
 
 // Scans every plugin folder across the SD plugin roots. Called on demand

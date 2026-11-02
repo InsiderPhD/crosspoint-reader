@@ -5,6 +5,7 @@
 #if CROSSPOINT_SD_PLUGINS  // SD-card plugins: PSRAM boards only, see lib/DevicePolicy
 #include <ArduinoJson.h>
 
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -95,17 +96,19 @@ void loadConfigFile(const std::string& file, Headers& out);
 // polling carries state in 4xx bodies). Returns HTTP status, -1 on transport
 // failure / truncation / cap.
 int request(freeink::SecureHttpClient* session, const std::string& url, const std::string& method,
-            const std::string& body, const Headers& headers, std::string& out, size_t maxResponse);
+            const std::string& body, const Headers& headers, std::string& out, size_t maxResponse,
+            uint32_t timeoutMs = 30000);
 
 // Same request, body streamed to a file on SD instead of DRAM.
 int requestToFile(freeink::SecureHttpClient* session, const std::string& url, const std::string& method,
-                  const std::string& body, const Headers& headers, const char* destPath, size_t maxResponse);
+                  const std::string& body, const Headers& headers, const char* destPath, size_t maxResponse,
+                  uint32_t timeoutMs = 30000);
 
 // Password-grant token mint: runs the (already-substituted) auth request and
 // extracts the token at `tokenPath` from a 2xx JSON response.
 bool mintPasswordToken(freeink::SecureHttpClient* session, const std::string& url, const std::string& method,
                        const std::string& body, const Headers& headers, const std::string& tokenPath,
-                       std::string& outToken);
+                       std::string& outToken, uint32_t timeoutMs = 30000);
 
 }  // namespace pluginhttp
 

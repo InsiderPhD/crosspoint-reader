@@ -123,6 +123,8 @@ class ActivityManager {
   void popActivity();
 
   bool preventAutoSleep() const;
+  // The reader is current or under a child screen (its menu, a picker).
+  bool readerOnStack() const;
   bool isReaderActivity() const;
   // The Home screen itself, with nothing pushed over it and nothing pending.
   bool isAtHome() const;

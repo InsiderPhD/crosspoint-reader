@@ -193,6 +193,7 @@ Boards without plugin support (X3 / X4) report API `0` and no capabilities.
 | `catalog.list_index_mapping` | `browse.lists_url` is fetched with `lists_headers` and read through `lists_items` / `lists_fields`; a list's `id` fills `{list_id}` / `{list_id_enc}` |
 | `catalog.list_requirements` | manifest and fetched lists may carry a `requires` array of capabilities; a list needing one we lack is hidden |
 | `catalog.server_paths` | where a response supplies a URL (the `download.url_path` answer, a fetched list `url`, an item `details_url`), a server path (`/path`) is joined to the origin of the request that returned it |
+| `events.reader.open` `events.reader.exit` `events.reader.session` `events.book.downloaded` `events.sleep.enter` | the device.json `events` handlers for these events are delivered (see `plugin-events.md`) |
 
 ### Schema
 
