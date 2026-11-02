@@ -106,8 +106,7 @@ CrossPointPosition KOReaderSyncActivity::mapRemote(const KOReaderProgress& progr
 
 void KOReaderSyncActivity::performSync() {
   // Calculate document hash based on user's preferred method
-  const DocumentMatchMethod primaryMethod = KOREADER_STORE.getMatchMethod();
-  documentHash = documentHashFor(epubPath, primaryMethod);
+  documentHash = documentHashFor(epubPath, KOREADER_STORE.getMatchMethod());
   if (documentHash.empty()) {
     {
       RenderLock lock(*this);
@@ -158,26 +157,12 @@ void KOReaderSyncActivity::performSync() {
   }
   requestUpdateAndWait();
 
-  // Fetch remote progress. Smart sync also reads the record stored under the
-  // other document-id method (another reader may match by the other one) and
-  // keeps whichever is further ahead; uploads stay on the configured hash.
-  auto result = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
-  KOReaderProgress alternateProgress;
-  bool hasAlternateProgress = false;
-  if (smart) {
-    const DocumentMatchMethod altMethod =
-        primaryMethod == DocumentMatchMethod::FILENAME ? DocumentMatchMethod::BINARY : DocumentMatchMethod::FILENAME;
-    const std::string altHash = documentHashFor(epubPath, altMethod);
-    if (!altHash.empty() && altHash != documentHash &&
-        KOReaderSyncClient::getProgress(altHash, alternateProgress) == KOReaderSyncClient::OK) {
-      hasAlternateProgress = true;
-    }
-  }
-  if (result == KOReaderSyncClient::NOT_FOUND && hasAlternateProgress) {
-    remoteProgress = std::move(alternateProgress);
-    hasAlternateProgress = false;
-    result = KOReaderSyncClient::OK;
-  }
+  // Fetch remote progress under the configured Document Matching method only.
+  // Also reading the other method's record let a position saved for a
+  // different copy of the file (same name, other edition; or same bytes,
+  // other name) move this book somewhere that does not exist in it
+  // (CrossInk 88af432d9).
+  const auto result = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
 
   if (result == KOReaderSyncClient::NOT_FOUND) {
     // No remote progress on the server.
@@ -219,15 +204,6 @@ void KOReaderSyncActivity::performSync() {
 
   hasRemoteProgress = true;
   remotePosition = mapRemote(remoteProgress);
-  if (hasAlternateProgress) {
-    const CrossPointPosition alternatePosition = mapRemote(alternateProgress);
-    if (selectRemoteRecord(remotePosition, remoteProgress.percentage, alternatePosition,
-                           alternateProgress.percentage) == RemoteRecordChoice::Alternate) {
-      remoteProgress = std::move(alternateProgress);
-      remotePosition = alternatePosition;
-      LOG_DBG("KOSync", "Selected the alternate document-id record (further ahead)");
-    }
-  }
 
   // Calculate local progress in KOReader format (for display)
   const CrossPointPosition localPos = localPosition();

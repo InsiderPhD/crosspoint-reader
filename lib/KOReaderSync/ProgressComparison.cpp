@@ -40,10 +40,3 @@ ProgressComparison compareProgress(const CrossPointPosition& local, const float 
 
   return ProgressComparison::Unknown;
 }
-
-RemoteRecordChoice selectRemoteRecord(const CrossPointPosition& primary, const float primaryPercentage,
-                                      const CrossPointPosition& alternate, const float alternatePercentage) {
-  return compareProgress(primary, primaryPercentage, alternate, alternatePercentage) == ProgressComparison::RemoteAhead
-             ? RemoteRecordChoice::Alternate
-             : RemoteRecordChoice::Primary;
-}
