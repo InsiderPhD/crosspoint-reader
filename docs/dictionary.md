@@ -67,7 +67,12 @@ HTML dictionaries (`sametypesequence=h`) and XDXF dictionaries (`sametypesequenc
 A dictionary whose `.ifo` has no `sametypesequence` stores a type with every field of every entry. Those are decoded per entry: HTML (`h`), XDXF (`x`) and Pango (`g`) fields use the same formatting support, text fields are shown as text in the reading font, and binary fields (images, sounds) and resource lists are skipped. An entry with nothing displayable counts as not found. A missing or unreadable `.ifo` keeps the plain-text handling.
 
 - **Left/Right** or side **Up/Down** — previous / next page
-- **Back** — return to word selection
+- **Confirm** — select a word in the definition (**Left/Right** by word, side **Up/Down** by line), then **Confirm** again to look it up; **Back** cancels the selection
+- **Hold on a word** (X4 Pro) — look it up straight away; while selecting, a tap on a word looks it up
+- **Back** — return to the previous definition, on the page you left it; from the first one, back to the book
+- **Hold Confirm** (1 s) — close every definition and go straight back to the book (a long **Back** is the device-wide "go Home" gesture)
+
+Nested lookups use the same dictionary and keep up to 16 previous definitions; at that limit (or when the remembered words fill their 512-byte store) another lookup shows *"Lookup history full"* and leaves the current definition open. Only one definition is ever held in memory: the current one is released before the next is read, and **Back** reads the previous one from the SD card again, so going back costs a lookup. A failed nested lookup ("Not found") puts the definition you were reading back on the same page; if even that cannot be re-read, the screen closes.
 
 On the C3 boards the styled path declines more often than it does upstream, because the reader already holds more at that moment. The fallback is the same definition in plain text, not a failed lookup.
 

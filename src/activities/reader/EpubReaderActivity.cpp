@@ -2308,9 +2308,13 @@ void EpubReaderActivity::performDictionaryLookup(const std::string& word) {
   showDictionaryMessage = false;
 
   if (outcome.found) {
-    startActivityForResult(std::make_unique<DictionaryDefinitionActivity>(renderer, mappedInput, outcome.headword,
-                                                                          outcome.definition, outcome.html),
-                           [this](const ActivityResult&) { requestUpdate(); });
+    // The session and the looked-up word let the definition screen look up a
+    // word inside the definition and come back to this one (DictionaryLookup
+    // is a member of this activity, so it outlives the sub-screen).
+    startActivityForResult(
+        std::make_unique<DictionaryDefinitionActivity>(renderer, mappedInput, outcome.headword, outcome.definition,
+                                                       outcome.html, &dictionaryLookup, word),
+        [this](const ActivityResult&) { requestUpdate(); });
     return;
   }
 

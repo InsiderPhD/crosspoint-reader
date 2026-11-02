@@ -214,7 +214,7 @@ To look a word up, open the reader menu and choose **Look Up**, or bind **Look U
 | **Look up a phrase** | hold **Confirm** on its first word, move to its last word, **Confirm** |
 | **Back to reading** | **Back** (with a phrase started: drops the phrase first) |
 
-On the X4 Pro you can also tap a word to highlight it, tap it again to look it up, or hold on it to do both at once; for a phrase, tap its first word and then drag from that word to the last one. In the definition screen, **Left**/**Right** (or side **Up**/**Down**) page through a long entry and **Back** returns to word selection.
+On the X4 Pro you can also tap a word to highlight it, tap it again to look it up, or hold on it to do both at once; for a phrase, tap its first word and then drag from that word to the last one. In the definition screen, **Left**/**Right** (or side **Up**/**Down**) page through a long entry. Press **Confirm** to select a word *inside* the definition and **Confirm** again to look that up too (on the X4 Pro, hold on the word); **Back** steps back through the definitions you came through, and holding **Confirm** for a second closes them all and returns to the page. Up to 16 nested lookups are remembered.
 
 Two things that look like faults but are not:
 
