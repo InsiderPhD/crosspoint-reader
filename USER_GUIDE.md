@@ -258,6 +258,7 @@ Insert the SD card into a computer and copy files anywhere on it. KatiePoint sca
 4. **BookFusion Library** — browse and download from your linked [BookFusion](https://www.bookfusion.com/) cloud library (see **[Sync](#10-sync-bookfusion--koreader)** for account linking).
 5. **OPDS Browser** — browse and download from your OPDS catalogues. *Only shown once an OPDS server is added* (see below).
 6. **Plugins** *(X4 Pro / X4C)* — catalogs from plugins on the SD card. *Only shown once a plugin with an on-device screen is installed* (see below).
+7. **Sync Books** — sync the reading position of every book on the card with your KOReader / CrossPoint Sync server in one pass. *Only shown once a KOReader Sync account is set up* (see **[Sync Books](#sync-books-and-sync-book)**).
 
 ### OPDS Browser
 
@@ -572,6 +573,21 @@ With **Send Book Details** on, a book downloaded from BookFusion (or by an SD pl
 
 Positions are matched by the text on the page, not the page number, so two devices with different fonts or margins land on the same sentence. **Sync Clippings** sends the same text position with each highlight, so a highlight made on another device opens at the right page here.
 
+Sync only looks your book up under the **Document Matching** method you chose. A position another device saved under the other method stays on the server until you switch methods (or merge the books in the CrossPoint Sync app).
+
+With a **CrossPoint** or **Extended** server, each reader has its own id on the server (a scrambled value derived from the device, never its hardware address), so the server can tell your readers apart.
+
+### Sync Books and Sync Book
+
+- **Sync Book** — in a book's menu (hold Confirm on it in **Home**, **Library**, **Tags/Authors** or **Browse Files**). It opens the book and runs **Sync** straight away, exactly as the reader menu's Sync does, then stays in the book. Shown for EPUBs once a KOReader Sync account is set up (or for a BookFusion book with a linked account).
+- **Sync Books** — **Home → File Transfer → Sync Books**. Syncs every EPUB on the card that has a saved position, without opening any of them, then shows how many were uploaded, updated from the server, already in sync, differ or failed.
+  - **Smart Sync** keeps the further position: a book read further elsewhere moves here, a book read further here is uploaded.
+  - **Ask Every Time** never guesses: a book whose server position differs is left alone and listed under *Differs*; open it and use **Sync** to choose.
+  - On a **CrossPoint** / **Extended** server the first run checks everything, later runs only fetch what changed on the server since the last run and only upload books you read since they were last synced (8 per request). A **Standard** (KOReader) server is checked one book at a time.
+  - Unread books are skipped. Bluetooth is off while it runs (it only runs outside the reader).
+
+**Sync Reading Stats** (KOReader Sync settings, off by default; CrossPoint / Extended servers only) also sends your reading stats with **Sync Books**: overall totals, time of day and day of week, which days you read, your longest streak and the last 20 days of reading time, plus each book's time and sessions and a journal of your reading sessions (start and end time). Each upload replaces this reader's previous one, so re-running never counts twice. A server without stats shows *Requires CrossPoint Sync* instead of an error. Afterwards **Statistics → Overview** also shows your streak across all your devices next to this reader's own, e.g. `3  (all devices 5)`; the two are never merged.
+
 ---
 
 ## 11. Bluetooth Page Turner
@@ -757,6 +773,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.
 - **Language** *(action)* — set the UI language.
 - **Battery** *(action)* — the current level, plus a graph of battery level against time awake on battery since the last charge, with the awake time, days elapsed and reader pages turned in that period. The history is sampled each time the device goes to sleep, so it fills in over a few sleeps and costs no battery of its own; time spent plugged in is not counted.
+- **Release Notes** *(action)* — what is new in this release. The same screen appears once by itself the first time you reach Home after an update.
 - **About** *(action)* — device information: firmware version, board, chip, display, battery, free memory (and the largest free block), SD card size and free space, MAC address, uptime and the reason for the last restart. Press **Confirm** (or tap the first row) to save `support-info.txt` to the SD card root for a bug report. The file holds hardware facts, memory/SD/battery readings, a short list of numeric display settings and three lifetime reading totals (books finished, total reading time, number of sessions); it never contains WiFi names or passwords, account details, tokens, the MAC address, file names or book titles.
 - **Time to Sleep** — auto-sleep after 1 / 5 / 10 / 15 / 30 min of inactivity.
 - **Show Hidden Files** — show dotfiles in the browser.
