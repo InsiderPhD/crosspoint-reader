@@ -198,6 +198,10 @@ struct CssStyle {
   // grow when the border edges were added below.
   CssDisplay display = CssDisplay::Block;                       // display property
   CssVerticalAlign verticalAlign = CssVerticalAlign::Baseline;  // vertical-align (super/sub positioning)
+  // The last byte of that padding: text properties whose "defined" mark could not join
+  // CssPropertyFlags (all 32 bits are taken). Each carries its own set bit.
+  uint8_t smallCaps : 1 = 0;         // font-variant(-caps): small-caps / all-small-caps
+  uint8_t smallCapsDefined : 1 = 0;  // font-variant(-caps) given at all ("normal" turns it off)
 
   CssLength textIndent;      // First-line indent (deferred resolution)
   CssLength marginTop;       // Vertical spacing before block
@@ -218,6 +222,9 @@ struct CssStyle {
 #endif
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
+
+  // True when the rule sets anything applyOver() would copy.
+  [[nodiscard]] bool anySet() const { return defined.anySet() || smallCapsDefined; }
 
   [[nodiscard]] bool hasVisibleBorder() const {
     return borders[0].visible() || borders[1].visible() || borders[2].visible() || borders[3].visible();
@@ -309,6 +316,10 @@ struct CssStyle {
     }
     defined.borderStyle |= base.defined.borderStyle;
     defined.borderWidth |= base.defined.borderWidth;
+    if (base.smallCapsDefined) {
+      smallCaps = base.smallCaps;
+      smallCapsDefined = 1;
+    }
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
     if (base.defined.fontSize) {
       fontSize = base.fontSize;
@@ -352,6 +363,7 @@ struct CssStyle {
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
     fontSize = CssLength{};
 #endif
+    smallCaps = smallCapsDefined = 0;
     defined.clearAll();
   }
 };

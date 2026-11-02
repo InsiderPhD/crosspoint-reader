@@ -631,6 +631,18 @@ void CssParser::parseDeclarationIntoStyle(std::string_view decl, CssStyle& style
         iequalsAscii(mode, "break-spaces")) {
       style.defined.whiteSpacePre = 1;
     }
+  } else if (iequalsAscii(name, "font-variant") || iequalsAscii(name, "font-variant-caps")) {
+    // Only the caps part matters here; a font-variant shorthand may list other values.
+    bool smallCaps = false;
+    bool normal = false;
+    forEachDelimitedToken(stripTrailingImportant(value), isCssWhitespace, [&](const std::string_view token) {
+      smallCaps = smallCaps || iequalsAscii(token, "small-caps") || iequalsAscii(token, "all-small-caps");
+      normal = normal || iequalsAscii(token, "normal");
+    });
+    if (smallCaps || normal) {
+      style.smallCaps = smallCaps ? 1 : 0;
+      style.smallCapsDefined = 1;
+    }
   } else if (iequalsAscii(name, "background") || iequalsAscii(name, "background-color")) {
     if (isShadedBackground(value)) style.defined.shaded = 1;
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
@@ -818,7 +830,7 @@ void CssParser::processRuleBlockWithStyle(std::string_view selectorGroup, const 
   // A rule that sets no supported property can never change a resolved style
   // (applyOver only copies defined properties), so storing it only costs a map
   // node + key string per selector and a slot against MAX_RULES.
-  if (!style.defined.anySet()) {
+  if (!style.anySet()) {
     return;
   }
 
@@ -1188,6 +1200,7 @@ bool CssParser::saveToCache() const {
     file.write(static_cast<uint8_t>(style.verticalAlign));
     file.write(static_cast<uint8_t>(style.direction));
     for (const CssBorderSide& side : style.borders) file.write(side.packed());
+    file.write(static_cast<uint8_t>(style.smallCaps | (style.smallCapsDefined << 1)));
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
     writeLength(style.fontSize);
 #endif
@@ -1278,8 +1291,8 @@ bool CssParser::loadFromCache() {
   constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
   // 4 enums + display, the lengths, verticalAlign + direction, 4 border edges, defined bits.
   constexpr size_t CSS_FIXED_STYLE_BYTES = 5 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
-                                           2 * sizeof(uint8_t) + 4 * sizeof(uint8_t) + sizeof(uint32_t) +
-                                           (CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? CSS_LENGTH_BYTES : 0);
+                                           2 * sizeof(uint8_t) + 4 * sizeof(uint8_t) + sizeof(uint8_t) +
+                                           sizeof(uint32_t) + (CROSSPOINT_EPUB_BLOCK_FONT_SIZES ? CSS_LENGTH_BYTES : 0);
 
   // Read each rule
   for (uint16_t i = 0; i < ruleCount; ++i) {
@@ -1393,6 +1406,14 @@ bool CssParser::loadFromCache() {
         return false;
       }
     }
+
+    uint8_t textBits = 0;
+    if (file.read(&textBits, 1) != 1 || textBits > 3) {
+      clear();
+      return false;
+    }
+    style.smallCaps = textBits & 1;
+    style.smallCapsDefined = (textBits >> 1) & 1;
 
 #if CROSSPOINT_EPUB_BLOCK_FONT_SIZES
     if (!readLength(style.fontSize) ||

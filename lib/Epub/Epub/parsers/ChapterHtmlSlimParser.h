@@ -255,6 +255,7 @@ class ChapterHtmlSlimParser {
     CssTextDirection direction = CssTextDirection::Ltr;
     bool hasSup = false, sup = false;
     bool hasSub = false, sub = false;
+    bool hasSmallCaps = false, smallCaps = false;
   };
   std::vector<StyleStackEntry> inlineStyleStack;
   std::vector<BlockStyle> blockStyleStack;  // accumulated block styles from open ancestor elements
@@ -266,6 +267,7 @@ class ChapterHtmlSlimParser {
   CssTextDirection effectiveDirection = CssTextDirection::Ltr;
   bool effectiveSup = false;
   bool effectiveSub = false;
+  bool effectiveSmallCaps = false;
 
   // Streaming table grid (ported from witchhunt-reader). Only ONE row is buffered as ParsedText;
   // at </tr> it is laid out into TableRows packed into a PageTableFragment that never exceeds a

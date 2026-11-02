@@ -444,7 +444,10 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
     // inside std::string during layout — visible in prewarm timings for SD fonts.
     size_t totalSize = hyphenationEnabled ? 1 : 0;
     if (!words.empty()) totalSize += words.size() - 1;  // inter-word spaces
-    for (const auto& w : words) totalSize += w.size();
+    for (size_t i = 0; i < words.size(); i++) {
+      // Small-caps words add their uppercase partners (below): same bytes or fewer, plus a space.
+      totalSize += (wordStyles[i] & EpdFontFamily::SMALL_CAPS) ? 2 * words[i].size() + 1 : words[i].size();
+    }
     std::string allText;
     allText.reserve(totalSize);
     for (size_t i = 0; i < words.size(); i++) {
@@ -452,6 +455,17 @@ void ParsedText::layoutAndExtractLines(const GfxRenderer& renderer, const int ba
       if (!isInlineImageToken(words[i])) allText += words[i];
     }
     if (hyphenationEnabled) allText += '-';
+    // Small caps measure and draw the uppercase partners of their lowercase letters: load
+    // those advances too (a few extra bytes on the joined string, only for such words).
+    for (size_t i = 0; i < words.size(); i++) {
+      if (!(wordStyles[i] & EpdFontFamily::SMALL_CAPS) || isInlineImageToken(words[i])) continue;
+      allText += ' ';
+      const auto* p = reinterpret_cast<const unsigned char*>(words[i].c_str());
+      while (const uint32_t cp = utf8NextCodepoint(&p)) {
+        const uint32_t upper = utf8SmallCapsUpper(cp);
+        if (upper != 0) utf8AppendCodepoint(allText, upper);
+      }
+    }
 
     // Style mask: only ask the SD font to load advances for styles actually
     // used in this paragraph. Style index is the low two bits (regular/bold/

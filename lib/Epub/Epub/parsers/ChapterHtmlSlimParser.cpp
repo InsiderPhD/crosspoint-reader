@@ -400,6 +400,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   effectiveDirection = currentCssStyle.direction;
   effectiveSup = false;
   effectiveSub = false;
+  effectiveSmallCaps = currentCssStyle.smallCapsDefined && currentCssStyle.smallCaps;
 
   // Apply inline style stack in order
   for (const auto& entry : inlineStyleStack) {
@@ -424,6 +425,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
       effectiveSub = entry.sub;
       if (entry.sub) effectiveSup = false;
     }
+    if (entry.hasSmallCaps) effectiveSmallCaps = entry.smallCaps;
   }
 }
 
@@ -449,6 +451,9 @@ void ChapterHtmlSlimParser::flushPartWordBuffer() {
     fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUP);
   } else if (effectiveSub) {
     fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SUB);
+  }
+  if (effectiveSmallCaps) {
+    fontStyle = static_cast<EpdFontFamily::Style>(fontStyle | EpdFontFamily::SMALL_CAPS);
   }
 
   // flush the buffer
@@ -1898,7 +1903,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   } else if (strcmp(name, "span") == 0 || !isHeaderOrBlock(name)) {
     // Handle span and other inline elements for CSS styling
     if (cssStyle.hasFontWeight() || cssStyle.hasFontStyle() || cssStyle.hasTextDecoration() ||
-        cssStyle.hasVerticalAlign()) {
+        cssStyle.hasVerticalAlign() || cssStyle.smallCapsDefined) {
       // Flush buffer before style change so preceding text gets current style
       if (self->partWordBufferIndex > 0) {
         self->flushPartWordBuffer();
@@ -1926,6 +1931,10 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
           entry.hasSub = true;
           entry.sub = true;
         }
+      }
+      if (cssStyle.smallCapsDefined) {
+        entry.hasSmallCaps = true;
+        entry.smallCaps = cssStyle.smallCaps;
       }
       self->inlineStyleStack.push_back(entry);
       self->updateEffectiveInlineStyle();
