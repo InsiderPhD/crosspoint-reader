@@ -32,6 +32,21 @@ std::string buildUrl(const std::string& serverUrl, const std::string& path);
  * "files/12") are left alone.
  */
 bool resolveServerPath(std::string& path, const std::string& requestUrl);
+ * Resolve a link found in a document fetched from baseUrl, the way a browser
+ * does (RFC 3986 section 5): an absolute URL as is, "//host/x" with the base's
+ * scheme, "/x" against the base's host, "?q" against the base's path, and a
+ * relative path against the base's directory with "." and ".." segments
+ * removed. Unlike buildUrl(), "next.xml" on ".../opds/root.xml" gives
+ * ".../opds/next.xml", not ".../opds/root.xml/next.xml".
+ */
+std::string resolveReference(const std::string& baseUrl, const std::string& reference);
+
+/**
+ * "scheme://host[:port]" of a URL, lowercased, without user info and without
+ * the scheme's default port, so two spellings of one site compare equal.
+ * Empty for a URL without "://".
+ */
+std::string origin(const std::string& url);
 
 /**
  * True when an HTTP Host header ("name[:port]") names another site. On the

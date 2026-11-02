@@ -395,7 +395,10 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
     return;
   }
 
-  searchTemplate = parser.getSearchTemplate();
+  // Resolved now, against the feed that declared it: performSearch() fetches
+  // the filled-in template as is.
+  searchTemplate =
+      parser.getSearchTemplate().empty() ? std::string() : UrlUtils::resolveReference(url, parser.getSearchTemplate());
   const auto& nextUrl = parser.getNextPageUrl();
   const auto& prevUrl = parser.getPrevPageUrl();
   entries = std::move(parser).getEntries();
@@ -417,7 +420,7 @@ void OpdsBookBrowserActivity::navigateToEntry(const OpdsEntry& entry) {
   navigationHistory.push_back(currentPath);
   // Resolve to a full URL so sub-sub-navigation retains parent path context
   const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
-  currentPath = UrlUtils::buildUrl(feedUrl, entry.href);
+  currentPath = UrlUtils::resolveReference(feedUrl, entry.href);
 
   state = BrowserState::LOADING;
   statusMessage = tr(STR_LOADING);
@@ -489,7 +492,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
 
   // Build full download URL relative to the current feed, not the root server URL
   const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
-  std::string downloadUrl = UrlUtils::buildUrl(feedUrl, book.href);
+  std::string downloadUrl = UrlUtils::resolveReference(feedUrl, book.href);
   std::string filename =
       "/" + StringUtils::sanitizeFilename((book.author.empty() ? "" : book.author + " - ") + book.title) + ".epub";
   LOG_DBG("OPDS", "Downloading: %s -> %s", downloadUrl.c_str(), filename.c_str());
