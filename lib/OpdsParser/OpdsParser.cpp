@@ -66,8 +66,17 @@ OpdsParser::~OpdsParser() { destroyXmlParser(parser); }
 
 size_t OpdsParser::write(uint8_t c) { return write(&c, 1); }
 
+// Every failure returns 0 (a short write) so the HTTP sink aborts the transfer instead of
+// downloading the rest of a feed that can no longer be parsed.
 size_t OpdsParser::write(const uint8_t* xmlData, const size_t length) {
-  if (errorOccured) return length;
+  if (errorOccured || !parser) {
+    errorOccured = true;
+    return 0;
+  }
+  if (!xmlData && length > 0) {
+    errorOccured = true;
+    return 0;
+  }
 
   XML_SetUserData(parser, this);
   XML_SetElementHandler(parser, startElement, endElement);
@@ -83,7 +92,7 @@ size_t OpdsParser::write(const uint8_t* xmlData, const size_t length) {
       errorOccured = true;
       LOG_DBG("OPDS", "Couldn't allocate memory for buffer");
       destroyXmlParser(parser);
-      return length;
+      return 0;
     }
 
     const size_t toRead = remaining < chunkSize ? remaining : chunkSize;
@@ -94,7 +103,7 @@ size_t OpdsParser::write(const uint8_t* xmlData, const size_t length) {
       LOG_DBG("OPDS", "Parse error at line %lu: %s", XML_GetCurrentLineNumber(parser),
               XML_ErrorString(XML_GetErrorCode(parser)));
       destroyXmlParser(parser);
-      return length;
+      return 0;
     }
     currentPos += toRead;
     remaining -= toRead;
@@ -103,6 +112,7 @@ size_t OpdsParser::write(const uint8_t* xmlData, const size_t length) {
 }
 
 void OpdsParser::flush() {
+  if (errorOccured || !parser) return;  // parser already torn down by a failed write()
   if (XML_Parse(parser, nullptr, 0, XML_TRUE) != XML_STATUS_OK) {
     errorOccured = true;
     destroyXmlParser(parser);

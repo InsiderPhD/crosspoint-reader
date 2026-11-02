@@ -283,7 +283,9 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
     OpdsParserStream stream{parser};
     if (!HttpDownloader::fetchUrl(url, stream)) {
       state = BrowserState::ERROR;
-      errorMessage = tr(STR_FETCH_FEED_FAILED);
+      // A parser failure rejects the write and aborts the download; report it as a parse
+      // error rather than hiding it behind a generic fetch failure.
+      errorMessage = parser.error() ? tr(STR_PARSE_FEED_FAILED) : tr(STR_FETCH_FEED_FAILED);
       requestUpdate();
       return;
     }
