@@ -381,8 +381,28 @@ void Epub::parseCssFiles() const {
   LOG_DBG("EBP", "Loaded %zu CSS style rules from %zu files", cssParser->ruleCount(), cssFiles.size());
 }
 
+std::string Epub::resolveCachePath(const std::string& filepath, const std::string& cacheDir) {
+  std::string path = cachePathFor(filepath, cacheDir);
+  if (Storage.exists(path.c_str())) return path;
+
+  // Same key CrossInk computes in Epub::cachePathForFilePath(): FNV-1a 64 over the
+  // exact filepath bytes handed to the Epub constructor.
+  const std::string crossInkPath =
+      cacheDir + "/epub_" + std::to_string(ZipFile::fnvHash64(filepath.c_str(), filepath.size()));
+  if (crossInkPath == path || !Storage.exists(crossInkPath.c_str())) return path;
+
+  if (Storage.rename(crossInkPath.c_str(), path.c_str())) {
+    LOG_INF("EBP", "Adopted CrossInk EPUB cache: %s -> %s", crossInkPath.c_str(), path.c_str());
+  } else {
+    LOG_ERR("EBP", "Failed to adopt CrossInk EPUB cache: %s -> %s", crossInkPath.c_str(), path.c_str());
+  }
+  return path;
+}
+
 bool Epub::hasCache(const std::string& filepath, const std::string& cacheDir, const bool skipLoadingCss) {
-  const std::string path = cachePathFor(filepath, cacheDir);
+  // Resolve (and adopt a CrossInk-named cache) here too: the reader calls this and
+  // BookSettings::begin() before it constructs the Epub.
+  const std::string path = resolveCachePath(filepath, cacheDir);
   if (!BookMetadataCache::isCurrent(path)) return false;
   return skipLoadingCss || CssParser::cacheIsCurrent(path);
 }

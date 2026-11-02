@@ -44,13 +44,19 @@ class Epub {
   static constexpr size_t MAX_DESCRIPTION_BYTES = 4096;
 
   explicit Epub(std::string filepath, const std::string& cacheDir) : filepath(std::move(filepath)) {
-    cachePath = cachePathFor(this->filepath, cacheDir);
+    cachePath = resolveCachePath(this->filepath, cacheDir);
   }
   ~Epub() = default;
   // Cache directory for a book: a key based on the filepath.
   static std::string cachePathFor(const std::string& filepath, const std::string& cacheDir) {
     return cacheDir + "/epub_" + std::to_string(std::hash<std::string>{}(filepath));
   }
+  // cachePathFor() plus CrossInk swap compatibility: CrossInk keys EPUB caches by
+  // ZipFile::fnvHash64(filepath) and renames our std::hash dir to that name when it
+  // opens a book. If our dir is missing but CrossInk's exists, rename it back so
+  // progress, per-book settings and sidecars survive flashing back. Never renames
+  // the other way. Fast path is a single Storage.exists() on our own dir.
+  static std::string resolveCachePath(const std::string& filepath, const std::string& cacheDir);
   // True when load(true, skipLoadingCss) will take its fast path for this book: a
   // book.bin of the current version exists and, unless CSS is skipped, so does a
   // current CSS rules cache. Costs two file opens and two 1-byte reads, no parsing.
