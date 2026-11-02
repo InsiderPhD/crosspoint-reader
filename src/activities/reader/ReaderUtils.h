@@ -92,6 +92,22 @@ inline TiltPageTurn detectTiltPageTurn() {
   return {back && !nextOnly, forward || (back && nextOnly)};
 }
 
+// A tap-zone action the Disable Page-Turn Gestures pause swallows: only the page
+// turns themselves, so a zone bound to the menu (or anything else) still works.
+inline bool pageTurnTapPaused(const uint8_t action) {
+  return SETTINGS.disablePageTurnGestures && (action == CrossPointSettings::READER_ACTION_PAGE_FORWARD ||
+                                              action == CrossPointSettings::READER_ACTION_PAGE_BACK);
+}
+
+// Flips the pause; returns the new state. Saved because it is a deliberate
+// toggle (one write per press, never per page).
+inline bool togglePageTurnGestures() {
+  SETTINGS.disablePageTurnGestures = SETTINGS.disablePageTurnGestures ? 0 : 1;
+  SETTINGS.saveToFile();
+  LOG_INF("READER", "Page-turn gestures %s", SETTINGS.disablePageTurnGestures ? "paused" : "resumed");
+  return SETTINGS.disablePageTurnGestures != 0;
+}
+
 struct PageTurnResult {
   bool prev;
   bool next;
@@ -153,8 +169,8 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   // Screen taps page too (TXT has no per-action dispatcher, so the zone
   // mapping is fixed here: left = prev, right = next, middle unused).
   const auto tapZone = input.wasTapZone();
-  const bool tapPrev = tapZone == MappedInputManager::TapZone::Left;
-  const bool tapNext = tapZone == MappedInputManager::TapZone::Right;
+  const bool tapPrev = tapZone == MappedInputManager::TapZone::Left && !SETTINGS.disablePageTurnGestures;
+  const bool tapNext = tapZone == MappedInputManager::TapZone::Right && !SETTINGS.disablePageTurnGestures;
 #else
   const bool tapPrev = false;
   const bool tapNext = false;

@@ -59,6 +59,10 @@ class MappedInputManager {
   // nothing: bound to Open Menu by default, it opened the menu on a sloppy
   // page-turn flick. The action bar's Confirm button still runs that slot.
   void setConfirmSwipeIgnored(bool enabled) { confirmSwipeIgnored = enabled; }
+  // When true (the reading screen while Disable Page-Turn Gestures is on), the
+  // vertical swipes -- the page-turn swipes, injected as the side keys -- are
+  // dropped. The Back swipe and the physical side keys are untouched.
+  void setPageSwipesIgnored(bool enabled) { pageSwipesIgnored = enabled; }
 
   // Swipe recorded this frame, and only while swipesBackOnly is on (i.e. Full
   // Touch mode outside the reading screens). Nothing was injected for it, so a
@@ -266,6 +270,7 @@ class MappedInputManager {
   bool swipesBackOnly = false;
   bool swipesIgnored = false;
   bool confirmSwipeIgnored = false;
+  bool pageSwipesIgnored = false;
   // Written by the const processTouchInput(); the injected presses live in gpio
   // so these are the only pieces of per-frame touch state the manager owns.
   mutable Swipe swipe = Swipe::None;

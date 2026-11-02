@@ -365,6 +365,9 @@ class CrossPointSettings {
     // Turns the page upside down: Portrait <-> Inverted, Landscape CW <-> CCW
     // (Rotate Screen cycles through all four instead). EPUB only, like Rotate.
     READER_ACTION_ROTATE_180 = 28,
+    // Touch boards: pause / resume the page-turn taps and swipes (see
+    // disablePageTurnGestures). Unavailable without a digitizer.
+    READER_ACTION_TOGGLE_PAGE_TURN_GESTURES = 29,
     READER_ACTION_COUNT
   };
 
@@ -744,6 +747,12 @@ class CrossPointSettings {
   // Tilt "Next Page Only": either tilt direction advances, so the device can be
   // flicked one way without paging back by accident. Same key as CrossInk's.
   uint8_t tiltNextPageOnly = 0;
+  // Page-turn gestures paused by READER_ACTION_TOGGLE_PAGE_TURN_GESTURES: on the
+  // reading page, tap zones bound to Next/Previous Page and the vertical
+  // (page-turn) swipes do nothing. Menus, the Back swipe, holds, the home key
+  // and tap zones bound to anything else keep working. Persisted, like
+  // CrossInk's key of the same name, so a pause survives sleep.
+  uint8_t disablePageTurnGestures = 0;
 
   // Per-button reader actions (short and long press for each logical button).
   // Defaults match legacy hard-coded behaviour so existing users see no change.

@@ -237,6 +237,12 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
     case A::READER_ACTION_TOGGLE_FRONTLIGHT:
       return FrontlightToggle::toggle();
 
+    case A::READER_ACTION_TOGGLE_PAGE_TURN_GESTURES:
+      // No popup here: XTC has no transient-message slot, and its page is a
+      // pre-rendered image that a repaint would only redraw unchanged.
+      if (!CrossPointSettings::isUnavailableReaderAction(action)) ReaderUtils::togglePageTurnGestures();
+      return false;
+
     default:
       return false;
   }
@@ -422,12 +428,15 @@ void XtcReaderActivity::loop() {
   // ── Screen tap zones and the home key (configurable reader actions) ───────
   switch (mappedInput.wasTapZone()) {
     case MappedInputManager::TapZone::Left:
+      if (ReaderUtils::pageTurnTapPaused(SETTINGS.readerTapLeft)) break;
       if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapLeft))) return;
       break;
     case MappedInputManager::TapZone::Middle:
+      if (ReaderUtils::pageTurnTapPaused(SETTINGS.readerTapMiddle)) break;
       if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapMiddle))) return;
       break;
     case MappedInputManager::TapZone::Right:
+      if (ReaderUtils::pageTurnTapPaused(SETTINGS.readerTapRight)) break;
       if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapRight))) return;
       break;
     case MappedInputManager::TapZone::None:

@@ -375,6 +375,8 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
       return tr(STR_SELECT_CHAPTER);
     case CrossPointSettings::READER_ACTION_ROTATE_180:
       return tr(STR_READER_ACTION_ROTATE_180);
+    case CrossPointSettings::READER_ACTION_TOGGLE_PAGE_TURN_GESTURES:
+      return tr(STR_DISABLE_PAGE_TURN_GESTURES);
     default:
       return tr(STR_NONE_OPT);
   }

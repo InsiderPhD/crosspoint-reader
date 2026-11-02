@@ -331,6 +331,10 @@ inline void appendControlSettings(SettingSink& v) {
                                 StrId::STR_CAT_SYSTEM));
   v.push_back(SettingInfo::Toggle(StrId::STR_TILT_NEXT_PAGE_ONLY, &CrossPointSettings::tiltNextPageOnly,
                                   "tiltNextPageOnly", StrId::STR_CAT_SYSTEM));
+  // Session switch flipped by the Disable Page-Turn Gestures reader action.
+  // No category: persisted (and round-tripped on every board) but not a row.
+  v.push_back(SettingInfo::Toggle(StrId::STR_DISABLE_PAGE_TURN_GESTURES, &CrossPointSettings::disablePageTurnGestures,
+                                  "disablePageTurnGestures"));
   // Per-button reader actions are persisted directly in JsonSettingsIO (not via SettingsList)
   // to allow proper clamping against READER_ACTION_COUNT.
   // Persisted last-chosen sort. Hidden from the settings UI (no category set) —
@@ -641,7 +645,7 @@ inline void appendStatusBarSettings(SettingSink& v) {
 // more (the list is visited, never stored); forEachSetting() logs a mismatch so a
 // helper that stops emitting an entry (and so stops persisting it) shows up on
 // the serial log. Recount when adding or removing an entry.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 101;  // includes tiltPageTurn + tiltNextPageOnly
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 102;  // includes tiltPageTurn + tiltNextPageOnly
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

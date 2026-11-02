@@ -66,6 +66,8 @@ const char* actionDescription(const uint8_t action) {
       return tr(STR_RA_DESC_SELECT_CHAPTER);
     case A::READER_ACTION_ROTATE_180:
       return tr(STR_RA_DESC_ROTATE_180);
+    case A::READER_ACTION_TOGGLE_PAGE_TURN_GESTURES:
+      return tr(STR_RA_DESC_PAGE_TURN_GESTURES);
     default:
       return tr(STR_RA_DESC_NONE);
   }

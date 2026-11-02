@@ -236,6 +236,10 @@ void MappedInputManager::processTouchInput() const {
             static_cast<unsigned>(swipe));
     return;
   }
+  if (pageSwipesIgnored && (idx == HalGPIO::BTN_UP || idx == HalGPIO::BTN_DOWN)) {
+    LOG_DBG("INPUT", "Swipe logical=(%d,%d) -> page-turn swipes paused", ldx, ldy);
+    return;
+  }
   if (confirmSwipeIgnored && idx == HalGPIO::BTN_CONFIRM) {
     LOG_DBG("INPUT", "Swipe logical=(%d,%d) -> Confirm swipe disabled here", ldx, ldy);
     return;

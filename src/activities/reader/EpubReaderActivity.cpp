@@ -1070,12 +1070,15 @@ void EpubReaderActivity::loop() {
   // ── Screen tap zones and the home key (configurable reader actions) ───────
   switch (mappedInput.wasTapZone()) {
     case MappedInputManager::TapZone::Left:
+      if (ReaderUtils::pageTurnTapPaused(SETTINGS.readerTapLeft)) break;
       if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapLeft))) return;
       break;
     case MappedInputManager::TapZone::Middle:
+      if (ReaderUtils::pageTurnTapPaused(SETTINGS.readerTapMiddle)) break;
       if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapMiddle))) return;
       break;
     case MappedInputManager::TapZone::Right:
+      if (ReaderUtils::pageTurnTapPaused(SETTINGS.readerTapRight)) break;
       if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerTapRight))) return;
       break;
     case MappedInputManager::TapZone::None:
@@ -4116,6 +4119,16 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
 
     case A::READER_ACTION_ROTATE_180:
       applyOrientation(ReaderUtils::flippedOrientation(SETTINGS.orientation));
+      requestUpdate();
+      return false;
+
+    case A::READER_ACTION_TOGGLE_PAGE_TURN_GESTURES:
+      if (CrossPointSettings::isUnavailableReaderAction(action)) return false;
+      // Brief popup on the transient-message slot, so the pause is never silent.
+      dictionaryMessage = ReaderUtils::togglePageTurnGestures() ? StrId::STR_PAGE_TURN_GESTURES_PAUSED
+                                                                : StrId::STR_PAGE_TURN_GESTURES_RESUMED;
+      showDictionaryMessage = true;
+      dictionaryMessageTime = millis();
       requestUpdate();
       return false;
 

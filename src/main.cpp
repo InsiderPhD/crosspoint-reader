@@ -867,6 +867,7 @@ void loop() {
   mappedInputManager.setSwipesBackOnly(CrossPointSettings::FULL_TOUCH_UI && !onReadingScreen);
   mappedInputManager.setSwipesIgnored(activityManager.ownsSwipes());
   mappedInputManager.setConfirmSwipeIgnored(onReadingScreen);
+  mappedInputManager.setPageSwipesIgnored(onReadingScreen && SETTINGS.disablePageTurnGestures);
   // Only the reading screen has a double-tap action, so only it pays the
   // double-tap wait on a single tap -- and not even there with None bound.
   mappedInputManager.setHomeKeyDoubleTap(onReadingScreen &&
