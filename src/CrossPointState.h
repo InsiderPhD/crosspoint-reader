@@ -62,6 +62,10 @@ class CrossPointState {
   // sync runs at most once a day. 0 = never. Persisted in state.json because
   // the whole point is to survive the reboot.
   uint32_t lastHardcoverSyncDay = 0;
+  // Revision of the What's New notes (ReleaseNotes.h) already shown; lower
+  // than RELEASE_NOTES_REVISION shows them once. Stored as kpReleaseNotesSeen
+  // in state.json, never CrossInk's releaseNotesSeen.
+  uint16_t kpReleaseNotesSeen = 0;
   bool showBootScreen = true;
   // BMP shown in place of the built-in boot logo, chosen in the file browser.
   // Empty (the default) = built-in logo, and the boot path never touches the

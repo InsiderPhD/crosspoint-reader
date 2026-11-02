@@ -114,6 +114,7 @@ void JsonSettingsIO::serializeState(const CrossPointState& s, String& json) {
   doc["lastSleepFromReader"] = s.lastSleepFromReader;
   doc["lastKnownValidTimestamp"] = s.lastKnownValidTimestamp;
   doc["lastHardcoverSyncDay"] = s.lastHardcoverSyncDay;
+  doc["kpReleaseNotesSeen"] = s.kpReleaseNotesSeen;
   doc["showBootScreen"] = s.showBootScreen;
   doc["bootImagePath"] = s.bootImagePath;
 
@@ -171,6 +172,9 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.lastSleepFromReader = doc["lastSleepFromReader"] | false;
   s.lastKnownValidTimestamp = doc["lastKnownValidTimestamp"] | static_cast<uint32_t>(0);
   s.lastHardcoverSyncDay = doc["lastHardcoverSyncDay"] | static_cast<uint32_t>(0);
+  // KatiePoint key, deliberately not CrossInk's releaseNotesSeen: the two
+  // firmwares number their notes differently and share state.json on a swap.
+  s.kpReleaseNotesSeen = doc["kpReleaseNotesSeen"] | static_cast<uint16_t>(0);
   s.showBootScreen = doc["showBootScreen"] | true;
   s.bootImagePath = doc["bootImagePath"] | std::string("");
 

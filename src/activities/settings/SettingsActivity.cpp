@@ -34,6 +34,7 @@
 #include "ReaderMenuSettingsActivity.h"
 #include "RecacheMetadataActivity.h"
 #include "RefreshBookFusionMetadataActivity.h"
+#include "ReleaseNotesActivity.h"
 #include "ResetStatsActivity.h"
 #include "SdCardFontGlobals.h"
 #include "SdFirmwareUpdateActivity.h"
@@ -180,6 +181,8 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BATTERY, SettingAction::Battery));
+  // Release Notes: reopens the What's New shown once after an update.
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_RELEASE_NOTES, SettingAction::ReleaseNotes));
   // About: read-only device diagnostics plus the support-file export. Last in
   // the tab, where "about" screens conventionally sit.
   systemSettings.push_back(SettingInfo::Action(StrId::STR_ABOUT, SettingAction::About));
@@ -525,6 +528,9 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::Language:
         startActivityForResult(std::make_unique<LanguageSelectActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::ReleaseNotes:
+        startActivityForResult(std::make_unique<ReleaseNotesActivity>(renderer, mappedInput), nullptr);
         break;
       case SettingAction::About:
         // Changes no setting, so no save-on-return handler.

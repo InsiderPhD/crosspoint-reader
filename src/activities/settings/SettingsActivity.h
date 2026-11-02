@@ -48,6 +48,7 @@ enum class SettingAction {
   SleepTheme,          // compiled HTML/CSS sleep theme picker
   FrontlightSchedule,  // dark mode only on boards without a light
   About,               // device diagnostics + support export
+  ReleaseNotes,        // What's New for this release
   Battery,             // level + usage since the last charge
 };
 

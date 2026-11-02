@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "../settings/BookFusionCoverRefreshActivity.h"
+#include "../settings/ReleaseNotesActivity.h"
 #include "../util/ConfirmationActivity.h"
 #include "BookDetailsActivity.h"
 #include "BookFusionBookIdStore.h"
@@ -25,6 +26,7 @@
 #include "MappedInputManager.h"
 #include "ReadingStatsDetailActivity.h"
 #include "RecentBooksStore.h"
+#include "ReleaseNotes.h"
 #include "SilentRestart.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -525,6 +527,19 @@ void HomeActivity::dispatchBookAction(BookContextMenu::Action action, const std:
 
 void HomeActivity::loop() {
   if (renameFlow.poll(*this, renderer, mappedInput)) return;
+
+  // What's New, once per release: the first Home visit after an update (or a
+  // fresh install). Checked from loop() so Home has painted underneath and
+  // the defrag checks in onEnter() have run first. The flag is in RAM state,
+  // so this costs one compare per frame.
+  if (ReleaseNotes::shouldShow() && !contextMenu.isOpen()) {
+    startActivityForResult(std::make_unique<ReleaseNotesActivity>(renderer, mappedInput),
+                           [this](const ActivityResult&) { requestUpdate(); });
+    // Marked seen as soon as it is shown: a power-off on the notes screen
+    // must not bring it back on every boot.
+    ReleaseNotes::markSeen();
+    return;
+  }
 
   const int menuCount = getMenuItemCount();
 
