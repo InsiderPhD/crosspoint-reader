@@ -69,20 +69,27 @@ std::string KOReaderDocumentId::calculate(const std::string& filePath) {
     }
 
     // Seek to offset
+    // A skipped or short sample would hash different bytes than KOReader does, yielding a
+    // plausible but wrong document id that silently never matches the server. Fail instead.
     if (!file.seekSet(offset)) {
-      LOG_DBG("KODoc", "Failed to seek to offset %zu", offset);
-      continue;
+      LOG_ERR("KODoc", "Failed to seek to offset %zu", offset);
+      file.close();
+      return "";
     }
 
     // Read up to CHUNK_SIZE bytes
     const size_t bytesToRead = std::min(CHUNK_SIZE, fileSize - offset);
-    const size_t bytesRead = file.read(buffer, bytesToRead);
+    const int bytesRead = file.read(buffer, bytesToRead);
 
-    if (bytesRead > 0) {
-      md5.add(buffer, bytesRead);
-      totalBytesRead += bytesRead;
+    if (bytesRead < 0 || static_cast<size_t>(bytesRead) != bytesToRead) {
+      LOG_ERR("KODoc", "Incomplete hash read at offset %zu (%d of %zu)", offset, bytesRead, bytesToRead);
+      file.close();
+      return "";
     }
+    md5.add(buffer, bytesToRead);
+    totalBytesRead += bytesToRead;
   }
+  file.close();
 
   // Calculate final hash
   md5.calculate();
