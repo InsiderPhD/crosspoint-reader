@@ -2340,6 +2340,7 @@ void EpubReaderActivity::computeClippingHighlights(const Page& page, const int o
   // (non-blank, positive advance), so the saved indices map back onto the same words.
   const int readerFontId = SETTINGS.getReaderFontId();
   const int lineHeight = renderer.getLineHeight(readerFontId);
+  const float lineCompression = SETTINGS.getReaderLineCompression();
   uint16_t wordIdx = 0;
   bool extendLast = false;
   for (const auto& element : page.elements) {
@@ -2353,6 +2354,15 @@ void EpubReaderActivity::computeClippingHighlights(const Page& page, const int o
     const int blockFontOverride = block.getBlockStyle().fontOverride;
     const int wordFontId = blockFontOverride != 0 ? blockFontOverride : readerFontId;
     const int wordLineHeight = blockFontOverride != 0 ? renderer.getLineHeight(wordFontId) : lineHeight;
+    // Band = the line's layout pitch, not the font's line box. At tight line spacing
+    // the parser advances lines by lineHeight * compression (< lineHeight), so a
+    // full-height band ran into the next line and dotted over its words. Shrink it
+    // to the pitch and centre it on the font box, so it stays behind this line's
+    // glyphs and consecutive highlighted lines tile without overlapping (CrossInk
+    // d3b0c96bc). Loose spacing keeps the font-height band.
+    const int linePitch = static_cast<int>(wordLineHeight * lineCompression);
+    const int bandHeight = linePitch > 0 && linePitch < wordLineHeight ? linePitch : wordLineHeight;
+    const int bandInset = (wordLineHeight - bandHeight) / 2;
     const auto charSpacing = block.getBlockStyle().characterSpacing;
     extendLast = false;  // a new line always starts a new rect
     for (uint16_t i = 0; i < count; ++i) {
@@ -2393,8 +2403,8 @@ void EpubReaderActivity::computeClippingHighlights(const Page& page, const int o
         return;
       }
       clipHighlightRects[clipHighlightRectCount++] = {static_cast<int16_t>(x),
-                                                      static_cast<int16_t>(orientedMarginTop + line.yPos),
-                                                      static_cast<int16_t>(w), static_cast<int16_t>(wordLineHeight)};
+                                                      static_cast<int16_t>(orientedMarginTop + line.yPos + bandInset),
+                                                      static_cast<int16_t>(w), static_cast<int16_t>(bandHeight)};
       extendLast = true;
     }
   }
