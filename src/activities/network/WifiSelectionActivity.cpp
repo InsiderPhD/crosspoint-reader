@@ -628,10 +628,11 @@ void WifiSelectionActivity::renderConnecting() const {
   } else {
     renderer.drawCenteredText(UI_12_FONT_ID, top - 40, tr(STR_CONNECTING), true, EpdFontFamily::BOLD);
 
-    std::string ssidInfo = std::string(tr(STR_TO_PREFIX)) + selectedSSID;
-    if (ssidInfo.length() > 25) {
-      ssidInfo.replace(22, ssidInfo.length() - 22, "...");
-    }
+    // Truncate by rendered width: the old byte cut could split a multi-byte
+    // UTF-8 SSID mid-character and draw a replacement glyph.
+    const std::string ssidInfo =
+        renderer.truncatedText(UI_10_FONT_ID, (std::string(tr(STR_TO_PREFIX)) + selectedSSID).c_str(),
+                               renderer.getScreenWidth() - 2 * UITheme::getInstance().getMetrics().contentSidePadding);
     renderer.drawCenteredText(UI_10_FONT_ID, top, ssidInfo.c_str());
   }
 }
@@ -643,10 +644,11 @@ void WifiSelectionActivity::renderConnected() const {
 
   renderer.drawCenteredText(UI_12_FONT_ID, top - 30, tr(STR_CONNECTED), true, EpdFontFamily::BOLD);
 
-  std::string ssidInfo = std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID;
-  if (ssidInfo.length() > 28) {
-    ssidInfo.replace(25, ssidInfo.length() - 25, "...");
-  }
+  // Truncate by rendered width: the old byte cut could split a multi-byte
+  // UTF-8 SSID mid-character and draw a replacement glyph.
+  const std::string ssidInfo =
+      renderer.truncatedText(UI_10_FONT_ID, (std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID).c_str(),
+                             renderer.getScreenWidth() - 2 * UITheme::getInstance().getMetrics().contentSidePadding);
   renderer.drawCenteredText(UI_10_FONT_ID, top + 10, ssidInfo.c_str());
 
   const std::string ipInfo = std::string(tr(STR_IP_ADDRESS_PREFIX)) + connectedIP;
@@ -665,10 +667,11 @@ void WifiSelectionActivity::renderSavePrompt() const {
 
   renderer.drawCenteredText(UI_12_FONT_ID, top - 40, tr(STR_CONNECTED), true, EpdFontFamily::BOLD);
 
-  std::string ssidInfo = std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID;
-  if (ssidInfo.length() > 28) {
-    ssidInfo.replace(25, ssidInfo.length() - 25, "...");
-  }
+  // Truncate by rendered width: the old byte cut could split a multi-byte
+  // UTF-8 SSID mid-character and draw a replacement glyph.
+  const std::string ssidInfo =
+      renderer.truncatedText(UI_10_FONT_ID, (std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID).c_str(),
+                             renderer.getScreenWidth() - 2 * UITheme::getInstance().getMetrics().contentSidePadding);
   renderer.drawCenteredText(UI_10_FONT_ID, top, ssidInfo.c_str());
 
   renderer.drawCenteredText(UI_10_FONT_ID, top + 40, tr(STR_SAVE_PASSWORD));
@@ -722,10 +725,11 @@ void WifiSelectionActivity::renderForgetPrompt() const {
 
   renderer.drawCenteredText(UI_12_FONT_ID, top - 40, tr(STR_FORGET_NETWORK), true, EpdFontFamily::BOLD);
 
-  std::string ssidInfo = std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID;
-  if (ssidInfo.length() > 28) {
-    ssidInfo.replace(25, ssidInfo.length() - 25, "...");
-  }
+  // Truncate by rendered width: the old byte cut could split a multi-byte
+  // UTF-8 SSID mid-character and draw a replacement glyph.
+  const std::string ssidInfo =
+      renderer.truncatedText(UI_10_FONT_ID, (std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID).c_str(),
+                             renderer.getScreenWidth() - 2 * UITheme::getInstance().getMetrics().contentSidePadding);
   renderer.drawCenteredText(UI_10_FONT_ID, top, ssidInfo.c_str());
 
   renderer.drawCenteredText(UI_10_FONT_ID, top + 40, tr(STR_FORGET_AND_REMOVE));

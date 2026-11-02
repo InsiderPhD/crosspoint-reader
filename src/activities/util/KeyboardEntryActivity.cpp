@@ -575,15 +575,19 @@ void KeyboardEntryActivity::render(RenderLock&&) {
 
   std::string displayText;
   if (inputType == InputType::Password && !passwordVisible) {
-    size_t revealPos;
-    if (cursorMode) {
-      revealPos = text.length();  // no reveal in displayText; block draws actual char directly
-    } else {
-      revealPos = (text.length() > 0 && cursorPos > 0) ? cursorPos - 1 : std::string::npos;
+    // Reveal the whole code point before the cursor, never a lone UTF-8 byte
+    // (a trailing "ú" used to show as a replacement glyph). Byte offsets stay
+    // aligned with text. Cursor mode reveals nothing here; the block cursor
+    // draws the actual character itself.
+    const size_t revealEnd = cursorMode ? 0 : std::min(cursorPos, text.length());
+    size_t revealStart = revealEnd;
+    if (revealStart > 0) {
+      --revealStart;
+      while (revealStart > 0 && (static_cast<unsigned char>(text[revealStart]) & 0xC0) == 0x80) --revealStart;
     }
     displayText = text;
     for (size_t i = 0; i < displayText.length(); i++) {
-      if (i != revealPos) {
+      if (i < revealStart || i >= revealEnd) {
         displayText[i] = '*';
       }
     }
