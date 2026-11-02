@@ -17,6 +17,7 @@
 
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
+#include "ProtectedPaths.h"
 #include "SdCardFontGlobals.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
@@ -720,7 +721,7 @@ void CrossPointWebServer::handleDownload() const {
   }
 
   const String itemName = itemPath.substring(itemPath.lastIndexOf('/') + 1);
-  if (itemName.startsWith(".")) {
+  if (itemName.startsWith(".") || protectedpaths::isSensitivePath(itemPath.c_str())) {
     server->send(403, "text/plain", "Cannot access system files");
     return;
   }
@@ -882,6 +883,11 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     LOG_DBG("WEB", "[UPLOAD] Free heap: %d bytes", ESP.getFreeHeap());
 
     const String filePath = uploadDestPath(state);
+    if (protectedpaths::isSensitivePath(filePath.c_str())) {
+      state.error = "Cannot write protected file: " + state.fileName;
+      LOG_ERR("WEB", "[UPLOAD] Refused protected path: %s", filePath.c_str());
+      return;
+    }
 
     // An existing file is replaced (this fork always overwrote; upstream's
     // `overwrite` flag is accepted and changes nothing). The new copy is staged
@@ -1136,6 +1142,11 @@ void CrossPointWebServer::handleRename() const {
   }
   newPath += newName;
 
+  if (protectedpaths::isSensitivePath(itemPath.c_str()) || protectedpaths::isSensitivePath(newPath.c_str())) {
+    file.close();
+    server->send(403, "text/plain", "Cannot change protected item");
+    return;
+  }
   if (Storage.exists(newPath.c_str())) {
     file.close();
     server->send(409, "text/plain", "Target already exists");
@@ -1228,6 +1239,11 @@ void CrossPointWebServer::handleMove() const {
     server->send(200, "text/plain", "Already in destination");
     return;
   }
+  if (protectedpaths::isSensitivePath(itemPath.c_str()) || protectedpaths::isSensitivePath(newPath.c_str())) {
+    file.close();
+    server->send(403, "text/plain", "Cannot change protected item");
+    return;
+  }
   if (Storage.exists(newPath.c_str())) {
     file.close();
     server->send(409, "text/plain", "Target already exists");
@@ -1305,8 +1321,8 @@ void CrossPointWebServer::handleDelete() const {
     // Security check: prevent deletion of protected items
     const String itemName = itemPath.substring(itemPath.lastIndexOf('/') + 1);
 
-    // Hidden/system files are protected
-    if (itemName.startsWith(".")) {
+    // Hidden/system files and credential stores are protected
+    if (itemName.startsWith(".") || protectedpaths::isSensitivePath(itemPath.c_str())) {
       failedItems += itemPath + " (hidden/system file); ";
       allSuccess = false;
       continue;

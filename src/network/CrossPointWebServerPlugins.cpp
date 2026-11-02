@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "CrossPointWebServer.h"
+#include "ProtectedPaths.h"
 #include "util/PluginLocations.h"
 
 namespace {
@@ -287,8 +288,12 @@ void CrossPointWebServer::handleRelay() {
 }
 
 namespace {
-// A destination path is safe to write if it is absolute and has no parent refs.
-bool safeWritePath(const std::string& p) { return p.size() > 1 && p[0] == '/' && p.find("..") == std::string::npos; }
+// A destination path is safe to write if it is absolute, has no parent refs and
+// is not a credential store.
+bool safeWritePath(const std::string& p) {
+  return p.size() > 1 && p[0] == '/' && p.find("..") == std::string::npos &&
+         !protectedpaths::isSensitivePath(p.c_str());
+}
 
 // True when `path` lands inside a plugin folder the native feature set
 // supersedes (see PluginLocations::kNativeFeaturePrefixes), under any root —
