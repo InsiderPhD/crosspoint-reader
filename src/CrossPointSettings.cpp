@@ -1,5 +1,6 @@
 #include "CrossPointSettings.h"
 
+#include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HalFrontlight.h>
 #include <HalStorage.h>
@@ -44,6 +45,9 @@ constexpr char LEGACY_SETTINGS_FILE_BAK[] = "/.crosspoint/settings.json.bak";
 // Read caps. Our file is ~8KB; upstream's settings.json ~3-4KB.
 constexpr size_t SETTINGS_MAX_BYTES = 32 * 1024;
 constexpr size_t COMPAT_MAX_BYTES = 16 * 1024;
+// Heap the compat merge needs to be left alone; see writeCompatSettings().
+constexpr uint32_t COMPAT_MIN_FREE_HEAP = 64 * 1024;
+constexpr uint32_t COMPAT_MIN_MAX_ALLOC = 24 * 1024;
 
 // Convert legacy front button layout into explicit logical->hardware mapping.
 void applyLegacyFrontButtonLayout(CrossPointSettings& settings) {
@@ -445,6 +449,14 @@ void writeCompatSettings(const JsonDocument& shared) {
   HashWriter hasher;
   serializeJson(shared, hasher);
   if (hasher.hash == lastCompatHash) return;
+  // C3 with BLE up in the reader runs ~35KB free: a ~16KB transient here could
+  // starve a section build or the BLE stack. Leave lastCompatHash stale so the
+  // next save (Settings, sleep, reader exit) catches settings.json up.
+  if (ESP.getFreeHeap() < COMPAT_MIN_FREE_HEAP || ESP.getMaxAllocHeap() < COMPAT_MIN_MAX_ALLOC) {
+    LOG_DBG("CPS", "Low heap (%u free, %u block); settings.json update deferred",
+            static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    return;
+  }
 
   std::string existing;
   if (Storage.exists(LEGACY_SETTINGS_FILE)) {
