@@ -76,6 +76,7 @@
 #include "util/FrontlightToggle.h"
 #include "util/HardcoverSync.h"
 #include "util/HeapReport.h"
+#include "util/PowerHistory.h"
 #include "util/ScreenshotUtil.h"
 #include "util/TimeUtils.h"
 #include "util/WifiTimeSync.h"
@@ -1894,6 +1895,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
   sessionPageTurns++;
   READING_STATS.noteActivity();
+  PowerHistory::recordReaderPageTurn();
   if (isForwardTurn) {
     if (section->currentPage < section->pageCount - 1) {
       section->currentPage++;

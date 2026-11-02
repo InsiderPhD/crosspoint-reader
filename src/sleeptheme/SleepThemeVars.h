@@ -18,7 +18,7 @@ enum class Kind : uint8_t {
   Number,     // integer, formatted with an optional zero-pad pattern
   Text,       // UTF-8 string
   Timestamp,  // epoch seconds, formatted with a date/time pattern
-  Image,      // only valid on a Cover element (book.cover)
+  Image,      // only valid on a Cover element (book.cover, recent.N.cover, sleep.image)
 };
 
 // X(id, name, kind, needsScan). needsScan marks values that read the SD card
@@ -103,6 +103,7 @@ enum class Kind : uint8_t {
   X(BookFinished, "book.finished", Timestamp, false)                            \
   X(BookClippings, "book.clippings", Number, true)                              \
   X(BookCover, "book.cover", Image, false)                                      \
+  X(SleepImage, "sleep.image", Image, false)                                    \
   X(TimeNow, "time.now", Timestamp, false)                                      \
   X(DeviceBattery, "device.battery", Number, false)                             \
   X(DeviceContact, "device.contact", Text, false)                               \

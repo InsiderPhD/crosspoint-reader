@@ -44,11 +44,11 @@ enum class SettingAction {
   FontFamily,
   FontDownload,
   FontLayoutPreview,
-  SleepStats,
   Dictionary,
   SleepTheme,          // compiled HTML/CSS sleep theme picker
-  FrontlightSchedule,  // frontlight boards only
+  FrontlightSchedule,  // dark mode only on boards without a light
   About,               // device diagnostics + support export
+  Battery,             // level + usage since the last charge
 };
 
 struct SettingInfo {

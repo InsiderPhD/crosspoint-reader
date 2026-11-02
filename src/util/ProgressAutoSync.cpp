@@ -326,6 +326,7 @@ bool pushBlocking(const Payload& payload) {
 
   if (!connectSilently()) {
     teardownWifi();
+    HardcoverSync::resume();
     return false;
   }
 
@@ -342,6 +343,9 @@ bool pushBlocking(const Payload& payload) {
   }
 
   teardownWifi();
+  // connectSilently() preempted any Hardcover push the session end had just
+  // queued; the radio is free again, so let it run.
+  HardcoverSync::resume();
   if (pushed) {
     sBaselinePercent = payload.bookPercent;
     sBaselineSpine = payload.spineIndex;

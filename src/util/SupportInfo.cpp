@@ -156,7 +156,7 @@ bool SupportInfo::exportToSd(const Snapshot& s) {
   ok &= writeLine(file, "bionic_reading: %u\n", static_cast<unsigned>(SETTINGS.bionicReading));
   ok &= writeLine(file, "text_anti_aliasing: %u\n", static_cast<unsigned>(SETTINGS.textAntiAliasing));
   ok &= writeLine(file, "refresh_frequency: %u\n", static_cast<unsigned>(SETTINGS.refreshFrequency));
-  ok &= writeLine(file, "sleep_screen: %u\n", static_cast<unsigned>(SETTINGS.sleepScreen));
+  ok &= writeLine(file, "sleep_theme: %s\n", SETTINGS.sleepTheme);
   ok &= writeLine(file, "sleep_timeout: %u\n", static_cast<unsigned>(SETTINGS.sleepTimeout));
   ok &= writeLine(file, "clock_timezone: %u\n", static_cast<unsigned>(SETTINGS.clockTimezone));
   ok &= writeLine(file, "clock_dst: %u\n", static_cast<unsigned>(SETTINGS.clockDst));

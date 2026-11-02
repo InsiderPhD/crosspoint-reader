@@ -217,14 +217,35 @@ bool takeJob(Job& out) {
     out = std::move(sPending);
     sHasPending = false;
   } else {
-    sHasPending = false;
+    // A preempted job stays in the slot: resume() or the next session end
+    // picks it up once the foreground WiFi user is done.
     sActive = false;  // last write under the lock: a new request spawns a new task
   }
   xSemaphoreGive(sMutex);
   return have;
 }
 
-void runBackgroundJob(const Job& job) {
+// Put back a job the worker took but was preempted out of, unless a newer one
+// has been queued meanwhile.
+void requeueJob(Job& job) {
+  xSemaphoreTake(sMutex, portMAX_DELAY);
+  if (!sHasPending) {
+    sPending = std::move(job);
+    sHasPending = true;
+  }
+  xSemaphoreGive(sMutex);
+}
+
+// False when the job was preempted before it reached Hardcover and should be
+// kept for later; true when it is finished with, pushed or not.
+bool runBackgroundJob(const Job& job) {
+  // A resumed job can be stale: a foreground sync may have pushed this book
+  // while it waited. SD only, so check before touching the radio.
+  if (HardcoverSyncClient::isUpToDate(job.path.c_str(), job.percent, job.finished)) {
+    LOG_INF("HCS", "Background push not needed: %s", job.title.c_str());
+    return true;
+  }
+
   // Someone else's live connection is used as-is and left up. A radio that is
   // on but not connected belongs to a foreground flow mid-connect: leave it
   // alone. The book stays unsynced, so the next session end (or the Stats
@@ -233,13 +254,14 @@ void runBackgroundJob(const Job& job) {
   if (WiFi.status() != WL_CONNECTED) {
     if (WiFi.getMode() != WIFI_OFF) {
       LOG_INF("HCS", "Background push skipped: WiFi in use");
-      return;
+      return !sStopRequested;
     }
     ownsWifi = true;
     if (!connectSilently(&sStopRequested)) {
-      LOG_INF("HCS", "Background push skipped: WiFi connect failed");
+      const bool preempted = sStopRequested;
+      LOG_INF("HCS", "Background push %s", preempted ? "deferred: preempted" : "skipped: WiFi connect failed");
       teardownWifi();
-      return;
+      return !preempted;
     }
   }
 
@@ -253,6 +275,7 @@ void runBackgroundJob(const Job& job) {
   if (ownsWifi) {
     teardownWifi();
   }
+  return true;
 }
 
 void workerTask(void* /*arg*/) {
@@ -262,9 +285,33 @@ void workerTask(void* /*arg*/) {
 
   Job job;
   while (takeJob(job)) {
-    runBackgroundJob(job);
+    if (!runBackgroundJob(job)) {
+      requeueJob(job);  // the next takeJob sees the stop flag and ends the task
+    }
   }
   vTaskDelete(nullptr);
+}
+
+// Start the worker for the job in the slot, if there is one and no worker is
+// running. Main task only.
+void spawnWorkerIfPending() {
+  if (sMutex == nullptr) return;
+  xSemaphoreTake(sMutex, portMAX_DELAY);
+  const bool spawn = sHasPending && !sActive;
+  if (spawn) {
+    sActive = true;
+    sStopRequested = false;
+    sSleepRequested = false;
+  }
+  xSemaphoreGive(sMutex);
+
+  if (spawn && xTaskCreate(&workerTask, "HardcoverSync", kWorkerStackBytes, nullptr, 1, nullptr) != pdPASS) {
+    LOG_ERR("HCS", "Failed to create background push task");
+    xSemaphoreTake(sMutex, portMAX_DELAY);
+    sActive = false;
+    sHasPending = false;
+    xSemaphoreGive(sMutex);
+  }
 }
 
 void waitForWorker(const uint32_t maxWaitMs, const char* why) {
@@ -365,7 +412,12 @@ int runFullSync(const uint32_t budgetMs, const volatile bool* stopFlag) {
 }
 
 void onSessionWritten(const ReadingBookStats& book) {
-  if (!HC_TOKEN_STORE.hasToken() || !isEligible(book) || isUpToDate(book)) {
+  if (!HC_TOKEN_STORE.hasToken() || !isEligible(book)) {
+    return;
+  }
+  if (isUpToDate(book)) {
+    LOG_INF("HCS", "Session end: nothing new for Hardcover (%u%%%s)", static_cast<unsigned>(book.lastProgressPercent),
+            book.completed ? ", completed" : "");
     return;
   }
   if (sMutex == nullptr) {
@@ -380,22 +432,12 @@ void onSessionWritten(const ReadingBookStats& book) {
   xSemaphoreTake(sMutex, portMAX_DELAY);
   sPending = std::move(job);
   sHasPending = true;
-  const bool spawn = !sActive;
-  if (spawn) {
-    sActive = true;
-    sStopRequested = false;
-    sSleepRequested = false;
-  }
   xSemaphoreGive(sMutex);
-
-  if (spawn && xTaskCreate(&workerTask, "HardcoverSync", kWorkerStackBytes, nullptr, 1, nullptr) != pdPASS) {
-    LOG_ERR("HCS", "Failed to create background push task");
-    xSemaphoreTake(sMutex, portMAX_DELAY);
-    sActive = false;
-    sHasPending = false;
-    xSemaphoreGive(sMutex);
-  }
+  LOG_INF("HCS", "Session end: queued background push");
+  spawnWorkerIfPending();
 }
+
+void resume() { spawnWorkerIfPending(); }
 
 void preempt(const uint32_t maxWaitMs) {
   if (!sActive) return;
@@ -405,6 +447,8 @@ void preempt(const uint32_t maxWaitMs) {
 }
 
 void finishBeforeSleep(const uint32_t maxWaitMs) {
+  // Last chance for a job a foreground WiFi user preempted and never resumed.
+  spawnWorkerIfPending();
   if (!sActive) return;
   LOG_INF("HCS", "Waiting for background push before sleep");
   sSleepRequested = true;
@@ -454,7 +498,10 @@ void pushBeforeSleep(GfxRenderer& renderer) {
   for (size_t i = 0; i < books.size() && pickCount < kMaxSleepPushBooks; i++) {
     if (i != justReadIndex && wants(i)) picks[pickCount++] = i;
   }
-  if (pickCount == 0) return;
+  if (pickCount == 0) {
+    LOG_INF("HCS", "Sleep push: nothing new for Hardcover");
+    return;
+  }
 
   // A live connection (a sync flow that left it up) is reused and left alone;
   // a radio that is on but not connected belongs to someone else.

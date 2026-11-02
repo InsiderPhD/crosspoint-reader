@@ -489,14 +489,15 @@ plus the limits the compiler checks against.
   "vars": [
     { "name": "stats.total_hours", "kind": "number", "value": "61", "raw": 61 },
     { "name": "time.now", "kind": "timestamp", "value": "21:04", "raw": 1792530240 },
-    { "name": "book.title", "kind": "text", "value": "Trollkarlens hatt" }
+    { "name": "book.title", "kind": "text", "value": "The War of the Worlds" }
   ]
 }
 ```
 
-`kind` is `number`, `text`, `timestamp` or `image` (`book.cover`). An empty `value` means
-unknown right now (no book open, clock not set). Installing a theme as the sleep screen
-is a `POST /api/settings` with `{"sleepScreen": 7, "sleepTheme": "<name>"}`.
+`kind` is `number`, `text`, `timestamp` or `image` (`book.cover`, `recent.N.cover`,
+`sleep.image`). An empty `value` means unknown right now (no book open, clock not set).
+Making a theme the sleep screen is a `POST /api/settings` with `{"sleepTheme": "<name>"}`
+(`""` for the built-in screen).
 
 ---
 

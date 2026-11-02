@@ -1,7 +1,9 @@
 #include "Bitmap.h"
 
 #include <Logging.h>
+#include <Memory.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -16,12 +18,28 @@
 constexpr bool USE_ATKINSON = true;  // Use Atkinson dithering instead of Floyd-Steinberg
 // ============================================================================
 
+// Adaptive tone mapping (ported from YACP): the black and white points are the
+// 1st and 99th luminance percentiles, so a few stray pixels cannot pin them.
+constexpr uint32_t ADAPTIVE_TONE_LOW_PERMILLE = 10;
+constexpr uint32_t ADAPTIVE_TONE_HIGH_PERMILLE = 990;
+// A narrower range than this is a near-flat image; stretching it only
+// amplifies noise and banding.
+constexpr int ADAPTIVE_TONE_MIN_RANGE = 96;
+// The stretched value is blended 3:1 with the original to keep the image's
+// own character.
+constexpr int ADAPTIVE_TONE_BLEND_NUM = 3;
+constexpr int ADAPTIVE_TONE_BLEND_DEN = 4;
+// Rows sampled for the histogram. Bounds the extra card reads on an image
+// much larger than the screen; a few hundred rows give the same percentiles.
+constexpr int ADAPTIVE_TONE_MAX_ROWS = 240;
+
 Bitmap::~Bitmap() {
   delete[] errorCurRow;
   delete[] errorNextRow;
 
   delete atkinsonDitherer;
   delete fsDitherer;
+  free(toneLut);
 }
 
 uint16_t Bitmap::readLE16(FsFile& f) {
@@ -203,6 +221,122 @@ BmpReaderError Bitmap::parseHeaders() {
   return BmpReaderError::Ok;
 }
 
+bool Bitmap::analyzeAdaptiveTone() {
+  if (toneLut) {
+    return true;
+  }
+  // Native-grey sources (our own cover thumbnails, hand-prepared 4-level
+  // images) are already exactly what the panel shows; remapping would only
+  // move pixels off their levels.
+  if (!file || width <= 0 || height <= 0 || rowBytes <= 0 || nativePalette) {
+    return false;
+  }
+
+  // Heap, not stack: 1KB of counters plus a row (1.4KB for a 480px 24-bit
+  // image) is far past the 256-byte stack budget. Both are freed on return.
+  auto histogram = makeUniqueNoThrow<uint32_t[]>(256);
+  auto rowBuffer = makeUniqueNoThrow<uint8_t[]>(rowBytes);
+  if (!histogram || !rowBuffer) {
+    LOG_ERR("BMP", "Adaptive tone: no memory for analysis (%d byte row)", rowBytes);
+    return false;
+  }
+  std::fill_n(histogram.get(), 256, 0U);
+
+  const int rowStep = std::max(1, height / ADAPTIVE_TONE_MAX_ROWS);
+  uint32_t total = 0;
+  for (int row = 0; row < height; row += rowStep) {
+    if (!file.seek(bfOffBits + static_cast<uint32_t>(row) * static_cast<uint32_t>(rowBytes)) ||
+        file.read(rowBuffer.get(), rowBytes) != rowBytes) {
+      LOG_ERR("BMP", "Adaptive tone: short read at row %d", row);
+      rewindToData();
+      return false;
+    }
+
+    const uint8_t* p = rowBuffer.get();
+    switch (bpp) {
+      case 32:
+      case 24: {
+        const int pixelBytes = bpp / 8;
+        for (int x = 0; x < width; x++, p += pixelBytes) {
+          histogram[(77u * p[2] + 150u * p[1] + 29u * p[0]) >> 8]++;
+        }
+        break;
+      }
+      case 8:
+        for (int x = 0; x < width; x++) {
+          histogram[paletteLum[p[x]]]++;
+        }
+        break;
+      case 4:
+        for (int x = 0; x < width; x++) {
+          histogram[paletteLum[(x & 1) ? (p[x >> 1] & 0x0F) : (p[x >> 1] >> 4)]]++;
+        }
+        break;
+      case 2:
+        for (int x = 0; x < width; x++) {
+          histogram[paletteLum[(p[x >> 2] >> (6 - ((x & 3) * 2))) & 0x03]]++;
+        }
+        break;
+      case 1:
+        for (int x = 0; x < width; x++) {
+          histogram[paletteLum[(p[x >> 3] & (0x80 >> (x & 7))) ? 1 : 0]]++;
+        }
+        break;
+      default:
+        rewindToData();
+        return false;
+    }
+    total += static_cast<uint32_t>(width);
+  }
+
+  const uint64_t lowTarget = (static_cast<uint64_t>(total) * ADAPTIVE_TONE_LOW_PERMILLE + 999u) / 1000u;
+  const uint64_t highTarget = (static_cast<uint64_t>(total) * ADAPTIVE_TONE_HIGH_PERMILLE + 999u) / 1000u;
+  uint64_t cumulative = 0;
+  int low = 0;
+  int high = 255;
+  bool foundLow = false;
+  for (int i = 0; i < 256; i++) {
+    cumulative += histogram[i];
+    if (!foundLow && cumulative >= lowTarget) {
+      low = i;
+      foundLow = true;
+    }
+    if (cumulative >= highTarget) {
+      high = i;
+      break;
+    }
+  }
+
+  if (rewindToData() != BmpReaderError::Ok) {
+    return false;
+  }
+  if (total == 0 || high - low < ADAPTIVE_TONE_MIN_RANGE) {
+    LOG_DBG("BMP", "Adaptive tone skipped: black=%d white=%d", low, high);
+    return false;
+  }
+
+  // One table lookup per pixel while drawing instead of a divide per pixel
+  // (no fast divide on the C3). 256 bytes: too large to add to an object that
+  // lives on the caller's stack, so it is heap-held and freed in ~Bitmap.
+  toneLut = static_cast<uint8_t*>(malloc(256));
+  if (!toneLut) {
+    LOG_ERR("BMP", "Adaptive tone: no memory for the tone table");
+    return false;
+  }
+  for (int lum = 0; lum < 256; lum++) {
+    const int leveled = std::clamp((lum - low) * 255 / (high - low), 0, 255);
+    int adjusted = (lum * (ADAPTIVE_TONE_BLEND_DEN - ADAPTIVE_TONE_BLEND_NUM) + leveled * ADAPTIVE_TONE_BLEND_NUM) /
+                   ADAPTIVE_TONE_BLEND_DEN;
+    // Never darken near-white: paper-white backgrounds must stay clean.
+    if (lum > 242 && adjusted < lum) {
+      adjusted = lum;
+    }
+    toneLut[lum] = static_cast<uint8_t>(adjusted);
+  }
+  LOG_DBG("BMP", "Adaptive tone enabled: black=%d white=%d", low, high);
+  return true;
+}
+
 // packed 2bpp output, 0 = black, 1 = dark gray, 2 = light gray, 3 = white
 BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
   // Note: rowBuffer should be pre-allocated by the caller to size 'rowBytes'
@@ -243,7 +377,8 @@ BmpReaderError Bitmap::readNextRow(uint8_t* data, uint8_t* rowBuffer) const {
   int currentX = 0;
 
   // Helper lambda to pack 2bpp color into the output stream
-  auto packPixel = [&](const uint8_t lum) {
+  auto packPixel = [&](const uint8_t sourceLum) {
+    const uint8_t lum = toneLut ? toneLut[sourceLum] : sourceLum;
     uint8_t color;
     if (atkinsonDitherer) {
       color = atkinsonDitherer->processPixel(adjustPixel(lum), currentX);

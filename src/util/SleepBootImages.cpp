@@ -2,8 +2,8 @@
 
 #include <Logging.h>
 
-#include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "sleeptheme/SleepThemeRenderer.h"
 
 namespace SleepBootImages {
 
@@ -26,13 +26,9 @@ void setSleepFolder(const std::string& path) {
   }
   LOG_INF("IMG", "Sleep folder: %s", path.empty() ? "<default>" : path.c_str());
 
-  // Only the custom-image sleep screens read the folder. Choosing one is a
-  // request to see its images, so switch a mode that would ignore them.
-  if (!path.empty() && SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM &&
-      SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM) {
-    SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
-    SETTINGS.saveToFile();
-  }
+  // Only themes showing sleep.image read the folder. Choosing one is a request
+  // to see its images, so switch from a theme that would ignore them.
+  if (!path.empty()) SleepThemeRenderer::showSleepImages();
 }
 
 }  // namespace SleepBootImages

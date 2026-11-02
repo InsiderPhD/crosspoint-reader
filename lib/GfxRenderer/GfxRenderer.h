@@ -36,6 +36,9 @@ class GfxRenderer {
  private:
   static constexpr size_t BW_BUFFER_CHUNK_SIZE = 8000;  // 8KB chunks to allow for non-contiguous memory
 
+  // Whether letter spacing goes between leftCp and rightCp (see setTrackSpaces()).
+  bool trackingBoundary(uint32_t leftCp, uint32_t rightCp) const;
+
   HalDisplay& display;
   RenderMode renderMode;
   // True only between a successful displayGrayscaleBase(Absolute) and the
@@ -53,6 +56,7 @@ class GfxRenderer {
   bool imagesSuppressed = false;
   bool imagesBwDither = false;
   bool darkModeActive = false;
+  bool trackSpaces = false;  // setTrackSpaces()
   uint8_t* frameBuffer = nullptr;
   uint16_t panelWidth = HalDisplay::DISPLAY_WIDTH;
   uint16_t panelHeight = HalDisplay::DISPLAY_HEIGHT;
@@ -289,11 +293,26 @@ class GfxRenderer {
   // paints any non-white source pixel black, so a heavily shrunk dithered
   // cover comes out almost solid black. Only black is drawn (the target is
   // assumed cleared); a no-op in the grayscale passes.
-  void drawBitmapResampled(const Bitmap& bitmap, int x, int y, int w, int h) const;
+  // How a resampled image's averaged greys become 1 bit.
+  enum class ResampleFilter : uint8_t {
+    Dither,     // 4x4 ordered dither
+    Lighter,    // dither, greys lifted towards white
+    Darker,     // dither, greys pushed towards black
+    Threshold,  // hard black and white at mid-grey, no dither
+    Invert,     // dither of the negative
+  };
+  // The part of the source image to resample, in source pixels; width 0 = all
+  // of it. A zoomed (object-fit: cover) image passes the centre crop.
+  struct SourceRect {
+    int x, y, width, height;
+  };
+  void drawBitmapResampled(const Bitmap& bitmap, int x, int y, int w, int h,
+                           ResampleFilter filter = ResampleFilter::Dither, SourceRect source = {0, 0, 0, 0}) const;
   // Same resample into a packed 1-bit buffer (MSB first, 1 = white, rows of
   // rowBytes), for caching a shrunk image as a 1-bit BMP that later draws 1:1.
   // bits must hold rowBytes * h bytes. False on allocation or read failure.
-  static bool resampleBitmapTo1Bit(const Bitmap& bitmap, int w, int h, uint8_t* bits, int rowBytes);
+  static bool resampleBitmapTo1Bit(const Bitmap& bitmap, int w, int h, uint8_t* bits, int rowBytes,
+                                   ResampleFilter filter = ResampleFilter::Dither, SourceRect source = {0, 0, 0, 0});
   // Paints over the four corner squares of an already-drawn rect so artwork
   // blitted by drawBitmap picks up rounded corners.
   void maskRoundedRectOutsideCorners(int x, int y, int width, int height, int radius, Color color) const;
@@ -319,6 +338,10 @@ class GfxRenderer {
   int getKerning(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style, int8_t tracking = 0) const;
   /// Advance of \p text as drawText(..., tracking) lays it out.
   int getTextAdvanceX(int fontId, const char* text, EpdFontFamily::Style style, int8_t tracking = 0) const;
+  /// Sleep themes space letters the CSS way: every boundary gets the tracking, spaces included,
+  /// so a letter-spaced "PUT DOWN AT" keeps its word gaps. Off (the reader's rule, no tracking
+  /// beside a space) unless a caller turns it on for its own drawing and back off after.
+  void setTrackSpaces(const bool on) { trackSpaces = on; }
   /// Whole pixels that \p tracking (half-pixel steps) adds over \p gaps glyph boundaries. The
   /// running total is snapped, not each step, so an odd setting alternates 0/1 px along a word
   /// instead of rounding every boundary the same way. Integer only: no FPU on the C3.

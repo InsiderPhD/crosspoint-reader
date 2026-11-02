@@ -202,7 +202,8 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
 
   if (httpCode >= 200 && httpCode < 300) {
     JsonDocument doc;
-    const DeserializationError error = deserializeJson(doc, http.getString());
+    const auto body = http.getString();
+    const DeserializationError error = deserializeJson(doc, body.c_str());
     http.end();
 
     if (error) {

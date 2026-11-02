@@ -17,6 +17,7 @@
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "ReadingDayDetailActivity.h"
+#include "ReadingRhythmView.h"
 #include "ReadingStatsDetailActivity.h"
 #include "ReadingStatsStore.h"
 #include "SessionDateEditActivity.h"
@@ -45,16 +46,17 @@
 
 namespace {
 constexpr unsigned long BOOK_LONG_PRESS_MS = 1000;
-constexpr int TOTAL_STATS_PAGES = 9;
+constexpr int TOTAL_STATS_PAGES = 10;
 constexpr int PAGE_OVERVIEW = 0;
 constexpr int PAGE_PROFILE = 1;
 constexpr int PAGE_STARTED_BOOKS = 2;
 constexpr int PAGE_WEEKLY = 3;
 constexpr int PAGE_MONTHLY = 4;
-constexpr int PAGE_SESSIONS = 5;
-constexpr int PAGE_YEAR = 6;
-constexpr int PAGE_LIBRARY = 7;
-constexpr int PAGE_CLIPPINGS = 8;
+constexpr int PAGE_RHYTHM = 5;
+constexpr int PAGE_SESSIONS = 6;
+constexpr int PAGE_YEAR = 7;
+constexpr int PAGE_LIBRARY = 8;
+constexpr int PAGE_CLIPPINGS = 9;
 
 // Tab labels in display order — index matches the PAGE_* enum values above.
 // The tab bar auto-scrolls to keep the selected tab's full label readable.
@@ -64,6 +66,7 @@ constexpr StrId TAB_NAMES[TOTAL_STATS_PAGES] = {
     StrId::STR_STATS_TAB_BOOKS,
     StrId::STR_STATS_TAB_WEEKLY,
     StrId::STR_MONTH,
+    StrId::STR_STATS_TAB_RHYTHM,
     StrId::STR_STATS_TAB_SESSIONS,
     StrId::STR_STATS_TAB_YEAR,
     StrId::STR_LIBRARY,
@@ -1041,7 +1044,7 @@ void ReadingStatsActivity::loop() {
   // Up/Down OR Left/Right step the scroll offset; long-press still cycles tabs
   // via the navigator below. maxScroll is set during render.
   const bool scrollablePage = (currentPage == PAGE_OVERVIEW || currentPage == PAGE_PROFILE ||
-                               currentPage == PAGE_WEEKLY || currentPage == PAGE_LIBRARY);
+                               currentPage == PAGE_WEEKLY || currentPage == PAGE_RHYTHM || currentPage == PAGE_LIBRARY);
   if (scrollablePage && selectedItemIndex == 0 && maxScroll > 0) {
     // Full Touch: a vertical swipe scrolls a screenful, in the same content-drag
     // sense as the paginated lists (swipe up reveals what is below). Without
@@ -1626,6 +1629,26 @@ void ReadingStatsActivity::render(RenderLock&&) {
     }
 
     drawLegend(renderer, Rect{sidePadding, legendTop, contentWidth, LEGEND_HEIGHT});
+  } else if (currentPage == PAGE_RHYTHM) {
+    // 13 weeks of daily dots, the same weeks as reading-time bars, and reading
+    // days per month. Anchored on today, or on the last day read while the
+    // clock is unset (no today ring then).
+    const uint32_t todayOrdinal = getDisplayReferenceDayOrdinal();
+    const uint32_t referenceDayOrdinal =
+        todayOrdinal != 0 ? todayOrdinal
+                          : (READING_STATS.hasReadingDays() ? READING_STATS.getReadingDays().back().dayOrdinal : 0);
+    if (referenceDayOrdinal == 0) {
+      renderer.drawCenteredText(UI_10_FONT_ID, (contentTop + contentBottom) / 2, tr(STR_NO_READING_STATS));
+    } else {
+      // Fits one portrait screen on the stock themes; scrolls like Weekly on
+      // any theme whose chrome leaves less room.
+      const int viewportHeight = scrollBottom - contentTop;
+      maxScroll = std::max(0, ReadingRhythmView::contentHeight() - viewportHeight);
+      scrollOffset = std::clamp(scrollOffset, 0, maxScroll);
+      ReadingRhythmView::draw(renderer, sidePadding, contentTop - scrollOffset, contentWidth, viewportHeight,
+                              referenceDayOrdinal, todayOrdinal != 0);
+      drawScrollChrome();
+    }
   } else if (currentPage == PAGE_SESSIONS) {
     // Session-length distribution over the recorded session log (bounded to the
     // most recent MAX_SESSION_LOG_ENTRIES sessions). Purely informational — the

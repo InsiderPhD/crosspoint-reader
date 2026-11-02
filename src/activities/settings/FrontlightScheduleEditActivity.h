@@ -1,8 +1,7 @@
 #pragma once
 
 #include <HalFrontlight.h>
-
-#if FREEINK_CAP_FRONTLIGHT
+#include <I18n.h>
 
 #include <cstdint>
 #include <string>
@@ -14,8 +13,9 @@
 struct Rect;
 
 /**
- * Editor for one frontlight schedule slot: Enabled, Start, End, Brightness and
- * (on warm/cool boards) Warmth. Enabled toggles in place; every other row
+ * Editor for one frontlight schedule slot: Enabled, Start, End, Dark Mode,
+ * Brightness and (on warm/cool boards) Warmth. Enabled and Dark Mode toggle in
+ * place; every other row
  * opens a picker list — the hours as a 24-row list, brightness through the
  * same FrontlightBrightnessActivity the reader menu uses, warmth as a list of
  * ten-point steps — so a value is chosen by scrolling to it, not tapped up to.
@@ -25,6 +25,9 @@ struct Rect;
  * schedule can be judged as a whole, not one field at a time; the pickers
  * carry that preview on, and Back puts the current setting back.
  *
+ * On boards without a frontlight the light rows are dropped and the editor
+ * schedules dark mode only (FrontlightScheduler::controlsLight()).
+ *
  * Works on a copy: Back writes it into SETTINGS.frontlightSchedules[slot] and
  * returns a plain result; persisting is the caller's job.
  */
@@ -32,6 +35,9 @@ class FrontlightScheduleEditActivity final : public Activity {
  public:
   FrontlightScheduleEditActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, uint8_t slot)
       : Activity("FrontlightScheduleEdit", renderer, mappedInput), slot(slot) {}
+
+  // "Frontlight Schedule", or "Dark Mode Schedule" on boards without a light.
+  static StrId titleId();
 
   void onEnter() override;
   void loop() override;
@@ -56,5 +62,3 @@ class FrontlightScheduleEditActivity final : public Activity {
   int selectedField = 0;
   ButtonNavigator buttonNavigator;
 };
-
-#endif  // FREEINK_CAP_FRONTLIGHT

@@ -1,24 +1,16 @@
 #include "SleepActivity.h"
 
-#include <Bitmap.h>
-#include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
-#include <HalStorage.h>
 #include <I18n.h>
 
-#include <string>
-#include <string_view>
+#include <cstring>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
-#include "SleepCover.h"
-#include "SleepOverlay.h"
-#include "SleepStatsCard.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "images/Logo120.h"
 #include "images/MoonIcon.h"
 #include "sleeptheme/SleepThemeRenderer.h"
 
@@ -34,287 +26,56 @@ void SleepActivity::onEnter() {
     return renderLastScreenSleepScreen();
   }
 
-  // Page Overlay composites onto the screen that is still in the framebuffer,
-  // so it has to run before the popup below draws over it.
-  if (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY) {
-    return renderOverlaySleepScreen();
+  SleepThemeRenderer::ThemeInfo theme;
+  const bool haveTheme = SleepThemeRenderer::inspect(SETTINGS.sleepTheme, theme);
+
+  // An overlay paints onto the screen that is still in the framebuffer, so it
+  // has to run before the popup below draws over it.
+  if (haveTheme && theme.overlay) {
+    return renderOverlayThemeSleepScreen();
   }
 
-  // Scrub the panel before the sleep image goes up: promote the popup paint
-  // below to a full GC flash so residue accumulated while reading (fast/partial
-  // waveforms are not DC-balanced) doesn't ghost through the sleep screen.
-  // The seamless path above deliberately skips this — it must not flash.
-  display.requestResync(1);
-
-  // Show popup with reader orientation only when going to sleep from reader
-  if (APP_STATE.lastSleepFromReader) {
-    ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+  // "Full refresh before sleep": scrub the panel before the sleep image goes
+  // up, showing "Entering sleep" on a full GC flash so residue accumulated
+  // while reading (fast/partial waveforms are not DC-balanced) can't ghost
+  // through the sleep screen. Off by default: it cost ~1.6 s of a ~3.8 s sleep
+  // on the X4 Pro, and the sleep image's own FULL_REFRESH still scrubs (a
+  // greyscale theme clears to white on a FULL first, so it never needs this).
+  // Off, there is no popup either: the page stays up for the half second the
+  // theme takes to draw, then the sleep screen replaces it.
+  if (SETTINGS.sleepFullRefresh && !(haveTheme && theme.greyscale)) {
+    display.requestResync(1);
+    // Show popup with reader orientation only when going to sleep from reader
+    if (APP_STATE.lastSleepFromReader) {
+      ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+    }
+    const unsigned long popupStart = millis();
     GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
-  } else {
-    GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
+    LOG_INF("SLP", "Popup shown in %lu ms", millis() - popupStart);
   }
 
   ReaderUtils::applyOrientation(renderer, SETTINGS.sleepScreenOrientation);
-
-  switch (SETTINGS.sleepScreen) {
-    case (CrossPointSettings::SLEEP_SCREEN_MODE::BLANK):
-      return renderBlankSleepScreen();
-    case (CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM):
-      return renderCustomSleepScreen();
-    case (CrossPointSettings::SLEEP_SCREEN_MODE::THEME):
-      return renderThemeSleepScreen();
-    case (CrossPointSettings::SLEEP_SCREEN_MODE::COVER):
-      return renderCoverSleepScreen();
-    case (CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM):
-      if (APP_STATE.lastSleepFromReader) {
-        return renderCoverSleepScreen();
-      } else {
-        return renderCustomSleepScreen();
-      }
-    default:
-      return renderDefaultSleepScreen();
+  if (haveTheme) {
+    return renderThemeSleepScreen(theme.greyscale);
   }
-}
-
-namespace {
-constexpr char ROOT_SLEEP_IMAGE[] = "/sleep.bmp";
-constexpr char DEFAULT_SLEEP_DIR_HIDDEN[] = "/.sleep";
-constexpr char DEFAULT_SLEEP_DIR[] = "/sleep";
-// Page Overlay images are kept apart from the Custom ones: an ordinary sleep
-// image has no transparent area and would simply hide the page.
-constexpr char ROOT_OVERLAY_PNG[] = "/sleep-overlay.png";
-constexpr char ROOT_OVERLAY_BMP[] = "/sleep-overlay.bmp";
-constexpr char OVERLAY_DIR_HIDDEN[] = "/.sleep-overlay";
-constexpr char OVERLAY_DIR[] = "/sleep-overlay";
-
-// Non-zero 16-bit FNV-1a fold of a folder path: tags which folder the
-// recently-shown history in APP_STATE was counted in.
-uint16_t sleepFolderHash(const std::string_view path) {
-  uint32_t hash = 2166136261u;
-  for (const char c : path) {
-    hash ^= static_cast<uint8_t>(c);
-    hash *= 16777619u;
-  }
-  const auto folded = static_cast<uint16_t>((hash >> 16) ^ (hash & 0xFFFFu));
-  return folded == 0 ? 1 : folded;
-}
-
-bool openSleepDir(const char* path, FsFile& dir) {
-  dir = Storage.open(path);
-  if (dir && dir.isDirectory()) {
-    return true;
-  }
-  if (dir) dir.close();
-  return false;
-}
-
-// Picks one .bmp (or, with allowPng, .png) from the open directory `dir` (whose
-// path is `dirPath`) and returns its full path in `outPath`. Records the pick
-// in APP_STATE's history.
-//
-// One pass, two candidates, no list. Holding every filename in a vector and
-// opening every BMP to parse its header made sleep entry scale with the
-// folder (two card seeks per file, plus one heap block per name). Instead:
-//  - nonRecentName: a uniform reservoir sample over the images that are not
-//    in the recently-shown history;
-//  - oldestRecentName: of the images that are in it, the one shown longest
-//    ago. Used only when every image is recent (a folder smaller than the
-//    history), where it gives a strict rotation rather than a repeat.
-// The caller validates the pick's header once, after selection.
-bool pickSleepImage(FsFile& dir, const std::string& dirPath, const bool allowPng, std::string& outPath) {
-  // The history is a list of positions in ONE folder's listing. Against any
-  // other folder its indices would exclude arbitrary images, so start over.
-  const uint16_t folderHash = sleepFolderHash(dirPath);
-  if (APP_STATE.recentSleepFolderHash != 0 && APP_STATE.recentSleepFolderHash != folderHash) {
-    APP_STATE.clearRecentSleepHistory();
-  }
-  APP_STATE.recentSleepFolderHash = folderHash;
-
-  std::string nonRecentName;
-  std::string oldestRecentName;
-  uint16_t candidateCount = 0;
-  uint16_t nonRecentCount = 0;
-  uint16_t nonRecentIndex = 0;
-  uint16_t oldestRecentIndex = 0;
-  uint8_t oldestRecentAge = 0;
-  bool haveOldestRecent = false;
-  char name[500];
-  for (auto dirFile = dir.openNextFile(); dirFile; dirFile = dir.openNextFile()) {
-    if (dirFile.isDirectory()) {
-      dirFile.close();
-      continue;
-    }
-    dirFile.getName(name, sizeof(name));
-    dirFile.close();
-    const std::string_view filename(name);
-    if (filename.empty() || filename.front() == '.') {
-      continue;
-    }
-
-    if (!FsHelpers::hasBmpExtension(filename) && !(allowPng && FsHelpers::hasPngExtension(filename))) {
-      LOG_DBG("SLP", "Skipping non-image file name: %s", name);
-      continue;
-    }
-
-    if (candidateCount == UINT16_MAX) {
-      break;
-    }
-    const uint16_t candidateIndex = candidateCount++;
-
-    const uint8_t age = APP_STATE.recentSleepAge(candidateIndex);
-    if (age == CrossPointState::SLEEP_NOT_RECENT) {
-      nonRecentCount++;
-      // Reservoir sampling: the k-th eligible image replaces the pick with
-      // probability 1/k, which leaves every eligible image equally likely.
-      if (random(nonRecentCount) == 0) {
-        nonRecentName.assign(filename.data(), filename.size());
-        nonRecentIndex = candidateIndex;
-      }
-    } else if (!haveOldestRecent || age > oldestRecentAge) {
-      oldestRecentName.assign(filename.data(), filename.size());
-      oldestRecentIndex = candidateIndex;
-      oldestRecentAge = age;
-      haveOldestRecent = true;
-    }
-  }
-  if (candidateCount == 0) {
-    return false;
-  }
-
-  const bool useNonRecent = nonRecentCount > 0;
-  outPath = dirPath;
-  if (outPath.empty() || outPath.back() != '/') outPath += '/';
-  outPath += useNonRecent ? nonRecentName : oldestRecentName;
-  APP_STATE.pushRecentSleep(useNonRecent ? nonRecentIndex : oldestRecentIndex);
-  APP_STATE.saveToFile();
-  LOG_DBG("SLP", "Randomly loading: %s (%u candidates)", outPath.c_str(), candidateCount);
-  return true;
-}
-}  // namespace
-
-bool SleepActivity::renderSleepImageFromFolder(const char* dirPath) const {
-  FsFile dir;
-  if (!openSleepDir(dirPath, dir)) {
-    return false;
-  }
-  std::string imagePath;
-  const bool picked = pickSleepImage(dir, dirPath, /*allowPng=*/false, imagePath);
-  dir.close();
-  if (!picked) {
-    return false;
-  }
-
-  FsFile imageFile;
-  if (!Storage.openFileForRead("SLP", imagePath, imageFile)) {
-    return false;
-  }
-  Bitmap bitmap(imageFile, true);
-  if (bitmap.parseHeaders() != BmpReaderError::Ok) {
-    LOG_ERR("SLP", "Invalid BMP sleep image: %s", imagePath.c_str());
-    imageFile.close();
-    return false;
-  }
-  renderBitmapSleepScreen(bitmap);
-  imageFile.close();
-  return true;
-}
-
-void SleepActivity::renderCustomSleepScreen() const {
-  // A folder the user picked in the file browser wins over everything else.
-  // Missing, or holding no images: the built-in lookup below still applies, so
-  // a removed folder cannot leave the device without its sleep image.
-  const std::string& preferredDir = APP_STATE.preferredSleepFolderPath;
-  if (!preferredDir.empty()) {
-    if (renderSleepImageFromFolder(preferredDir.c_str())) {
-      return;
-    }
-    LOG_INF("SLP", "No usable image in chosen sleep folder, falling back: %s", preferredDir.c_str());
-  }
-
-  // /sleep.bmp on the root of the SD card takes priority over the default
-  // sleep folders.
-  FsFile file;
-  if (Storage.openFileForRead("SLP", ROOT_SLEEP_IMAGE, file)) {
-    Bitmap bitmap(file, true);
-    if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-      LOG_DBG("SLP", "Loading: %s", ROOT_SLEEP_IMAGE);
-      renderBitmapSleepScreen(bitmap);
-      file.close();
-      return;
-    }
-    file.close();
-  }
-
-  // /.sleep (preferred) or /sleep. Only the first that exists is used, as
-  // before: an empty /.sleep does not fall through to /sleep.
-  const char* defaultDir = nullptr;
-  {
-    FsFile probe;
-    if (openSleepDir(DEFAULT_SLEEP_DIR_HIDDEN, probe)) {
-      defaultDir = DEFAULT_SLEEP_DIR_HIDDEN;
-    } else if (openSleepDir(DEFAULT_SLEEP_DIR, probe)) {
-      defaultDir = DEFAULT_SLEEP_DIR;
-    }
-    if (probe) probe.close();
-  }
-  if (defaultDir && renderSleepImageFromFolder(defaultDir)) {
-    return;
-  }
-
+  LOG_INF("SLP", "No usable sleep theme '%s'; using the default sleep screen", SETTINGS.sleepTheme);
   renderDefaultSleepScreen();
 }
 
-bool SleepActivity::drawSleepOverlay() const {
-  using SleepOverlay::Result;
-
-  // A single image on the card root wins, as /sleep.bmp does for Custom.
-  if (SleepOverlay::drawPng(renderer, ROOT_OVERLAY_PNG) == Result::Drawn) return true;
-  if (SleepOverlay::drawBmp(renderer, ROOT_OVERLAY_BMP) == Result::Drawn) return true;
-
-  const char* overlayDir = nullptr;
-  FsFile dir;
-  if (openSleepDir(OVERLAY_DIR_HIDDEN, dir)) {
-    overlayDir = OVERLAY_DIR_HIDDEN;
-  } else if (openSleepDir(OVERLAY_DIR, dir)) {
-    overlayDir = OVERLAY_DIR;
-  }
-  if (!overlayDir) {
-    return false;
-  }
-
-  std::string imagePath;
-  bool picked = pickSleepImage(dir, overlayDir, /*allowPng=*/true, imagePath);
-  if (picked && FsHelpers::hasPngExtension(imagePath)) {
-    if (SleepOverlay::drawPng(renderer, imagePath.c_str()) == Result::Drawn) {
-      dir.close();
-      return true;
-    }
-    // A PNG needs one 45-60KB block for its decoder and a BMP needs none, so a
-    // folder that also holds BMPs can still supply an overlay when the heap is
-    // too fragmented for the PNG.
-    dir.rewindDirectory();
-    picked = pickSleepImage(dir, overlayDir, /*allowPng=*/false, imagePath);
-  }
-  dir.close();
-  return picked && SleepOverlay::drawBmp(renderer, imagePath.c_str()) == Result::Drawn;
-}
-
-void SleepActivity::renderOverlaySleepScreen() const {
-  ReaderUtils::applyOrientation(renderer, SETTINGS.sleepScreenOrientation);
-
+void SleepActivity::renderOverlayThemeSleepScreen() const {
   // Dark mode screens are inverted in the framebuffer just before they are
   // shown, so the page being kept is white-on-black. Flip it to its natural
-  // polarity, composite, and flip the result back: the overlay then follows
-  // dark mode like the rest of the UI, and black line art stays visible
-  // instead of vanishing into a black page.
+  // polarity, paint, and flip the result back: the overlay then follows dark
+  // mode like the rest of the UI, and black art stays visible instead of
+  // vanishing into a black page.
   if (SETTINGS.darkMode) renderer.invertScreen();
-
-  if (!drawSleepOverlay()) {
-    LOG_INF("SLP", "No overlay image drawn; sleeping on the page alone");
+  const bool drawn = SleepThemeRenderer::draw(renderer, SETTINGS.sleepTheme);
+  if (SETTINGS.darkMode) renderer.invertScreen();
+  if (!drawn) {
+    LOG_INF("SLP", "Overlay theme '%s' not drawn; using the default sleep screen", SETTINGS.sleepTheme);
+    ReaderUtils::applyOrientation(renderer, SETTINGS.sleepScreenOrientation);
+    return renderDefaultSleepScreen();
   }
-  SleepStatsCard::draw(renderer);
-
-  if (SETTINGS.darkMode) renderer.invertScreen();
 
   // A full waveform, like every other generated sleep screen: this image has
   // to survive the rail collapsing on battery (see renderDefaultSleepScreen).
@@ -323,35 +84,71 @@ void SleepActivity::renderOverlaySleepScreen() const {
   renderer.displayBuffer(HalDisplay::FULL_REFRESH, /*powerOffAfter=*/true);
 }
 
-void SleepActivity::renderThemeSleepScreen() const {
-  // Drawn exactly as designed: no dark-mode invert and no stats card (themes
-  // place their own stats).
-  if (!SleepThemeRenderer::draw(renderer, SETTINGS.sleepTheme)) {
+void SleepActivity::renderThemeSleepScreen(const bool greyscale) const {
+  if (greyscale) {
+    // The grayscale LUT only nudges particles, so the BW base under it must
+    // not be a strong waveform. A HALF base no longer works: HalDisplay arms a
+    // resync on every HALF, which on the X3 is a full-sync waveform that sets
+    // the pixels too firmly for the grey drive to move, and images came out
+    // in harsh, wrong tones. Scrub to white on a FULL first so the base paint
+    // below (a differential) doesn't ghost the screen underneath.
+    renderer.clearScreen();
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
+  }
+
+  // Drawn exactly as designed: no dark-mode invert (themes are their own art).
+  SleepThemeRenderer::GreyPlan grey;
+  const unsigned long drawStart = millis();
+  const bool drawn = SleepThemeRenderer::draw(renderer, SETTINGS.sleepTheme, greyscale ? &grey : nullptr);
+  LOG_INF("SLP", "Theme %s drawn in %lu ms", SETTINGS.sleepTheme, millis() - drawStart);
+  if (!drawn) {
     LOG_INF("SLP", "Theme '%s' not drawn; using the default sleep screen", SETTINGS.sleepTheme);
     ReaderUtils::applyOrientation(renderer, SETTINGS.sleepScreenOrientation);
     return renderDefaultSleepScreen();
   }
-  // FULL_REFRESH so the image survives the rail collapsing on battery (see
-  // renderDefaultSleepScreen).
-  renderer.displayBuffer(HalDisplay::FULL_REFRESH, /*powerOffAfter=*/true);
+
+  if (grey.count == 0) {
+    // FULL_REFRESH so the image survives the rail collapsing on battery (see
+    // renderDefaultSleepScreen).
+    const unsigned long refreshStart = millis();
+    renderer.displayBuffer(HalDisplay::FULL_REFRESH, /*powerOffAfter=*/true);
+    LOG_INF("SLP", "Sleep screen refreshed in %lu ms", millis() - refreshStart);
+    return;
+  }
+
+  // The BW paint is the base; the grey passes then hold only the grey images,
+  // so displayGrayBuffer leaves every other pixel as the base drew it.
+  //
+  // The X3's UC8253 has a dedicated grey-base waveform (the OEM "AA-pre-BW(mid)"
+  // bank): a differential update that gives the changed pixels the calibrated
+  // strong drives the gc nudge bank was tuned against. A plain FAST base is the
+  // short "turbo" bank, whose blacks are too weak to start from, and the grey
+  // nudge then lightens them further: every image came out washed out. The
+  // other panels have no such waveform and their base stays a FAST paint.
+  if (!gpio.deviceIsX3() ||
+      !renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Overlay, HalDisplay::FAST_REFRESH)) {
+    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+  }
+
+  renderer.clearScreen(0x00);
+  renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
+  SleepThemeRenderer::drawGreyImages(renderer, grey);
+  renderer.copyGrayscaleLsbBuffers();
+
+  renderer.clearScreen(0x00);
+  renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
+  SleepThemeRenderer::drawGreyImages(renderer, grey);
+  renderer.copyGrayscaleMsbBuffers();
+
+  // displayGrayBuffer powers the rails off.
+  renderer.displayGrayBuffer();
+  renderer.setRenderMode(GfxRenderer::BW);
 }
 
 void SleepActivity::renderDefaultSleepScreen() const {
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
-
-  renderer.clearScreen();
-  renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_SLEEPING));
-
-  // Draw the stat cards before any invertScreen() below so they invert with the
-  // rest of the dark-mode screen.
-  SleepStatsCard::draw(renderer);
-
-  // Make sleep screen dark unless light is selected in settings
-  if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::LIGHT) {
-    renderer.invertScreen();
-  }
+  // The store's "light" and "dark" themes are this screen, so either works
+  // before it is downloaded: light unless the setting asks for dark.
+  SleepThemeRenderer::drawBuiltIn(renderer, strcmp(SETTINGS.sleepTheme, "dark") == 0);
 
   // Terminate on a FULL_REFRESH, not a partial one. On battery, deep sleep
   // opens the battery-protection MOSFET (HalPowerManager::startDeepSleep) and
@@ -364,147 +161,6 @@ void SleepActivity::renderDefaultSleepScreen() const {
   renderer.displayBuffer(HalDisplay::FULL_REFRESH, /*powerOffAfter=*/true);
 }
 
-void SleepActivity::renderBitmapSleepScreen(const Bitmap& bitmap) const {
-  int x, y;
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
-  float cropX = 0, cropY = 0;
-
-  LOG_DBG("SLP", "bitmap %d x %d, screen %d x %d", bitmap.getWidth(), bitmap.getHeight(), pageWidth, pageHeight);
-  if (bitmap.getWidth() > pageWidth || bitmap.getHeight() > pageHeight) {
-    // image will scale, make sure placement is right
-    float ratio = static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
-    const float screenRatio = static_cast<float>(pageWidth) / static_cast<float>(pageHeight);
-
-    LOG_DBG("SLP", "bitmap ratio: %f, screen ratio: %f", ratio, screenRatio);
-    if (ratio > screenRatio) {
-      // image wider than viewport ratio, scaled down image needs to be centered vertically
-      if (SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP) {
-        cropX = 1.0f - (screenRatio / ratio);
-        LOG_DBG("SLP", "Cropping bitmap x: %f", cropX);
-        ratio = (1.0f - cropX) * static_cast<float>(bitmap.getWidth()) / static_cast<float>(bitmap.getHeight());
-      }
-      x = 0;
-      y = std::round((static_cast<float>(pageHeight) - static_cast<float>(pageWidth) / ratio) / 2);
-      LOG_DBG("SLP", "Centering with ratio %f to y=%d", ratio, y);
-    } else {
-      // image taller than viewport ratio, scaled down image needs to be centered horizontally
-      if (SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP) {
-        cropY = 1.0f - (ratio / screenRatio);
-        LOG_DBG("SLP", "Cropping bitmap y: %f", cropY);
-        ratio = static_cast<float>(bitmap.getWidth()) / ((1.0f - cropY) * static_cast<float>(bitmap.getHeight()));
-      }
-      x = std::round((static_cast<float>(pageWidth) - static_cast<float>(pageHeight) * ratio) / 2);
-      y = 0;
-      LOG_DBG("SLP", "Centering with ratio %f to x=%d", ratio, x);
-    }
-  } else {
-    // center the image
-    x = (pageWidth - bitmap.getWidth()) / 2;
-    y = (pageHeight - bitmap.getHeight()) / 2;
-  }
-
-  LOG_DBG("SLP", "drawing to %d x %d", x, y);
-
-  const bool hasGreyscale = bitmap.hasGreyscale() &&
-                            SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::NO_FILTER;
-
-  if (hasGreyscale) {
-    // The grayscale LUT only nudges particles, so the BW base under it must
-    // not be a strong waveform. A HALF base no longer works: HalDisplay arms a
-    // resync on every HALF, which on the X3 is a full-sync waveform that sets
-    // the pixels too firmly for the grey drive to move, and the cover came out
-    // in harsh, wrong tones. Scrub to white on a FULL first so the base paint
-    // below (a differential) doesn't ghost the reader page underneath.
-    renderer.clearScreen();
-    renderer.displayBuffer(HalDisplay::FULL_REFRESH);
-  }
-
-  renderer.clearScreen();
-  renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
-
-  if (SETTINGS.sleepScreenCoverFilter == CrossPointSettings::SLEEP_SCREEN_COVER_FILTER::INVERTED_BLACK_AND_WHITE) {
-    renderer.invertScreen();
-  }
-
-  // Draw the stat box into this (BW) paint. For a BW cover this is the final
-  // commit. For a greyscale cover it is the base; the greyscale passes below
-  // clear the box rectangle so displayGrayBuffer leaves the box region as this
-  // BW base while the rest of the cover renders in greyscale.
-  SleepStatsCard::draw(renderer);
-
-  if (!hasGreyscale) {
-    // Final paint: FULL_REFRESH so the image is fully committed and survives
-    // the battery-disconnect power collapse (see renderDefaultSleepScreen).
-    renderer.displayBuffer(HalDisplay::FULL_REFRESH, /*powerOffAfter=*/true);
-    return;
-  }
-
-  // displayGrayBuffer below powers the rails off.
-  //
-  // The X3's UC8253 has a dedicated grey-base waveform (the OEM "AA-pre-BW(mid)"
-  // bank): a differential update that gives the cover's changed pixels the
-  // calibrated strong drives the gc nudge bank was tuned against. A plain FAST
-  // base is the short "turbo" bank, whose blacks are too weak to start from,
-  // and the grey nudge then lightens them further: every cover came out washed
-  // out. The other panels have no such waveform and their base stays the FAST
-  // paint they have always had.
-  if (!gpio.deviceIsX3() ||
-      !renderer.displayGrayscaleBase(HalDisplay::GrayscaleMode::Overlay, HalDisplay::FAST_REFRESH)) {
-    renderer.displayBuffer(HalDisplay::FAST_REFRESH);
-  }
-
-  bitmap.rewindToData();
-  renderer.clearScreen(0x00);
-  renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
-  renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
-  SleepStatsCard::draw(renderer, /*clearRegionOnly=*/true);  // clear box rect -> preserves BW base box
-  renderer.copyGrayscaleLsbBuffers();
-
-  bitmap.rewindToData();
-  renderer.clearScreen(0x00);
-  renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);
-  renderer.drawBitmap(bitmap, x, y, pageWidth, pageHeight, cropX, cropY);
-  SleepStatsCard::draw(renderer, /*clearRegionOnly=*/true);
-  renderer.copyGrayscaleMsbBuffers();
-
-  renderer.displayGrayBuffer();
-  renderer.setRenderMode(GfxRenderer::BW);
-}
-
-void SleepActivity::renderCoverSleepScreen() const {
-  void (SleepActivity::*renderNoCoverSleepScreen)() const;
-  switch (SETTINGS.sleepScreen) {
-    case (CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM):
-      renderNoCoverSleepScreen = &SleepActivity::renderCustomSleepScreen;
-      break;
-    default:
-      renderNoCoverSleepScreen = &SleepActivity::renderDefaultSleepScreen;
-      break;
-  }
-
-  std::string coverBmpPath;
-  const bool cropped = SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP;
-  if (!SleepCover::resolveBmpPath(renderer, cropped, coverBmpPath)) {
-    return (this->*renderNoCoverSleepScreen)();
-  }
-
-  FsFile file;
-  if (!Storage.openFileForRead("SLP", coverBmpPath, file)) {
-    LOG_ERR("SLP", "Falling back: could not open cover bmp for reading: %s", coverBmpPath.c_str());
-    return (this->*renderNoCoverSleepScreen)();
-  }
-  Bitmap bitmap(file);
-  const auto parseErr = bitmap.parseHeaders();
-  if (parseErr != BmpReaderError::Ok) {
-    LOG_ERR("SLP", "Falling back: cover bmp parseHeaders failed (err=%d) for: %s", static_cast<int>(parseErr),
-            coverBmpPath.c_str());
-    return (this->*renderNoCoverSleepScreen)();
-  }
-  LOG_DBG("SLP", "Rendering sleep cover: %s", coverBmpPath.c_str());
-  renderBitmapSleepScreen(bitmap);
-}
-
 void SleepActivity::renderLastScreenSleepScreen() const {
   const auto pageHeight = renderer.getScreenHeight();
   renderer.drawImage(MoonIcon, 0, pageHeight - MOONICON_HEIGHT, MOONICON_WIDTH, MOONICON_HEIGHT);
@@ -515,12 +171,4 @@ void SleepActivity::renderLastScreenSleepScreen() const {
   // renderDefaultSleepScreen). Seamless users opt into flash-free over
   // ghost-free; do not "fix" this to FULL_REFRESH.
   renderer.displayBuffer(HalDisplay::HALF_REFRESH, /*powerOffAfter=*/true);
-}
-
-void SleepActivity::renderBlankSleepScreen() const {
-  renderer.clearScreen();
-  // FULL_REFRESH so the blank field is fully committed and does not let the
-  // prior image ghost back when the battery rail collapses (see
-  // renderDefaultSleepScreen for the full rationale).
-  renderer.displayBuffer(HalDisplay::FULL_REFRESH, /*powerOffAfter=*/true);
 }

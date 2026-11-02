@@ -1,8 +1,6 @@
 #pragma once
 #include "../Activity.h"
 
-class Bitmap;
-
 class SleepActivity final : public Activity {
  public:
   explicit SleepActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool fromTimeout = false)
@@ -10,25 +8,16 @@ class SleepActivity final : public Activity {
   void onEnter() override;
 
  private:
+  // The built-in screen (logo, "Sleeping"): shown when no theme is set or the
+  // chosen one is missing or unusable.
   void renderDefaultSleepScreen() const;
-  void renderCustomSleepScreen() const;
-  // Picks an image from dirPath (rotation history in APP_STATE) and paints it.
-  // False when the folder is missing or has no usable image; nothing is drawn.
-  bool renderSleepImageFromFolder(const char* dirPath) const;
-  void renderCoverSleepScreen() const;
-  void renderBitmapSleepScreen(const Bitmap& bitmap) const;
   void renderLastScreenSleepScreen() const;
-  void renderBlankSleepScreen() const;
-  // Compiled HTML/CSS theme (SETTINGS.sleepTheme); default screen when unusable.
-  void renderThemeSleepScreen() const;
-  // Page Overlay: keeps the framebuffer as the outgoing screen left it and
-  // composites a transparent image from the SD card over it.
-  void renderOverlaySleepScreen() const;
-  // Draws the overlay image, if there is one. False when nothing was drawn.
-  bool drawSleepOverlay() const;
-
-  // The selected reading stats are drawn by the shared SleepStatsCard component
-  // (also used by the settings preview); see activities/boot_sleep/SleepStatsCard.h.
+  // Compiled HTML/CSS theme (SETTINGS.sleepTheme). greyscale: it has images in
+  // the panel's greys, which need the grey passes after the BW paint.
+  void renderThemeSleepScreen(bool greyscale) const;
+  // Overlay theme: keeps the framebuffer as the outgoing screen left it and
+  // paints the theme over it.
+  void renderOverlayThemeSleepScreen() const;
 
   bool fromTimeout = false;
 };

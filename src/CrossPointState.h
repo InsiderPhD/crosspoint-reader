@@ -2,6 +2,28 @@
 #include <cstdint>
 #include <string>
 
+// Battery level against awake-on-battery time for the current charge cycle
+// (see util/PowerHistory). Fixed size and part of this singleton, so tracking
+// costs no heap; it rides the state.json save that deep sleep already makes.
+struct PowerHistoryState {
+  static constexpr uint8_t SAMPLE_CAPACITY = 21;  // 100% down to 0% in 5% steps
+
+  uint32_t activeSeconds = 0;
+  uint32_t cycleStartDay = 0;  // local day ordinal, valid when hasCycleStartDay
+  uint32_t readerPageTurns = 0;
+  uint16_t sampleActiveMinutes[SAMPLE_CAPACITY] = {};
+  uint8_t samplePercents[SAMPLE_CAPACITY] = {};
+  uint8_t sampleCount = 0;
+  uint8_t lastPercent = UINT8_MAX;  // > 100 = never sampled
+  // Lowest level seen while on external power, so a later rise reads as a charge.
+  uint8_t chargePendingPercent = UINT8_MAX;
+  bool hasCycleStartDay = false;
+  bool cycleConfirmed = false;  // the cycle began at an actual charge
+  bool chargePending = false;
+};
+
+static_assert(sizeof(PowerHistoryState) <= 96, "Power history must remain a small fixed-size state");
+
 class CrossPointState {
   // Static instance
   static CrossPointState instance;
@@ -45,6 +67,7 @@ class CrossPointState {
   // Empty (the default) = built-in logo, and the boot path never touches the
   // card for it. A path that no longer opens or parses also gives the logo.
   std::string bootImagePath;
+  PowerHistoryState powerHistory;
 
   // recentSleepAge() result for an index that is not in the history.
   static constexpr uint8_t SLEEP_NOT_RECENT = UINT8_MAX;

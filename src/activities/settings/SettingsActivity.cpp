@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "AboutActivity.h"
+#include "BatteryActivity.h"
 #include "BluetoothSettingsActivity.h"
 #include "BookFusionSettingsActivity.h"
 #include "ButtonRemapActivity.h"
@@ -21,6 +22,7 @@
 #include "FontLayoutPreviewActivity.h"
 #include "FontSelectionActivity.h"
 #include "FrontlightBrightnessActivity.h"
+#include "FrontlightScheduleEditActivity.h"
 #include "FrontlightScheduleListActivity.h"
 #include "HardcoverPushActivity.h"
 #include "KOReaderSettingsActivity.h"
@@ -37,7 +39,6 @@
 #include "SdFirmwareUpdateActivity.h"
 #include "SettingsList.h"
 #include "SilentRestart.h"
-#include "SleepStatsSettingsActivity.h"
 #include "SleepThemeSelectActivity.h"
 #include "StatsDataActivity.h"
 #include "StatusBarSettingsActivity.h"
@@ -48,6 +49,7 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/FrontlightScheduler.h"
 #include "util/TimeUtils.h"
 #include "util/TimeZoneRegistry.h"
 #include "util/TouchListNav.h"
@@ -101,15 +103,6 @@ void SettingsActivity::onEnter() {
     // device it is picked from the installed themes by the SleepTheme action row
     // inserted below.
     if (setting.key && std::strcmp(setting.key, "sleepTheme") == 0) continue;
-    // Device-only override: the three sleep-stat slots are edited on-device from
-    // the dedicated Sleep Screen Stats screen (with a live preview) launched by
-    // the action row below, so they are hidden from this flat Stats list. They
-    // stay in getSettingsList() so the web UI and JSON round-trip still see them.
-    if (setting.key &&
-        (std::strcmp(setting.key, "sleepStatSlot1") == 0 || std::strcmp(setting.key, "sleepStatSlot2") == 0 ||
-         std::strcmp(setting.key, "sleepStatSlot3") == 0)) {
-      continue;
-    }
     if (setting.category == StrId::STR_CAT_DISPLAY) {
       displaySettings.push_back(setting);
     } else if (setting.category == StrId::STR_CAT_READER) {
@@ -126,32 +119,32 @@ void SettingsActivity::onEnter() {
     // Web-only categories (KOReader Sync, OPDS Browser) are skipped for device UI
   }
 
-#if FREEINK_CAP_FRONTLIGHT
-  // Schedules sit right under the brightness/warmth rows they time, not at
-  // the end of the tab with the unrelated rows.
-  if (halFrontlight.present()) {
-    auto after = displaySettings.begin();
+  // Schedules sit right under the rows they time: brightness/warmth on a lit
+  // board, Dark Mode on boards without a light (where they only drive it).
+  {
+    const bool light = FrontlightScheduler::controlsLight();
+    auto after = displaySettings.end();
     for (auto it = displaySettings.begin(); it != displaySettings.end(); ++it) {
-      if (it->valuePtr == &CrossPointSettings::frontlightBrightness ||
-          it->valuePtr == &CrossPointSettings::frontlightWarmth) {
+      if (light ? (it->valuePtr == &CrossPointSettings::frontlightBrightness ||
+                   it->valuePtr == &CrossPointSettings::frontlightWarmth)
+                : it->valuePtr == &CrossPointSettings::darkMode) {
         after = it + 1;
       }
     }
-    displaySettings.insert(after,
-                           SettingInfo::Action(StrId::STR_FRONTLIGHT_SCHEDULE, SettingAction::FrontlightSchedule));
+    displaySettings.insert(
+        after, SettingInfo::Action(FrontlightScheduleEditActivity::titleId(), SettingAction::FrontlightSchedule));
   }
-#endif
 
-  // Sleep Theme sits right under the Sleep Screen mode it belongs to.
+  // Sleep Theme sits where the sleep settings start, above Seamless Sleep.
   {
-    auto after = displaySettings.end();
+    auto at = displaySettings.end();
     for (auto it = displaySettings.begin(); it != displaySettings.end(); ++it) {
-      if (it->valuePtr == &CrossPointSettings::sleepScreen) {
-        after = it + 1;
+      if (it->key && std::strcmp(it->key, "seamlessSleepScreen") == 0) {
+        at = it;
         break;
       }
     }
-    displaySettings.insert(after, SettingInfo::Action(StrId::STR_SLEEP_THEME, SettingAction::SleepTheme));
+    displaySettings.insert(at, SettingInfo::Action(StrId::STR_SLEEP_THEME, SettingAction::SleepTheme));
   }
 
   // Append device-only ACTION items — button remap goes first in System
@@ -172,13 +165,10 @@ void SettingsActivity::onEnter() {
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
+  systemSettings.push_back(SettingInfo::Action(StrId::STR_BATTERY, SettingAction::Battery));
   // About: read-only device diagnostics plus the support-file export. Last in
   // the tab, where "about" screens conventionally sit.
   systemSettings.push_back(SettingInfo::Action(StrId::STR_ABOUT, SettingAction::About));
-  // Sleep Screen Stats: opens the dedicated picker + live-preview screen for the
-  // three sleep-stat slots (the flat slot rows are skipped above). Sits with the
-  // other stat settings, above the date/timezone/data-management actions.
-  statsSettings.push_back(SettingInfo::Action(StrId::STR_SLEEP_SCREEN_STATS, SettingAction::SleepStats));
   // Stats tab device-only actions (date/timezone pickers). The daily goal +
   // min-session-length Enum entries are already populated above from
   // SettingsList — these actions go below them.
@@ -526,6 +516,10 @@ void SettingsActivity::toggleCurrentSetting() {
         // Changes no setting, so no save-on-return handler.
         startActivityForResult(std::make_unique<AboutActivity>(renderer, mappedInput), nullptr);
         break;
+      case SettingAction::Battery:
+        // Read-only, like About.
+        startActivityForResult(std::make_unique<BatteryActivity>(renderer, mappedInput), nullptr);
+        break;
       case SettingAction::Plugins:
 #if CROSSPOINT_SD_PLUGINS
         startActivityForResult(std::make_unique<PluginCatalogActivity>(renderer, mappedInput), resultHandler);
@@ -578,15 +572,10 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<FontLayoutPreviewActivity>(renderer, mappedInput),
                                [this](const ActivityResult&) { ensureSdFontLoaded(); });
         break;
-      case SettingAction::SleepStats:
-        startActivityForResult(std::make_unique<SleepStatsSettingsActivity>(renderer, mappedInput), resultHandler);
-        break;
       case SettingAction::FrontlightSchedule:
-#if FREEINK_CAP_FRONTLIGHT
         // The list saves its own slots and re-evaluates the schedules on exit.
         startActivityForResult(std::make_unique<FrontlightScheduleListActivity>(renderer, mappedInput),
                                [](const ActivityResult&) {});
-#endif
         break;
       case SettingAction::None:
         // Do nothing

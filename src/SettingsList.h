@@ -140,39 +140,31 @@ inline void appendDisplaySettings(std::vector<SettingInfo>& v) {
                                  "frontlightWarmth", StrId::STR_CAT_DISPLAY));
 #endif
 #endif
-  v.insert(v.end(),
-           {
-               SettingInfo::Enum(StrId::STR_SLEEP_SCREEN, &CrossPointSettings::sleepScreen,
-                                 {StrId::STR_DARK, StrId::STR_LIGHT, StrId::STR_CUSTOM, StrId::STR_COVER,
-                                  StrId::STR_NONE_OPT, StrId::STR_COVER_CUSTOM, StrId::STR_PAGE_OVERLAY,
-                                  StrId::STR_SLEEP_THEME_MODE},
-                                 "sleepScreen", StrId::STR_CAT_DISPLAY),
-               // Theme folder for the Theme sleep screen; the web UI's Sleep Themes page sets it.
-               SettingInfo::String(StrId::STR_SLEEP_THEME, SETTINGS.sleepTheme, sizeof(SETTINGS.sleepTheme),
-                                   "sleepTheme", StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_SLEEP_COVER_MODE, &CrossPointSettings::sleepScreenCoverMode,
-                                 {StrId::STR_FIT, StrId::STR_CROP}, "sleepScreenCoverMode", StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_SLEEP_COVER_FILTER, &CrossPointSettings::sleepScreenCoverFilter,
-                                 {StrId::STR_NONE_OPT, StrId::STR_FILTER_CONTRAST, StrId::STR_INVERTED},
-                                 "sleepScreenCoverFilter", StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_SEAMLESS_SLEEP, &CrossPointSettings::seamlessSleepScreen,
-                                 {StrId::STR_NEVER, StrId::STR_AFTER_TIMEOUT, StrId::STR_ALWAYS}, "seamlessSleepScreen",
-                                 StrId::STR_CAT_DISPLAY),
-               SettingInfo::Enum(StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
-                                 {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15,
-                                  StrId::STR_PAGES_30},
-                                 "refreshFrequency", StrId::STR_CAT_DISPLAY),
-               // Persisted directly in JsonSettingsIO: a DynamicEnum has no valuePtr.
-               SettingInfo::DynamicEnum(
-                   StrId::STR_UI_THEME,
-                   {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                    StrId::STR_THEME_LYRA_CAROUSEL, StrId::STR_THEME_DASHBOARD, StrId::STR_THEME_BOOKSHELF},
-                   getUiThemeIndex, setUiThemeIndex, "uiTheme", StrId::STR_CAT_DISPLAY),
-               SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
-                                   StrId::STR_CAT_DISPLAY),
-               SettingInfo::Toggle(StrId::STR_READER_DARK_MODE, &CrossPointSettings::darkMode, "darkMode",
-                                   StrId::STR_CAT_DISPLAY),
-           });
+  v.insert(v.end(), {
+                        // The sleep theme folder; picked on the device from the installed themes
+                        // (SettingsActivity's Sleep Theme row) or on the web UI's Sleep Themes page.
+                        SettingInfo::String(StrId::STR_SLEEP_THEME, SETTINGS.sleepTheme, sizeof(SETTINGS.sleepTheme),
+                                            "sleepTheme", StrId::STR_CAT_DISPLAY),
+                        SettingInfo::Enum(StrId::STR_SEAMLESS_SLEEP, &CrossPointSettings::seamlessSleepScreen,
+                                          {StrId::STR_NEVER, StrId::STR_AFTER_TIMEOUT, StrId::STR_ALWAYS},
+                                          "seamlessSleepScreen", StrId::STR_CAT_DISPLAY),
+                        SettingInfo::Toggle(StrId::STR_SLEEP_FULL_REFRESH, &CrossPointSettings::sleepFullRefresh,
+                                            "sleepFullRefresh", StrId::STR_CAT_DISPLAY),
+                        SettingInfo::Enum(StrId::STR_REFRESH_FREQ, &CrossPointSettings::refreshFrequency,
+                                          {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10,
+                                           StrId::STR_PAGES_15, StrId::STR_PAGES_30},
+                                          "refreshFrequency", StrId::STR_CAT_DISPLAY),
+                        // Persisted directly in JsonSettingsIO: a DynamicEnum has no valuePtr.
+                        SettingInfo::DynamicEnum(
+                            StrId::STR_UI_THEME,
+                            {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
+                             StrId::STR_THEME_LYRA_CAROUSEL, StrId::STR_THEME_DASHBOARD, StrId::STR_THEME_BOOKSHELF},
+                            getUiThemeIndex, setUiThemeIndex, "uiTheme", StrId::STR_CAT_DISPLAY),
+                        SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
+                                            StrId::STR_CAT_DISPLAY),
+                        SettingInfo::Toggle(StrId::STR_READER_DARK_MODE, &CrossPointSettings::darkMode, "darkMode",
+                                            StrId::STR_CAT_DISPLAY),
+                    });
 }
 
 // --- Reader: fonts and layout ---
@@ -279,29 +271,7 @@ inline void appendStatsSettings(std::vector<SettingInfo>& v) {
           SettingInfo::Enum(StrId::STR_MIN_SESSION_THRESHOLD, &CrossPointSettings::minSessionMinutes,
                             {StrId::STR_MIN_1, StrId::STR_MIN_3, StrId::STR_MIN_5}, "minSessionMinutes",
                             StrId::STR_CAT_STATS),
-          // Sleep-screen stat slots: each picks one reading stat (or None) to show on the sleep screen.
-          SettingInfo::Enum(StrId::STR_SLEEP_STAT_1, &CrossPointSettings::sleepStatSlot1,
-                            {StrId::STR_NONE_OPT, StrId::STR_STAT_TODAY, StrId::STR_STAT_GOAL, StrId::STR_STAT_WEEK,
-                             StrId::STR_STAT_STREAK, StrId::STR_STAT_MONTH, StrId::STR_STAT_TOTAL,
-                             StrId::STR_STAT_FINISHED, StrId::STR_STAT_RETURN, StrId::STR_STAT_BOOK_PROGRESS,
-                             StrId::STR_STAT_DAILY_AVG, StrId::STR_STAT_DAYS_MONTH, StrId::STR_STAT_WEEK_STREAK,
-                             StrId::STR_STAT_GOAL_LEFT, StrId::STR_STAT_BOOK_TIME_LEFT},
-                            "sleepStatSlot1", StrId::STR_CAT_STATS),
-          SettingInfo::Enum(StrId::STR_SLEEP_STAT_2, &CrossPointSettings::sleepStatSlot2,
-                            {StrId::STR_NONE_OPT, StrId::STR_STAT_TODAY, StrId::STR_STAT_GOAL, StrId::STR_STAT_WEEK,
-                             StrId::STR_STAT_STREAK, StrId::STR_STAT_MONTH, StrId::STR_STAT_TOTAL,
-                             StrId::STR_STAT_FINISHED, StrId::STR_STAT_RETURN, StrId::STR_STAT_BOOK_PROGRESS,
-                             StrId::STR_STAT_DAILY_AVG, StrId::STR_STAT_DAYS_MONTH, StrId::STR_STAT_WEEK_STREAK,
-                             StrId::STR_STAT_GOAL_LEFT, StrId::STR_STAT_BOOK_TIME_LEFT},
-                            "sleepStatSlot2", StrId::STR_CAT_STATS),
-          SettingInfo::Enum(StrId::STR_SLEEP_STAT_3, &CrossPointSettings::sleepStatSlot3,
-                            {StrId::STR_NONE_OPT, StrId::STR_STAT_TODAY, StrId::STR_STAT_GOAL, StrId::STR_STAT_WEEK,
-                             StrId::STR_STAT_STREAK, StrId::STR_STAT_MONTH, StrId::STR_STAT_TOTAL,
-                             StrId::STR_STAT_FINISHED, StrId::STR_STAT_RETURN, StrId::STR_STAT_BOOK_PROGRESS,
-                             StrId::STR_STAT_DAILY_AVG, StrId::STR_STAT_DAYS_MONTH, StrId::STR_STAT_WEEK_STREAK,
-                             StrId::STR_STAT_GOAL_LEFT, StrId::STR_STAT_BOOK_TIME_LEFT},
-                            "sleepStatSlot3", StrId::STR_CAT_STATS),
-          // Contact string shown by the "If Found" stat option (e.g. a phone number).
+          // Contact string for "if found" sleep themes (device.contact), e.g. a phone number.
           SettingInfo::String(StrId::STR_RETURN_CONTACT, SETTINGS.returnContact, sizeof(SETTINGS.returnContact),
                               "returnContact", StrId::STR_CAT_STATS),
           // RETIRED time-zone preset (index into the old 29-zone list), superseded by
@@ -635,7 +605,7 @@ inline void appendStatusBarSettings(std::vector<SettingInfo>& v) {
 // reserve(86) did on every board except a tilt-less C3: an IMU board inserted
 // an 87th entry, and a frontlight board appended 88.
 // Recount when adding or removing an entry; getSettingsList() logs a mismatch.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 97;
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 93;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

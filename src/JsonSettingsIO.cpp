@@ -42,6 +42,8 @@ constexpr const char* kFlSchedBrightnessKeys[kFlSchedSlots] = {
     "frontlightSched3Brightness"};
 constexpr const char* kFlSchedWarmthKeys[kFlSchedSlots] = {"frontlightSched0Warmth", "frontlightSched1Warmth",
                                                            "frontlightSched2Warmth", "frontlightSched3Warmth"};
+constexpr const char* kFlSchedDarkModeKeys[kFlSchedSlots] = {"frontlightSched0DarkMode", "frontlightSched1DarkMode",
+                                                             "frontlightSched2DarkMode", "frontlightSched3DarkMode"};
 }  // namespace
 
 // Convert legacy settings.
@@ -113,6 +115,22 @@ void JsonSettingsIO::serializeState(const CrossPointState& s, String& json) {
   doc["showBootScreen"] = s.showBootScreen;
   doc["bootImagePath"] = s.bootImagePath;
 
+  JsonObject powerHistory = doc["powerHistory"].to<JsonObject>();
+  powerHistory["activeSeconds"] = s.powerHistory.activeSeconds;
+  powerHistory["cycleStartDay"] = s.powerHistory.cycleStartDay;
+  powerHistory["readerPageTurns"] = s.powerHistory.readerPageTurns;
+  powerHistory["lastPercent"] = s.powerHistory.lastPercent;
+  powerHistory["chargePendingPercent"] = s.powerHistory.chargePendingPercent;
+  powerHistory["hasCycleStartDay"] = s.powerHistory.hasCycleStartDay;
+  powerHistory["cycleConfirmed"] = s.powerHistory.cycleConfirmed;
+  powerHistory["chargePending"] = s.powerHistory.chargePending;
+  JsonArray powerSamples = powerHistory["samples"].to<JsonArray>();
+  for (uint8_t i = 0; i < s.powerHistory.sampleCount; ++i) {
+    JsonArray sample = powerSamples.add<JsonArray>();
+    sample.add(s.powerHistory.sampleActiveMinutes[i]);
+    sample.add(s.powerHistory.samplePercents[i]);
+  }
+
   json = "";
   serializeJson(doc, json);
 }
@@ -153,6 +171,36 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
   s.lastHardcoverSyncDay = doc["lastHardcoverSyncDay"] | static_cast<uint32_t>(0);
   s.showBootScreen = doc["showBootScreen"] | true;
   s.bootImagePath = doc["bootImagePath"] | std::string("");
+
+  s.powerHistory = {};
+  JsonObjectConst powerHistory = doc["powerHistory"];
+  if (!powerHistory.isNull()) {
+    auto& history = s.powerHistory;
+    history.activeSeconds = powerHistory["activeSeconds"] | static_cast<uint32_t>(0);
+    history.cycleStartDay = powerHistory["cycleStartDay"] | static_cast<uint32_t>(0);
+    history.readerPageTurns = powerHistory["readerPageTurns"] | static_cast<uint32_t>(0);
+    history.lastPercent = powerHistory["lastPercent"] | static_cast<uint8_t>(UINT8_MAX);
+    if (history.lastPercent > 100) history.lastPercent = UINT8_MAX;
+    history.chargePendingPercent = powerHistory["chargePendingPercent"] | static_cast<uint8_t>(UINT8_MAX);
+    if (history.chargePendingPercent > 100) history.chargePendingPercent = UINT8_MAX;
+    history.hasCycleStartDay = powerHistory["hasCycleStartDay"] | false;
+    history.cycleConfirmed = powerHistory["cycleConfirmed"] | false;
+    history.chargePending = (powerHistory["chargePending"] | false) && history.chargePendingPercent <= 100;
+
+    // Points must stay in awake-time order; drop anything a damaged file gives.
+    JsonArrayConst powerSamples = powerHistory["samples"];
+    uint16_t previousMinute = 0;
+    for (JsonArrayConst sample : powerSamples) {
+      if (history.sampleCount >= PowerHistoryState::SAMPLE_CAPACITY || sample.size() < 2) break;
+      const uint16_t minute = sample[0] | static_cast<uint16_t>(0);
+      const uint8_t percent = sample[1] | static_cast<uint8_t>(UINT8_MAX);
+      if (percent > 100 || (history.sampleCount > 0 && minute < previousMinute)) continue;
+      history.sampleActiveMinutes[history.sampleCount] = minute;
+      history.samplePercents[history.sampleCount] = percent;
+      history.sampleCount++;
+      previousMinute = minute;
+    }
+  }
   return true;
 }
 
@@ -266,10 +314,12 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
     doc[kFlSchedEndKeys[slot]] = sched.endMinutes;
     doc[kFlSchedBrightnessKeys[slot]] = sched.brightness;
     doc[kFlSchedWarmthKeys[slot]] = sched.warmth;
+    doc[kFlSchedDarkModeKeys[slot]] = sched.darkMode;
   }
   doc["frontlightScheduleActive"] = s.frontlightScheduleActive;
   doc["frontlightScheduleRestoreBrightness"] = s.frontlightScheduleRestoreBrightness;
   doc["frontlightScheduleRestoreWarmth"] = s.frontlightScheduleRestoreWarmth;
+  doc["frontlightScheduleRestoreDarkMode"] = s.frontlightScheduleRestoreDarkMode;
 
   String json;
   serializeJson(doc, json);
@@ -458,10 +508,14 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     sched.endMinutes = doc[kFlSchedEndKeys[slot]] | defaults.endMinutes;
     sched.brightness = doc[kFlSchedBrightnessKeys[slot]] | defaults.brightness;
     sched.warmth = doc[kFlSchedWarmthKeys[slot]] | defaults.warmth;
+    sched.darkMode = doc[kFlSchedDarkModeKeys[slot]] | defaults.darkMode;
   }
   s.frontlightScheduleActive = doc["frontlightScheduleActive"] | (uint8_t)0;
   s.frontlightScheduleRestoreBrightness = doc["frontlightScheduleRestoreBrightness"] | (uint8_t)0;
   s.frontlightScheduleRestoreWarmth = doc["frontlightScheduleRestoreWarmth"] | (uint8_t)50;
+  // Absent (file from before per-slot dark mode): the current setting, so a
+  // window already running at upgrade time cannot flip dark mode when it ends.
+  s.frontlightScheduleRestoreDarkMode = doc["frontlightScheduleRestoreDarkMode"] | s.darkMode;
   CrossPointSettings::sanitizeFrontlightSchedules(s);
 
   // Reader-menu visibility. Predating the per-row bitmask, a settings file
@@ -475,6 +529,18 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     if (needsResave) *needsResave = true;
   } else {
     s.readerMenuVisible = doc["readerMenuVisible"].as<uint32_t>();
+  }
+
+  // Sleep screens are themes now. A file from before carries the retired mode
+  // ("sleepScreen", no longer in the settings list): switch to the store theme
+  // that draws the same screen. Theme mode kept its sleepTheme as it was.
+  if (!doc["sleepScreen"].isNull()) {
+    const char* theme = CrossPointSettings::legacySleepThemeFor(doc["sleepScreen"] | static_cast<uint8_t>(0));
+    if (theme != nullptr) {
+      strncpy(s.sleepTheme, theme, sizeof(s.sleepTheme) - 1);
+      s.sleepTheme[sizeof(s.sleepTheme) - 1] = '\0';
+    }
+    if (needsResave) *needsResave = true;
   }
 
   // Status-bar position migration: a settings file that predates the per-element

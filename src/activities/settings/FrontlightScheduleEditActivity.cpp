@@ -1,7 +1,5 @@
 #include "FrontlightScheduleEditActivity.h"
 
-#if FREEINK_CAP_FRONTLIGHT
-
 #include <GfxRenderer.h>
 #include <I18n.h>
 
@@ -9,7 +7,9 @@
 #include <memory>
 #include <string>
 
+#if FREEINK_CAP_FRONTLIGHT
 #include "FrontlightBrightnessActivity.h"
+#endif
 #include "MappedInputManager.h"
 #include "activities/util/ListPickerActivity.h"
 #include "components/UITheme.h"
@@ -18,7 +18,17 @@
 #include "util/TouchListNav.h"
 
 namespace {
-enum Field : int { FIELD_ENABLED = 0, FIELD_START, FIELD_END, FIELD_BRIGHTNESS, FIELD_WARMTH, FIELD_COUNT };
+// The light rows stay last: boards drop them by cutting the count (warmth on
+// single-channel lights, both on boards with no light at all).
+enum Field : int {
+  FIELD_ENABLED = 0,
+  FIELD_START,
+  FIELD_END,
+  FIELD_DARK_MODE,
+  FIELD_BRIGHTNESS,
+  FIELD_WARMTH,
+  FIELD_COUNT
+};
 
 // Windows are set on the hour: 24 rows is one short scroll, and a bedtime
 // light does not need finer than that.
@@ -43,6 +53,10 @@ const StrId kSlotLabels[CrossPointSettings::FRONTLIGHT_SCHEDULE_SLOTS] = {
     StrId::STR_FRONTLIGHT_SCHEDULE_4};
 }  // namespace
 
+StrId FrontlightScheduleEditActivity::titleId() {
+  return FrontlightScheduler::controlsLight() ? StrId::STR_FRONTLIGHT_SCHEDULE : StrId::STR_DARK_MODE_SCHEDULE;
+}
+
 void FrontlightScheduleEditActivity::onEnter() {
   Activity::onEnter();
   draft = SETTINGS.frontlightSchedules[slot];
@@ -55,19 +69,23 @@ void FrontlightScheduleEditActivity::onEnter() {
   requestUpdate();
 }
 
-// Single-channel boards have no warmth row.
+// Single-channel boards have no warmth row; boards without a light schedule
+// dark mode only.
 int FrontlightScheduleEditActivity::fieldCount() const {
+  if (!FrontlightScheduler::controlsLight()) return FIELD_BRIGHTNESS;
   return halFrontlight.hasWarmth() ? FIELD_COUNT : FIELD_WARMTH;
 }
 
 // Light the panel as this schedule would. A schedule whose level is Off has
 // nothing to show, so its warmth is previewed at the dim fallback instead.
 void FrontlightScheduleEditActivity::previewDraft() {
+  if (!FrontlightScheduler::controlsLight()) return;
   halFrontlight.apply(draft.brightness > 0 ? draft.brightness : FrontlightToggle::FALLBACK_BRIGHTNESS, draft.warmth);
 }
 
 // Leaving the editor: put the real setting back.
 void FrontlightScheduleEditActivity::restoreLight() {
+  if (!FrontlightScheduler::controlsLight()) return;
   halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
 }
 
@@ -89,6 +107,7 @@ void FrontlightScheduleEditActivity::pickHour(const bool start) {
 }
 
 void FrontlightScheduleEditActivity::pickBrightness() {
+#if FREEINK_CAP_FRONTLIGHT
   startActivityForResult(
       std::make_unique<FrontlightBrightnessActivity>(renderer, mappedInput, draft.brightness, draft.warmth),
       [this](const ActivityResult& result) {
@@ -98,6 +117,7 @@ void FrontlightScheduleEditActivity::pickBrightness() {
         // Also covers the cancel path, where the picker put the old draft level back.
         previewDraft();
       });
+#endif
 }
 
 void FrontlightScheduleEditActivity::pickWarmth() {
@@ -123,6 +143,10 @@ void FrontlightScheduleEditActivity::activateField(const int index) {
   switch (index) {
     case FIELD_ENABLED:
       draft.enabled = draft.enabled ? 0 : 1;
+      requestUpdate();
+      break;
+    case FIELD_DARK_MODE:
+      draft.darkMode = draft.darkMode ? 0 : 1;
       requestUpdate();
       break;
     case FIELD_START:
@@ -204,6 +228,8 @@ std::string FrontlightScheduleEditActivity::fieldLabel(const int index) const {
       return tr(STR_SCHEDULE_START);
     case FIELD_END:
       return tr(STR_SCHEDULE_END);
+    case FIELD_DARK_MODE:
+      return tr(STR_READER_DARK_MODE);
     case FIELD_BRIGHTNESS:
       return tr(STR_FRONTLIGHT_BRIGHTNESS);
     case FIELD_WARMTH:
@@ -221,6 +247,8 @@ std::string FrontlightScheduleEditActivity::fieldValue(const int index) const {
       return hourLabel(draft.startMinutes / 60);
     case FIELD_END:
       return hourLabel(draft.endMinutes / 60);
+    case FIELD_DARK_MODE:
+      return draft.darkMode ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     case FIELD_BRIGHTNESS:
       return draft.brightness == 0 ? std::string(tr(STR_STATE_OFF)) : percentLabel(draft.brightness);
     case FIELD_WARMTH:
@@ -236,7 +264,7 @@ void FrontlightScheduleEditActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_FRONTLIGHT_SCHEDULE),
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, I18N.get(titleId()),
                  I18N.get(kSlotLabels[slot]));
 
   GUI.drawList(
@@ -249,5 +277,3 @@ void FrontlightScheduleEditActivity::render(RenderLock&&) {
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
-
-#endif  // FREEINK_CAP_FRONTLIGHT

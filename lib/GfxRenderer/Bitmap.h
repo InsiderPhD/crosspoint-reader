@@ -69,6 +69,14 @@ class Bitmap {
   BmpReaderError parseHeaders();
   BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer) const;
   BmpReaderError rewindToData() const;
+  // Measures the image's tonal range and, when it is worth it, stretches the
+  // 1st-99th percentile towards the panel's full black-to-white span before
+  // dithering, so a flat or dim photo is not squeezed into two of the four
+  // grey levels. Costs one sampled pass over the file (at most a few hundred
+  // rows) and a 256-byte table held until the Bitmap is destroyed. Call after
+  // parseHeaders(). False (image drawn unchanged) for sources already in the
+  // panel's native greys, a range too narrow to stretch safely, or no memory.
+  bool analyzeAdaptiveTone();
   int getWidth() const { return width; }
   int getHeight() const { return height; }
   bool isTopDown() const { return topDown; }
@@ -92,6 +100,8 @@ class Bitmap {
   bool nativePalette = false;  // true if all palette entries map to native gray levels
   int rowBytes = 0;
   uint8_t paletteLum[256] = {};
+  // Luminance remap built by analyzeAdaptiveTone(); null = draw unchanged.
+  uint8_t* toneLut = nullptr;
 
   // Dithering state (mutable for const methods)
   mutable int16_t* errorCurRow = nullptr;

@@ -4,6 +4,7 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -12,6 +13,9 @@
 #include "CrossPointSettings.h"
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
+#include "SleepThemeDownloadActivity.h"
+#include "activities/util/ConfirmationActivity.h"
+#include "activities/util/ListPickerActivity.h"
 #include "fontIds.h"
 #include "sleeptheme/SleepThemeRenderer.h"
 #include "util/TouchListNav.h"
@@ -20,16 +24,21 @@ void SleepThemeSelectActivity::onEnter() {
   Activity::onEnter();
 
   discover();
+  placeCursor();
+  requestUpdate();
+}
 
-  selectedIndex = 0;
+void SleepThemeSelectActivity::placeCursor() {
+  configuredMissing = SETTINGS.sleepTheme[0] != '\0' && !SleepThemeRenderer::isBuiltIn(SETTINGS.sleepTheme);
+  selectedIndex = storeIndex();
   for (size_t i = 0; i < themes.size(); ++i) {
     if (strncmp(themes[i].c_str(), SETTINGS.sleepTheme, sizeof(SETTINGS.sleepTheme) - 1) == 0) {
       selectedIndex = static_cast<int>(i);
+      configuredMissing = false;
       break;
     }
   }
-
-  requestUpdate();
+  if (!configuredMissing && selectedIndex == storeIndex() && !themes.empty()) selectedIndex = 0;
 }
 
 void SleepThemeSelectActivity::onExit() { Activity::onExit(); }
@@ -41,6 +50,7 @@ void SleepThemeSelectActivity::discover() {
   auto root = Storage.open(SleepThemeRenderer::THEMES_DIR);
   if (!root || !root.isDirectory()) {
     LOG_DBG("STS", "No %s directory on SD card", SleepThemeRenderer::THEMES_DIR);
+    addBuiltIns();
     return;
   }
 
@@ -59,7 +69,15 @@ void SleepThemeSelectActivity::discover() {
     if (!Storage.exists(path)) continue;
     themes.emplace_back(name);
   }
+  addBuiltIns();
+}
 
+// The built-in themes are always choices: the device draws them itself until
+// the store's copies are downloaded.
+void SleepThemeSelectActivity::addBuiltIns() {
+  for (const char* name : SleepThemeRenderer::BUILT_IN_THEMES) {
+    if (std::find(themes.begin(), themes.end(), name) == themes.end()) themes.emplace_back(name);
+  }
   std::sort(themes.begin(), themes.end(),
             [](const std::string& a, const std::string& b) { return strcasecmp(a.c_str(), b.c_str()) < 0; });
 }
@@ -69,8 +87,6 @@ void SleepThemeSelectActivity::loop() {
     finish();
     return;
   }
-  if (themes.empty()) return;
-
   int tappedIndex;
   switch (TouchListNav::tapRow(mappedInput, listRect(), totalItems(), selectedIndex,
                                /*hasSubtitle=*/false, tappedIndex)) {
@@ -109,23 +125,114 @@ void SleepThemeSelectActivity::loop() {
 
 void SleepThemeSelectActivity::handleSelection() {
   if (selectedIndex < 0 || selectedIndex >= totalItems()) return;
+  if (selectedIndex == storeIndex()) {
+    openStore();
+    return;
+  }
+  openThemeActions(selectedIndex);
+}
+
+namespace {
+constexpr int ACTION_USE = 0;
+constexpr int ACTION_DELETE = 1;
+constexpr int ACTION_COUNT = 2;
+}  // namespace
+
+void SleepThemeSelectActivity::useTheme(const std::string& name) {
   {
     RenderLock lock(*this);
-    const auto& chosen = themes[static_cast<size_t>(selectedIndex)];
-    strncpy(SETTINGS.sleepTheme, chosen.c_str(), sizeof(SETTINGS.sleepTheme) - 1);
+    strncpy(SETTINGS.sleepTheme, name.c_str(), sizeof(SETTINGS.sleepTheme) - 1);
     SETTINGS.sleepTheme[sizeof(SETTINGS.sleepTheme) - 1] = '\0';
-    SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::THEME;
     // Only reachable by an explicit choice, so not a hot write path.
     SETTINGS.saveToFile();
   }
   finish();
 }
 
+void SleepThemeSelectActivity::openThemeActions(const int index) {
+  // The name is copied into the callbacks: the list is rescanned (and this
+  // vector replaced) before a delete finishes.
+  const std::string name = themes[static_cast<size_t>(index)];
+  // A built-in that isn't on the card has nothing to delete.
+  char path[96];
+  snprintf(path, sizeof(path), "%s/%s/theme.bin", SleepThemeRenderer::THEMES_DIR, name.c_str());
+  if (!Storage.exists(path)) {
+    useTheme(name);
+    return;
+  }
+  // Heap: one small activity, gone before this list is back on screen.
+  auto picker = makeUniqueNoThrow<ListPickerActivity>(
+      renderer, mappedInput, themes[static_cast<size_t>(index)].c_str(), ACTION_COUNT, 0,
+      [](int row) { return std::string(row == ACTION_USE ? tr(STR_SLEEP_THEME_USE) : tr(STR_DELETE)); }, nullptr,
+      /*markInitial=*/false);
+  if (!picker) {
+    LOG_ERR("STS", "OOM: theme action list");
+    return;
+  }
+  startActivityForResult(std::move(picker), [this, name](const ActivityResult& result) {
+    if (result.isCancelled) {
+      requestUpdate();
+      return;
+    }
+    if (std::get<ListPickResult>(result.data).index == ACTION_DELETE) {
+      confirmDelete(name);
+      return;
+    }
+    useTheme(name);
+  });
+}
+
+void SleepThemeSelectActivity::confirmDelete(const std::string& name) {
+  startActivityForResult(
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_SLEEP_THEME_DELETE_CONFIRM), name),
+      [this, name](const ActivityResult& result) {
+        if (!result.isCancelled) deleteTheme(name);
+        discover();
+        placeCursor();
+        requestUpdate();
+      });
+}
+
+void SleepThemeSelectActivity::deleteTheme(const std::string& name) {
+  char dir[96];
+  snprintf(dir, sizeof(dir), "%s/%s", SleepThemeRenderer::THEMES_DIR, name.c_str());
+  if (!Storage.removeDir(dir)) {
+    LOG_ERR("STS", "Failed to remove %s", dir);
+    return;
+  }
+  LOG_INF("STS", "Deleted sleep theme %s", name.c_str());
+  // The setting must not name a folder that is gone (light and dark carry on
+  // as the built-in screen): fall back to light.
+  if (strncmp(SETTINGS.sleepTheme, name.c_str(), sizeof(SETTINGS.sleepTheme) - 1) == 0 &&
+      !SleepThemeRenderer::isBuiltIn(SETTINGS.sleepTheme)) {
+    strncpy(SETTINGS.sleepTheme, "light", sizeof(SETTINGS.sleepTheme) - 1);
+    SETTINGS.saveToFile();
+  }
+}
+
+// The store owns the WiFi lifecycle; this screen only rescans on return, since
+// a theme may have been installed or deleted while it was away.
+void SleepThemeSelectActivity::openStore() {
+  startActivityForResult(std::make_unique<SleepThemeDownloadActivity>(renderer, mappedInput),
+                         [this](const ActivityResult&) {
+                           discover();
+                           placeCursor();
+                           requestUpdate();
+                         });
+}
+
+// With no themes installed, or the configured one missing, the explanation
+// takes this many UI_12 lines above the list.
+constexpr int EMPTY_MESSAGE_LINES = 4;
+
 // List body between the header and the button hints. Shared by render() and
 // the tap hit-testing so the two can never disagree.
 Rect SleepThemeSelectActivity::listRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  if (themes.empty() || configuredMissing) {
+    contentTop += EMPTY_MESSAGE_LINES * renderer.getLineHeight(UI_12_FONT_ID) + metrics.verticalSpacing;
+  }
   const int contentHeight =
       renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing;
   return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
@@ -139,30 +246,39 @@ void SleepThemeSelectActivity::render(RenderLock&&) {
 
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SLEEP_THEME));
 
-  if (themes.empty()) {
-    const Rect body = listRect();
+  if (themes.empty() || configuredMissing) {
     const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
-    const auto lines = renderer.wrappedText(UI_12_FONT_ID, tr(STR_NO_SLEEP_THEMES), pageWidth - 2 * 24, 4);
-    int y = body.y + (body.height - static_cast<int>(lines.size()) * lineHeight) / 2;
+    char message[160];
+    if (configuredMissing) {
+      snprintf(message, sizeof(message), tr(STR_SLEEP_THEME_MISSING), SETTINGS.sleepTheme);
+    } else {
+      snprintf(message, sizeof(message), "%s", tr(STR_NO_SLEEP_THEMES));
+    }
+    const auto lines = renderer.wrappedText(UI_12_FONT_ID, message, pageWidth - 2 * 24, EMPTY_MESSAGE_LINES);
+    int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
     for (const auto& line : lines) {
       renderer.drawCenteredText(UI_12_FONT_ID, y, line.c_str(), true);
       y += lineHeight;
     }
-  } else {
-    const bool themeMode = SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::THEME;
-    GUI.drawList(
-        renderer, listRect(), totalItems(), selectedIndex,
-        [this](int index) -> std::string { return themes[static_cast<size_t>(index)]; }, nullptr, nullptr,
-        [this, themeMode](int index) -> std::string {
-          const bool active = themeMode && strncmp(themes[static_cast<size_t>(index)].c_str(), SETTINGS.sleepTheme,
-                                                   sizeof(SETTINGS.sleepTheme) - 1) == 0;
-          return active ? tr(STR_SELECTED) : "";
-        },
-        true);
   }
 
-  const auto labels =
-      mappedInput.mapLabels(tr(STR_BACK), themes.empty() ? "" : tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  GUI.drawList(
+      renderer, listRect(), totalItems(), selectedIndex,
+      [this](int index) -> std::string {
+        if (index == storeIndex()) return tr(STR_SLEEP_THEME_STORE);
+        return themes[static_cast<size_t>(index)];
+      },
+      nullptr, nullptr,
+      [this](int index) -> std::string {
+        if (index == storeIndex()) return "";
+        const bool active = strncmp(themes[static_cast<size_t>(index)].c_str(), SETTINGS.sleepTheme,
+                                    sizeof(SETTINGS.sleepTheme) - 1) == 0;
+        return active ? tr(STR_SELECTED) : "";
+      },
+      true);
+
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), selectedIndex == storeIndex() ? tr(STR_OPEN) : tr(STR_SELECT),
+                                            tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   if (SETTINGS.darkMode) renderer.invertScreen();

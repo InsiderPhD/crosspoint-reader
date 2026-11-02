@@ -413,9 +413,12 @@ Neither action touches `My Clippings.txt`, so copy it off the SD card whenever y
 
 Open from **Home → Statistics**. Tracks sessions across `.epub`, `.txt`, and `.xtc`. Metrics include **Reading Time, Pages Read, Books Finished, Sessions, Average Session, Reading Speed,** and **In Progress**. Books at **≥90%** count as finished.
 
-Statistics are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), **Sessions**, **Year**, and **Library**:
+Statistics are organised into tabs — **Overview** (streaks, daily goal, totals, and a reading profile), **Books**, **Week**, **Month** (a calendar heat-map of reading time per day), **Rhythm**, **Sessions**, **Year**, and **Library**:
 
 The **Library** tab shows how many books you finished this month and this year, and your five most-read authors and tags by reading time (with the number of books behind each). Authors and tags come from the Library, so open the Library once after adding books; a book you have read but since deleted from the card is not listed there.
+
+The **Rhythm** tab shows the last 13 weeks as a dot per day (larger and darker for 1, 15 and 30+ minutes, with today ringed), the same weeks as weekly reading-time bars against their average, and how many days you read in each of the last 12 months.
+
 
 <p>
 <img src="docs/images/user-guide/stats-overview.png" alt="Statistics Overview tab with streak, daily goal, totals, and reading profile scores" width="300">
@@ -428,15 +431,15 @@ The **Library** tab shows how many books you finished this month and this year, 
 - **Minimum Session Length** — the shortest activity (1 / 3 / 5 min) that counts as a session.
 - **Set Date** / **Time Zone** / **Daylight Saving** — keep timestamps and streaks accurate. Pick a city for automatic daylight saving, or a fixed `UTC±HH:MM` offset; Daylight Saving can also be forced On or Off. The same zone drives the status-bar clock, dates, daily goals and frontlight schedules.
 - **Export Statistics / Import Statistics / Export to StoryGraph** — back up or move your stats.
-- **"If Found" contact** — a contact string (e.g. a phone number) that can be shown on the sleep screen.
+- **"If Found" contact** — a contact string (e.g. a phone number) that sleep themes can show (`device.contact`).
 
 <img src="docs/images/user-guide/settings-stats.png" alt="Settings Statistics tab with daily goal, session length, sleep-screen stat slots, and export options" width="300">
 
-### Sleep-screen stats
+### Reading stats on the sleep screen
 
-**Settings → Statistics → Track Reading Stats** (on by default) is the master switch. Off, no reading session is recorded, nothing is pushed to Hardcover, and the sleep-screen stat lines, the Dashboard theme's stats and the reader menu's daily-goal line are hidden (the "If Found" contact and Book Time Left lines stay). Existing history is kept and still viewable under Statistics. Note that a book finished while tracking is off is not marked as finished.
+**Settings → Statistics → Track Reading Stats** (on by default) is the master switch. Off, no reading session is recorded, nothing is pushed to Hardcover, and the Dashboard theme's stats and the reader menu's daily-goal line are hidden. Existing history is kept and still viewable under Statistics. Note that a book finished while tracking is off is not marked as finished.
 
-You can surface up to **three** reading stats on the sleep screen. **Settings → Statistics → Sleep Screen Statistics 1 / 2 / 3** each pick one of: Today, Daily Goal, This Week, Streak, This Month, Total, Books Finished, "If Found" contact, Book Progress, Daily Average, Days This Month, Week Streak, Goal Remaining, or Book Time Left (or **None**).
+To show stats while the device sleeps, pick a sleep theme that shows them (streak, year in books, reading rhythm, reader profile, stats overlay and more) — see **[Sleep Screen](#13-sleep-screen)**.
 
 ---
 
@@ -621,10 +624,9 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 
 ### Display tab
 
-- **Sleep Screen** — Dark / Light / Custom / Cover / None / Cover + Custom / Page Overlay (see **[Sleep Screen](#13-sleep-screen)**).
-- **Sleep Cover Mode** — Fit / Crop (when using a cover sleep screen).
-- **Sleep Cover Filter** — None (grayscale) / Contrast / Inverted.
+- **Sleep Theme** — the sleep screen, chosen from the themes on the SD card or fetched from the theme store (see **[Sleep Screen](#13-sleep-screen)**).
 - **Seamless Sleep Screen** — Never / After Timeout / Always.
+- **Full Refresh Before Sleep** — off by default: the sleep screen replaces the page directly, with one full refresh. On: an "Entering sleep" message is shown with an extra full refresh first, which clears any faint marks left from reading before the sleep screen is drawn, at the cost of about a second per sleep.
 - **Refresh Frequency** — full-refresh every 1 / 5 / 10 / 15 / 30 pages (reduces ghosting).
 - **UI Theme** — Classic / Lyra / Lyra Extended / Lyra Carousel / Dashboard / Bookshelf (see **[Home Screen](#3-home-screen)**).
 - **Sunlight Fading Fix** — software fix for white X4 units fading in direct sunlight.
@@ -632,7 +634,8 @@ Settings are organised into tabs, selected via the top ribbon: **Display**, **Re
 - **Folder View** — Folders / Tags / Authors / Series (see **[Folder views](#folder-views)**).
 - **Frontlight Brightness** *(frontlight devices only — X4 Pro)* — 0–100% in 10% steps; 0 is off.
 - **Frontlight Warmth** *(warm/cool devices only — X4 Pro)* — 0 = fully cool, 100 = fully warm. Splits the total light between the two LED strings; overall brightness stays constant across the mix.
-- **Frontlight Schedule** *(frontlight devices only — X4 Pro)* — up to four daily windows, each with its own brightness and warmth ("night shift"). **Confirm** on a schedule opens its editor: **Enabled** toggles in place; **Start time** and **End time** each open a list of the 24 hours (an end at or before the start runs past midnight, e.g. 21:00 → 07:00); **Frontlight Brightness** opens the same level picker as the reader menu and **Frontlight Warmth** a list of 10% steps, both previewed live on the panel. **Back** saves the schedule. When a window begins the light switches to that schedule's level; when it ends the light returns to whatever it was before the window started. Changing the light by hand inside a window sticks until the window ends. Schedules need a set clock — the device shows a note on this screen until the time has synced over WiFi.
+- **Frontlight Schedule** *(frontlight devices only — X4 Pro)* — up to four daily windows, each with its own brightness and warmth, and optionally dark mode ("night shift"). **Confirm** on a schedule opens its editor: **Enabled** toggles in place; **Start time** and **End time** each open a list of the 24 hours (an end at or before the start runs past midnight, e.g. 21:00 → 07:00); **Frontlight Brightness** opens the same level picker as the reader menu and **Frontlight Warmth** a list of 10% steps, both previewed live on the panel; **Dark Mode** toggles in place and turns dark mode on for the window. **Back** saves the schedule. When a window begins the light switches to that schedule's level; when it ends the light (and, for a Dark Mode schedule, dark mode) returns to whatever it was before the window started. A schedule with Dark Mode off leaves dark mode alone. Changing the light or dark mode by hand inside a window sticks until the window ends. Schedules need a set clock — the device shows a note on this screen until the time has synced over WiFi.
+- **Dark Mode Schedule** *(X3 / X4 — devices without a frontlight)* — the same four daily windows, listed under **Dark Mode**, but each only has **Enabled**, **Start time**, **End time** and **Dark Mode**. A schedule with Dark Mode on turns dark mode on for its window and puts it back how it was when the window ends.
 
 ### Reader tab
 
@@ -725,6 +728,7 @@ See **[Statistics](#9-statistics)** — Daily Reading Goal, Minimum Session Leng
 - **Check for Updates** *(action)* — OTA firmware update over WiFi.
 - **SD Firmware Update** *(action)* — flash a `firmware.bin` from the SD card.
 - **Language** *(action)* — set the UI language.
+- **Battery** *(action)* — the current level, plus a graph of battery level against time awake on battery since the last charge, with the awake time, days elapsed and reader pages turned in that period. The history is sampled each time the device goes to sleep, so it fills in over a few sleeps and costs no battery of its own; time spent plugged in is not counted.
 - **About** *(action)* — device information: firmware version, board, chip, display, battery, free memory (and the largest free block), SD card size and free space, MAC address, uptime and the reason for the last restart. Press **Confirm** (or tap the first row) to save `support-info.txt` to the SD card root for a bug report. The file holds hardware facts, memory/SD/battery readings, a short list of numeric display settings and three lifetime reading totals (books finished, total reading time, number of sessions); it never contains WiFi names or passwords, account details, tokens, the MAC address, file names or book titles.
 - **Time to Sleep** — auto-sleep after 1 / 5 / 10 / 15 / 30 min of inactivity.
 - **Show Hidden Files** — show dotfiles in the browser.
@@ -758,36 +762,44 @@ Reading screens use your configured tap zones, hold zones and swipe actions inst
 
 ## 13. Sleep Screen
 
-The **Sleep Screen** setting controls what shows when the device sleeps:
+The sleep screen is a **sleep theme**: a design made in HTML/CSS and compiled for your screen, filled in with your live values (time, battery, the open book, reading stats, recent books, a random image) every time the device sleeps. Pick one in **Settings → Display → Sleep Theme**. The default is **light**. **light**, **dark** and **cover-crop** are built in and work without downloading anything: light and dark are the device's own logo screen, and cover-crop is the open book's cover zoomed to fill the screen (the light logo screen when no book is open), until you fetch the store's copies. Any other theme not on the card falls back to the light logo screen.
 
-| Mode | Behaviour |
+In the Sleep Theme list, **Confirm** on a theme offers **Use as Sleep Screen** or **Delete**. Deleting the theme you are using switches you to light.
+
+The store has a theme for each of the old sleep-screen modes, and updating sets yours automatically (fetch it from **Get More Themes**):
+
+| Old mode | Theme |
 |------|-----------|
-| **Dark** (default) | KatiePoint logo on a dark background. |
-| **Light** | Logo on a white background. |
-| **Custom** | A custom image from the SD card (see below); falls back to Dark. |
-| **Cover** | Cover of the currently open book; falls back to Dark if no book is open. |
-| **Cover + Custom** | Book cover, falling back to Custom behaviour. |
-| **None** | Blank screen. |
-| **Page Overlay** | Keeps the screen you were on (usually the page you were reading) and draws a transparent image from the SD card over it (see below). With no overlay image, the page is shown on its own. |
+| Dark (default) / Light | `dark` / `light` — the logo screen |
+| Custom | `custom` — a random image from the SD card (below) |
+| Cover (Fit or Crop) | `cover-crop` — the open book's cover filling the screen, in grey |
+| Cover + Custom | `cover-or-custom` — the cover, or a custom image when no book is open |
+| None | `blank` |
+| Page Overlay | `page-overlay` — keeps the page you were on and paints over it |
+| Sleep-screen stats | `stats-overlay`, or any of the stats themes |
 
-**Cover settings** (for Cover / Cover + Custom): **Cover Mode** — Fit (scale to fit, white borders) or Crop (scale & fill); **Cover Filter** — None (grayscale), Contrast (B&W), or Inverted.
-
-**Custom images:**
+**Custom images** (shown by themes that use `sleep.image`, such as `custom`):
 
 - **Multiple (recommended):** create a `.sleep` directory at the SD-card root and drop in any number of `.bmp` files — one is chosen at random each sleep. (A `sleep` directory is also accepted.)
-- **Single:** place `sleep.bmp` at the SD-card root as a fallback.
-- **Any folder:** in **Browse Files**, hold **Confirm** on a folder (long-tap on the X4 Pro) and choose **Set as Sleep Folder**. That folder is then used instead of the two above and is marked *Sleep* in the list; **Use Default Sleep Folder** on the same menu undoes it. Choosing a single image with **Set Cover** in the image viewer also undoes it.
-
-**Page Overlay images** are kept separately, because an ordinary sleep image has no transparent area and would just hide the page:
-
-- **Multiple:** a `.sleep-overlay` (or `sleep-overlay`) directory at the SD-card root holding `.png` and/or `.bmp` files — one is chosen at random each sleep.
-- **Single:** `sleep-overlay.png` or `sleep-overlay.bmp` at the SD-card root, which takes priority over the directory.
-- **PNG:** transparent pixels (under 50% alpha) leave the page showing; everything else is drawn in black and white, with greys dithered. PNGs must not be interlaced. A PNG needs a large block of memory to decode; if the device cannot find one, the overlay is skipped for that sleep (or a BMP from the same folder is used instead).
-- **BMP:** white is transparent, anything darker is drawn black.
-- In Dark Mode the overlay is inverted along with the page. *Page as Sleep Screen* (seamless sleep) still takes priority when it applies.
+- **Single:** place `sleep.bmp` at the SD-card root; it takes priority over the directories.
+- **Any folder:** in **Browse Files**, hold **Confirm** on a folder (long-tap on the X4 Pro) and choose **Set as Sleep Folder**. That folder is then used instead of the ones above and is marked *Sleep* in the list; **Use Default Sleep Folder** on the same menu undoes it. Choosing a single image with **Set Cover** in the image viewer also undoes it.
+- Choosing a folder or an image switches the sleep screen to the `custom` theme, unless your theme already shows the custom image.
 
 > [!TIP]
-> Use uncompressed 24-bit BMPs. Match your screen: **X4 = 480×800**, **X3 = 528×792**.
+> Use uncompressed BMPs. Match your screen: **X4 = 480×800**, **X3 = 528×792**.
+
+**Overlay themes** (such as `page-overlay` and `stats-overlay`) keep the screen you were on and paint only their own parts over it. In Dark Mode they are inverted along with the page. *Page as Sleep Screen* (seamless sleep) still takes priority when it applies.
+
+**Making your own:** design one in the Sleep Theme Bench (linked from the theme store's page) and compile and install it on the web UI's **Sleep Themes** page. `docs/sleep-themes/README.md` describes what a theme can do.
+
+### Theme store
+
+Ready-made sleep themes live in the theme store ([InsiderPhD/katiepoint-sleep-themes](https://github.com/InsiderPhD/katiepoint-sleep-themes)), already compiled for each screen size. Two ways in:
+
+- **On the device:** **Settings → Display → Sleep Theme → Get More Themes** connects to WiFi and lists the themes built for your screen, with their size. **Confirm** downloads one into `/sleep-themes/<name>/`; on a theme that is already installed, **Confirm** offers to delete it. A theme the store has changed since you installed it says **Update**, and **Confirm** fetches the new version; when any are out of date, an **Update All** row at the top updates them all. **Back** cancels a download in progress. A theme you install becomes your sleep screen when the one you had chosen isn't on the card (light and dark count as on the card).
+- **In the web UI:** the **Sleep Themes** page shows the same store with previews; **Install** puts the theme on the card over WiFi (the computer needs internet access), and **Update** replaces one the store has changed.
+
+A theme is only swapped in once all its files have arrived, so a cancelled or failed download never leaves a broken theme behind.
 
 ### Custom boot screen
 
@@ -795,10 +807,6 @@ To replace the logo shown while the device starts: in **Browse Files**, hold **C
 
 > [!TIP]
 > The image is read from the SD card on every start, so a small file starts faster: a 1-bit (black-and-white) BMP is about 48KB where a 24-bit one is over 1MB. Restarts the device makes on its own (after WiFi use, sync) and wakes with *Page as Sleep Screen* show no boot screen at all, as before.
-
-You can also overlay up to three reading stats on the sleep screen — see **[Sleep-screen stats](#sleep-screen-stats)**. Here's a Custom (dark) sleep screen with the weekly streak, daily goal, and book-time-left stats shown at the bottom:
-
-<img src="docs/images/user-guide/sleep-screen.jpg" alt="Device asleep showing a custom dark sleep screen with weekly streak boxes, daily goal met, and time left in book" width="300">
 
 ---
 

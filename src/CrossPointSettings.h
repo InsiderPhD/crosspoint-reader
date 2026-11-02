@@ -18,27 +18,18 @@ class CrossPointSettings {
   CrossPointSettings(const CrossPointSettings&) = delete;
   CrossPointSettings& operator=(const CrossPointSettings&) = delete;
 
-  enum SLEEP_SCREEN_MODE {
-    DARK = 0,
-    LIGHT = 1,
-    CUSTOM = 2,
-    COVER = 3,
-    BLANK = 4,
-    COVER_CUSTOM = 5,
-    // The screen that was showing stays up, with a transparent image from the
-    // SD card composited over it. See SleepActivity::renderOverlaySleepScreen.
-    OVERLAY = 6,
-    // A compiled HTML/CSS theme from /sleep-themes/<sleepTheme>/. See
-    // src/sleeptheme/SleepThemeRenderer.h.
-    THEME = 7,
-    SLEEP_SCREEN_MODE_COUNT
-  };
-  enum SLEEP_SCREEN_COVER_MODE { FIT = 0, CROP = 1, SLEEP_SCREEN_COVER_MODE_COUNT };
-  enum SLEEP_SCREEN_COVER_FILTER {
-    NO_FILTER = 0,
-    BLACK_AND_WHITE = 1,
-    INVERTED_BLACK_AND_WHITE = 2,
-    SLEEP_SCREEN_COVER_FILTER_COUNT
+  // RETIRED: the sleep screen used to be one of these modes; it is always a
+  // theme now (sleepTheme). Values of the old "sleepScreen" / binary-settings
+  // field, read only to pick the matching store theme (legacySleepThemeFor).
+  enum LEGACY_SLEEP_SCREEN_MODE {
+    LEGACY_SLEEP_DARK = 0,
+    LEGACY_SLEEP_LIGHT = 1,
+    LEGACY_SLEEP_CUSTOM = 2,
+    LEGACY_SLEEP_COVER = 3,
+    LEGACY_SLEEP_BLANK = 4,
+    LEGACY_SLEEP_COVER_CUSTOM = 5,
+    LEGACY_SLEEP_OVERLAY = 6,
+    LEGACY_SLEEP_THEME = 7,
   };
 
   // Status bar enum - legacy
@@ -311,34 +302,6 @@ class CrossPointSettings {
     FINISHED_BOOK_FOLDER_COUNT
   };
 
-  // Reading stat selectable on the sleep screen (one per picker slot).
-  enum SLEEP_STAT {
-    SLEEP_STAT_NONE = 0,
-    SLEEP_STAT_TODAY = 1,
-    SLEEP_STAT_GOAL = 2,
-    SLEEP_STAT_WEEK = 3,
-    SLEEP_STAT_STREAK = 4,
-    SLEEP_STAT_MONTH = 5,
-    SLEEP_STAT_TOTAL = 6,
-    SLEEP_STAT_FINISHED = 7,
-    // "If found, please return to" line with the user-entered contact (returnContact).
-    // Skipped when returnContact is empty.
-    SLEEP_STAT_RETURN = 8,
-    // Percent through the currently-open book. Skipped when no book is open.
-    SLEEP_STAT_BOOK_PROGRESS = 9,
-    // Average time read per day over the last 7 days.
-    SLEEP_STAT_DAILY_AVG = 10,
-    // Number of days read in the current calendar month.
-    SLEEP_STAT_DAYS_MONTH = 11,
-    // Last 7 days as a row of cells; a cell is filled when that day met the goal.
-    SLEEP_STAT_WEEK_STREAK = 12,
-    // Time remaining to reach today's daily goal ("Daily goal met" once reached).
-    SLEEP_STAT_GOAL_LEFT = 13,
-    // Estimated reading time left in the currently-open book.
-    SLEEP_STAT_BOOK_TIME_LEFT = 14,
-    SLEEP_STAT_COUNT
-  };
-
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
 
   // Silent progress push while reading (BookFusion or KOReader). Percent modes
@@ -457,6 +420,7 @@ class CrossPointSettings {
     uint16_t endMinutes = 7 * 60;
     uint8_t brightness = 10;  // 0-100, same scale as frontlightBrightness
     uint8_t warmth = 80;      // 0-100, same scale as frontlightWarmth
+    uint8_t darkMode = 0;     // 1 = force dark mode on inside the window
   };
   FrontlightSchedule frontlightSchedules[FRONTLIGHT_SCHEDULE_SLOTS];
   // Scheduler state. Persisted because deep sleep is a reboot on this hardware:
@@ -466,26 +430,19 @@ class CrossPointSettings {
   uint8_t frontlightScheduleActive = 0;
   uint8_t frontlightScheduleRestoreBrightness = 0;
   uint8_t frontlightScheduleRestoreWarmth = 50;
-  // Sleep screen settings
-  uint8_t sleepScreen = DARK;
-  // Sleep screen cover mode settings
-  uint8_t sleepScreenCoverMode = FIT;
-  // Sleep screen cover filter
-  uint8_t sleepScreenCoverFilter = NO_FILTER;
-  // Sleep screen orientation
+  uint8_t frontlightScheduleRestoreDarkMode = 0;
+  // Orientation of the built-in sleep screen (themes carry their own).
   uint8_t sleepScreenOrientation = PORTRAIT;
-  // Folder name under /sleep-themes/ drawn by SLEEP_SCREEN_MODE::THEME. Empty = unset.
-  char sleepTheme[32] = "";
-  // Reading stats shown on the sleep screen (one SLEEP_STAT per slot; NONE = hidden).
+  // The sleep screen: a theme folder under /sleep-themes/. Empty or missing
+  // (not installed yet) shows the built-in logo screen, which "light" and
+  // "dark" are the store's versions of, so the default needs no download.
+  char sleepTheme[32] = "light";
   // Master switch for reading statistics. Off: no session is opened, so nothing
   // is recorded, saved or pushed (ReadingStatsStore::beginSession), and the
   // surfaces that would show a frozen "today" hide their stats. History is
   // kept. The reading-speed pace behind Time Left is independent of this.
   uint8_t trackReadingStats = 1;
-  uint8_t sleepStatSlot1 = SLEEP_STAT_NONE;
-  uint8_t sleepStatSlot2 = SLEEP_STAT_NONE;
-  uint8_t sleepStatSlot3 = SLEEP_STAT_NONE;
-  // Contact (e.g. phone number) shown by the SLEEP_STAT_RETURN "if found" line. Empty = unset.
+  // Contact (e.g. phone number) for "if found" sleep themes (device.contact). Empty = unset.
   char returnContact[32] = "";
   // Status bar settings.
   // The legacy toggle/enum fields below (statusBar, statusBarChapterPageCount,
@@ -769,6 +726,10 @@ class CrossPointSettings {
   uint8_t timeZonePreset = 0;
   // Seamless sleep: keep current content visible with moon icon instead of showing sleep screen
   uint8_t seamlessSleepScreen = SEAMLESS_NEVER;
+  // Full refresh before sleep: show "Entering sleep" on a full (GC) flash that
+  // scrubs reading residue before the sleep screen paints. Off: no popup, the
+  // sleep screen's own full refresh is the only one (about a second faster).
+  uint8_t sleepFullRefresh = 0;
   // Tilt-based page turning (X3 only — requires QMI8658 IMU)
   uint8_t tiltPageTurn = TILT_OFF;
 
@@ -960,6 +921,9 @@ class CrossPointSettings {
   // Read-time migrations from the two retired settings. Each runs when its new
   // keys are absent from the file (and after a settings.bin import).
   static void migrateStatusBarBatteryStyles(CrossPointSettings& settings);
+  // The store theme that replaces a retired sleep-screen mode (LEGACY_SLEEP_*);
+  // nullptr for LEGACY_SLEEP_THEME, whose sleepTheme already says.
+  static const char* legacySleepThemeFor(uint8_t mode);
   static void migrateHeaderStatusBar(CrossPointSettings& settings);
   // The retired settings' values as the current configuration would have set
   // them, for the mirrored write.

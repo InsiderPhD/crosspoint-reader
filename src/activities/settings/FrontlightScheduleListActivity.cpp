@@ -1,7 +1,5 @@
 #include "FrontlightScheduleListActivity.h"
 
-#if FREEINK_CAP_FRONTLIGHT
-
 #include <GfxRenderer.h>
 #include <I18n.h>
 
@@ -22,7 +20,8 @@ constexpr int kRowCount = CrossPointSettings::FRONTLIGHT_SCHEDULE_SLOTS;
 const StrId kSlotLabels[kRowCount] = {StrId::STR_FRONTLIGHT_SCHEDULE_1, StrId::STR_FRONTLIGHT_SCHEDULE_2,
                                       StrId::STR_FRONTLIGHT_SCHEDULE_3, StrId::STR_FRONTLIGHT_SCHEDULE_4};
 
-// "21:00 - 07:00 · 10% · Warmth 80%", or Off. Short enough for a stack buffer.
+// "21:00 - 07:00 · 10% · Warmth 80% · Dark Mode", or Off. Short enough for a
+// stack buffer.
 std::string describeSlot(const int index) {
   const auto& slot = SETTINGS.frontlightSchedules[index];
   if (!slot.enabled) return tr(STR_STATE_OFF);
@@ -30,12 +29,18 @@ std::string describeSlot(const int index) {
   char end[10];
   FrontlightScheduler::formatMinuteOfDay(slot.startMinutes, start, sizeof(start));
   FrontlightScheduler::formatMinuteOfDay(slot.endMinutes, end, sizeof(end));
-  char buf[64];
-  if (halFrontlight.hasWarmth()) {
-    snprintf(buf, sizeof(buf), "%s - %s \xC2\xB7 %u%% \xC2\xB7 %s %u%%", start, end, slot.brightness, tr(STR_WARMTH),
-             slot.warmth);
+  char buf[96];
+  int len;
+  if (!FrontlightScheduler::controlsLight()) {
+    len = snprintf(buf, sizeof(buf), "%s - %s", start, end);
+  } else if (halFrontlight.hasWarmth()) {
+    len = snprintf(buf, sizeof(buf), "%s - %s \xC2\xB7 %u%% \xC2\xB7 %s %u%%", start, end, slot.brightness,
+                   tr(STR_WARMTH), slot.warmth);
   } else {
-    snprintf(buf, sizeof(buf), "%s - %s \xC2\xB7 %u%%", start, end, slot.brightness);
+    len = snprintf(buf, sizeof(buf), "%s - %s \xC2\xB7 %u%%", start, end, slot.brightness);
+  }
+  if (slot.darkMode && len > 0 && static_cast<size_t>(len) < sizeof(buf)) {
+    snprintf(buf + len, sizeof(buf) - len, " \xC2\xB7 %s", tr(STR_READER_DARK_MODE));
   }
   return buf;
 }
@@ -54,9 +59,14 @@ void FrontlightScheduleListActivity::applySlotIfActive(const uint8_t slot) {
   if (SETTINGS.frontlightScheduleActive != slot + 1) return;
   const auto& sched = SETTINGS.frontlightSchedules[slot];
   if (!sched.enabled) return;  // evaluate() below restores the daytime level
-  SETTINGS.frontlightBrightness = sched.brightness;
-  SETTINGS.frontlightWarmth = sched.warmth;
-  halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
+  if (FrontlightScheduler::controlsLight()) {
+    SETTINGS.frontlightBrightness = sched.brightness;
+    SETTINGS.frontlightWarmth = sched.warmth;
+    halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
+  }
+  // Dark mode toggled on the live slot: on now, or back to the pre-schedule
+  // setting. Arms the full refresh this screen's repaint will use.
+  FrontlightScheduler::setDarkMode(sched.darkMode ? 1 : SETTINGS.frontlightScheduleRestoreDarkMode);
 }
 
 void FrontlightScheduleListActivity::editSlot(const uint8_t slot) {
@@ -125,7 +135,8 @@ void FrontlightScheduleListActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_FRONTLIGHT_SCHEDULE));
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight},
+                 I18N.get(FrontlightScheduleEditActivity::titleId()));
 
   const Rect rows = listRect();
   GUI.drawList(
@@ -135,7 +146,9 @@ void FrontlightScheduleListActivity::render(RenderLock&&) {
   // Below the rows, not below the rect: the rect's bottom strip belongs to the
   // page counter (unused on a list this short).
   const int helpTop = rows.y + GUI.contentHeightWithoutIndicator(rows) + 2 * metrics.verticalSpacing;
-  GUI.drawHelpText(renderer, Rect{0, helpTop, pageWidth, 20}, tr(STR_FRONTLIGHT_SCHEDULE_HINT));
+  GUI.drawHelpText(
+      renderer, Rect{0, helpTop, pageWidth, 20},
+      FrontlightScheduler::controlsLight() ? tr(STR_FRONTLIGHT_SCHEDULE_HINT) : tr(STR_DARK_MODE_SCHEDULE_HINT));
   // Said up front rather than discovered as a schedule that never fires: with
   // no trustworthy clock the scheduler idles until NTP sets one.
   uint16_t minuteOfDay;
@@ -150,5 +163,3 @@ void FrontlightScheduleListActivity::render(RenderLock&&) {
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
-
-#endif  // FREEINK_CAP_FRONTLIGHT

@@ -19,6 +19,7 @@
 #include "ListPickerActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "sleeptheme/SleepThemeRenderer.h"
 #include "util/SleepBootImages.h"
 
 namespace {
@@ -332,8 +333,8 @@ bool BmpViewerActivity::saveJpegSleepCover() const {
     jpegFile.close();
     return false;
   }
-  const bool crop = SETTINGS.sleepScreenCoverMode == CrossPointSettings::SLEEP_SCREEN_COVER_MODE::CROP;
-  const bool converted = JpegToBmpConverter::jpegFileToBmpStream(jpegFile, bmpFile, crop);
+  // The whole picture: the sleep theme decides how it is fitted (object-fit).
+  const bool converted = JpegToBmpConverter::jpegFileToBmpStream(jpegFile, bmpFile, /*crop=*/false);
   jpegFile.close();
   bmpFile.close();
   if (!converted) {
@@ -374,8 +375,7 @@ void BmpViewerActivity::doSetSleepCover() {
   }
 
   if (success) {
-    SETTINGS.sleepScreen = CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM;
-    SETTINGS.saveToFile();
+    SleepThemeRenderer::showSleepImages();
     // A chosen sleep folder outranks /sleep.bmp. Picking one image here is the
     // newer request, so drop the folder or this image would never be shown.
     if (!APP_STATE.preferredSleepFolderPath.empty()) {

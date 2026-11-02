@@ -133,6 +133,16 @@
     </div>
 
     <div class="card">
+      <h2>Theme store</h2>
+      <p class="muted">
+        Ready-made themes, already compiled for this device's screen. Install one and it is on the card in a few
+        seconds; the device's Sleep Theme screen has the same store under Get More Themes.
+      </p>
+      <div id="store" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px"></div>
+      <p class="muted" id="storeMsg">Loading the theme store...</p>
+    </div>
+
+    <div class="card">
       <h2>Installed themes</h2>
       <p class="muted" id="themesEmpty">No themes installed yet.</p>
       <table id="themes"></table>
@@ -158,17 +168,33 @@
             the text: <code>{{stats.week_met_1 ? icon("star-filled") : icon("star")}}</code>.</li>
           <li><code>data-digit="0"</code> - only the nth digit from the right (flip-board tiles).</li>
           <li><code>data-var="book.cover"</code> on an <code>&lt;img&gt;</code> or <code>&lt;div&gt;</code> - the open
-            book's cover. <code>object-fit: contain</code> keeps its shape.</li>
+            book's cover. <code>object-fit: contain</code> shows all of it, <code>cover</code> zooms it to fill the box
+            and crops the overflow, anything else stretches it. <code>recent.2.cover</code> is a recent
+            book's; <code>sleep.image</code> is a random image from <code>/sleep</code> (or <code>/sleep.bmp</code>).</li>
+          <li><code>data-filter="grey"</code> on an image - drawn in the screen's four greys (keep live text off it);
+            otherwise it becomes black and white: <code>dither</code> (default), <code>lighter</code>,
+            <code>darker</code>, <code>bw</code> (hard black and white) or <code>invert</code>. Rotated images and
+            overlay themes always dither.</li>
           <li><code>data-kind="bar"</code> - fills the box from the left by a 0-100 value.</li>
           <li><code>data-max-lines="2"</code>, <code>data-overflow="ellipsis"</code>, <code>data-hide-if-empty</code>,
             <code>data-glyphs="digits"</code> (character sets to include for live text: latin, digits, greek,
             cyrillic, kana, cjk, hangul; default latin).</li>
-          <li>Live content is drawn on top of everything static, so don't put art over a live element (a stamp
-            over the cover would end up underneath it).</li>
+          <li><code>data-valign="bottom"</code> (or <code>middle</code>, <code>top</code>) - a text box that keeps room for
+            all of its <code>data-max-lines</code> and places shorter text at its bottom or middle, like a slide's text
+            box. A title above an author stays put whether it wraps or not.</li>
+          <li><code>data-fit</code> on live text with a border or background (a tag pill) - the device draws the
+            border and background to fit the real text, up to the element's <code>max-width</code>, instead of
+            keeping the sample's size. Use a <code>width: fit-content</code> box on its own line, or put the pills
+            in a <code>display: flex; flex-wrap: wrap</code> parent: the device then lines them up and wraps them
+            itself (<code>data-max-lines</code> on the parent caps the rows).</li>
+          <li>Live text and bars are drawn on top of everything static. Static art in front of an image (a card
+            over a full-screen cover) stays in front: the device draws it again after the image.</li>
           <li>Live text keeps its font, size, weight, colour (black or white), alignment, letter-spacing,
             <code>text-transform</code> and any 2D <code>transform</code> (rotate, scale, skew).</li>
           <li><code>&lt;html data-kp-orientation="landscape"&gt;</code> for a landscape theme;
-            <code>data-kp-dither="threshold"</code> for crisp line art instead of dithering.</li>
+            <code>data-kp-dither="threshold"</code> for crisp line art instead of dithering;
+            <code>data-kp-overlay</code> to paint over the page that was showing - anything left transparent
+            (no background on <code>body</code>) shows the page.</li>
         </ul>
         <table id="vars"></table>
       </details>
@@ -307,7 +333,7 @@
 
       // Returns theme.html as one self-contained document string (every
       // stylesheet, image and font as a data: URL), sized to the screen.
-      async function buildDocument(width, height) {
+      async function buildDocument(width, height, overlay = false) {
         const html = await files.get('theme.html').text();
         const doc = new DOMParser().parseFromString(html, 'text/html');
         for (const link of [...doc.querySelectorAll('link[rel~="stylesheet"][href]')]) {
@@ -334,7 +360,7 @@
         const base = doc.createElement('style');
         base.textContent =
           'html,body{margin:0;padding:0;width:' + width + 'px;height:' + height +
-          'px;overflow:hidden;background:#fff}';
+          'px;overflow:hidden;background:' + (overlay ? 'transparent' : '#fff') + '}';
         doc.head.prepend(base);
         return { doc, text: '<!DOCTYPE html>' + doc.documentElement.outerHTML };
       }
@@ -367,7 +393,7 @@
           div.style.display = cs.display === 'inline' ? 'inline-block' : cs.display;
           div.style.objectFit = cs.objectFit;
           div.style.backgroundImage = 'url("' + img.src + '")';
-          div.style.backgroundSize = cs.objectFit === 'contain' ? 'contain' : '100% 100%';
+          div.style.backgroundSize = cs.objectFit === 'contain' || cs.objectFit === 'cover' ? cs.objectFit : '100% 100%';
           div.style.backgroundRepeat = 'no-repeat';
           div.style.backgroundPosition = 'center';
           img.replaceWith(div);
@@ -754,6 +780,30 @@
         });
       }
 
+      // data-valign: the box keeps room for all its lines (min-height in lh)
+      // and its text sits at the top, middle or bottom, as the device draws it.
+      const VALIGNS = { top: 0, middle: 1, bottom: 2 };
+      // data-filter on a cover: the device's CoverFilter, and a CSS filter that
+      // looks like it for the preview.
+      const COVER_FILTERS = {
+        dither: [0, ''],
+        lighter: [1, 'brightness(1.25)'],
+        darker: [2, 'brightness(0.75)'],
+        bw: [3, 'grayscale(1) contrast(100)'],
+        invert: [4, 'invert(1)'],
+        grey: [5, 'grayscale(1)'],
+      };
+      function applyVAlign(view, el) {
+        const v = el.getAttribute('data-valign');
+        if (!(v in VALIGNS)) return;
+        const cs = view.getComputedStyle(el);
+        const lines = Math.max(1, Math.min(8, parseInt(el.getAttribute('data-max-lines'), 10) || 1));
+        el.style.minHeight = 'max(' + (cs.minHeight === 'auto' ? '0px' : cs.minHeight) + ', ' + lines + 'lh)';
+        el.style.display = cs.display.startsWith('inline') ? 'inline-flex' : 'flex';
+        el.style.flexDirection = 'column';
+        el.style.justifyContent = { top: 'flex-start', middle: 'center', bottom: 'flex-end' }[v];
+      }
+
       // Collects every live element with its geometry and computed style.
       function collectLive(d) {
         const view = d.defaultView;
@@ -762,6 +812,7 @@
         for (const el of d.querySelectorAll('[data-var],[data-template]')) {
           const cs = view.getComputedStyle(el);
           if (cs.display === 'inline') el.style.display = 'inline-block';
+          applyVAlign(view, el);
           const tpl = templateOf(el);
           const info = ThemeExpr.inspect(tpl, (n) => varsByName.has(n));
           errors.push(...info.errors);
@@ -772,7 +823,22 @@
           if (!isCover && !isBar && el.textContent === '') el.textContent = '\u00a0';
           live.push({ el, tpl, kind: isCover ? 1 : isBar ? 2 : 0, icons: info.icons, strings: info.strings });
         }
+        // A data-fit box is measured at its widest (max-width): the device fits
+        // its border to the live text inside that. Put back afterwards so the
+        // preview shows the sample's fitted box.
+        const fitWidths = [];
+        for (const item of live) {
+          if (item.kind !== 0 || !item.el.hasAttribute('data-fit')) continue;
+          const mw = view.getComputedStyle(item.el).maxWidth;
+          const pcs = view.getComputedStyle(item.el.parentElement);
+          const inFlow = pcs.display.endsWith('flex') && pcs.flexWrap === 'wrap';
+          fitWidths.push([item.el, item.el.style.width]);
+          // A pill in a wrapping row may grow to the whole row.
+          if (mw !== 'none') item.el.style.width = mw;
+          else if (inFlow) item.el.style.width = '100%';
+        }
         // Measure after every display fix-up so later boxes see the final layout.
+        const flowGroups = new Map();
         for (const item of live) {
           const cs = view.getComputedStyle(item.el);
           Object.assign(item, measureMatrix(d, item.el));
@@ -797,15 +863,80 @@
           item.barMax = Math.max(0, Math.min(65535, parseInt(item.el.getAttribute('data-max'), 10) || 0));
           item.maxLines = Math.min(8, parseInt(item.el.getAttribute('data-max-lines') || cs.webkitLineClamp || '1', 10) || 1);
           item.ellipsis = item.el.getAttribute('data-overflow') === 'ellipsis' || cs.textOverflow === 'ellipsis';
+          item.valign = VALIGNS[item.el.getAttribute('data-valign')] || 0;
+          item.coverFilter = item.kind === 1 ? (COVER_FILTERS[item.el.getAttribute('data-filter')] || COVER_FILTERS.dither)[0] : 0;
           item.hideIfEmpty = item.el.hasAttribute('data-hide-if-empty');
           item.digit = item.el.hasAttribute('data-digit') ? parseInt(item.el.getAttribute('data-digit'), 10) : -1;
           item.contain = item.el.style.objectFit === 'contain' || cs.objectFit === 'contain';
+          item.zoom = !item.contain && (item.el.style.objectFit === 'cover' || cs.objectFit === 'cover');
           item.glyphs = item.el.getAttribute('data-glyphs') || '';
           const [a, b, c, dd] = item.m;
           item.transformed = Math.abs(a - 1) > 1e-3 || Math.abs(dd - 1) > 1e-3 || Math.abs(b) > 1e-3 || Math.abs(c) > 1e-3;
           if (item.w <= 0 || item.h <= 0) errors.push('A live element has no size: ' + item.tpl);
+          if (item.kind === 0 && item.el.hasAttribute('data-fit')) {
+            item.fit = fitBoxOf(view, item, cs);
+            if (!item.fit) errors.push('data-fit needs a border or background, an unrotated box and a single line: ' + item.tpl);
+            else item.fit.flow = fitFlowOf(d, item.el, flowGroups, errors);
+          }
         }
+        for (const [el, width] of fitWidths) el.style.width = width;
         return { live, errors };
+      }
+
+      // data-fit: the element's own border and background, which the device
+      // draws around the live text (an extra element, kind 3, just before the
+      // text's). Only for upright single-line boxes with a uniform border.
+      function fitBoxOf(view, it, cs) {
+        if (it.transformed || it.maxLines > 1) return null;
+        const px = (v) => Math.max(0, Math.round(parseFloat(v) || 0));
+        const border = cs.borderTopStyle === 'none' ? 0 : px(cs.borderTopWidth);
+        const bg = cs.backgroundColor.match(/[\d.]+/g) || [];
+        const bgVisible = bg.length >= 3 && (bg.length < 4 || parseFloat(bg[3]) > 0.5);
+        if (!border && !bgVisible) return null;
+        const insetL = px(cs.borderLeftWidth) + px(cs.paddingLeft);
+        const insetR = px(cs.borderRightWidth) + px(cs.paddingRight);
+        const insetT = px(cs.borderTopWidth) + px(cs.paddingTop);
+        const insetB = px(cs.borderBottomWidth) + px(cs.paddingBottom);
+        const outerH = it.h + insetT + insetB;
+        const r = cs.borderTopLeftRadius;
+        const radius = Math.min(Math.floor(outerH / 2), r.endsWith('%') ? Math.round((outerH * parseFloat(r)) / 100) : px(r));
+        return {
+          w: it.w + insetL + insetR, h: outerH,
+          x: it.m[4] - insetL, y: it.m[5] - insetT,
+          insetL: Math.min(255, insetL), insetR: Math.min(255, insetR),
+          border: Math.min(255, border), radius: Math.min(255, radius),
+          borderWhite: luminanceOf(cs.borderTopColor) >= 128,
+          // 0 none, 1 black, 2 white
+          fill: bgVisible ? (luminanceOf(cs.backgroundColor) >= 128 ? 2 : 1) : 0,
+        };
+      }
+
+      // A data-fit item whose parent is a wrapping flex row (flex-wrap: wrap):
+      // the device lays the group's pills out left to right in the parent's
+      // content box and wraps them itself, so they fit the real tags. The
+      // parent's data-max-lines caps the rows. Null when not in such a row.
+      function fitFlowOf(d, el, groups, errors) {
+        const parent = el.parentElement;
+        const view = d.defaultView;
+        const pcs = view.getComputedStyle(parent);
+        if (!pcs.display.endsWith('flex') || pcs.flexWrap !== 'wrap' || pcs.flexDirection !== 'row') return null;
+        if (!groups.has(parent)) {
+          const box = measureMatrix(d, parent);
+          const [a, b, c, dd] = box.m;
+          if (Math.abs(a - 1) > 1e-3 || Math.abs(dd - 1) > 1e-3 || Math.abs(b) > 1e-3 || Math.abs(c) > 1e-3) {
+            errors.push('A wrapping row of data-fit pills cannot be rotated or scaled');
+          }
+          if (groups.size >= 255) errors.push('Too many wrapping rows of data-fit pills');
+          const gap = (v) => Math.max(0, Math.min(255, Math.round(parseFloat(v) || 0)));
+          groups.set(parent, {
+            group: groups.size + 1,
+            x: Math.max(0, Math.round(box.m[4])), y: Math.max(0, Math.round(box.m[5])),
+            w: Math.max(1, Math.min(65535, box.w)),
+            gapX: gap(pcs.columnGap), gapY: gap(pcs.rowGap),
+            maxRows: Math.max(0, Math.min(255, parseInt(parent.getAttribute('data-max-lines'), 10) || 0)),
+          });
+        }
+        return groups.get(parent);
       }
 
       function hideLiveContent(d, it) {
@@ -815,8 +946,17 @@
           el.style['border' + side + 'Color'] = cs['border' + side + 'Color'];
         }
         el.style.outlineColor = cs.outlineColor;
+        if (it.fit) {
+          // The device draws this box at the live text's width.
+          for (const side of ['Top', 'Right', 'Bottom', 'Left']) el.style['border' + side + 'Color'] = 'transparent';
+          el.style.backgroundColor = 'transparent';
+          el.style.boxShadow = 'none';
+        }
         if (it.kind === 1) {
           el.style.backgroundImage = 'none';
+          // The preview's data-filter look is not art: an inverted cover's
+          // border must not bake white.
+          if (it.savedFilter !== undefined) el.style.filter = it.savedFilter;
           return;
         }
         el.style.color = 'transparent';
@@ -847,7 +987,8 @@
         for (let i = 0; i < px.length; i++) h = Math.imul(h ^ px[i], 16777619);
         return h >>> 0;
       }
-      async function rasterize(d, width, height) {
+      // overlay: keep transparency (the canvas starts clear, not white).
+      async function rasterize(d, width, height, overlay = false) {
         const xhtml = new XMLSerializer().serializeToString(d.documentElement);
         const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '">' +
           '<foreignObject x="0" y="0" width="100%" height="100%">' + xhtml + '</foreignObject></svg>';
@@ -862,8 +1003,11 @@
         let previous = null;
         for (let pass = 0; pass < 6; pass++) {
           const img = await loadImage(url);
-          ctx.fillStyle = '#fff';
-          ctx.fillRect(0, 0, width, height);
+          ctx.clearRect(0, 0, width, height);
+          if (!overlay) {
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, width, height);
+          }
           ctx.drawImage(img, 0, 0);
           const hash = pixelHash(ctx, width, height);
           if (hash === previous) break;
@@ -878,7 +1022,11 @@
         const { width, height } = canvas;
         const px = canvas.getContext('2d').getImageData(0, 0, width, height).data;
         const lum = new Float32Array(width * height);
-        for (let i = 0; i < lum.length; i++) lum[i] = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+        // Partly transparent pixels (overlays) are judged over white.
+        for (let i = 0; i < lum.length; i++) {
+          const a = px[i * 4 + 3] / 255;
+          lum[i] = a * (0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2]) + (1 - a) * 255;
+        }
         const black = new Uint8Array(width * height);
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
@@ -897,6 +1045,55 @@
           }
         }
         return black;
+      }
+
+      // Static art in front of an image (a card over a full-screen cover): the
+      // device draws images after the background, so these pixels go in
+      // front.bmp and are drawn again after the images. Found by painting every
+      // image box solid black, then solid white: inside the boxes, what does
+      // not change is something in front. Null when nothing is.
+      async function frontBits(d, live, width, height, overlay) {
+        const covers = live.filter((it) => it.kind === 1);
+        if (!covers.length) return null;
+        const saved = covers.map((it) => it.el.style.backgroundColor);
+        const pixels = async (colour) => {
+          for (const it of covers) it.el.style.backgroundColor = colour;
+          const c = await rasterize(d, width, height, overlay);
+          return c.getContext('2d').getImageData(0, 0, width, height).data;
+        };
+        const dark = await pixels('#000');
+        const light = await pixels('#fff');
+        covers.forEach((it, k) => { it.el.style.backgroundColor = saved[k]; });
+        const front = new Uint8Array(width * height);
+        let any = false;
+        for (const it of covers) {
+          // The content box through its transform, as a bounding rectangle.
+          const [a, b, c, dd, e, f] = it.m;
+          const xs = [e, e + a * it.w, e + c * it.h, e + a * it.w + c * it.h];
+          const ys = [f, f + b * it.w, f + dd * it.h, f + b * it.w + dd * it.h];
+          const x0 = Math.max(0, Math.floor(Math.min(...xs))), x1 = Math.min(width, Math.ceil(Math.max(...xs)));
+          const y0 = Math.max(0, Math.floor(Math.min(...ys))), y1 = Math.min(height, Math.ceil(Math.max(...ys)));
+          for (let y = y0; y < y1; y++) {
+            for (let x = x0; x < x1; x++) {
+              const i = y * width + x, p = i * 4;
+              const diff = Math.max(Math.abs(dark[p] - light[p]), Math.abs(dark[p + 1] - light[p + 1]), Math.abs(dark[p + 2] - light[p + 2]));
+              if (diff < 24 && (!overlay || dark[p + 3] >= 128)) {
+                front[i] = 1;
+                any = true;
+              }
+            }
+          }
+        }
+        return any ? front : null;
+      }
+
+      // Overlay mask: true (black in mask.bmp) where the theme paints.
+      function alphaBits(canvas) {
+        const { width, height } = canvas;
+        const px = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+        const painted = new Uint8Array(width * height);
+        for (let i = 0; i < painted.length; i++) painted[i] = px[i * 4 + 3] >= 128 ? 1 : 0;
+        return painted;
       }
 
       function bitsToCanvas(black, width, height) {
@@ -1109,8 +1306,13 @@
           return offsetOf.get(s);
         }
         // Covers keep their template too: it says which book (book.cover, recent.N.cover).
-        const elements = live.map((it) => ({ it, tplOffset: addString(it.tplDevice || it.tpl) }));
+        const elements = [];
+        for (const it of live) {
+          if (it.fit) elements.push({ box: it.fit, it });
+          elements.push({ it, tplOffset: addString(it.tplDevice || it.tpl) });
+        }
         if (stringBytes > device.limits.strings) throw new Error('Templates are too long (' + stringBytes + ' bytes)');
+        if (elements.length > device.limits.elements) throw new Error('Too many live elements (' + elements.length + ' with data-fit boxes, max ' + device.limits.elements + ')');
         const buf = new ArrayBuffer(32 + elements.length * 48 + stringBytes);
         const v = new DataView(buf);
         'KPTHEME'.split('').forEach((c, i) => v.setUint8(i, c.charCodeAt(0)));
@@ -1120,17 +1322,45 @@
         v.setUint8(14, meta.orientation);
         v.setUint8(15, elements.length);
         v.setUint8(16, meta.fontCount);
-        v.setUint8(17, 0x01); // HEADER_FLAG_COVER_TEMPLATES: covers say which book they show
+        // HEADER_FLAG_COVER_TEMPLATES (covers say which book they show) | HEADER_FLAG_OVERLAY | HEADER_FLAG_FRONT
+        v.setUint8(17, 0x01 | (meta.overlay ? 0x02 : 0) | (meta.front ? 0x04 : 0));
         v.setUint16(18, stringBytes, true);
         const fp = (x) => Math.round(x * 65536);
-        elements.forEach(({ it, tplOffset }, i) => {
+        elements.forEach(({ it, tplOffset, box }, i) => {
           const o = 32 + i * 48;
+          if (box) {
+            // ElementKind::Box: the border box, drawn fitted to the next element's text.
+            v.setUint8(o, 3);
+            v.setUint8(o + 1, box.border);
+            v.setUint8(o + 2, box.radius);
+            v.setUint8(o + 3, it.align);
+            // FLAG_WHITE | FLAG_FLOW
+            v.setUint8(o + 4, (box.borderWhite ? 0x01 : 0) | (box.flow ? 0x80 : 0));
+            v.setUint8(o + 5, box.insetL);
+            v.setUint8(o + 6, box.insetR);
+            v.setUint8(o + 9, box.fill);
+            v.setUint16(o + 10, Math.round(box.w), true);
+            v.setUint16(o + 12, Math.round(box.h), true);
+            v.setUint16(o + 14, box.flow ? box.flow.w : 0xffff, true);
+            [1, 0, 0, 1, box.x, box.y].forEach((x, k) => v.setInt32(o + 16 + k * 4, fp(x), true));
+            if (box.flow) {
+              // The wrapping row: group, max rows, left/top, gaps (see ElementKind::Box).
+              v.setUint8(o + 7, box.flow.group);
+              v.setUint8(o + 8, box.flow.maxRows);
+              v.setUint16(o + 40, box.flow.x, true);
+              v.setUint16(o + 42, box.flow.y, true);
+              v.setUint8(o + 44, box.flow.gapX);
+              v.setUint8(o + 45, box.flow.gapY);
+            }
+            return;
+          }
           let flags = 0;
           if (it.white) flags |= 0x01;
           if (it.hideIfEmpty) flags |= 0x02;
           if (it.transformed) flags |= 0x04;
           if (it.ellipsis) flags |= 0x08;
           if (it.contain) flags |= 0x10;
+          if (it.zoom) flags |= 0x40;
           if (it.kind === 1) flags |= 0x20;
           v.setUint8(o, it.kind);
           v.setUint8(o + 1, it.kind === 0 ? fontIndexOf(it) : 0);
@@ -1141,12 +1371,14 @@
           v.setUint8(o + 6, Math.min(255, it.maxLines));
           v.setInt8(o + 7, it.digit);
           v.setInt8(o + 8, it.tracking);
+          v.setUint8(o + 9, it.kind === 0 ? it.valign : 0);
           v.setUint16(o + 10, it.w, true);
           v.setUint16(o + 12, it.h, true);
           v.setUint16(o + 14, tplOffset, true);
           it.m.forEach((x, k) => v.setInt32(o + 16 + k * 4, fp(x), true));
           v.setUint16(o + 40, Math.min(65535, it.lineHeight), true);
           v.setUint16(o + 42, it.kind === 2 ? it.barMax : 0, true);
+          v.setUint8(o + 44, it.coverFilter);
         });
         const bytes = new Uint8Array(buf);
         let o = 32 + elements.length * 48;
@@ -1172,9 +1404,10 @@
         const width = landscape ? Math.max(pw, ph) : Math.min(pw, ph);
         const height = landscape ? Math.min(pw, ph) : Math.max(pw, ph);
         const threshold = /data-kp-dither\s*=\s*["']threshold["']/i.test(htmlText);
+        const overlay = /<html\b[^>]*\sdata-kp-overlay\b/i.test(htmlText);
         log('Laying out at ' + width + 'x' + height + ' (' + orientName + ')...');
 
-        const { text } = await buildDocument(width, height);
+        const { text } = await buildDocument(width, height, overlay);
         const d = await layout(text, width, height);
         replaceLiveImages(d);
         const { live, errors } = collectLive(d);
@@ -1262,11 +1495,17 @@
         }
         const fontIndexOf = (it) => keys.indexOf(it.family + '|' + it.size);
         // A wrapped element needs room for every line it may draw, not just the
-        // sample's. The box grows downward, through its own transform.
+        // sample's. The box grows away from its vertical alignment (downward from
+        // the top, upward from the bottom, both ways from the middle), through
+        // its own transform.
         for (const it of live) {
           if (it.kind !== 0 || it.maxLines <= 1) continue;
           const lineH = it.lineHeight || lineHeights.get(it.family + '|' + it.size);
-          it.h = Math.max(it.h, it.maxLines * lineH);
+          const grow = Math.max(0, it.maxLines * lineH - it.h);
+          const up = it.valign === 2 ? grow : it.valign === 1 ? Math.round(grow / 2) : 0;
+          it.m[4] -= it.m[2] * up;
+          it.m[5] -= it.m[3] * up;
+          it.h += grow;
         }
 
         // Preview: live elements showing your real values.
@@ -1275,6 +1514,12 @@
             const full = it.barMax || 100;
             const pct = Math.max(0, Math.min(100, ((parseInt(expandSample(it.tpl), 10) || 0) * 100) / full));
             it.el.style.backgroundImage = 'linear-gradient(to right, currentColor ' + pct + '%, transparent ' + pct + '%)';
+            continue;
+          }
+          if (it.kind === 1) {
+            const css = (COVER_FILTERS[it.el.getAttribute('data-filter')] || COVER_FILTERS.dither)[1];
+            it.savedFilter = it.el.style.filter;
+            if (css) it.el.style.filter = (it.savedFilter ? it.savedFilter + ' ' : '') + css;
             continue;
           }
           if (it.kind !== 0) continue;
@@ -1299,7 +1544,7 @@
           }
           if (run) it.el.appendChild(d.createTextNode(run));
         }
-        const previewBits = toBits(await rasterize(d, width, height), threshold);
+        const previewBits = toBits(await rasterize(d, width, height, overlay), threshold);
 
         // Background: everything except the live content. A live element's
         // own box (border, background) stays as art; only its text or sample
@@ -1308,12 +1553,25 @@
           if (it.kind === 2) it.el.style.backgroundImage = '';
           hideLiveContent(d, it);
         }
-        const bgBits = toBits(await rasterize(d, width, height), threshold);
+        const bgCanvas = await rasterize(d, width, height, overlay);
+        const bgBits = toBits(bgCanvas, threshold);
+        const maskBits = overlay ? alphaBits(bgCanvas) : null;
+        const front = await frontBits(d, live, width, height, overlay);
 
-        const themeBin = packTheme({ width, height, orientation, fontCount: fontFiles.length }, live, fontIndexOf);
-        compiled = { themeBin, bmp: encodeBmp(bgBits, width, height), fontFiles };
+        const themeBin = packTheme({ width, height, orientation, overlay, front: !!front, fontCount: fontFiles.length }, live, fontIndexOf);
+        compiled = {
+          themeBin,
+          bmp: encodeBmp(bgBits, width, height),
+          mask: maskBits && encodeBmp(maskBits, width, height),
+          front: front && encodeBmp(front, width, height),
+          fontFiles,
+        };
+        if (overlay) log('Overlay: the page that was showing stays wherever the theme is transparent.');
+        if (front) log('Some art sits in front of an image; the device draws it after the image.');
 
         const figs = [['Background', bgBits], ['Preview (your stats right now)', previewBits]];
+        if (maskBits) figs.push(['Overlay mask (black = painted)', maskBits]);
+        if (front) figs.push(['In front of images (black = drawn after them)', front]);
         for (const [label, bits] of figs) {
           const fig = document.createElement('figure');
           fig.appendChild(bitsToCanvas(bits, width, height));
@@ -1330,12 +1588,12 @@
       }
 
       // ---- Installed themes -----------------------------------------------
-      async function setSleepTheme(name, useIt) {
-        const body = useIt ? { sleepScreen: 7, sleepTheme: name } : { sleepTheme: name };
+      // The sleep screen is always a theme; '' shows the built-in one.
+      async function setSleepTheme(name) {
         const res = await fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ sleepTheme: name }),
         });
         if (!res.ok) throw new Error('Could not change the sleep screen setting');
         device.active = name;
@@ -1372,7 +1630,7 @@
           use.disabled = name === device.active;
           use.addEventListener('click', async () => {
             try {
-              await setSleepTheme(name, true);
+              await setSleepTheme(name);
               $('themesMsg').textContent = name + ' shows the next time the device sleeps.';
             } catch (e) {
               $('themesMsg').textContent = e.message;
@@ -1404,7 +1662,7 @@
               if (!res.ok) throw new Error(await res.text());
               // A deleted theme can't stay selected; the device falls back to
               // its default sleep screen.
-              if (name === device.active) await setSleepTheme('', false);
+              if (name === device.active) await setSleepTheme('');
               $('themesMsg').textContent = 'Deleted ' + name + '.';
             } catch (e) {
               $('themesMsg').textContent = 'Could not delete ' + name + ': ' + e.message;
@@ -1441,6 +1699,8 @@
           await mkdir(root, name);
           log('Uploading to ' + dir + '...');
           await upload(dir, 'bg.bmp', compiled.bmp);
+          if (compiled.mask) await upload(dir, 'mask.bmp', compiled.mask);
+          if (compiled.front) await upload(dir, 'front.bmp', compiled.front);
           for (const [i, f] of compiled.fontFiles.entries()) await upload(dir, 'f' + i + '.cpfont', f);
           // Kept so the theme can be recompiled after a firmware update.
           await mkdir(dir, 'source');
@@ -1459,7 +1719,7 @@
           }
           // Last, so a half-finished install is never picked up as complete.
           await upload(dir, 'theme.bin', compiled.themeBin);
-          if ($('activate').checked) await setSleepTheme(name, true);
+          if ($('activate').checked) await setSleepTheme(name);
           log('Installed. ' + ($('activate').checked ? 'It shows the next time the device sleeps.' : ''));
           loadThemes();
         } catch (e) {
@@ -1478,8 +1738,146 @@
         $('compile').disabled = false;
       });
       $('install').addEventListener('click', install);
+      // ---- Theme store -----------------------------------------------------
+      // The store's CI compiles every theme per panel size; this installs the
+      // build for this device with the same mkdir/upload calls as install().
+      // Same catalog the device's Get More Themes screen reads.
+      const STORE_CATALOG_URL =
+        'https://raw.githubusercontent.com/InsiderPhD/katiepoint-sleep-themes/main/dist/index.json';
+      const STORE_BASE = STORE_CATALOG_URL.slice(0, STORE_CATALOG_URL.lastIndexOf('/') + 1);
+      const STORE_ID = /^[a-z0-9][a-z0-9-]{0,30}$/;
+      const STORE_FILE = /^(theme\.bin|bg\.bmp|mask\.bmp|front\.bmp|f[0-3]\.cpfont)$/;
+      const storeBuildKey = () =>
+        Math.max(device.panelWidth, device.panelHeight) + 'x' + Math.min(device.panelWidth, device.panelHeight);
+
+      async function installedThemeNames() {
+        try {
+          const res = await fetch('/api/files?path=' + encodeURIComponent(device.themesDir) + '&_=' + Date.now());
+          if (!res.ok) return new Set();
+          const list = await res.json();
+          return new Set((Array.isArray(list) ? list : list.items || []).filter((f) => f.isDirectory).map((f) => f.name));
+        } catch (e) {
+          return new Set();
+        }
+      }
+
+      async function installFromStore(theme, button) {
+        const key = storeBuildKey();
+        const build = theme.builds[key];
+        button.disabled = true;
+        const msg = $('storeMsg');
+        try {
+          // Fetch everything first: a dropped connection then never leaves half a theme on the card.
+          const blobs = [];
+          for (const f of build.files) {
+            msg.textContent = 'Downloading ' + theme.name + ': ' + f.name + '...';
+            const res = await fetch(STORE_BASE + key + '/' + theme.id + '/' + f.name);
+            if (!res.ok) throw new Error(f.name + ': HTTP ' + res.status);
+            blobs.push([f.name, await res.blob()]);
+          }
+          // Which build this is: the device's store screen and this page offer
+          // an update when the store's version moves on.
+          if (build.version) blobs.push(['store.ver', new Blob([build.version])]);
+          // A new theme becomes the sleep screen when the configured one isn't on
+          // the card. Updates never switch it, and light and dark are built in.
+          const onCard = await installedThemeNames();
+          const adopt = !onCard.has(theme.id) && device.active !== 'light' && device.active !== 'dark' &&
+            (!device.active || !onCard.has(device.active));
+          const root = device.themesDir;
+          const dir = root + '/' + theme.id;
+          await mkdir('/', root.slice(1));
+          await mkdir(root, theme.id);
+          msg.textContent = 'Installing ' + theme.name + '...';
+          // theme.bin last, so a half-finished install is never picked up as complete.
+          blobs.sort((a, b) => (a[0] === 'theme.bin') - (b[0] === 'theme.bin'));
+          for (const [name, blob] of blobs) await upload(dir, name, blob);
+          if (adopt && device.active !== theme.id) await setSleepTheme(theme.id);
+          msg.textContent =
+            'Installed ' + theme.name + '.' + (device.active === theme.id ? ' It shows the next time the device sleeps.' : '');
+          await loadThemes();
+          await loadStore();
+        } catch (e) {
+          msg.textContent = 'Could not install ' + theme.name + ': ' + e.message;
+          button.disabled = false;
+        }
+      }
+
+      // The version a store install recorded, or '' (installed by hand, or by
+      // older firmware: offered as an update).
+      async function installedVersion(id) {
+        try {
+          const res = await fetch('/download?path=' + encodeURIComponent(device.themesDir + '/' + id + '/store.ver') + '&_=' + Date.now());
+          return res.ok ? (await res.text()).trim() : '';
+        } catch (e) {
+          return '';
+        }
+      }
+
+      async function loadStore() {
+        const grid = $('store');
+        const msg = $('storeMsg');
+        let catalog;
+        try {
+          const res = await fetch(STORE_CATALOG_URL, { cache: 'no-cache' });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          catalog = await res.json();
+        } catch (e) {
+          msg.textContent = 'Could not reach the theme store (' + e.message + '). The computer needs internet access.';
+          return;
+        }
+        const key = storeBuildKey();
+        const themes = (catalog.themes || []).filter(
+          (t) =>
+            STORE_ID.test(t.id || '') &&
+            t.builds &&
+            t.builds[key] &&
+            Array.isArray(t.builds[key].files) &&
+            t.builds[key].files.some((f) => f.name === 'theme.bin') &&
+            t.builds[key].files.every((f) => STORE_FILE.test(f.name || '')),
+        );
+        const installed = await installedThemeNames();
+        const outdated = new Set();
+        for (const t of themes) {
+          const version = t.builds[key].version;
+          if (installed.has(t.id) && version && (await installedVersion(t.id)) !== version) outdated.add(t.id);
+        }
+        grid.textContent = '';
+        msg.textContent = themes.length ? '' : 'No themes in the store for this device (' + key + ') yet.';
+        for (const t of themes) {
+          const card = document.createElement('div');
+          const img = document.createElement('img');
+          img.src = STORE_BASE + key + '/' + t.id + '/preview.png';
+          img.alt = '';
+          img.loading = 'lazy';
+          img.style.cssText = 'width: 100%; border: 1px solid var(--border-color); background: #fff';
+          img.onerror = () => img.remove();
+          const title = document.createElement('strong');
+          title.textContent = t.name || t.id;
+          const desc = document.createElement('p');
+          desc.className = 'muted';
+          desc.style.margin = '4px 0 8px';
+          desc.textContent = t.description || '';
+          const button = document.createElement('button');
+          button.className = 'btn';
+          const have = installed.has(t.id);
+          const update = outdated.has(t.id);
+          button.textContent = update ? 'Update' : have ? 'Reinstall' : 'Install';
+          button.addEventListener('click', () => installFromStore(t, button));
+          card.append(img, title);
+          if (have) {
+            const tag = document.createElement('span');
+            tag.className = 'tag';
+            tag.textContent = update ? 'update available' : 'installed';
+            card.append(tag);
+          }
+          card.append(desc, button);
+          grid.appendChild(card);
+        }
+      }
+
       loadDevice()
         .then(loadThemes)
+        .then(loadStore)
         .catch(() => log('Could not reach the device.', true));
     </script>
   </body>

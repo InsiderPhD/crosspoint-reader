@@ -47,6 +47,7 @@
 #include "util/HardcoverSync.h"
 #include "util/HeapReport.h"
 #include "util/HeapTrace.h"
+#include "util/PowerHistory.h"
 #include "util/ReaderCombos.h"
 #include "util/ScreenshotUtil.h"
 #include "util/TimeUtils.h"
@@ -361,6 +362,7 @@ void enterDeepSleep(bool fromTimeout) {
                                               CrossPointSettings::SEAMLESS_SLEEP_SCREEN::SEAMLESS_AFTER_TIMEOUT);
   APP_STATE.showBootScreen = !isSeamless;
 
+  PowerHistory::commitBeforeSleep(gpio.isUsbConnectedCached());
   APP_STATE.saveToFile();
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
@@ -551,6 +553,7 @@ void setup() {
   BOOT_PHASE("gpio.begin");
 
   powerManager.begin();
+  PowerHistory::begin(gpio.isUsbConnectedCached());
   // A rejected deep-sleep entry now restarts the device instead of dropping
   // back into loop() at full clock (HalPowerManager::startDeepSleep). Say so
   // once, here: without this line that failure is silent and looks exactly like
@@ -879,8 +882,13 @@ void loop() {
   }
 
   // Frontlight schedules: once a minute, switch the light at a window edge.
-  // Cheap no-op on boards without a light.
-  FrontlightScheduler::tick();
+  // Boards without a light only get the dark-mode half. A slot that flips dark mode needs
+  // the current screen repainted (the scheduler already armed a full refresh).
+  {
+    const uint8_t darkBefore = SETTINGS.darkMode;
+    FrontlightScheduler::tick();
+    if (SETTINGS.darkMode != darkBefore) activityManager.requestUpdate();
+  }
 
   // Bluetooth HID maintenance: inactivity timeout and bonded-remote reconnect.
   // Cheap no-ops while Bluetooth is disabled.
@@ -1105,6 +1113,7 @@ void loop() {
   // Refresh the battery icon when USB is plugged or unplugged.
   // Placed after sleep guards so we never queue a render that won't be processed.
   if (gpio.wasUsbStateChanged()) {
+    PowerHistory::noteExternalPower(gpio.isUsbConnectedCached());
     activityManager.requestUpdate();
   }
 

@@ -330,10 +330,12 @@ void CrossPointSettings::sanitizeFrontlightSchedules(CrossPointSettings& setting
     if (slot.endMinutes >= MINUTES_PER_DAY) slot.endMinutes = 0;
     if (slot.brightness > 100) slot.brightness = 100;
     if (slot.warmth > 100) slot.warmth = 100;
+    slot.darkMode = slot.darkMode ? 1 : 0;
   }
   if (settings.frontlightScheduleActive > FRONTLIGHT_SCHEDULE_SLOTS) settings.frontlightScheduleActive = 0;
   if (settings.frontlightScheduleRestoreBrightness > 100) settings.frontlightScheduleRestoreBrightness = 100;
   if (settings.frontlightScheduleRestoreWarmth > 100) settings.frontlightScheduleRestoreWarmth = 100;
+  settings.frontlightScheduleRestoreDarkMode = settings.frontlightScheduleRestoreDarkMode ? 1 : 0;
 }
 
 bool CrossPointSettings::isUnavailableReaderAction(const uint8_t action) {
@@ -474,8 +476,10 @@ bool CrossPointSettings::loadFromBinaryFile() {
 
   uint8_t settingsRead = 0;
   bool frontButtonMappingRead = false;
+  uint8_t legacySleepMode = LEGACY_SLEEP_DARK;
+  uint8_t retiredValue = 0;  // fields read only to keep the file in step
   do {
-    readAndValidate(inputFile, sleepScreen, SLEEP_SCREEN_MODE_COUNT);
+    serialization::readPod(inputFile, legacySleepMode);
     if (++settingsRead >= fileSettingsCount) break;
     serialization::readPod(inputFile, extraParagraphSpacing);
     if (++settingsRead >= fileSettingsCount) break;
@@ -503,7 +507,7 @@ bool CrossPointSettings::loadFromBinaryFile() {
     if (++settingsRead >= fileSettingsCount) break;
     serialization::readPod(inputFile, screenMargin);
     if (++settingsRead >= fileSettingsCount) break;
-    readAndValidate(inputFile, sleepScreenCoverMode, SLEEP_SCREEN_COVER_MODE_COUNT);
+    serialization::readPod(inputFile, retiredValue);  // sleep cover mode
     if (++settingsRead >= fileSettingsCount) break;
     {
       std::string urlStr;
@@ -534,7 +538,7 @@ bool CrossPointSettings::loadFromBinaryFile() {
       opdsPassword[sizeof(opdsPassword) - 1] = '\0';
     }
     if (++settingsRead >= fileSettingsCount) break;
-    readAndValidate(inputFile, sleepScreenCoverFilter, SLEEP_SCREEN_COVER_FILTER_COUNT);
+    serialization::readPod(inputFile, retiredValue);  // sleep cover filter
     if (++settingsRead >= fileSettingsCount) break;
     serialization::readPod(inputFile, uiTheme);
     if (++settingsRead >= fileSettingsCount) break;
@@ -554,6 +558,12 @@ bool CrossPointSettings::loadFromBinaryFile() {
     serialization::readPod(inputFile, frontButtonFollowOrientation);
     if (++settingsRead >= fileSettingsCount) break;
   } while (false);
+
+  (void)retiredValue;
+  if (const char* theme = legacySleepThemeFor(legacySleepMode)) {
+    strncpy(sleepTheme, theme, sizeof(sleepTheme) - 1);
+    sleepTheme[sizeof(sleepTheme) - 1] = '\0';
+  }
 
   if (frontButtonMappingRead) {
     CrossPointSettings::validateFrontButtonMapping(*this);
@@ -710,4 +720,27 @@ int CrossPointSettings::getReaderFontId() const {
     // SD font failed to load — fall through to built-in below.
   }
   return builtInReaderFontId(fontFamily, fontSize);
+}
+
+const char* CrossPointSettings::legacySleepThemeFor(const uint8_t mode) {
+  switch (mode) {
+    case LEGACY_SLEEP_LIGHT:
+      return "light";
+    case LEGACY_SLEEP_CUSTOM:
+      return "custom";
+    case LEGACY_SLEEP_COVER:
+      // Fit and Crop alike: the store's cover theme fills the screen.
+      return "cover-crop";
+    case LEGACY_SLEEP_BLANK:
+      return "blank";
+    case LEGACY_SLEEP_COVER_CUSTOM:
+      return "cover-or-custom";
+    case LEGACY_SLEEP_OVERLAY:
+      return "page-overlay";
+    case LEGACY_SLEEP_THEME:
+      return nullptr;
+    case LEGACY_SLEEP_DARK:
+    default:
+      return "dark";
+  }
 }

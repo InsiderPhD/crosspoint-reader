@@ -17,7 +17,6 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "SleepThemeExpr.h"
-#include "activities/boot_sleep/SleepStatsCard.h"
 #include "util/LibraryReadingStats.h"
 #include "util/ReadingStatsAnalytics.h"
 #include "util/TimeUtils.h"
@@ -35,6 +34,84 @@ constexpr Info INFOS[] = {
 static_assert(sizeof(INFOS) / sizeof(INFOS[0]) == static_cast<size_t>(Id::Count), "var table out of sync");
 
 constexpr uint64_t MS_PER_MINUTE = 60ULL * 1000ULL;
+
+// Stat computations the old sleep-screen stats card owned. Each returns false
+// when the value cannot be known (no book open, clock not set, ...).
+
+// Day of week for a Gregorian date via Sakamoto's algorithm. 0 = Sunday .. 6 = Saturday.
+int dayOfWeek(int y, unsigned m, unsigned d) {
+  static constexpr int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+  if (m < 3) y -= 1;
+  return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + static_cast<int>(d)) % 7;
+}
+
+bool estimateBookTimeLeftMs(uint64_t& outMs) {
+  if (APP_STATE.openEpubPath.empty()) return false;
+  // Prefer the reader's own pages-left × pace figure, stashed at reader
+  // exit — the same estimate the status bar / reader menu show, and it
+  // doesn't hide after short sessions the way percent-based pace does.
+  if (APP_STATE.readerTimeLeftSeconds > 0 && APP_STATE.readerTimeLeftBookPath == APP_STATE.openEpubPath) {
+    outMs = static_cast<uint64_t>(APP_STATE.readerTimeLeftSeconds) * 1000ULL;
+    return true;
+  }
+  // Fallback: "read (end-start)% of the book in sessionMs, so (100-end)%
+  // remaining takes remaining/pace". Recent-reading only, so it survives a
+  // stats reset, unlike extrapolating lifetime time vs. progress.
+  const ReadingSessionSnapshot& snap = READING_STATS.getLastSessionSnapshot();
+  if (snap.valid && snap.path == APP_STATE.openEpubPath && snap.sessionMs != 0 &&
+      snap.endProgressPercent > snap.startProgressPercent && snap.endProgressPercent < 100) {
+    const uint32_t gainedPct = snap.endProgressPercent - snap.startProgressPercent;
+    const uint32_t remainingPct = 100 - snap.endProgressPercent;
+    outMs = static_cast<uint64_t>(snap.sessionMs) * remainingPct / gainedPct;
+    return true;
+  }
+  return false;
+}
+
+bool currentWeekGoalMask(uint8_t& outMask) {
+  // Future days this week simply stay unset.
+  const uint32_t todayOrd = TimeUtils::getLocalDayOrdinal(READING_STATS.getDisplayTimestamp());
+  int ty = 0;
+  unsigned tm = 0, tdd = 0;
+  if (!TimeUtils::getDateFromDayOrdinal(todayOrd, ty, tm, tdd)) return false;  // clock not set
+  const int dow = dayOfWeek(ty, tm, tdd);                                      // 0 = Sunday
+  const uint32_t mondayOrd = todayOrd - static_cast<uint32_t>((dow + 6) % 7);
+  const uint64_t goalMs = SETTINGS.getDailyGoalMs();
+  uint8_t mask = 0;
+  for (uint8_t d = 0; d < 7; d++) {  // Monday..Sunday
+    const uint32_t ord = mondayOrd + d;
+    uint64_t ms = 0;
+    for (const auto& rd : READING_STATS.getReadingDays()) {
+      if (rd.dayOrdinal == ord) {
+        ms = rd.readingMs;
+        break;
+      }
+    }
+    if (ms >= goalMs) mask = static_cast<uint8_t>(mask | (1u << d));
+  }
+  outMask = mask;
+  return true;
+}
+
+bool daysReadThisMonth(uint32_t& outDays) {
+  // Count reading days whose (year, month) matches the reference date —
+  // mirrors buildMonthSummary() in ReadingStatsActivity.
+  const uint32_t refOrdinal = TimeUtils::getLocalDayOrdinal(READING_STATS.getDisplayTimestamp());
+  int refYear = 0;
+  unsigned refMonth = 0, refDay = 0;
+  if (!TimeUtils::getDateFromDayOrdinal(refOrdinal, refYear, refMonth, refDay)) return false;  // clock not set
+  uint32_t daysRead = 0;
+  for (const auto& d : READING_STATS.getReadingDays()) {
+    if (d.readingMs == 0) continue;
+    int y = 0;
+    unsigned m = 0, dd = 0;
+    if (TimeUtils::getDateFromDayOrdinal(d.dayOrdinal, y, m, dd) && y == refYear && m == refMonth) {
+      daysRead++;
+    }
+  }
+  outDays = daysRead;
+  return true;
+}
 
 // Per-frame caches. Heap, between beginFrame() and endFrame() only: the
 // Library summary alone is ~600 bytes, too much for the stack and not worth
@@ -99,7 +176,7 @@ int64_t timeOfDayPercent(const ReadingTimeBucket bucket) {
 
 bool weekMet(const uint8_t dayIndex, int64_t& out) {
   uint8_t mask = 0;
-  if (!SleepStatsCard::currentWeekGoalMask(mask)) return false;
+  if (!currentWeekGoalMask(mask)) return false;
   out = (mask & (1u << dayIndex)) ? 100 : 0;
   return true;
 }
@@ -324,7 +401,7 @@ void text(const Id id, char* out, const size_t outSize) {
       if (book) formatDuration(book->totalReadingMs, out, outSize);
       return;
     case Id::BookTimeLeft:
-      if (SleepStatsCard::estimateBookTimeLeftMs(ms)) formatDuration(ms, out, outSize);
+      if (estimateBookTimeLeftMs(ms)) formatDuration(ms, out, outSize);
       return;
     case Id::DeviceContact:
       copyText(SETTINGS.returnContact, out, outSize);
@@ -448,11 +525,11 @@ bool number(const Id id, int64_t& out) {
       out = todayMs >= goalMs ? 1 : 0;
       return true;
     case Id::StatsDaysThisMonth:
-      if (!SleepStatsCard::daysReadThisMonth(days)) return false;
+      if (!daysReadThisMonth(days)) return false;
       out = days;
       return true;
     case Id::StatsWeekGoalDays:
-      if (!SleepStatsCard::currentWeekGoalMask(mask)) return false;
+      if (!currentWeekGoalMask(mask)) return false;
       out = __builtin_popcount(mask);
       return true;
     case Id::StatsWeekMet1:
@@ -520,7 +597,7 @@ bool number(const Id id, int64_t& out) {
       out = book->sessions;
       return true;
     case Id::BookTimeLeftMinutes:
-      if (!SleepStatsCard::estimateBookTimeLeftMs(ms)) return false;
+      if (!estimateBookTimeLeftMs(ms)) return false;
       out = static_cast<int64_t>(ms / MS_PER_MINUTE);
       return true;
     case Id::BookDaysReading:

@@ -39,8 +39,14 @@ void forgetSyncState(const ReadingBookStats& book);
 void onSessionWritten(const ReadingBookStats& book);
 
 // Stop the background push and wait (bounded) until it has released WiFi. For
-// foreground code about to use the radio itself.
+// foreground code about to use the radio itself. A push that had not reached
+// Hardcover yet is kept, not dropped: resume() restarts it, and so does
+// finishBeforeSleep().
 void preempt(uint32_t maxWaitMs = 8000);
+
+// Restart a push that preempt() set aside. Call once the foreground user has
+// turned WiFi off again. No-op when nothing is waiting. Main task only.
+void resume();
 
 // Let an in-flight or queued push finish (bounded) before deep sleep cuts power.
 // Sessions usually end by sleeping from the reader, so cancelling here would drop
@@ -71,6 +77,7 @@ int runFullSync(uint32_t budgetMs, const volatile bool* stopFlag = nullptr);
 inline void pushBeforeSleep(GfxRenderer&) {}
 #else
 inline void preempt(uint32_t = 0) {}
+inline void resume() {}
 inline void finishBeforeSleep(uint32_t = 0) {}
 inline bool isFullSyncDue() { return false; }
 inline int runFullSync(uint32_t, const volatile bool* = nullptr) { return 0; }

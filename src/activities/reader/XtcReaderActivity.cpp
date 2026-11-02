@@ -28,6 +28,7 @@
 #include "fontIds.h"
 #include "util/FinishedBookMover.h"
 #include "util/FrontlightToggle.h"
+#include "util/PowerHistory.h"
 #include "util/ScreenshotUtil.h"
 
 namespace {
@@ -121,6 +122,7 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
       ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
       sessionPageTurns++;
       READING_STATS.noteActivity();
+      PowerHistory::recordReaderPageTurn();
       currentPage++;
       if (currentPage >= xtc->getPageCount()) currentPage = xtc->getPageCount();
       requestUpdate();
@@ -137,6 +139,7 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
       ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
       sessionPageTurns++;
       READING_STATS.noteActivity();
+      PowerHistory::recordReaderPageTurn();
       if (currentPage > 0) currentPage--;
       requestUpdate();
       return false;
@@ -151,6 +154,7 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
       ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
       sessionPageTurns++;
       READING_STATS.noteActivity();
+      PowerHistory::recordReaderPageTurn();
       currentPage = (currentPage + 10 < xtc->getPageCount()) ? currentPage + 10 : xtc->getPageCount();
       requestUpdate();
       return false;
@@ -161,6 +165,7 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
       ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
       sessionPageTurns++;
       READING_STATS.noteActivity();
+      PowerHistory::recordReaderPageTurn();
       currentPage = (currentPage >= 10) ? currentPage - 10 : 0;
       requestUpdate();
       return false;

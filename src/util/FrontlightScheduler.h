@@ -20,14 +20,25 @@
 // slot's level is written to SETTINGS.frontlightBrightness/Warmth like any
 // other setter, so every screen shows the level that is actually lit.
 //
-// Everything is a no-op on boards without a frontlight and whenever the system
-// clock is not trustworthy (no NTP yet and no RTC seed).
+// A slot can also turn dark mode on for its window. That follows the same
+// restore point, but only slots that ask for dark mode touch it: leaving a
+// dark slot puts the pre-schedule setting back, a plain slot leaves it alone.
+// The caller repaints; a flip arms a full (GC) refresh for that repaint.
+//
+// On boards without a frontlight (X3/X4) the schedules drive dark mode only:
+// the brightness/warmth fields are never read or written there. Everything is
+// a no-op whenever the system clock is not trustworthy (no NTP yet and no RTC
+// seed).
 namespace FrontlightScheduler {
 
 // True when `minuteOfDay` (0-1439, local) is inside the slot's window. A window
 // whose end is at or before its start wraps past midnight; start == end is
 // treated as the full day.
 bool slotContains(const CrossPointSettings::FrontlightSchedule& slot, uint16_t minuteOfDay);
+
+// True when the schedules drive a frontlight on this board, so the editor
+// offers brightness/warmth. False on boards that only get dark mode.
+bool controlsLight();
 
 // Index of the first enabled slot whose window contains the minute, or -1.
 // Earlier slots win when windows overlap.
@@ -38,6 +49,10 @@ int matchingSlot(uint16_t minuteOfDay);
 // was changed. Call at boot (after settings load and halFrontlight.begin())
 // and after editing a schedule.
 bool evaluate();
+
+// Set SETTINGS.darkMode, arming a full refresh for the next repaint when it
+// actually changes. Does not save or repaint.
+void setDarkMode(uint8_t on);
 
 // evaluate() throttled to once a minute of wall time, for the main loop.
 void tick();

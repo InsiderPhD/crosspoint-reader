@@ -564,6 +564,11 @@ A theme folder holds:
 
 - `theme.bin`: the layout below.
 - `bg.bmp`: 1-bit BMP, exactly `screenWidth` x `screenHeight`, everything static baked in.
+- `mask.bmp` (overlay themes only): 1-bit BMP, same size, black where `bg.bmp` is painted.
+- `front.bmp` (flag 0x04): 1-bit BMP, same size, black where `bg.bmp` is drawn again after
+  the images, because that static art sits in front of one. In grey passes those pixels are
+  left as the BW base drew them.
+  Elsewhere the screen that was showing when the device went to sleep stays.
 - `f0.cpfont` .. `f3.cpfont`: v4 `.cpfont` files (no kerning or ligatures) holding the
   glyphs live text can need, one file per font family + pixel size. The format is 2-bit,
   but the compiler only writes levels 0 and 3, cut at 50% coverage: themes draw in black
@@ -586,26 +591,36 @@ struct ThemeBin {
     u8   fontCount;          // <= 4
     u8   flags;              // 0x01 cover elements store their template (older themes: 0,
                              //      and every cover shows the open book)
+                             // 0x02 overlay: draw bg.bmp through mask.bmp, clear nothing
+                             // 0x04 front: draw bg.bmp through front.bmp after the images
     u16  stringTableSize;    // <= 4096
     u8   reserved[12];
     struct {                 // 48 bytes
-        u8   kind;           // 0 text, 1 cover (book.cover or recent.N.cover), 2 bar
+        u8   kind;           // 0 text, 1 cover (book.cover or recent.N.cover), 2 bar,
+                             // 3 box: see below
         u8   fontIndex;      // fN.cpfont
         u8   fontStyle;      // 0 regular, 1 bold, 2 italic, 3 bold italic
         u8   align;          // 0 left, 1 centre, 2 right
         u8   flags;          // 0x01 white ink, 0x02 hide if a value is empty, 0x04 transformed,
-                             // 0x08 ellipsis, 0x10 contain (cover), 0x20 opaque (cover)
+                             // 0x08 ellipsis, 0x10 contain (cover), 0x20 opaque (cover),
+                             // 0x40 zoom: fill the box, crop the overflow (cover),
+                             // 0x80 flow (box): placed in a wrapping row, see below
         u8   textTransform;  // 0 none, 1 upper, 2 lower, 3 capitalize
         u8   maxLines;       // 0/1 single line; wrapped text is clamped to 8
         i8   digitIndex;     // >= 0: only the nth digit from the right
         i8   tracking;       // letter-spacing, half-pixel steps
-        u8   reserved0;
+        u8   verticalAlign;  // (text) 0 top, 1 middle, 2 bottom: where the lines sit in the box
+                             //   when they are fewer/shorter than it (older themes: 0)
         u16  width, height;  // content box in the element's own coordinates
         u16  templateOffset; // into the string table; 0xFFFF none (a cover with none is book.cover)
         i32  matrix[6];      // a b c d e f, 16.16: screen = (a*x + c*y + e, b*x + d*y + f)
         u16  lineHeight;     // pixels between baselines, 0 = font default
         u16  barMax;         // (bar) the value that fills it; 0 = 100, a percentage
-        u8   reserved[4];
+        u8   coverFilter;    // (cover) 0 dither, 1 lighter, 2 darker, 3 black and white (no dither),
+                             //   4 inverted, 5 grey: the panel's four greys, drawn in grey passes
+                             //   after the BW paint (untransformed, non-overlay only; else 0)
+                             //   (older themes: 0)
+        u8   reserved[3];
     } elements[elementCount];
     char strings[stringTableSize];  // NUL-terminated templates: "Day {{stats.streak:000}}"
                                     // or expressions: {{stats.streak == 1 ? "day" : "days"}}
@@ -614,6 +629,28 @@ struct ThemeBin {
                                     // whose glyphs the compiler added to the element's font.
 };
 ```
+
+A **box** element (kind 3, from `data-fit`) always comes just before the text element it
+belongs to, and is drawn under it: that text's border and background, as wide as the
+text's live value plus the insets and never wider than the box. It reuses the text fields:
+`width`/`height`/`matrix` are the border box (a translation only), `fontIndex` the border
+width, `fontStyle` the corner radius, `align` which side stays put (the text's alignment),
+`textTransform`/`maxLines` the left/right insets (border plus padding), `verticalAlign` the
+fill (0 none, 1 black, 2 white) and flag 0x01 a white border. Firmware without it skips the
+element, so the text draws without its pill.
+
+With flag 0x80 (flow: the pill's parent is a `flex-wrap: wrap` row) the device ignores the
+box's position and lines the group's pills up itself, left to right with the column gap,
+starting a new row when the next one doesn't fit, and draws the text with its box (moved as
+far as the box moved). Hidden pills take no room. More fields are reused: `digitIndex` is
+the group id (u8, from 1), `tracking` the most rows (u8, 0 no limit; the parent's
+`data-max-lines`), `templateOffset` the row width, `lineHeight`/`barMax` the rows' left x
+and top y, `coverFilter`/`reserved[0]` the column/row gap. Firmware without flow draws each
+pill where the compiler measured it: fitted, but one per row.
+
+A store install also writes `store.ver` into the theme folder: the build's `version` from the
+store catalog (a short hash of its files). The store screens offer an update when it differs
+from the catalog's, or is missing.
 
 Template names are the ones `GET /api/sleep-theme/vars` lists (`src/sleeptheme/SleepThemeVars.h`).
 A version or screen-size mismatch makes the device fall back to the default sleep screen.

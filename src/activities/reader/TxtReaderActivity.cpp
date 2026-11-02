@@ -19,6 +19,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/FinishedBookMover.h"
+#include "util/PowerHistory.h"
 
 namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;  // 8KB chunk for reading
@@ -117,6 +118,7 @@ void TxtReaderActivity::loop() {
   ReaderUtils::updateReadingSpeed(readingSpeedLastTurnMs);
   sessionPageTurns++;
   READING_STATS.noteActivity();
+  PowerHistory::recordReaderPageTurn();
 
   if (prevTriggered && currentPage > 0) {
     currentPage--;

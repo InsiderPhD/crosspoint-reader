@@ -2,8 +2,6 @@
 
 #include <HalFrontlight.h>
 
-#if FREEINK_CAP_FRONTLIGHT
-
 #include <cstdint>
 
 #include "activities/Activity.h"
@@ -13,7 +11,7 @@ struct Rect;
 
 /**
  * The frontlight schedule slots, one row each: the window and the level it
- * sets, or Off.
+ * sets, or Off. On boards without a light this is the dark mode schedule.
  *
  * Confirm on a row opens FrontlightScheduleEditActivity for that slot. The
  * editor writes the slot into SETTINGS and this screen owns the single
@@ -40,5 +38,3 @@ class FrontlightScheduleListActivity final : public Activity {
   bool isDirty = false;
   ButtonNavigator buttonNavigator;
 };
-
-#endif  // FREEINK_CAP_FRONTLIGHT

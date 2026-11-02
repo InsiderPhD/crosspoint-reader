@@ -437,6 +437,12 @@ void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* te
   drawText(fontId, x, y, text, black, style);
 }
 
+bool GfxRenderer::trackingBoundary(const uint32_t leftCp, const uint32_t rightCp) const {
+  // CSS letter-spacing follows every character, spaces included.
+  if (trackSpaces) return leftCp != 0 && rightCp != 0;
+  return isTrackingBoundary(leftCp, rightCp);
+}
+
 void GfxRenderer::drawText(const int fontId, const int x, const int y, const char* text, const bool black,
                            const EpdFontFamily::Style style, const int8_t tracking) const {
   const int yPos = y + getFontAscenderSize(fontId);
@@ -491,7 +497,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     if (prevCp != 0) {
       const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
       lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);       // snap 12.4 fixed-point to nearest pixel
-      if (tracking != 0 && isTrackingBoundary(prevCp, cp)) {
+      if (tracking != 0 && trackingBoundary(prevCp, cp)) {
         lastBaseX += trackingStep(trackingGaps++, tracking);
       }
     }
@@ -1353,6 +1359,30 @@ namespace {
 constexpr uint8_t kResampleBayer[4][4] = {
     {8, 136, 40, 168}, {200, 72, 232, 104}, {56, 184, 24, 152}, {248, 120, 216, 88}};
 
+// Brightness shift for the Lighter / Darker filters: about one of the
+// source's four grey levels' worth, enough to visibly open up a dark cover.
+constexpr int kResampleTonalShift = 48;
+
+// Whether an averaged intensity (0 black .. 255 white) at output (dx, dy)
+// comes out black under filter.
+bool resampledIsBlack(const uint32_t avg, const int dx, const int dy, const GfxRenderer::ResampleFilter filter) {
+  const int v = static_cast<int>(avg);
+  const int bayer = kResampleBayer[dy & 3][dx & 3];
+  switch (filter) {
+    case GfxRenderer::ResampleFilter::Lighter:
+      return std::min(255, v + kResampleTonalShift) < bayer;
+    case GfxRenderer::ResampleFilter::Darker:
+      return std::max(0, v - kResampleTonalShift) < bayer;
+    case GfxRenderer::ResampleFilter::Threshold:
+      return v < 128;
+    case GfxRenderer::ResampleFilter::Invert:
+      return 255 - v < bayer;
+    case GfxRenderer::ResampleFilter::Dither:
+      break;
+  }
+  return v < bayer;
+}
+
 // Box-average resample of bitmap to w x h, re-dithered to 1 bit. Calls
 // emitBlack(dx, dy) for every black output pixel, in output coordinates; the
 // dither pattern is keyed to those too, so a cached copy matches a direct draw.
@@ -1360,16 +1390,23 @@ constexpr uint8_t kResampleBayer[4][4] = {
 // than paying for std::function. False if a buffer could not be allocated or
 // the source could not be read.
 template <typename EmitBlack>
-bool resampleBitmap(const Bitmap& bitmap, const int w, const int h, EmitBlack&& emitBlack) {
-  const int srcW = bitmap.getWidth();
-  const int srcH = bitmap.getHeight();
-  if (srcW <= 0 || srcH <= 0 || w <= 0 || h <= 0) return false;
+bool resampleBitmap(const Bitmap& bitmap, const int w, const int h, const GfxRenderer::ResampleFilter filter,
+                    const GfxRenderer::SourceRect& source, EmitBlack&& emitBlack) {
+  const int fullW = bitmap.getWidth();
+  const int fullH = bitmap.getHeight();
+  if (fullW <= 0 || fullH <= 0 || w <= 0 || h <= 0) return false;
+  // The source window mapped onto w x h: the whole image unless a crop is given.
+  const bool whole = source.width <= 0 || source.height <= 0;
+  const int srcLeft = whole ? 0 : std::max(0, std::min(fullW - 1, source.x));
+  const int srcTop = whole ? 0 : std::max(0, std::min(fullH - 1, source.y));
+  const int srcW = whole ? fullW : std::min(source.width, fullW - srcLeft);
+  const int srcH = whole ? fullH : std::min(source.height, fullH - srcTop);
 
   // Heap temporaries, sized at runtime and freed on every path: the two row
   // buffers drawBitmap uses, plus per-destination-column source spans and
   // intensity sums (~10 B per column, ~2.3 KB for a 230 px cover) -- far past
   // the 256 B stack budget.
-  const int outputRowSize = (srcW + 3) / 4;
+  const int outputRowSize = (fullW + 3) / 4;
   auto* outputRow = static_cast<uint8_t*>(malloc(outputRowSize));
   auto* rowBytes = static_cast<uint8_t*>(malloc(bitmap.getRowBytes()));
   auto* srcX0 = static_cast<int16_t*>(malloc(w * sizeof(int16_t)));
@@ -1395,8 +1432,8 @@ bool resampleBitmap(const Bitmap& bitmap, const int w, const int h, EmitBlack&& 
   for (int dx = 0; dx < w; dx++) {
     const int x0 = std::min(srcW - 1, (dx * srcW) / w);
     const int x1 = std::max(x0 + 1, std::min(srcW, ((dx + 1) * srcW) / w));
-    srcX0[dx] = static_cast<int16_t>(x0);
-    srcX1[dx] = static_cast<int16_t>(x1);
+    srcX0[dx] = static_cast<int16_t>(srcLeft + x0);
+    srcX1[dx] = static_cast<int16_t>(srcLeft + x1);
   }
 
   int pendingStart = -1;  // destination rows [pendingStart, pendingEnd) being accumulated
@@ -1408,7 +1445,7 @@ bool resampleBitmap(const Bitmap& bitmap, const int w, const int h, EmitBlack&& 
       for (int dx = 0; dx < w; dx++) {
         if (counts[dx] == 0) continue;
         const uint32_t avg = sums[dx] / counts[dx];
-        if (avg < kResampleBayer[dy & 3][dx & 3]) emitBlack(dx, dy);
+        if (resampledIsBlack(avg, dx, dy, filter)) emitBlack(dx, dy);
       }
     }
   };
@@ -1416,13 +1453,16 @@ bool resampleBitmap(const Bitmap& bitmap, const int w, const int h, EmitBlack&& 
   // readNextRow is forward-only, and a bottom-up BMP visits destination rows
   // in reverse; the accumulator only cares that rows sharing a destination
   // row arrive consecutively, which holds in either direction.
-  for (int srcY = 0; srcY < srcH; srcY++) {
+  for (int fileRow = 0; fileRow < fullH; fileRow++) {
     if (bitmap.readNextRow(outputRow, rowBytes) != BmpReaderError::Ok) {
-      LOG_ERR("GFX", "Failed to read row %d from bitmap (resample)", srcY);
+      LOG_ERR("GFX", "Failed to read row %d from bitmap (resample)", fileRow);
       freeAll();
       return false;
     }
-    const int srcRow = bitmap.isTopDown() ? srcY : (srcH - 1 - srcY);
+    // Rows outside the source window are read (the reader is forward-only)
+    // and dropped.
+    const int srcRow = (bitmap.isTopDown() ? fileRow : (fullH - 1 - fileRow)) - srcTop;
+    if (srcRow < 0 || srcRow >= srcH) continue;
     const int dstStart = (srcRow * h) / srcH;
     const int dstEnd = std::max(dstStart + 1, ((srcRow + 1) * h) / srcH);
 
@@ -1451,13 +1491,14 @@ bool resampleBitmap(const Bitmap& bitmap, const int w, const int h, EmitBlack&& 
 }
 }  // namespace
 
-void GfxRenderer::drawBitmapResampled(const Bitmap& bitmap, const int x, const int y, const int w, const int h) const {
+void GfxRenderer::drawBitmapResampled(const Bitmap& bitmap, const int x, const int y, const int w, const int h,
+                                      const ResampleFilter filter, const SourceRect source) const {
   if (fontCacheManager_ && fontCacheManager_->isScanning()) return;
   if (renderMode != BW) return;
 
   const int screenW = getScreenWidth();
   const int screenH = getScreenHeight();
-  resampleBitmap(bitmap, w, h, [&](const int dx, const int dy) {
+  resampleBitmap(bitmap, w, h, filter, source, [&](const int dx, const int dy) {
     const int sx = x + dx;
     const int sy = y + dy;
     if (sx >= 0 && sx < screenW && sy >= 0 && sy < screenH) drawPixel(sx, sy);
@@ -1465,10 +1506,10 @@ void GfxRenderer::drawBitmapResampled(const Bitmap& bitmap, const int x, const i
 }
 
 bool GfxRenderer::resampleBitmapTo1Bit(const Bitmap& bitmap, const int w, const int h, uint8_t* bits,
-                                       const int rowBytes) {
+                                       const int rowBytes, const ResampleFilter filter, const SourceRect source) {
   if (bits == nullptr || rowBytes * 8 < w) return false;
   memset(bits, 0xFF, static_cast<size_t>(rowBytes) * h);  // all white; black clears a bit
-  return resampleBitmap(bitmap, w, h, [&](const int dx, const int dy) {
+  return resampleBitmap(bitmap, w, h, filter, source, [&](const int dx, const int dy) {
     bits[dy * rowBytes + dx / 8] &= static_cast<uint8_t>(~(0x80u >> (dx % 8)));
   });
 }
@@ -1924,7 +1965,7 @@ int GfxRenderer::getKerning(const int fontId, const uint32_t leftCp, const uint3
   const auto fontIt = fontMap.find(fontId);
   if (fontIt == fontMap.end()) return 0;
   const int kernFP = fontIt->second.getKerning(leftCp, rightCp, style);  // 4.4 fixed-point
-  const int trackingPx = (tracking != 0 && isTrackingBoundary(leftCp, rightCp)) ? trackingPixels(1, tracking) : 0;
+  const int trackingPx = (tracking != 0 && trackingBoundary(leftCp, rightCp)) ? trackingPixels(1, tracking) : 0;
   return fp4::toPixel(kernFP) + trackingPx;  // snap 4.4 fixed-point to nearest pixel
 }
 
@@ -1947,7 +1988,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
       // Count the boundaries drawText will space: it steps over combining marks without
       // moving its previous-glyph cursor, so they are stepped over here too.
       if (tracking != 0 && !utf8IsCombiningMark(cp)) {
-        if (isTrackingBoundary(prevBaseCp, cp)) ++trackingGaps;
+        if (trackingBoundary(prevBaseCp, cp)) ++trackingGaps;
         prevBaseCp = cp;
       }
     }
@@ -1980,7 +2021,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     if (prevCp != 0) {
       const auto kernFP = font.getKerning(prevCp, cp, style);  // 4.4 fixed-point kern
       widthPx += fp4::toPixel(prevAdvanceFP + kernFP);         // snap 12.4 fixed-point to nearest pixel
-      if (tracking != 0 && isTrackingBoundary(prevCp, cp)) {
+      if (tracking != 0 && trackingBoundary(prevCp, cp)) {
         widthPx += trackingStep(trackingGaps++, tracking);
       }
     }
