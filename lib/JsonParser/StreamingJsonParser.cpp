@@ -242,6 +242,9 @@ void StreamingJsonParser::emitToken() {
     if (!tokenOverflow && cb.onString) {
       tokenBuf[tokenLen] = '\0';
       cb.onString(cb.ctx, tokenBuf, tokenLen);
+    } else if (tokenOverflow && cb.onStringPrefix) {
+      tokenBuf[tokenLen] = '\0';
+      cb.onStringPrefix(cb.ctx, tokenBuf, tokenLen);
     }
     state = State::SCANNING;
     expectingValue = false;

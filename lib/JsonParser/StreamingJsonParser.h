@@ -14,6 +14,11 @@ struct JsonCallbacks {
   void (*onObjectEnd)(void* ctx);
   void (*onArrayStart)(void* ctx);
   void (*onArrayEnd)(void* ctx);
+  // Optional: a string value too long for the token buffer is not passed to
+  // onString (it would be cut silently); when set, this receives its first
+  // TOKEN_BUF_SIZE - 1 bytes instead, for callers that want a bounded prefix
+  // (a description excerpt). Not called for keys.
+  void (*onStringPrefix)(void* ctx, const char* value, size_t len) = nullptr;
 };
 
 class StreamingJsonParser {

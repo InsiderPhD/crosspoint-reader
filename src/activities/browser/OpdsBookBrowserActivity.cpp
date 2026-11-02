@@ -6,6 +6,8 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <OpdsFeedParser.h>
+#include <OpdsJsonParser.h>
 #include <OpdsStream.h>
 #include <WiFi.h>
 
@@ -138,22 +140,50 @@ void OpdsBookBrowserActivity::showDescription(const OpdsEntry& book) {
   statusMessage = tr(STR_LOADING);
   requestUpdateAndWait();
 
-  // A second, description-only parse of the same feed: it stores no entries,
-  // so the transient cost is the parser plus one bounded excerpt buffer, not
-  // a copy of the catalog. A failed fetch still opens the preview (without a
-  // description) so the book stays downloadable.
-  const std::string url = UrlUtils::buildUrl(server.url, currentPath);
-  {
-    OpdsParser parser;
-    parser.captureDescriptionFor(book.href, DESCRIPTION_MAX_BYTES);
-    TlsFramebufferBorrow borrow(renderer);
-    OpdsParserStream stream{parser};
-    if (HttpDownloader::fetchUrl(url, stream, auth, nullptr) && parser) {
-      descriptionText = parser.takeDescription();
-    } else {
-      LOG_ERR("OPDS", "Could not load the description");
-      descriptionText.clear();
+  const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
+  descriptionText.clear();
+  previewDownloadUrl.clear();
+  TlsFramebufferBorrow borrow(renderer);
+  if (book.indirect) {
+    // OPDS 2 indirect acquisition: the row points at a publication document,
+    // which carries the description and the EPUB link (possibly via further
+    // documents; at most MAX_INDIRECT_HOPS). One-entry parser per hop.
+    constexpr int MAX_INDIRECT_HOPS = 3;
+    std::string url = UrlUtils::resolveReference(feedUrl, book.href);
+    for (int hop = 0; hop < MAX_INDIRECT_HOPS; ++hop) {
+      OpdsJsonParser parser(/*publicationDocument=*/true);
+      parser.setPreferredLanguage(I18n::languageCode(I18N.getLanguage()));
+      parser.captureDescriptionFor("", DESCRIPTION_MAX_BYTES);
+      OpdsParserStream stream{parser};
+      if (!HttpDownloader::fetchUrl(url, stream, auth, nullptr)) break;
+      parser.flush();
+      if (parser.error() || parser.getEntries().empty()) break;
+      std::string text = parser.takeDescription();
+      if (!text.empty()) descriptionText = std::move(text);
+      const OpdsEntry& detail = parser.getEntries().front();
+      if (detail.href.empty()) break;
+      const std::string next = UrlUtils::resolveReference(url, detail.href);
+      if (!detail.indirect) {
+        previewDownloadUrl = next;
+        break;
+      }
+      url = next;
     }
+    if (previewDownloadUrl.empty()) LOG_ERR("OPDS", "No EPUB behind the publication document");
+  } else {
+    // A second, description-only parse of the same feed: it stores no entries,
+    // so the transient cost is the parser plus one bounded excerpt buffer, not
+    // a copy of the catalog. A failed fetch still opens the preview (without a
+    // description) so the book stays downloadable.
+    previewDownloadUrl = UrlUtils::resolveReference(feedUrl, book.href);
+    OpdsFeedParser parser;
+    parser.setPreferredLanguage(I18n::languageCode(I18N.getLanguage()));
+    parser.captureDescriptionFor(book.href, DESCRIPTION_MAX_BYTES);
+    {
+      OpdsParserStream stream{parser};
+      if (!HttpDownloader::fetchUrl(feedUrl, stream, auth, nullptr)) LOG_ERR("OPDS", "Could not load the description");
+    }
+    if (parser) descriptionText = parser.takeDescription();
   }
   descriptionTop = 0;
   state = BrowserState::DESCRIPTION;
@@ -162,6 +192,7 @@ void OpdsBookBrowserActivity::showDescription(const OpdsEntry& book) {
 
 void OpdsBookBrowserActivity::closeDescription() {
   std::string().swap(descriptionText);
+  std::string().swap(previewDownloadUrl);
   descriptionTop = 0;
   state = BrowserState::BROWSING;
   requestUpdate();
@@ -249,7 +280,16 @@ void OpdsBookBrowserActivity::loop() {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
       if (selectorIndex >= 0 && selectorIndex < static_cast<int>(entries.size())) {
         std::string().swap(descriptionText);
-        downloadBook(entries[selectorIndex]);
+        if (previewDownloadUrl.empty()) {
+          // An indirect publication whose documents led to no plain EPUB.
+          state = BrowserState::ERROR;
+          errorMessage = tr(STR_OPDS_NO_EPUB);
+          requestUpdate();
+          return;
+        }
+        const std::string url = std::move(previewDownloadUrl);
+        previewDownloadUrl.clear();
+        downloadBook(entries[selectorIndex], url);
       }
       return;
     }
@@ -503,7 +543,8 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   }
 
   std::string url = (path.find("http") == 0) ? path : UrlUtils::buildUrl(server.url, path);
-  OpdsParser parser;
+  OpdsFeedParser parser;  // Atom or OPDS 2 JSON, chosen by the first byte
+  parser.setPreferredLanguage(I18n::languageCode(I18N.getLanguage()));
   {
     // Lend the framebuffer to the catalog fetch's TLS session ("Loading…" is
     // already queued/painted; nothing renders during the call).
@@ -533,7 +574,7 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
       parser.getSearchTemplate().empty() ? std::string() : UrlUtils::resolveReference(url, parser.getSearchTemplate());
   const auto& nextUrl = parser.getNextPageUrl();
   const auto& prevUrl = parser.getPrevPageUrl();
-  entries = std::move(parser).getEntries();
+  entries = parser.takeEntries();
 
   if (!prevUrl.empty()) {
     entries.insert(entries.begin(), OpdsEntry{OpdsEntryType::NAVIGATION, tr(STR_PREV_PAGE), "", prevUrl, ""});
@@ -617,7 +658,7 @@ std::string applyServerFilename(const std::string& downloadedPath, const std::st
 }
 }  // namespace
 
-void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
+void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const std::string& downloadUrl) {
   state = BrowserState::DOWNLOADING;
   statusMessage = book.title;
   // Paint the static download frame and wait for it: the screen stays frozen
@@ -625,9 +666,6 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   // (same scheme as BookFusion book downloads and OTA).
   requestUpdateAndWait();
 
-  // Build full download URL relative to the current feed, not the root server URL
-  const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
-  std::string downloadUrl = UrlUtils::resolveReference(feedUrl, book.href);
   // The catalog's own folder, else the shared default; both re-validated here
   // (the shared one may have been typed on the web page).
   std::string folder;
@@ -735,10 +773,36 @@ void OpdsBookBrowserActivity::performSearch(const std::string& query) {
     return out;
   };
 
+  // OpenSearch's "{searchTerms}" (Atom), else the first RFC 6570 expression
+  // of an OPDS 2 template: "{?query}" / "{&query}" become "?query=..." /
+  // "&query=...", a plain "{query}" the bare term; other expressions drop.
   std::string url = searchTemplate;
   const std::string placeholder = "{searchTerms}";
   const size_t pos = url.find(placeholder);
-  if (pos != std::string::npos) url.replace(pos, placeholder.length(), urlEncode(query));
+  if (pos != std::string::npos) {
+    url.replace(pos, placeholder.length(), urlEncode(query));
+  } else {
+    bool filled = false;
+    for (size_t open = url.find('{'); open != std::string::npos; open = url.find('{', open)) {
+      const size_t close = url.find('}', open);
+      if (close == std::string::npos) break;
+      std::string expr = url.substr(open + 1, close - open - 1);
+      std::string replacement;
+      if (!filled && !expr.empty()) {
+        const char op = expr[0];
+        if (op == '?' || op == '&') {
+          const std::string name =
+              expr.substr(1, expr.find(',') == std::string::npos ? std::string::npos : expr.find(',') - 1);
+          replacement = std::string(1, op) + name + "=" + urlEncode(query);
+        } else {
+          replacement = urlEncode(query);
+        }
+        filled = true;
+      }
+      url.replace(open, close - open + 1, replacement);
+      open += replacement.size();
+    }
+  }
 
   navigationHistory.push_back(currentPath);  // <-- add this
   currentPath = url;                         // <-- add this

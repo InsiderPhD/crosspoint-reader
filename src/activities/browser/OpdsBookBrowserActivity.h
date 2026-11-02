@@ -67,6 +67,9 @@ class OpdsBookBrowserActivity final : public Activity {
   // Held only while the preview is open (freed by closeDescription()).
   static constexpr size_t DESCRIPTION_MAX_BYTES = 1536;
   std::string descriptionText;
+  // Absolute EPUB URL the preview's Download fetches (an indirect OPDS 2 row
+  // resolved through its publication document); empty if none was found.
+  std::string previewDownloadUrl;
   int descriptionTop = 0;
   // Description lines per screen, written by render() for loop()'s scrolling.
   int descriptionPageLines = 1;
@@ -92,7 +95,7 @@ class OpdsBookBrowserActivity final : public Activity {
   void fetchFeed(const std::string& path);
   void navigateToEntry(const OpdsEntry& entry);
   void navigateBack();
-  void downloadBook(const OpdsEntry& book);
+  void downloadBook(const OpdsEntry& book, const std::string& downloadUrl);
   // Book preview before a download: re-reads the current feed for just that
   // book's description (bounded, see DESCRIPTION_MAX_BYTES), then shows it.
   void showDescription(const OpdsEntry& book);

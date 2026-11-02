@@ -29,6 +29,9 @@ struct OpdsEntry {
   // link, or a "<N> books" summary); -1 when the feed does not say. Last
   // member so the positional initialisers used for the paging rows still work.
   int32_t count = -1;
+  // OPDS 2: href is a publication document to fetch for the real EPUB link,
+  // not the EPUB itself. Always false from Atom feeds.
+  bool indirect = false;
 };
 
 // Legacy alias for backward compatibility
