@@ -313,7 +313,8 @@ constexpr int NUM_HEADER_TAGS = sizeof(HEADER_TAGS) / sizeof(HEADER_TAGS[0]);
 // "caption" is a block so it lays out as its own paragraph above the grid (see endElement).
 // "pre" was dropped from this list by an upstream merge (5bfdeca42), which left the <pre>
 // handling below unreachable; restored.
-constexpr const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "caption", "pre"};
+// "fieldset" draws as an outlined box (reader default in startElement, publisher CSS wins).
+constexpr const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "caption", "pre", "fieldset"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
 constexpr const char* BOLD_TAGS[] = {"b", "strong"};
 constexpr int NUM_BOLD_TAGS = sizeof(BOLD_TAGS) / sizeof(BOLD_TAGS[0]);
@@ -1089,8 +1090,25 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
   // Compute CSS style for this element early so display:none can short-circuit
   // before tag-specific branches emit any content or metadata.
   CssStyle cssStyle;
+  if (strcmp(name, "fieldset") == 0) {
+    // Reader default below the publisher's CSS: a crisp 1px outline (not a browser's
+    // groove) with padding, drawn by the bounded box renderer that continues across pages.
+    // Applies with embedded styles off too, like a browser's user-agent sheet.
+    for (auto& side : cssStyle.borders) {
+      side.width = 1;
+      side.setStyle(CssBorderStyle::Solid);
+    }
+    cssStyle.defined.borderStyle = cssStyle.defined.borderWidth = 0x0F;
+    cssStyle.marginLeft = cssStyle.marginRight = CssLength(2);
+    cssStyle.defined.marginLeft = cssStyle.defined.marginRight = 1;
+    cssStyle.paddingTop = CssLength(0.35f, CssUnit::Em);
+    cssStyle.paddingBottom = CssLength(0.625f, CssUnit::Em);
+    cssStyle.paddingLeft = cssStyle.paddingRight = CssLength(0.75f, CssUnit::Em);
+    cssStyle.defined.paddingTop = cssStyle.defined.paddingBottom = 1;
+    cssStyle.defined.paddingLeft = cssStyle.defined.paddingRight = 1;
+  }
   if (self->cssParser) {
-    cssStyle = self->cssParser->resolveStyle(name, classAttr);
+    cssStyle.applyOver(self->cssParser->resolveStyle(name, classAttr));
     if (!styleAttr.empty()) {
       CssStyle inlineStyle = CssParser::parseInlineStyle(styleAttr);
       cssStyle.applyOver(inlineStyle);
