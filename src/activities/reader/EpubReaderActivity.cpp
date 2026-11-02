@@ -4113,6 +4113,11 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
       requestUpdate();
       return false;
 
+    case A::READER_ACTION_ROTATE_180:
+      applyOrientation(ReaderUtils::flippedOrientation(SETTINGS.orientation));
+      requestUpdate();
+      return false;
+
     case A::READER_ACTION_DICTIONARY:
       openDictionaryLookup();
       return false;

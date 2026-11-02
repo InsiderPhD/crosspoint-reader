@@ -56,6 +56,27 @@ inline void applyOrientation(GfxRenderer& renderer, const uint8_t orientation) {
   }
 }
 
+// The same layout turned upside down: Portrait <-> Inverted, Landscape CW <->
+// Landscape CCW. An out-of-range value is returned unchanged.
+constexpr uint8_t flippedOrientation(const uint8_t orientation) {
+  switch (orientation) {
+    case CrossPointSettings::ORIENTATION::PORTRAIT:
+      return CrossPointSettings::ORIENTATION::INVERTED;
+    case CrossPointSettings::ORIENTATION::INVERTED:
+      return CrossPointSettings::ORIENTATION::PORTRAIT;
+    case CrossPointSettings::ORIENTATION::LANDSCAPE_CW:
+      return CrossPointSettings::ORIENTATION::LANDSCAPE_CCW;
+    case CrossPointSettings::ORIENTATION::LANDSCAPE_CCW:
+      return CrossPointSettings::ORIENTATION::LANDSCAPE_CW;
+    default:
+      return orientation;
+  }
+}
+static_assert(flippedOrientation(CrossPointSettings::PORTRAIT) == CrossPointSettings::INVERTED &&
+              flippedOrientation(CrossPointSettings::LANDSCAPE_CW) == CrossPointSettings::LANDSCAPE_CCW &&
+              flippedOrientation(flippedOrientation(CrossPointSettings::LANDSCAPE_CCW)) ==
+                  CrossPointSettings::LANDSCAPE_CCW);
+
 struct PageTurnResult {
   bool prev;
   bool next;

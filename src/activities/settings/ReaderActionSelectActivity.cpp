@@ -64,6 +64,8 @@ const char* actionDescription(const uint8_t action) {
       return tr(STR_RA_DESC_FRONTLIGHT);
     case A::READER_ACTION_SELECT_CHAPTER:
       return tr(STR_RA_DESC_SELECT_CHAPTER);
+    case A::READER_ACTION_ROTATE_180:
+      return tr(STR_RA_DESC_ROTATE_180);
     default:
       return tr(STR_RA_DESC_NONE);
   }

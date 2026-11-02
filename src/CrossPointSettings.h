@@ -362,6 +362,9 @@ class CrossPointSettings {
     // Opens the chapter list straight from the page (EPUB contents, XTC
     // chapters) without going through the reader menu.
     READER_ACTION_SELECT_CHAPTER = 27,
+    // Turns the page upside down: Portrait <-> Inverted, Landscape CW <-> CCW
+    // (Rotate Screen cycles through all four instead). EPUB only, like Rotate.
+    READER_ACTION_ROTATE_180 = 28,
     READER_ACTION_COUNT
   };
 
