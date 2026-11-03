@@ -1053,7 +1053,8 @@ void EpubReaderActivity::loop() {
     const auto holdZone = mappedInput.wasTouchLongPressZone(holdX, holdY);
     if (holdZone != MappedInputManager::TapZone::None) {
       if (SETTINGS.readerHoldMode != CrossPointSettings::READER_HOLD_SHORTCUT) {
-        // Hold Action = Dictionary / Highlight: the hold is a word gesture and
+        // Hold Action = Dictionary / Highlight / Select Text / Look Up &
+        // Highlight (holds as Highlight): the hold is a word gesture and
         // the zones do not apply. The contact is deliberately left live when
         // the word selector opens, which adopts it so the same finger can go on
         // to drag out a phrase or a range (a suppressed contact reports no
@@ -1078,6 +1079,20 @@ void EpubReaderActivity::loop() {
       } else {
         executeReaderAction(holdAction);
       }
+      return;
+    }
+  }
+
+  // ── Hold Action = Look Up & Highlight: a tap on a word looks it up ────────
+  // Runs before the tap zones, which still get any tap that misses the text,
+  // and every tap while no dictionary is set (a page of text would otherwise
+  // stop turning and only say "no dictionary").
+  if (SETTINGS.readerHoldMode == CrossPointSettings::READER_HOLD_LOOKUP_HIGHLIGHT &&
+      SETTINGS.dictionaryName[0] != '\0') {
+    int tapX, tapY;
+    if (mappedInput.wasTapPoint(tapX, tapY) &&
+        startClipSelection(tapX, tapY, /*forLookup=*/true, /*liveContact=*/false, /*selectMode=*/false,
+                           /*tapEntry=*/true)) {
       return;
     }
   }
@@ -2000,7 +2015,7 @@ const char* clipVisibleText(const char* text) { return clipword::hasEmSpacePrefi
 }  // namespace
 
 bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY, const bool forLookup,
-                                            const bool liveContact, const bool selectMode) {
+                                            const bool liveContact, const bool selectMode, const bool tapEntry) {
   if (!section || !epub) {
     requestUpdate();
     return false;
@@ -2147,7 +2162,7 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
   if (clipWords.words.empty()) {
     // A hold on an all-image page is "no word under the finger", not an error:
     // leave the page exactly as it is.
-    if (liveContact) return false;
+    if (liveContact || tapEntry) return false;
     LOG_ERR(forLookup ? "DICT" : "CLIP", "No selectable words on current EPUB page");
     requestUpdate();
     return false;
@@ -2173,6 +2188,29 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
   if (liveContact) {
     if (!preAnchored) return false;
     if (forLookup && !dictionaryLookupAllowed()) return false;
+  }
+
+  // A tap looks up only the word it lands on. findWordAt snaps to the nearest
+  // word, which would make a margin or a blank line look something up and leave
+  // no way to tap-turn the page, so the box is checked here. The slop covers
+  // the gap between words and a finger landing a little off the glyphs.
+  if (tapEntry) {
+    if (!preAnchored) return false;
+    constexpr int kTapSlop = 8;
+    const WordRef& hit = clipWords.words[initialCursorIdx];
+    if (anchorX < hit.x - kTapSlop || anchorX >= hit.x + hit.w + kTapSlop || anchorY < hit.y - kTapSlop ||
+        anchorY >= hit.y + hit.h + kTapSlop) {
+      return false;
+    }
+    // On the text, so the tap is spent even if the lookup cannot run (the
+    // message says why).
+    if (!dictionaryLookupAllowed()) return true;
+    // Same text the selector's lookup takes: the word as laid out, without the
+    // paragraph-indent marker. DictionaryLookup strips punctuation itself.
+    const std::string word = clipVisibleText(clipWords.textOf(hit));
+    if (word.empty()) return false;
+    performDictionaryLookup(word);
+    return true;
   }
 
   if (selectMode) {

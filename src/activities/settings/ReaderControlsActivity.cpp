@@ -51,7 +51,7 @@ constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 22, 25, 14, 19, 15, 20, 16, 21, 17, 2
 constexpr uint8_t kTapZoneLayoutRow = 22;
 
 // Row 25 is the same kind of row: Hold Action cycles Shortcut / Dictionary /
-// Highlight in place. Rows 19-21 are the per-zone hold actions it switches off.
+// Highlight / Select Text / Look Up & Highlight in place. Rows 19-21 are the per-zone hold actions it switches off.
 constexpr uint8_t kHoldModeRow = 25;
 constexpr bool isHoldZoneRow(const uint8_t row) { return row >= 19 && row <= 21; }
 
@@ -306,6 +306,8 @@ const char* ReaderControlsActivity::getRowActionName(const uint8_t row) const {
         return tr(STR_HOLD_ACTION_HIGHLIGHT);
       case CrossPointSettings::READER_HOLD_SELECT:
         return tr(STR_HOLD_ACTION_SELECT);
+      case CrossPointSettings::READER_HOLD_LOOKUP_HIGHLIGHT:
+        return tr(STR_HOLD_ACTION_LOOKUP_HIGHLIGHT);
       case CrossPointSettings::READER_HOLD_SHORTCUT:
       case CrossPointSettings::READER_HOLD_MODE_COUNT:
         break;
@@ -471,7 +473,7 @@ void ReaderControlsActivity::activateRow(const uint8_t row) {
     return;
   }
   if (row == kHoldModeRow) {
-    // Four values, cycled in place like the row above. The hold-zone rows
+    // Five values, cycled in place like the row above. The hold-zone rows
     // follow it in the list, so hiding or restoring them never moves this row
     // out from under the selection.
     SETTINGS.readerHoldMode =

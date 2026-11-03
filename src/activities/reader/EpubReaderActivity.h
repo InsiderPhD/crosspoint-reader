@@ -291,8 +291,12 @@ class EpubReaderActivity final : public Activity {
   // liveContact the caller still owns the contact and must suppress it.
   // selectMode: Hold Action = Select Text -- handles plus a Look Up / Clip
   // toolbar, so the result may be either a lookup or a clipping.
+  // tapEntry (with forLookup): Hold Action = Look Up & Highlight's tap. Looks up the word under the
+  // point (not the nearest one) with no selector; returns false without
+  // repainting when the point misses the text, so the caller can hand the tap
+  // to the tap zones.
   bool startClipSelection(int anchorX = -1, int anchorY = -1, bool forLookup = false, bool liveContact = false,
-                          bool selectMode = false);
+                          bool selectMode = false, bool tapEntry = false);
   // Stores a finished selection as a clipping and shows the saved/failed popup.
   void saveClipping(const ClippingResult& clip, const std::string& bookTitle, const std::string& author,
                     const std::string& chapterTitle);
