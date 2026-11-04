@@ -1804,7 +1804,7 @@ bool PluginCatalogActivity::handlePickerHold() {
   if (mappedInput.wasScreenLongPress(lx, ly)) {
     const int index = GUI.hitTestList(listRect(), rowCount(), selectedIndex, rowsHaveSubtitle(), lx, ly);
     if (index >= 0) {
-      mappedInput.suppressTouchContact();
+      mappedInput.suppressScreenContact();
       selectedIndex = index;
       confirmUninstallPlugin(index);
       return true;

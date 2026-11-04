@@ -209,6 +209,14 @@ class MappedInputManager {
 #endif
   }
 
+  // Board-neutral suppressTouchContact(), owed after wasScreenLongPress(); a
+  // no-op on a board without a digitizer.
+  void suppressScreenContact() const {
+#if FREEINK_DEVICE_X4PRO
+    suppressTouchContact();
+#endif
+  }
+
   // Touch-down edge and live contact position. Our touch classifier reports
   // completed gestures only (tap, long-press, swipe), so both are always false
   // here, and nothing can be dragged by finger. Kept as the board-neutral

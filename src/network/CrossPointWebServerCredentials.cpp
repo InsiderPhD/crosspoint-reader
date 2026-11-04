@@ -18,7 +18,7 @@
 namespace {
 // The body of a JSON POST, parsed into `doc`; false (after answering 400) when
 // it is missing or malformed.
-bool readJsonBody(WebServer& server, JsonDocument& doc) {
+bool readRequestJson(WebServer& server, JsonDocument& doc) {
   if (!server.hasArg("plain")) {
     server.send(400, "text/plain", "Missing JSON body");
     return false;
@@ -89,7 +89,7 @@ void CrossPointWebServer::handleGetOpdsServers() const {
 // keeps the stored one; an empty header name clears that slot.
 void CrossPointWebServer::handlePostOpdsServer() {
   JsonDocument doc;
-  if (!readJsonBody(*server, doc)) return;
+  if (!readRequestJson(*server, doc)) return;
 
   OpdsServer entry;
   entry.name = doc["name"] | std::string("");
@@ -162,7 +162,7 @@ void CrossPointWebServer::handlePostOpdsServer() {
 // {"index":n}. POST rather than DELETE: the ESP32 WebServer takes no DELETE body.
 void CrossPointWebServer::handleDeleteOpdsServer() {
   JsonDocument doc;
-  if (!readJsonBody(*server, doc)) return;
+  if (!readRequestJson(*server, doc)) return;
   if (!doc["index"].is<int>()) {
     server->send(400, "text/plain", "Missing index");
     return;
@@ -217,7 +217,7 @@ void CrossPointWebServer::handleGetWifiNetworks() const {
 void CrossPointWebServer::handlePostWifiNetwork() {
   reloadWifiStore();
   JsonDocument doc;
-  if (!readJsonBody(*server, doc)) return;
+  if (!readRequestJson(*server, doc)) return;
 
   const std::string ssid = doc["ssid"] | std::string("");
   if (ssid.empty()) {
@@ -258,7 +258,7 @@ void CrossPointWebServer::handlePostWifiNetwork() {
 void CrossPointWebServer::handleDeleteWifiNetwork() {
   reloadWifiStore();
   JsonDocument doc;
-  if (!readJsonBody(*server, doc)) return;
+  if (!readRequestJson(*server, doc)) return;
   if (!doc["index"].is<int>()) {
     server->send(400, "text/plain", "Missing index");
     return;
