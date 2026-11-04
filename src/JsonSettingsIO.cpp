@@ -599,6 +599,15 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
   // that draws the same screen. Theme mode kept its sleepTheme as it was.
   if (!doc["sleepScreen"].isNull()) {
     const char* theme = CrossPointSettings::legacySleepThemeFor(doc["sleepScreen"] | static_cast<uint8_t>(0));
+    // The retired stats card (sleepStatSlot1-3) sat on the logo screen: keep
+    // it with the built-in theme that draws the same card.
+    const bool hadStats = (doc["sleepStatSlot1"] | static_cast<uint8_t>(0)) != 0 ||
+                          (doc["sleepStatSlot2"] | static_cast<uint8_t>(0)) != 0 ||
+                          (doc["sleepStatSlot3"] | static_cast<uint8_t>(0)) != 0;
+    if (hadStats && theme != nullptr) {
+      if (strcmp(theme, "light") == 0) theme = "stats";
+      if (strcmp(theme, "dark") == 0) theme = "stats-dark";
+    }
     if (theme != nullptr) {
       strncpy(s.sleepTheme, theme, sizeof(s.sleepTheme) - 1);
       s.sleepTheme[sizeof(s.sleepTheme) - 1] = '\0';

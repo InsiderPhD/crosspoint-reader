@@ -127,6 +127,8 @@ struct ThemeMode {
 constexpr ThemeMode THEME_MODES[] = {
     {"dark", up::SLEEP_DARK},
     {"light", up::SLEEP_LIGHT},
+    {"stats", up::SLEEP_LIGHT},
+    {"stats-dark", up::SLEEP_DARK},
     {"custom", up::SLEEP_CUSTOM},
     {"cover-crop", up::SLEEP_COVER},
     {"cover-or-custom", up::SLEEP_COVER_CUSTOM},

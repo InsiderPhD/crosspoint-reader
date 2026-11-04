@@ -146,9 +146,10 @@ void SleepActivity::renderThemeSleepScreen(const bool greyscale) const {
 }
 
 void SleepActivity::renderDefaultSleepScreen() const {
-  // The store's "light" and "dark" themes are this screen, so either works
-  // before it is downloaded: light unless the setting asks for dark.
-  SleepThemeRenderer::drawBuiltIn(renderer, strcmp(SETTINGS.sleepTheme, "dark") == 0);
+  // The store's "light", "dark", "stats" and "stats-dark" themes are this
+  // screen, so they work before they are downloaded; anything else falls back
+  // to light.
+  SleepThemeRenderer::drawFallback(renderer, SETTINGS.sleepTheme);
 
   // Terminate on a FULL_REFRESH, not a partial one. On battery, deep sleep
   // opens the battery-protection MOSFET (HalPowerManager::startDeepSleep) and

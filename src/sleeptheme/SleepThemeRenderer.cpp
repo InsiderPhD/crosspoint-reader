@@ -1125,6 +1125,68 @@ void drawBuiltIn(GfxRenderer& renderer, const bool dark) {
   if (dark) renderer.invertScreen();
 }
 
+namespace {
+
+// The rounded card the retired sleep-screen stats setting drew in the lower
+// eighth of the logo screen: time read today, the reading streak, and the time
+// left in the open book. A line whose value is unknown (no book open, no pace
+// yet) is dropped; with tracking off the store is frozen, so only the reader's
+// own time-left estimate is shown.
+void drawStatsCard(GfxRenderer& renderer) {
+  constexpr uint8_t MAX_LINES = 3;
+  constexpr size_t LINE_LEN = 48;
+  // Stack: 3 x 48 B lines + a 24 B value, well under the 256 B local budget.
+  char lines[MAX_LINES][LINE_LEN];
+  char value[24];
+  uint8_t count = 0;
+
+  if (SETTINGS.trackReadingStats) {
+    SleepThemeVars::format(SleepThemeVars::Id::StatsTodayTime, nullptr, 0, value, sizeof(value));
+    snprintf(lines[count++], LINE_LEN, "%s: %s", tr(STR_TODAY), value);
+    int64_t streak = 0;
+    if (!SleepThemeVars::number(SleepThemeVars::Id::StatsStreak, streak)) streak = 0;
+    snprintf(lines[count++], LINE_LEN, "%s: %lld %s", tr(STR_STREAK), static_cast<long long>(streak),
+             tr(STR_STAT_DAYS));
+  }
+  SleepThemeVars::format(SleepThemeVars::Id::BookTimeLeft, nullptr, 0, value, sizeof(value));
+  if (value[0] != '\0') snprintf(lines[count++], LINE_LEN, "%s: %s", tr(STR_BOOK_TIME_LEFT), value);
+  if (count == 0) return;
+
+  constexpr int FONT_ID = UI_12_FONT_ID;
+  constexpr int RADIUS = 8;
+  constexpr int BORDER = 2;
+  constexpr int PAD_X = 24;
+  constexpr int PAD_Y = 14;
+  constexpr int LINE_GAP = 6;
+
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  const int lineH = renderer.getLineHeight(FONT_ID);
+  int maxLineW = 0;
+  for (uint8_t i = 0; i < count; i++) maxLineW = std::max(maxLineW, renderer.getTextWidth(FONT_ID, lines[i]));
+  const int boxW = std::min(maxLineW + 2 * PAD_X, pageWidth - 8);
+  const int boxH = count * lineH + (count - 1) * LINE_GAP + 2 * PAD_Y;
+  const int boxX = (pageWidth - boxW) / 2;
+  const int boxY = pageHeight - pageHeight / 8 - boxH;  // grows up from the lower eighth
+
+  renderer.fillRoundedRect(boxX, boxY, boxW, boxH, RADIUS, Color::White);
+  renderer.drawRoundedRect(boxX, boxY, boxW, boxH, BORDER, RADIUS, /*state=*/true);
+  for (uint8_t i = 0; i < count; i++) {
+    // drawCenteredText takes the text top.
+    renderer.drawCenteredText(FONT_ID, boxY + PAD_Y + i * (lineH + LINE_GAP), lines[i], /*black=*/true);
+  }
+}
+
+}  // namespace
+
+void drawFallback(GfxRenderer& renderer, const char* themeName) {
+  const bool stats = strcmp(themeName, "stats") == 0 || strcmp(themeName, "stats-dark") == 0;
+  const bool dark = strcmp(themeName, "dark") == 0 || strcmp(themeName, "stats-dark") == 0;
+  drawBuiltIn(renderer, false);
+  if (stats) drawStatsCard(renderer);
+  if (dark) renderer.invertScreen();
+}
+
 void showSleepImages() {
   ThemeInfo info;
   if (inspect(SETTINGS.sleepTheme, info) && info.showsSleepImage) return;

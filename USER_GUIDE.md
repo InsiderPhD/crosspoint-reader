@@ -808,7 +808,7 @@ Reading screens use your configured tap zones, hold zones and swipe actions inst
 
 ## 13. Sleep Screen
 
-The sleep screen is a **sleep theme**: a design made in HTML/CSS and compiled for your screen, filled in with your live values (time, battery, the open book, reading stats, recent books, a random image) every time the device sleeps. Pick one in **Settings → Display → Sleep Theme**. The default is **light**. **light**, **dark** and **cover-crop** are built in and work without downloading anything: light and dark are the device's own logo screen, and cover-crop is the open book's cover zoomed to fill the screen (the light logo screen when no book is open), until you fetch the store's copies. Any other theme not on the card falls back to the light logo screen.
+The sleep screen is a **sleep theme**: a design made in HTML/CSS and compiled for your screen, filled in with your live values (time, battery, the open book, reading stats, recent books, a random image) every time the device sleeps. Pick one in **Settings → Display → Sleep Theme**. The default is **light**. **light**, **dark**, **stats**, **stats-dark** and **cover-crop** are built in and work without downloading anything: light and dark are the device's own logo screen, stats and stats-dark add a card under the logo with three reading stats (time read today, your reading streak, and the time left in the open book), and cover-crop is the open book's cover zoomed to fill the screen (the light logo screen when no book is open), until you fetch the store's copies. Any other theme not on the card falls back to the light logo screen.
 
 In the Sleep Theme list, **Confirm** on a theme offers **Use as Sleep Screen** or **Delete**. Deleting the theme you are using switches you to light.
 

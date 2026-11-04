@@ -17,10 +17,12 @@ namespace SleepThemeRenderer {
 inline constexpr char THEMES_DIR[] = "/sleep-themes";
 
 // Themes that work without a download. When their folder is missing, "light"
-// and "dark" draw the built-in logo screen they are copies of, and
-// "cover-crop" is laid out by the firmware: the open book's cover zoomed to
-// fill the screen, over the light logo screen when there is none.
-inline constexpr const char* BUILT_IN_THEMES[] = {"light", "dark", "cover-crop"};
+// and "dark" draw the built-in logo screen they are copies of, "stats" and
+// "stats-dark" add the three-line reading stats card under the logo (the look
+// of the retired sleep-screen stats setting), and "cover-crop" is laid out by
+// the firmware: the open book's cover zoomed to fill the screen, over the
+// light logo screen when there is none.
+inline constexpr const char* BUILT_IN_THEMES[] = {"light", "dark", "stats", "stats-dark", "cover-crop"};
 inline bool isBuiltIn(const char* themeName) {
   for (const char* name : BUILT_IN_THEMES) {
     if (strcmp(themeName, name) == 0) return true;
@@ -68,6 +70,10 @@ bool draw(GfxRenderer& renderer, const char* themeName, GreyPlan* grey = nullptr
 // over the whole framebuffer in the renderer's current orientation, for when
 // their folder isn't on the card.
 void drawBuiltIn(GfxRenderer& renderer, bool dark);
+
+// The screen the device draws when themeName can't be drawn: the logo screen,
+// with the stats card for "stats"/"stats-dark", inverted for the dark ones.
+void drawFallback(GfxRenderer& renderer, const char* themeName);
 
 // Draws the plan's images in the renderer's current (grey) render mode.
 void drawGreyImages(const GfxRenderer& renderer, const GreyPlan& plan);
