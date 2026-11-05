@@ -166,6 +166,10 @@
             lower pad plural date</code>.</li>
           <li><code>icon("star")</code> in an expression draws <code>icons/star.svg</code> from the theme folder as part of
             the text: <code>{{stats.week_met_1 ? icon("star-filled") : icon("star")}}</code>.</li>
+          <li><code>data-var="plugin.word_of_day.word"</code> - text an SD plugin publishes (key <code>word</code>
+            of the <code>sleep-vars.json</code> in the plugin's folder; a <code>-</code> in the folder name is written
+            <code>_</code>). It's empty until the plugin is installed and has written the file, so pair it with
+            <code>data-hide-if-empty</code>.</li>
           <li><code>data-digit="0"</code> - only the nth digit from the right (flip-board tiles).</li>
           <li><code>data-var="book.cover"</code> on an <code>&lt;img&gt;</code> or <code>&lt;div&gt;</code> - the open
             book's cover. <code>object-fit: contain</code> shows all of it, <code>cover</code> zooms it to fill the box
@@ -217,6 +221,15 @@
       // ---- Device info ---------------------------------------------------
       let device = null;
       let varsByName = new Map();
+      // plugin.<name>.<key>: text an SD plugin publishes in its sleep-vars.json
+      // (SleepThemePluginVars.h). Any well-formed name compiles, even for a plugin
+      // this device doesn't have, so a theme can ship before its plugin is
+      // installed; it reads empty until then. Installed plugins' current values
+      // come from the device's list for the preview.
+      const PLUGIN_VAR = /^plugin\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/;
+      function varInfo(name) {
+        return varsByName.get(name) || (PLUGIN_VAR.test(name) ? { name, kind: 'text', value: '' } : undefined);
+      }
       async function loadDevice() {
         const res = await fetch('/api/sleep-theme/vars');
         device = await res.json();
@@ -753,7 +766,7 @@
       let iconChars = new Map();
       const exprEnv = {
         lookup(name) {
-          const v = varsByName.get(name);
+          const v = varInfo(name);
           if (!v) throw new Error('unknown value ' + name);
           if (v.kind === 'number' || v.kind === 'timestamp') return v.raw === undefined ? ThemeExpr.EMPTY : ThemeExpr.num(v.raw);
           if (v.kind === 'text') return v.value ? ThemeExpr.str(v.value) : ThemeExpr.EMPTY;
@@ -763,7 +776,7 @@
         icon: (name) => (iconChars.has(name) ? String.fromCodePoint(iconChars.get(name).cp) : ''),
       };
       function expandSample(tpl) {
-        return ThemeExpr.expand(tpl, (name, fmt) => formatValue(varsByName.get(name), fmt), exprEnv).text;
+        return ThemeExpr.expand(tpl, (name, fmt) => formatValue(varInfo(name), fmt), exprEnv).text;
       }
       // The SVG file for icon("name"): icons/name.svg, or name.svg anywhere.
       function iconPath(name) {
@@ -814,10 +827,10 @@
           if (cs.display === 'inline') el.style.display = 'inline-block';
           applyVAlign(view, el);
           const tpl = templateOf(el);
-          const info = ThemeExpr.inspect(tpl, (n) => varsByName.has(n));
+          const info = ThemeExpr.inspect(tpl, (n) => varInfo(n) !== undefined);
           errors.push(...info.errors);
           const names = [...info.names];
-          const isCover = names.length === 1 && varsByName.get(names[0])?.kind === 'image';
+          const isCover = names.length === 1 && varInfo(names[0])?.kind === 'image';
           const isBar = el.getAttribute('data-kind') === 'bar';
           // An empty block has no height; a no-break space gives it its line box.
           if (!isCover && !isBar && el.textContent === '') el.textContent = '\u00a0';

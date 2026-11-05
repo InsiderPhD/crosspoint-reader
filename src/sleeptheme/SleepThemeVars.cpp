@@ -17,6 +17,7 @@
 #include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "SleepThemeExpr.h"
+#include "SleepThemePluginVars.h"
 #include "util/LibraryReadingStats.h"
 #include "util/ReadingStatsAnalytics.h"
 #include "util/TimeUtils.h"
@@ -452,9 +453,13 @@ bool timestamp(const Id id, uint32_t& out) { return timestampOf(id, out); }
 void beginFrame() {
   cache = makeUniqueNoThrow<FrameCache>();
   if (!cache) LOG_ERR("STH", "malloc failed: %u bytes value cache", static_cast<unsigned>(sizeof(FrameCache)));
+  SleepThemePluginVars::beginFrame();
 }
 
-void endFrame() { cache.reset(); }
+void endFrame() {
+  SleepThemePluginVars::endFrame();
+  cache.reset();
+}
 
 bool number(const Id id, int64_t& out) {
   const ReadingBookStats* book = currentBook();
@@ -758,6 +763,15 @@ bool expand(const char* tpl, char* out, const size_t outSize) {
         Id id;
         if (find(name, nameLen, id)) {
           format(id, fmt, fmtLen, value, sizeof(value));
+        } else if (SleepThemePluginVars::isPluginVar(name, nameLen)) {
+          // Straight into out, not through value: a plugin's text may run past
+          // VALUE_LEN, up to what the element itself can hold. No format applies.
+          const size_t before = o;
+          SleepThemePluginVars::lookup(name, nameLen, out + o, outSize - o);
+          o += strlen(out + o);
+          if (o == before) allPresent = false;
+          p = end + 2;
+          continue;
         } else {
           LOG_ERR("STH", "Unknown variable in template: %.*s", static_cast<int>(nameLen), name);
           value[0] = '\0';

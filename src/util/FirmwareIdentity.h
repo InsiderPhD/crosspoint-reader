@@ -33,7 +33,8 @@ inline constexpr const char* PLUGIN_CAPABILITIES =
     "events.reader.exit,"
     "events.reader.session,"
     "events.book.downloaded,"
-    "events.sleep.enter";
+    "events.sleep.enter,"
+    "sleep_theme.vars";
 // clang-format on
 #else
 // Boards without plugin support (lib/DevicePolicy) run no plugin contract.

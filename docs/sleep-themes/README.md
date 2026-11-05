@@ -52,6 +52,13 @@ every value (`stats.*`, `book.*`, `recent.*`, `sleep.image`, `time.*`, `device.*
   with `data-hide-if-empty`, or `{{time.now ? … : …}}` for wording that needs it.
 - `stats.week_met_1` … `_7` are Monday to Sunday of this week, `100` on a day the daily
   goal was met and `0` otherwise. Test them with `> 0`.
+- `plugin.<name>.<key>` is text an SD plugin publishes: the `<key>` of the
+  `sleep-vars.json` in the plugin's folder, with a `-` in the folder name written as `_`
+  (`plugin.word_of_day.word`). The plugin decides when it changes. It is empty until the
+  plugin is installed and has written the file, while plugins are off, and always on the
+  X3 / X4 (no SD plugins there), so pair it with `data-hide-if-empty`. Any well-formed
+  name compiles, so a theme can ship ahead of its plugin. See `docs/sd-plugins.md`,
+  "Surface 5".
 
 ## Images
 

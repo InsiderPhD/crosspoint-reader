@@ -194,6 +194,7 @@ Boards without plugin support (X3 / X4) report API `0` and no capabilities.
 | `catalog.list_requirements` | manifest and fetched lists may carry a `requires` array of capabilities; a list needing one we lack is hidden |
 | `catalog.server_paths` | where a response supplies a URL (the `download.url_path` answer, a fetched list `url`, an item `details_url`), a server path (`/path`) is joined to the origin of the request that returned it |
 | `events.reader.open` `events.reader.exit` `events.reader.session` `events.book.downloaded` `events.sleep.enter` | the device.json `events` handlers for these events are delivered (see `plugin-events.md`) |
+| `sleep_theme.vars` | sleep themes show values the plugin writes to its `sleep-vars.json` as `{{plugin.<name>.<key>}}` (Surface 5) |
 
 ### Schema
 
@@ -497,6 +498,39 @@ lets plugins attach service fields (e.g. a service book id) to a book; those
 fields ride along with KOSync progress uploads and are available to event
 handlers as `{meta.*}` variables. See `plugin-events.md` for the whole
 surface: the event whitelist, handler schema, delivery semantics, and limits.
+
+## Surface 5: sleep-screen values (`sleep-vars.json`)
+
+A plugin can publish text for sleep themes to show. It writes a flat JSON
+object to `sleep-vars.json` in its own folder:
+
+```json
+{ "word": "petrichor", "definition": "the smell of rain on dry earth" }
+```
+
+and a theme shows a key with `{{plugin.<name>.<key>}}`, e.g.
+`<p data-var="plugin.word_of_day.word" data-hide-if-empty>` (see
+`docs/sleep-themes/README.md`). `<name>` is the plugin's folder name with every
+`-` written as `_` (theme value names cannot hold `-`); keys must be
+`[A-Za-z0-9_]+`, and keys outside that are ignored.
+
+- **The plugin decides when values change.** The firmware never runs plugin
+  code; it reads the file each time it draws the sleep screen. Rewrite it from
+  `plugin.js` (`/api/plugin-fs`), from a `device.json` event `download`
+  (a `sleep.enter` handler that fetches the file brings WiFi up at sleep, see
+  `plugin-events.md`), or ship a file that holds a whole list and rotate it
+  from your own code when the device is next online.
+- **Format.** Strings or whole numbers (numbers become their text), 2KB read cap:
+  the same rules as the book metadata sidecar. Values are always text, so they
+  go in text elements and expressions, not on bars or images. A value longer
+  than the element can hold (about 190 bytes in a text element, 95 inside an
+  expression) is cut off.
+- **Missing means empty.** A plugin that isn't installed, has no file, or lacks
+  the key reads as empty, as does every plugin value while **Enable Plugins**
+  is off and on boards without plugins (X3 / X4). A theme can be compiled
+  before the plugin is installed; the compiler accepts any well-formed
+  `plugin.*` name and previews installed plugins' current values.
+- Advertised as the `sleep_theme.vars` capability.
 
 ## Ideas to build
 

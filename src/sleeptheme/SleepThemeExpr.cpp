@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "SleepThemePluginVars.h"
 #include "SleepThemeText.h"
 #include "SleepThemeVars.h"
 
@@ -358,6 +359,11 @@ class Evaluator {
   __attribute__((noinline)) Val variable(const char* name, const size_t nameLen) {
     SleepThemeVars::Id id;
     if (!SleepThemeVars::find(name, nameLen, id)) {
+      if (SleepThemePluginVars::isPluginVar(name, nameLen)) {
+        char value[SleepThemeVars::VALUE_LEN];
+        SleepThemePluginVars::lookup(name, nameLen, value, sizeof(value));
+        return value[0] == '\0' ? Val{} : str(value, strlen(value));
+      }
       fail("unknown value");
       return Val{};
     }

@@ -9,6 +9,7 @@
 #include "CrossPointWebServer.h"
 #include "html/SleepThemesPageHtml.generated.h"
 #include "sleeptheme/SleepThemeFormat.h"
+#include "sleeptheme/SleepThemePluginVars.h"
 #include "sleeptheme/SleepThemeRenderer.h"
 #include "sleeptheme/SleepThemeVars.h"
 
@@ -79,6 +80,24 @@ void CrossPointWebServer::handleSleepThemeVars() const {
     serializeJson(doc, buf, sizeof(buf));
     server->sendContent(buf);
   }
+  // Values installed plugins publish right now (plugin.<name>.<key>). The page
+  // accepts any well-formed plugin name, so these only fill in the preview.
+  // Serialized to a string, not buf: a plugin value can be up to its 2KB file,
+  // and a truncated serialization would be broken JSON. Only the PSRAM boards
+  // have plugins, so this never runs on the C3.
+  SleepThemePluginVars::forEach(
+      [](void* ctx, const char* name, const char* value) {
+        auto* web = static_cast<WebServer*>(ctx);
+        JsonDocument doc;
+        doc["name"] = name;
+        doc["kind"] = "text";
+        doc["value"] = value;
+        std::string json;
+        serializeJson(doc, json);
+        web->sendContent(",");
+        web->sendContent(json.c_str());
+      },
+      server.get());
   SleepThemeVars::endFrame();
   server->sendContent("]}");
   server->sendContent("");
