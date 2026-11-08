@@ -7,17 +7,18 @@ A heavily-customised personal fork of [CrossPoint Reader](https://github.com/cro
 | ![Home screen with a Start Reading hero card, a shelf of recent books and the main menu](./docs/images/readme/home-screen.png) | ![Reader Controls action picker binding a gesture to Refresh, Dark, Footnotes, Auto-turn, Stats, Bionic and more](./docs/images/readme/reader-customisation.png) | ![BookFusion All Books list with synced and downloadable titles](./docs/images/readme/bookfusion-sync.png) |
 | :---: | :---: | :---: |
 | **New home screens** — hero card, bookshelf of recent reads, library grid and more themes to pick from | **A customisable reading experience** — bind any button, tap zone or swipe to the reader action you want | **Native BookFusion sync** — browse your cloud library, download books and sync progress on-device |
-| ![Bluetooth Page Turner settings with a connected remote and mapped Page Back / Page Forward buttons](./docs/images/readme/bluetooth.png) | ![Statistics month view with a reading-time calendar heat-map, month total, days read and best day](./docs/images/readme/reading-stats.png) | ![Sleep screen with a stats box showing the week streak, daily goal met and current book progress](./docs/images/readme/sleep-screen.png) |
-| **Bluetooth page turners** — pair a cheap BLE clicker and map its buttons to page back / forward | **Detailed reading stats** — streaks, goals, a month heat-map and more, with syncing to [Hardcover](https://hardcover.app) | **Sleep screen widgets** — up to three stats on the sleep screen: streak, daily goal, book progress and more |
+| ![Bluetooth Page Turner settings with a connected remote and mapped Page Back / Page Forward buttons](./docs/images/readme/bluetooth.png) | ![Statistics month view with a reading-time calendar heat-map, month total, days read and best day](./docs/images/readme/reading-stats.png) | ![The Nightly Gazette sleep theme: tonight's reading as a newspaper front page with a headline written from your stats](./docs/images/readme/sleep-themes.png) |
+| **Bluetooth page turners** — pair a cheap BLE clicker and map its buttons to page back / forward | **Detailed reading stats** — streaks, goals, a month heat-map and more, with syncing to [Hardcover](https://hardcover.app) | **Custom sleep screens** — themes from an online store, filled in with your book and stats every time it sleeps, or design your own |
 
 This gives you an idea of what features are avaliable for which device, I frequently add features or port from crosspoint and crossink when I like a feature, but I also take requests. Feel free to make asks on GitHub issues, in the Bookfusion Discord and the Micro eReaders Community Discord, or on Twitter @insiderphd.
 
 | Device | Chip | Status |
 | ------ | --- | ------ |
-| **Xteink X4** | ESP32-C3 | BookFusion, Hardcover (but limited autosync), (restricted) Bluetooth, stats, remapable controls, customisable reader, lirary view, sortable lists, inline footnotes, clippings, SD flashing (no brick club here)  |
+| **Xteink X4** | ESP32-C3 | BookFusion, Hardcover (but limited autosync), (restricted) Bluetooth, stats, sleep themes, remappable controls, customisable reader, library view, sortable lists, inline footnotes, clippings, SD flashing (no brick club here)  |
 | **Xteink X3** | ESP32-C3 | Same as X4, plus: tilt to turn page, accurate time, button hints are remapped |
 | **Xteink X4C** | ESP32-S3 | Same as X3 plus: sd-plugins, autosync for hardcover/bookfusion/KOReader, Bluetooth unrestricted |
 | **Xteink X4 Pro** | ESP32-S3 | Same as X4C, plus: touchscreen, keyboard for searches, light (with nightshift to customize settings based on time)  |
+| **BOOX Picco** *(experimental)* | ESP32-S3 | Same as X4 Pro (touch UI, warm/cool light), plus: the slide switch can be bound to light, dark mode, Bluetooth or auto page turn. No front or home buttons, so Home is a swipe up from the bottom edge. Updates over USB only (no OTA or SD updates). **Back up the stock firmware before you flash**; see [docs/picco.md](docs/picco.md) |
 
 You won't see any progress bars on this firmware, this is intentional, when we need memory for things like downloading books I intentially use the memory that the screen usually takes up to get a few more KB out of the device. 
 
@@ -35,7 +36,7 @@ With that in mind, basically all non-english translations are non-existant, sorr
 - **Book Info panel** — full metadata for the open book (series & number, bookshelf, categories, lists, publisher, published date, tags, rating, language) plus the full description.
 - **Sortable lists** — 14 sort modes (Name A-Z/Z-A, Author A-Z/Z-A, Recently/Least recently opened, Most/Least read, Newest/Oldest on device, Date added, BookFusion first/last, Tag A–Z/Z–A) across Library, Recent Books, and File Browser. Short-press Power opens the Sort Menu; the chosen mode persists across reboots.
 - **Folder views** — Browse Files can group the SD card by real **Folders** (default), or by **Tags**, **Authors**, or **Series** (Settings → Display → Folder View). Grouping pulls from BookFusion/EPUB metadata; open a group to see its books.
-- **Reading Stats overhaul** — 7 metrics instead of 3 (Reading Time, Pages Read, Books Finished, Sessions, Avg. Session, Reading Speed, In Progress), now split across **Overview / Books / Week / Month / Sessions** tabs with reading streaks, a daily goal, a reading-profile score, and a Month calendar heat-map. Adds **Export / Import** and **Export to StoryGraph**, and can surface up to three stats on the sleep screen. Accessible from the Home menu; session tracking covers `.epub`, `.txt`, and `.xtc` instead of EPUB only.
+- **Reading Stats overhaul** — 7 metrics instead of 3 (Reading Time, Pages Read, Books Finished, Sessions, Avg. Session, Reading Speed, In Progress), now split across **Overview / Books / Week / Month / Sessions** tabs with reading streaks, a daily goal, a reading-profile score, and a Month calendar heat-map. Adds **Export / Import** and **Export to StoryGraph**, and sleep themes can show any of these stats while the device sleeps. Accessible from the Home menu; session tracking covers `.epub`, `.txt`, and `.xtc` instead of EPUB only.
 - **Book Options popup** — long-press Confirm on a recent book opens an inline modal (Mark as Read, Shelve, Reset Progress, etc.) instead of navigating away. Same modal in the Library cover grid.
 - **Mark as Completed** — in-reader menu option that bumps progress to 100%, increments Books Finished, and returns home. Books at ≥90% are now counted as finished (was 100%).
 - **Inline footnotes** — new "On page" Footnotes mode renders footnote text at the bottom of the page that references it, beneath a horizontal rule. Space is reserved during layout so the footnote block never overlaps page text.
@@ -54,12 +55,24 @@ With that in mind, basically all non-english translations are non-existant, sorr
 - **Dictionary lookup** — offline **StarDict** word lookup while reading. Drop a dictionary folder in `/dictionaries/` on the SD card, pick it in **Settings → Reader → Dictionary**, then use the reader menu's **Look Up** row or bind Look Up to any button, tap zone or hold. Highlight a word, press Confirm, read the definition — HTML dictionaries render through the EPUB layout engine (headings, bold, italics, lists), with a plain-text fallback when memory is tight. Handles `.dict.dz` compression, `.syn` synonyms, and common word endings (`running` → `run`) on a miss. No dictionary ships with the firmware; see [docs/dictionary.md](docs/dictionary.md) for where to get one. On the X3/X4 a lookup requires Bluetooth to be off (RAM); the X4 Pro has no such limit.
 - **Hyphenation toggle** — dictionary hyphenation is back as a Reader setting rather than a build-time constant.
 - **File Browser progress column** — right-aligned `X` (finished, ≥90%), `21%` (in progress), or blank (unopened/directory) on every row.
-- **Sleep screen options** — Dark / Light / Custom / **Cover** / **Cover + Custom** / None, with cover Fit/Crop and None/Contrast/Inverted filters. Drop multiple `.bmp`s in a `.sleep/` folder for a random image each sleep, and overlay up to three reading stats.
+- **Sleep themes** — the sleep screen is now a theme. See [Custom sleep screens](#custom-sleep-screens) below.
+
+## Custom sleep screens
+
+![Six sleep themes: Departures split-flap board, Library card, Reading habit, Reader profile, Year in books and Bedside clock](./docs/images/readme/sleep-themes-strip.png)
+
+The sleep screen is a theme: a small HTML/CSS page laid out for your screen. The device fills it in with your current book, progress and reading stats every time it goes to sleep. Available on every device.
+
+- **Theme store** — open **Settings → Display → Sleep Theme → Get More Themes** on the device (or the **Sleep Themes** page of the web UI), preview a theme and download it. The store has 20-odd themes: a newspaper front page written from tonight's reading, a split-flap departures board, a library checkout card, your streak as moons, a year in books, a reader profile score, the book cover in greys or full screen, a random picture from your `/sleep` folder, the page you were on with a small moon, and more. **Update All** brings installed themes up to date.
+- **Built in** — Light, Dark, Stats, Stats (dark) and Cover (full screen) work with no download. Light, Dark and the two Stats screens show your **"If Found"** contact at the bottom if you set one.
+- **Make your own** — the [Sleep Theme Bench](https://insiderphd.github.io/katiepoint-sleep-themes/bench/) is a drag-and-drop editor in the browser. Start from any store theme, change it, then save the zip and install it from the web UI. Open a pull request on [katiepoint-sleep-themes](https://github.com/InsiderPhD/katiepoint-sleep-themes) to share it with everyone. [docs/sleep-themes](docs/sleep-themes/README.md) lists everything a theme can show.
+
+If you used the old sleep screen modes, your choice moves to the matching theme the first time you boot.
 
 ## Original CrossPoint features (still here)
 
 - EPUB 2 / EPUB 3 parsing and rendering with image support
-- Saved reading position, custom sleep screen (incl. book-cover mode)
+- Saved reading position
 - WiFi book upload, WiFi OTA updates
 - KOReader Sync for cross-device reading progress
 - Configurable font, layout, and display options
