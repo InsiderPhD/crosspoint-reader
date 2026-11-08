@@ -757,7 +757,7 @@ void GroupBrowserActivity::loop() {
   // Skipped while the entry Confirm is still being swallowed (see lockNextConfirmRelease).
   if (!lockNextConfirmRelease) {
     bool touchLongPressOnNonBook = false;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     // Full Touch: a touch hold points at a row, not the current selector. Move
     // the selector to the touched book first so contextMenu.checkLongPress —
     // which reads the same per-frame touch event below and suppresses the

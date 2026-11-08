@@ -75,8 +75,11 @@ const char* actionDescription(const uint8_t action) {
 }  // namespace
 
 ReaderActionSelectActivity::ReaderActionSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                                       const char* rowTitle, const uint8_t currentAction)
-    : Activity("ReaderActionSelect", renderer, mappedInput), currentAction(currentAction) {
+                                                       const char* rowTitle, const uint8_t currentAction,
+                                                       const bool switchableOnly)
+    : Activity("ReaderActionSelect", renderer, mappedInput),
+      currentAction(currentAction),
+      switchableOnly(switchableOnly) {
   snprintf(this->rowTitle, sizeof(this->rowTitle), "%s", rowTitle ? rowTitle : "");
 }
 
@@ -92,6 +95,7 @@ void ReaderActionSelectActivity::onEnter() {
   currentIndex = -1;
   for (uint8_t action = 0; action < CrossPointSettings::READER_ACTION_COUNT; action++) {
     if (CrossPointSettings::isRetiredReaderAction(action)) continue;
+    if (switchableOnly && !CrossPointSettings::isSwitchableReaderAction(action)) continue;
     if (!dev && CrossPointSettings::isDeveloperReaderAction(action) && action != currentAction) continue;
     if (CrossPointSettings::isUnavailableReaderAction(action) && action != currentAction) continue;
     if (action == currentAction) currentIndex = actionCount;

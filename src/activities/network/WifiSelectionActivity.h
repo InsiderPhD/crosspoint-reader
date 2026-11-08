@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "CrossPointSettings.h"
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
@@ -119,5 +120,16 @@ class WifiSelectionActivity final : public Activity {
   // Full Touch tap dispatch only covers the AP list. Every other state (empty
   // list, prompts, results) keeps the global tap-is-Confirm injection, e.g. so
   // a tap on the empty list still triggers the rescan.
-  bool handlesDirectTouch() const override { return state == WifiSelectionState::NETWORK_LIST && !networks.empty(); }
+  // Full Touch: the save/forget prompts answer from the action bar alone (see
+  // renderSavePrompt / renderForgetPrompt), so a stray tap on the body must not
+  // become a Confirm -- there Confirm is Save or Forget, not a highlighted choice.
+  bool handlesDirectTouch() const override {
+    return (state == WifiSelectionState::NETWORK_LIST && !networks.empty()) || touchPrompt();
+  }
+  // The prompts' bar Confirm is their only Save/Forget, so it must stay listed.
+  bool tapActivatesConfirm() const override { return state == WifiSelectionState::NETWORK_LIST && !networks.empty(); }
+  bool touchPrompt() const {
+    return CrossPointSettings::FULL_TOUCH_UI &&
+           (state == WifiSelectionState::SAVE_PROMPT || state == WifiSelectionState::FORGET_PROMPT);
+  }
 };

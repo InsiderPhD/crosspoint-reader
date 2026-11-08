@@ -85,7 +85,7 @@ class BookContextMenu {
   bool longPressFlagSet_ = false;  // One-shot for short-press suppression.
 
   int selectedIndex_ = 0;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Option rows share one height so handleInput can map a tap y to a row.
   // Must match render()'s row pitch.
   static constexpr int OPTION_ROW_H = 34;

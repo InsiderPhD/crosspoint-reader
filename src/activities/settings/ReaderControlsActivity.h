@@ -31,7 +31,7 @@ class ReaderControlsActivity final : public Activity {
   // opens the chord list. Row 24 is the X4 Pro home key's double tap.
   // Row 25 is the X4 Pro's Hold Action mode (CrossPointSettings::READER_HOLD_MODE),
   // which decides whether rows 19-21 are listed at all.
-  static constexpr uint8_t kTotalRows = 26;
+  static constexpr uint8_t kTotalRows = 27;
 
   // The rows currently listed, as row ids in display order. A member rather
   // than the constant table it is built from because the X4 Pro hides the three
@@ -43,6 +43,9 @@ class ReaderControlsActivity final : public Activity {
 
   uint8_t selectedRow = 0;
   bool isDirty = false;
+  // Set when a pick was refused because it would leave no control that opens
+  // the book menu or leaves the book; the next render shows why, once.
+  bool escapeRefused = false;
   ButtonNavigator buttonNavigator;
 
   // Returns the label for each row (button + press type).

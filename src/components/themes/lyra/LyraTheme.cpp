@@ -59,7 +59,9 @@ void drawLyraBatteryIcon(const GfxRenderer& renderer, int x, int y, int battWidt
                          uint16_t percentage) {
   BaseTheme::drawBatteryOutline(renderer, x, y, battWidth, rectHeight);
 
-  const bool charging = gpio.isUsbConnected();
+  // Cached sample, as BaseTheme uses: the direct probe busy-waits 1.5 ms on the S3
+  // boards and skips the charger-STAT check that catches wall chargers there.
+  const bool charging = gpio.isUsbConnectedCached();
 
   if (charging) {
     // Draw solid fill when charging so lightning bolt is visible
@@ -388,7 +390,7 @@ void LyraTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
 }
 
 const ThemeMetrics& LyraTheme::themeMetrics() const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // See BaseTheme::themeMetrics() -- Full Touch keeps the action-bar strip,
   // gesture mode reclaims it.
   return CrossPointSettings::FULL_TOUCH_UI ? LyraMetrics::values : LyraMetrics::noActionBarValues;
@@ -399,7 +401,7 @@ const ThemeMetrics& LyraTheme::themeMetrics() const {
 
 void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4, const bool allSlots) const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // No front buttons to label on the X4 Pro; in Full Touch the same four labels
   // become tap targets instead (rounded, to match Lyra's boxes).
   ActionBar::draw(renderer, UITheme::getInstance().getMetrics().buttonHintsHeight, SMALL_FONT_ID, /*rounded=*/true,
@@ -534,7 +536,7 @@ void LyraTheme::drawPowerButtonHint(GfxRenderer& renderer, const char* label) co
 
   // X4: vertical box on the right edge, above the Up/Down side hints, tracking the Power button.
   const int x = screenWidth - buttonWidth;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // X4 Pro: the side hints use the X3 placement (right-edge box at y=155), so anchor
   // just above that box — the X4's 140px gap under topHintButtonY would overlap it.
   const int y = 155 - 20 - buttonHeight;

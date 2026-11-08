@@ -80,7 +80,7 @@ class ReaderCombos {
   // through bands while the fingers land. Front-button remaps only shuffle
   // roles within the front four, so the logical groups ARE the physical ones.
   static bool sharesLadder(const uint16_t mask) {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     (void)mask;
     return false;
 #else
@@ -94,7 +94,7 @@ class ReaderCombos {
 
   static constexpr uint16_t eligibleMask() {
     using S = CrossPointSettings;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     return (1u << S::COMBO_BTN_SIDE_UP) | (1u << S::COMBO_BTN_SIDE_DOWN) | (1u << S::COMBO_BTN_POWER) |
            (1u << S::COMBO_BTN_ZONE_LEFT) | (1u << S::COMBO_BTN_ZONE_MIDDLE) | (1u << S::COMBO_BTN_ZONE_RIGHT) |
            (1u << S::COMBO_BTN_HOME);

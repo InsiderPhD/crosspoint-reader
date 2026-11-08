@@ -378,7 +378,7 @@ int UITheme::getProgressBarHeight() { return getProgressBarHeight(StatusBarSide:
 
 UITheme::HintReserve UITheme::getHintReserve(const GfxRenderer& renderer, const int sideGutter,
                                              const int invertedTopGutter) {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // The action bar is drawn in the logical frame, so it is at the bottom in
   // every orientation. Reserving a side gutter here would be dead space.
   (void)sideGutter;

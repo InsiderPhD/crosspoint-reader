@@ -25,8 +25,10 @@ struct Rect;
  */
 class ReaderActionSelectActivity final : public Activity {
  public:
+  // switchableOnly: offer only CrossPointSettings::isSwitchableReaderAction()
+  // (the Picco's slide switch row).
   ReaderActionSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const char* rowTitle,
-                             uint8_t currentAction);
+                             uint8_t currentAction, bool switchableOnly = false);
 
   void onEnter() override;
   void loop() override;
@@ -41,6 +43,7 @@ class ReaderActionSelectActivity final : public Activity {
   // Copy, not a pointer: getRowTitle() hands back a shared static buffer.
   char rowTitle[48] = {};
   const uint8_t currentAction;
+  const bool switchableOnly;
   // Offerable actions in enum order, minus the retired values and (outside Dev
   // Mode) Screenshot. Fixed capacity, so no heap and no vector growth.
   uint8_t actions[CrossPointSettings::READER_ACTION_COUNT] = {};

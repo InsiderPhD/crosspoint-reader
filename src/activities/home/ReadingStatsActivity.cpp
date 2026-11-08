@@ -302,7 +302,7 @@ int drawGoalWeekRow(GfxRenderer& renderer, int x, int y, int availWidth) {
 
 void drawLyraStyleButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                               const char* btn4) {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // No front buttons to label on the X4 Pro. This screen paints its own hint
   // bar instead of going through the theme, so it needs the same treatment as
   // BaseTheme/LyraTheme::drawButtonHints: in Full Touch the labels become the
@@ -870,7 +870,7 @@ void ReadingStatsActivity::loop() {
     return;
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: a tap on a tab selects that category directly; on the Books,
   // Sessions and Clippings tabs a tap on a row selects it, and a second tap on the
   // selected row opens it. Both hit-tests need the raw point, so this reads
@@ -985,7 +985,7 @@ void ReadingStatsActivity::loop() {
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     // Full Touch handles Back on the RELEASE frame (top of loop). Both an
     // injected swipe and an action-bar tap press on one frame and release on
     // the next, so this press frame runs first and must do nothing at all —

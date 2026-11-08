@@ -2,7 +2,7 @@
 
 #include "CrossPointSettings.h"
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 #include <GfxRenderer.h>
 #include <Logging.h>
 
@@ -28,7 +28,7 @@ uint8_t MappedInputManager::getPhysicalButtonIndex(const Button button) const {
   const auto sideLayout = static_cast<CrossPointSettings::SIDE_BUTTON_LAYOUT>(SETTINGS.sideButtonLayout);
   const auto& side = kSideLayouts[sideLayout];
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // The X4 Pro has the same SIDE keys as the X3 and X4 -- they are Up/Down,
   // exactly as on those boards -- and no front buttons at all. What it lacks is
   // the front four, so those indices are free and touch supplies them: the Full
@@ -107,7 +107,7 @@ uint8_t MappedInputManager::getPhysicalButtonIndex(const Button button) const {
   return HalGPIO::BTN_BACK;
 }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 void MappedInputManager::processTouchInput() const {
   // Cleared before any early return, or a swipe recorded on one frame would
   // still be reported as fresh on the next.
@@ -173,7 +173,15 @@ void MappedInputManager::processTouchInput() const {
   const int dcx = static_cast<int>((nxe - nxs) * 800.0f);
   const int dcy = static_cast<int>((nye - nys) * 480.0f);
   const int pdx = dcx;
+#if FREEINK_DEVICE_PICCO
+  // UNVERIFIED on hardware: the Picco's TMA525C frame (swapXY + flipY in the SDK
+  // profile) was calibrated against taps, so swipes are assumed to share that
+  // direct frame. If left/right or up/down swipes come out reversed, negate
+  // the matching axis here.
+  const int pdy = dcy;
+#else
   const int pdy = -dcy;
+#endif
 
   // Rotate physical deltas into the logical frame of the active orientation
   // (inverse of GfxRenderer::rotateCoordinates) so a swipe tracks what is on
@@ -198,6 +206,22 @@ void MappedInputManager::processTouchInput() const {
         break;
     }
   }
+
+#if FREEINK_DEVICE_PICCO
+  // Swipe up from the bottom edge = Home, upstream CrossPoint's gesture for
+  // touch boards without a home key. Kept even with the home pad decoded, as a
+  // fallback while that decoding is unverified. Reported exactly like a home-pad
+  // tap, so the main loop's Home route and the readers' home-tap action apply.
+  if (renderer != nullptr && abs(ldy) > abs(ldx) && ldy < 0) {
+    constexpr int BOTTOM_EDGE_PX = 60;
+    const LogicalTouchPoint start = toLogicalPoint(nxs, nys);
+    if (start.y >= renderer->getScreenHeight() - BOTTOM_EDGE_PX) {
+      LOG_DBG("INPUT", "Bottom-edge swipe up from (%d,%d) -> Home", start.x, start.y);
+      homeGesture = HomeKeyGesture::Tap;
+      return;
+    }
+  }
+#endif
 
   uint8_t idx;
   if (abs(ldx) >= abs(ldy)) {
@@ -502,7 +526,7 @@ MappedInputManager::Labels MappedInputManager::mapLabels(const char* back, const
     return "";
   };
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // The X4 Pro bypasses SETTINGS.frontButton* in getPhysicalButtonIndex(), so
   // resolving labels through it would place them in slots that do not match the
   // buttons they act on -- and these slots are the Full Touch action bar's tap

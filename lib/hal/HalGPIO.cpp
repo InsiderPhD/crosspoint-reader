@@ -24,6 +24,21 @@ constexpr unsigned long VIRTUAL_BUTTON_REPRESS_DEBOUNCE_MS = 250;
 // nothing, since the only consumers are the battery icon and its plug/unplug
 // repaint.
 constexpr unsigned long USB_POLL_INTERVAL_MS = 1000;
+
+#if FREEINK_MCU_S3
+// The S3 boards' only USB probe is the start-of-frame counter, which a data host
+// drives but a wall charger or power bank never does, so on its own the battery
+// icon showed no bolt on anything but a computer. The charger's STAT line (GPIO21
+// on X4 Pro / X4C, active-high per the board profile) does see a wall supply.
+// It drops when the battery is full, so it is OR-ed with the SOF probe, never a
+// replacement for it. BatteryMonitor's default constructor takes the pin and its
+// polarity from the board profile; a CW2017 gauge reports charging as unknown,
+// so isCharging() falls straight through to a digitalRead (no I2C).
+bool chargerReportsCharging() {
+  static const BatteryMonitor battery;
+  return battery.isCharging();
+}
+#endif
 }  // namespace
 
 // The X3 fingerprint probe and its BQ27220 helpers are ESP32-C3 ONLY. They drive
@@ -260,17 +275,30 @@ void HalGPIO::update() {
 
 bool HalGPIO::wasUsbStateChanged() const { return usbStateChanged; }
 
-bool HalGPIO::isUsbConnectedCached() const { return usbStateSampled ? lastUsbConnected : isUsbConnected(); }
+bool HalGPIO::isUsbConnectedCached() const {
+  if (usbStateSampled) {
+    return lastUsbConnected;
+  }
+#if FREEINK_MCU_S3
+  if (chargerReportsCharging()) {
+    return true;
+  }
+#endif
+  return isUsbConnected();
+}
 
 bool HalGPIO::sampleUsbConnected() {
 #if FREEINK_MCU_S3
+  // A wall charger has no host to clock SOF packets; the charger STAT pin is the
+  // only thing that sees it. Cheap GPIO read, so it goes first.
+  const bool charging = chargerReportsCharging();
   // A host clocks one start-of-frame per millisecond, so the 11-bit frame
   // counter has moved since the poll a second ago whenever a host is attached:
   // comparing against the previous poll's value answers without waiting.
   const uint32_t frame = REG_READ(USB_SERIAL_JTAG_FRAM_NUM_REG);
   const bool advanced = usbStateSampled && frame != lastUsbFrameNumber;
   lastUsbFrameNumber = frame;
-  if (advanced) {
+  if (advanced || charging) {
     return true;
   }
   // Counter unchanged (or no previous poll to compare with): either no host, or
@@ -309,6 +337,12 @@ bool HalGPIO::wasHomeKeyTapped() const { return inputMgr.wasHomeKeyTapped(); }
 bool HalGPIO::wasHomeKeyLongPressed() const { return inputMgr.wasHomeKeyLongPressed(); }
 
 bool HalGPIO::isHomeKeyDown() const { return inputMgr.isHomeKeyDown(); }
+
+bool HalGPIO::hasToggleSwitch() const { return inputMgr.hasToggleSwitch(); }
+
+bool HalGPIO::isToggleSwitchOn() const { return inputMgr.isToggleSwitchOn(); }
+
+bool HalGPIO::prepareForDeepSleep() { return inputMgr.prepareForDeepSleep(); }
 
 bool HalGPIO::isTouchHeldAt(float& nx, float& ny) const { return inputMgr.isTouchHeldAt(nx, ny); }
 
@@ -510,6 +544,17 @@ void HalGPIO::verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPre
 }
 
 bool HalGPIO::isUsbConnected() const {
+#if FREEINK_DEVICE_PICCO
+  // The SGM41562 reports its input rail directly, which also sees a wall
+  // charger (no host, so no start-of-frame packets). One I2C read; fall back to
+  // the SOF probe below only if the charger did not answer.
+  {
+    static const BatteryMonitor battery;
+    bool known = false;
+    const bool present = battery.isExternalPowerPresent(&known);
+    if (known) return present;
+  }
+#endif
 #if FREEINK_MCU_S3
   // The S3 boards (X4 Pro, X4C) have no VBUS sense line, and UART0_RXD/GPIO20 (the X4's detect pin)
   // is the S3's native USB D+, so reading it as a GPIO is meaningless. Infer host

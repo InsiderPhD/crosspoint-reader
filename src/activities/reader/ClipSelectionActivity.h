@@ -81,7 +81,7 @@ class ClipSelectionActivity final : public Activity {
   // not be injected as Back/Confirm. Lookup mode keeps the Back swipe, and only
   // claims the contact once it has become a phrase drag (see handleLookupDrag).
   bool ownsSwipes() const override {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     return !lookupMode || dragging || contactAdopted || selectMode;
 #else
     return !lookupMode;
@@ -115,7 +115,7 @@ class ClipSelectionActivity final : public Activity {
 
   ButtonNavigator buttonNavigator;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Touch range selection state (handleRangeTouch).
   bool touchWasHeld = false;
   bool dragging = false;

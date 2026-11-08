@@ -410,6 +410,8 @@ void text(const Id id, char* out, const size_t outSize) {
     case Id::DeviceModel:
 #if FREEINK_DEVICE_X4PRO
       copyText("X4 Pro", out, outSize);
+#elif FREEINK_DEVICE_PICCO
+      copyText("Picco", out, outSize);
 #else
       copyText(gpio.deviceIsX3() ? "X3" : "X4", out, outSize);
 #endif

@@ -1,10 +1,12 @@
 #include "SleepThemeDownloadActivity.h"
 
+#include <Bitmap.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <PngToBmpConverter.h>
 #include <StreamingJsonParser.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
@@ -31,6 +33,11 @@ namespace {
 // Scratch file the catalog lands in before it is parsed: streaming the parse
 // during the live TLS session would carry both heap costs at once.
 constexpr const char* CATALOG_TMP = "/sleep_theme_catalog.tmp";
+// The previewed theme's screenshot as fetched, and its fitted conversion. At
+// the card root beside CATALOG_TMP, not under /sleep-themes, so the picker
+// never sees them.
+constexpr const char* PREVIEW_PNG = "/sleep_theme_preview.png";
+constexpr const char* PREVIEW_BMP = "/sleep_theme_preview.bmp";
 
 // Every row costs heap for the life of the screen.
 constexpr size_t MAX_CATALOG_ENTRIES = 48;
@@ -333,6 +340,7 @@ void SleepThemeDownloadActivity::onEnter() {
 
 void SleepThemeDownloadActivity::onExit() {
   Activity::onExit();
+  discardPreview();
   WiFi.disconnect(false);
   delay(100);
   WiFi.mode(WIFI_OFF);
@@ -629,8 +637,103 @@ void SleepThemeDownloadActivity::activateSelected() {
     return;
   }
 
-  downloadEntry(*entry);
+  // Not installed or out of date: show what it looks like first.
+  openPreview(*entry);
+}
+
+// --- Preview ---
+
+void SleepThemeDownloadActivity::discardPreview() {
+  if (Storage.exists(PREVIEW_PNG)) Storage.remove(PREVIEW_PNG);
+  if (Storage.exists(PREVIEW_BMP)) Storage.remove(PREVIEW_BMP);
+}
+
+Rect SleepThemeDownloadActivity::previewRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect body = listRect();
+  return Rect{body.x + metrics.contentSidePadding, body.y, body.width - 2 * metrics.contentSidePadding, body.height};
+}
+
+void SleepThemeDownloadActivity::openPreview(const CatalogEntry& entry) {
+  {
+    RenderLock lock(*this);
+    state_ = PREVIEW_LOADING;
+    previewReady_ = false;
+  }
+  // The loading frame must be on the panel before the screen freezes for the
+  // fetch's TLS session.
   requestUpdateAndWait();
+
+  const bool ready = fetchPreview(entry);
+  {
+    RenderLock lock(*this);
+    if (cancelRequested_) {
+      discardPreview();
+      state_ = CATALOG_LIST;
+    } else {
+      previewReady_ = ready;
+      state_ = PREVIEW;
+    }
+  }
+  requestUpdate();
+}
+
+// Two serial phases like the catalog: fetch the PNG inside the framebuffer
+// borrow, then convert it on a quiet heap. The conversion (one PNG inflate,
+// a few row buffers sized by the ~500 px preview width) is freed before it
+// returns; only the fitted BMP on the card outlives it, read row by row on
+// each paint. False = nothing to show (missing, failed, or cancelled).
+bool SleepThemeDownloadActivity::fetchPreview(const CatalogEntry& entry) {
+  discardPreview();
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    fcm->clearCachesDeep();
+  }
+
+  char buildKey[16];
+  buildKeyFor(renderer, buildKey, sizeof(buildKey));
+  const std::string url = catalogBase() + buildKey + "/" + entry.id + "/preview.png";
+
+  cancelRequested_ = false;
+  lastCancelPollMs_ = millis();
+  auto result = HttpDownloader::HTTP_ERROR;
+  {
+    WifiPowerSaveGuard wifiPowerSaveGuard;
+    TlsFramebufferBorrow borrow(renderer);
+    result = HttpDownloader::downloadToFile(
+        url, PREVIEW_PNG, [this](size_t, size_t) { pollForCancel(); },
+        /*allowConfiguredAuth=*/false, /*expectedSize=*/0, &cancelRequested_);
+  }
+  if (result != HttpDownloader::OK) {
+    if (result != HttpDownloader::ABORTED) LOG_ERR("STD", "Preview fetch failed: %s (%d)", url.c_str(), result);
+    discardPreview();
+    return false;
+  }
+
+  const Rect box = previewRect();
+  FsFile png;
+  if (!Storage.openFileForRead("STD", PREVIEW_PNG, png)) {
+    discardPreview();
+    return false;
+  }
+  FsFile bmp;
+  if (!Storage.openFileForWrite("STD", PREVIEW_BMP, bmp)) {
+    png.close();
+    discardPreview();
+    return false;
+  }
+  // Fit (not crop): the whole screen, shrunk to the preview area.
+  const bool converted = PngToBmpConverter::pngFileToBmpStreamWithSize(png, bmp, box.width, box.height, /*crop=*/false);
+  png.close();
+  bmp.flush();
+  bmp.close();
+  Storage.remove(PREVIEW_PNG);
+  LOG_DBG("STD", "Preview %s: %s; heap free=%u largest=%u", entry.id.c_str(), converted ? "ok" : "convert failed",
+          ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  if (!converted) {
+    Storage.remove(PREVIEW_BMP);
+    return false;
+  }
+  return true;
 }
 
 // --- Input handling ---
@@ -703,6 +806,25 @@ void SleepThemeDownloadActivity::loop() {
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       deleteSelected();
       requestUpdate();
+    }
+  } else if (state_ == PREVIEW) {
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+      discardPreview();
+      {
+        RenderLock lock(*this);
+        state_ = CATALOG_LIST;
+      }
+      requestUpdate();
+    } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+      discardPreview();
+      CatalogEntry* entry = entryAtRow(selectedIndex_);
+      if (entry == nullptr) {
+        RenderLock lock(*this);
+        state_ = CATALOG_LIST;
+        return;
+      }
+      downloadEntry(*entry);
+      requestUpdateAndWait();
     }
   } else if (state_ == COMPLETE) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
@@ -778,7 +900,12 @@ void SleepThemeDownloadActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
 
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_SLEEP_THEME_STORE));
+  // The preview screens are titled with the theme they show.
+  const char* title = tr(STR_SLEEP_THEME_STORE);
+  if (state_ == PREVIEW_LOADING || state_ == PREVIEW) {
+    if (const CatalogEntry* e = entryAtRow(selectedIndex_)) title = e->name.c_str();
+  }
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, title);
 
   const auto lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const auto centerY = (pageHeight - lineHeight) / 2;
@@ -830,6 +957,41 @@ void SleepThemeDownloadActivity::render(RenderLock&&) {
       renderer.drawCenteredText(UI_10_FONT_ID, centerY + metrics.verticalSpacing, entry->name.c_str());
     }
     const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_DELETE), "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  } else if (state_ == PREVIEW_LOADING) {
+    renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_SLEEP_THEME_LOADING_PREVIEW));
+    // Frozen frame during the fetch, as in DOWNLOADING: Back cancels.
+    const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  } else if (state_ == PREVIEW) {
+    bool drawn = false;
+    if (previewReady_) {
+      FsFile file;
+      if (Storage.openFileForRead("STD", PREVIEW_BMP, file)) {
+        Bitmap bitmap(file);
+        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+          const Rect box = previewRect();
+          const int w = std::min(bitmap.getWidth(), box.width);
+          const int h = std::min(bitmap.getHeight(), box.height);
+          const int x = box.x + (box.width - w) / 2;
+          const int y = box.y + (box.height - h) / 2;
+          // Resampled, not drawBitmap: that paints every grey black. Dark mode
+          // inverts the whole screen below, so the picture is drawn as its
+          // negative to come out as the theme really looks.
+          renderer.drawBitmapResampled(
+              bitmap, x, y, w, h,
+              SETTINGS.darkMode ? GfxRenderer::ResampleFilter::Invert : GfxRenderer::ResampleFilter::Dither);
+          // Outline: a mostly white theme otherwise has no edge on the page.
+          renderer.drawRect(x - 1, y - 1, w + 2, h + 2);
+          drawn = true;
+        }
+        file.close();
+      }
+    }
+    if (!drawn) renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_SLEEP_THEME_NO_PREVIEW));
+    const CatalogEntry* entry = entryAtRow(selectedIndex_);
+    const char* action = entry != nullptr && entry->updateAvailable ? tr(STR_UPDATE) : tr(STR_DOWNLOAD);
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), action, "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state_ == DOWNLOADING) {
     const auto& entry = entries_[static_cast<size_t>(downloadingIndex_)];

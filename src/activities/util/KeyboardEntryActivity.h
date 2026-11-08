@@ -245,7 +245,7 @@ class KeyboardEntryActivity : public Activity {
   };
   KeyGrid computeKeyGrid(int keyboardStartY) const;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Top of the key grid as last drawn. Cached rather than recomputed because in
   // a non bottom-aligned theme it depends on the wrapped input field height,
   // which only render() measures. One aligned int: written by the render task,

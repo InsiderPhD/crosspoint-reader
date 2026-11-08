@@ -664,7 +664,7 @@ void EpubReaderActivity::onResume() { armHeldButtons(); }
 void EpubReaderActivity::armHeldButtons() {
   longPressFeedbackShown = mappedInput.isPressed(MappedInputManager::Button::Confirm);
   longPressBackFired = mappedInput.isPressed(MappedInputManager::Button::Back);
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // The Left/Right action slots dispatch on logical Up/Down (swipes) here.
   longPressLeftFired = mappedInput.isPressed(MappedInputManager::Button::Up);
   longPressRightFired = mappedInput.isPressed(MappedInputManager::Button::Down);
@@ -913,7 +913,7 @@ void EpubReaderActivity::loop() {
     if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressBack))) return;
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // X4 Pro: logical Left/Right are the action bar's OUTER SLOTS (BTN_LEFT /
   // BTN_RIGHT), which is what MappedInputManager's mapping table and Reader
   // Controls' "Left"/"Right" rows both say they are.
@@ -1044,7 +1044,7 @@ void EpubReaderActivity::loop() {
     }
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // ── Tap-and-hold zones (configurable; default Clip in every zone) ─────────
   // Runs before the tap zones: a hold fires while the finger is still down, and
   // suppressing the contact stops the lift from also firing a tap-zone action.
@@ -2570,7 +2570,7 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
   // hints reflows the chapter automatically.
   if (SETTINGS.showButtonHints != CrossPointSettings::BUTTON_HINTS_OFF) {
     const auto& metrics = UITheme::getInstance().getMetrics();
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     // The reader draws no front hint bar on the X4 Pro (no front buttons, and
     // the strip belongs to the Full Touch action bar on the menu screens), so
     // it reserves nothing for one. See renderButtonHints().
@@ -3847,7 +3847,7 @@ void EpubReaderActivity::renderButtonHints() const {
   const auto origOrientation = renderer.getOrientation();
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
-#if !FREEINK_DEVICE_X4PRO
+#if !FREEINK_CAP_TOUCH
   // Front-button actions -> themed bottom hint bar. mapLabels positions each logical
   // role's label under the physical button it maps to (handles remap + orientation swap).
   //

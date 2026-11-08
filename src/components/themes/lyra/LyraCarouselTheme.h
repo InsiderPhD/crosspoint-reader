@@ -19,7 +19,7 @@ constexpr ThemeMetrics values = [] {
   return v;
 }();
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 // Gesture mode (Full Touch off) reclaims the action-bar strip; see BaseMetrics.
 constexpr ThemeMetrics noActionBarValues = [] {
   ThemeMetrics v = values;

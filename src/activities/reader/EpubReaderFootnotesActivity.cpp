@@ -73,7 +73,7 @@ void EpubReaderFootnotesActivity::loop() {
     return;
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: first tap on a row moves the cursor there; a second tap on the
   // already-selected row follows the footnote. The list is a scroll window, so
   // the tapped item is scrollOffset (as of the last render) plus the row.

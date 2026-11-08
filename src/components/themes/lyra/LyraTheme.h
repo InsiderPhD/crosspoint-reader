@@ -26,7 +26,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                  .homeCoverHeight = 226,
                                  .homeCoverTileHeight = 242,
                                  .homeRecentBooksCount = 1,
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
                                  // X4 Pro has no front buttons, so this strip holds the tappable
                                  // action bar instead of four button labels (see ActionBar.h).
                                  // Gesture mode reclaims it via noActionBarValues below.
@@ -53,7 +53,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 16,
                                  .keyboardWidthPercent = 90,
                                  .keyboardKeyCornerRadius = 6};
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 // Gesture mode (Full Touch off) reclaims the action-bar strip. See the same
 // pair in BaseMetrics; LyraTheme::themeMetrics() is out of line for the same
 // reason (the choice needs SETTINGS).

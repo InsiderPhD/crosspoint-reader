@@ -1676,7 +1676,7 @@ void LibraryActivity::loop() {
     return;
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: a touch hold targets the cover under the finger — move the
   // selector there first so checkLongPress below (which reads the same touch
   // event and suppresses the contact) opens the menu for that cover.
@@ -1738,7 +1738,7 @@ void LibraryActivity::loop() {
     }
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: first tap on a cover moves the selector; a second tap on the
   // selected cover opens it. Selection moves stay within the current page, so
   // the framebuffer snapshot remains valid.

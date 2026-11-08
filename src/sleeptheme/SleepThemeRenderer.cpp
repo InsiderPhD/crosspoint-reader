@@ -1177,6 +1177,20 @@ void drawStatsCard(GfxRenderer& renderer) {
   }
 }
 
+// The user's "If-Found Contact" setting (SETTINGS.returnContact), verbatim, one
+// centred line at the bottom edge, below the stats card's lower-eighth anchor.
+// Nothing when it is empty.
+void drawIfFound(GfxRenderer& renderer) {
+  if (SETTINGS.returnContact[0] == '\0') return;
+  constexpr int FONT_ID = UI_10_FONT_ID;
+  constexpr int BOTTOM_PAD = 8;
+  int top = 0, right = 0, bottom = 0, left = 0;
+  renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
+  const int textTop = renderer.getScreenHeight() - bottom - BOTTOM_PAD - renderer.getLineHeight(FONT_ID);
+  // drawCenteredText takes the text top.
+  renderer.drawCenteredText(FONT_ID, textTop, SETTINGS.returnContact, /*black=*/true);
+}
+
 }  // namespace
 
 void drawFallback(GfxRenderer& renderer, const char* themeName) {
@@ -1184,6 +1198,7 @@ void drawFallback(GfxRenderer& renderer, const char* themeName) {
   const bool dark = strcmp(themeName, "dark") == 0 || strcmp(themeName, "stats-dark") == 0;
   drawBuiltIn(renderer, false);
   if (stats) drawStatsCard(renderer);
+  drawIfFound(renderer);
   if (dark) renderer.invertScreen();
 }
 

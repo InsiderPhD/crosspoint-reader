@@ -23,7 +23,7 @@ constexpr MappedInputManager::Button kComboButtons[] = {
 constexpr uint8_t kComboButtonBits = sizeof(kComboButtons) / sizeof(kComboButtons[0]);
 static_assert(kComboButtonBits == S::COMBO_BTN_ZONE_LEFT, "button bits must be the first COMBO_BTN_* values");
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 // Zone names follow the axis in force, exactly as the Reader Controls rows do:
 // under TAP_ZONES_TOP_BOTTOM the Left slot IS the top band.
 bool tapZonesAreBands() { return SETTINGS.readerTapZoneLayout == CrossPointSettings::TAP_ZONES_TOP_BOTTOM; }
@@ -35,7 +35,7 @@ uint16_t ReaderCombos::currentMask(const MappedInputManager& input) {
   for (uint8_t bit = 0; bit < kComboButtonBits; bit++) {
     if (input.isPressed(kComboButtons[bit])) mask |= static_cast<uint16_t>(1u << bit);
   }
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   if (input.isHomeKeyDown()) mask |= 1u << S::COMBO_BTN_HOME;
   // A finger resting in a zone is held state, the same as a key being down.
   switch (input.heldTouchZone()) {
@@ -77,7 +77,7 @@ const char* ReaderCombos::buttonLabel(const uint8_t bit) {
     case S::COMBO_BTN_POWER:
       // Untranslated, matching the Reader Controls row for the same key.
       return "Power";
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     case S::COMBO_BTN_HOME:
       return tr(STR_HOME_BUTTON);
     // "Hold left/middle/right", because in a chord the finger stays down —
@@ -179,7 +179,7 @@ ReaderCombos::Result ReaderCombos::update(const MappedInputManager& input) {
   // belt-and-braces guard, not a path the UI can produce.
   if (action == S::READER_ACTION_NONE) return Result::None;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   if (mask & zoneMask()) {
     // The finger is still down. Spend the rest of the contact here, or lifting
     // it reports a tap and runs that zone's own action on top of the chord's.

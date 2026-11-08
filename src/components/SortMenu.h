@@ -57,7 +57,7 @@ class SortMenu {
   const SortOption* options_ = ALL_SORT_OPTIONS;
   int optionCount_ = ALL_SORT_OPTIONS_COUNT;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Field rows share one height so handleInput can map a tap y to a row.
   // Must match render()'s row pitch.
   static constexpr int OPTION_ROW_H = 30;

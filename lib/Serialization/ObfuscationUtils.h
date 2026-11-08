@@ -26,7 +26,9 @@ void xorTransform(std::string& data, const uint8_t* key, size_t keyLen);
 String obfuscateToBase64(const std::string& plaintext);
 
 // Decode base64 and de-obfuscate back to plaintext.
-// Returns empty string on invalid base64 input; sets *ok to false if decode fails.
+// Returns empty string on invalid base64 input, or when the result is not
+// printable ASCII (written on another device: its MAC is the key); sets *ok
+// to false in both cases.
 std::string deobfuscateFromBase64(const char* encoded, bool* ok = nullptr);
 
 // Self-test: verifies round-trip obfuscation with hardware key. Logs PASS/FAIL.

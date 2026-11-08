@@ -525,7 +525,7 @@ void DictionaryDefinitionActivity::loop() {
       lookUpWord(pageWords.textOf(pageWords.words[cursor]));
       return;
     }
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     int tx = 0;
     int ty = 0;
     if (mappedInput.wasTapPoint(tx, ty)) {
@@ -561,7 +561,7 @@ void DictionaryDefinitionActivity::loop() {
     return;
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Hold on a word: look it up straight away, the reader's own gesture.
   int hx = 0;
   int hy = 0;

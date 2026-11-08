@@ -319,6 +319,7 @@ void JsonSettingsIO::serializeSettings(const CrossPointSettings& s, JsonDocument
   doc["readerShortPressHome"] = s.readerShortPressHome;
   doc["readerLongPressHome"] = s.readerLongPressHome;
   doc["readerDoubleTapHome"] = s.readerDoubleTapHome;
+  doc["readerSlideSwitch"] = s.readerSlideSwitch;
   doc["frontlightLastBrightness"] = s.frontlightLastBrightness;
   // Time zone + DST — picked on dedicated screens, so persisted by hand rather
   // than through SettingsList (that list stays resident for the whole session).
@@ -522,8 +523,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
   s.readerLongPressSideDown =
       clampAction(doc["readerLongPressSideDown"] | (uint8_t)S::READER_ACTION_SKIP_CHAPTER_FORWARD,
                   S::READER_ACTION_SKIP_CHAPTER_FORWARD);
-  s.readerShortPressPower =
-      clampAction(doc["readerShortPressPower"] | (uint8_t)S::READER_ACTION_PAGE_FORWARD, S::READER_ACTION_PAGE_FORWARD);
+  s.readerShortPressPower = clampAction(doc["readerShortPressPower"] | S::DEFAULT_READER_SHORT_PRESS_POWER,
+                                       S::DEFAULT_READER_SHORT_PRESS_POWER);
   s.readerTapLeft = clampAction(doc["readerTapLeft"] | (uint8_t)S::READER_ACTION_PAGE_BACK, S::READER_ACTION_PAGE_BACK);
   s.readerTapMiddle =
       clampAction(doc["readerTapMiddle"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
@@ -545,6 +546,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
       clampAction(doc["readerLongPressHome"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
   s.readerDoubleTapHome =
       clampAction(doc["readerDoubleTapHome"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
+  s.readerSlideSwitch = doc["readerSlideSwitch"] | (uint8_t)S::READER_ACTION_TOGGLE_FRONTLIGHT;
+  if (!S::isSwitchableReaderAction(s.readerSlideSwitch)) s.readerSlideSwitch = S::READER_ACTION_TOGGLE_FRONTLIGHT;
   s.frontlightLastBrightness = clamp(doc["frontlightLastBrightness"] | (uint8_t)0, 101, 0);
   // Absent on a file from older firmware: stays NOT_CHOSEN, and the zone is
   // derived from the retired clockUtcOffsetQ / timeZonePreset loaded above.
@@ -839,10 +842,19 @@ bool JsonSettingsIO::loadWifi(WifiCredentialStore& store, const char* json, bool
     WifiCredential cred;
     cred.ssid = obj["ssid"] | std::string("");
     bool ok = false;
-    cred.password = obfuscation::deobfuscateFromBase64(obj["password_obf"] | "", &ok);
+    const char* obfuscated = obj["password_obf"] | "";
+    cred.password = obfuscation::deobfuscateFromBase64(obfuscated, &ok);
     if (!ok || cred.password.empty()) {
       cred.password = obj["password"] | std::string("");
       if (!cred.password.empty() && needsResave) *needsResave = true;
+    }
+    if (!ok && obfuscated[0] != '\0' && cred.password.empty()) {
+      // A saved password this device cannot read (card copied from another
+      // reader). Keeping it as an empty password would make the network look
+      // open and fail with "General failure"; without it, picking the network
+      // asks for the password.
+      LOG_INF("WCS", "Saved password for %s is from another device; asking again", cred.ssid.c_str());
+      continue;
     }
     store.credentials.push_back(cred);
   }

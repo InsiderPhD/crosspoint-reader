@@ -245,7 +245,7 @@ void EpubReaderBookmarksActivity::loop() {
     actionsHoldTriggered = false;
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: a long tap on a bookmark row opens that row's action list,
   // like the hold-Confirm above. The contact is suppressed so the lift does not
   // also count as a tap.

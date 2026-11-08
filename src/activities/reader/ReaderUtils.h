@@ -158,7 +158,7 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   const auto tilt = detectTiltPageTurn();
   const bool tiltNext = tilt.next;
   const bool tiltPrev = tilt.prev;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // X4 Pro: logical Left/Right are the side keys — the same physical keys as
   // PageBack/PageForward — so counting them here would double-match one press.
   // Swipe up/down (logical Up/Down) act as prev/next instead, matching the

@@ -41,7 +41,7 @@ class ReaderComboWizardActivity final : public Activity {
  private:
   enum class Step : uint8_t { Capture, PickAction };
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Paints the three tap zones across `area`, so a board whose chords are held
   // against the glass shows WHERE to hold. The dividers are drawn at the real
   // classification boundaries (thirds of the whole logical frame, along the

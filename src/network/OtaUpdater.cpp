@@ -39,6 +39,10 @@ constexpr char kFirmwareAssetName[] = "x4pro_firmware.bin";
 #elif FREEINK_DEVICE_X4CLASSIC
 // Same S3 chip as the X4 Pro, but a different board: its image is not the Pro's.
 constexpr char kFirmwareAssetName[] = "x4c_firmware.bin";
+#elif FREEINK_DEVICE_PICCO
+// No release ships this asset yet, so OTA reports NO_UPDATE rather than ever
+// offering an X3/X4 or X4 Pro image to this board.
+constexpr char kFirmwareAssetName[] = "picco_firmware.bin";
 #else
 constexpr char kFirmwareAssetName[] = "firmware.bin";
 #endif

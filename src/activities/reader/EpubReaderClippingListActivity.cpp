@@ -318,7 +318,7 @@ void EpubReaderClippingListActivity::loop() {
     deleteHoldTriggered = false;
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: a long tap on a list row is the hold-Confirm delete for that
   // row. Suppress the contact only when the delete actually ran, so a no-op
   // hold still falls through to the tap handling below.

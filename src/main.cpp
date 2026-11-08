@@ -44,6 +44,12 @@
 #include "images/LoadingIcon.h"
 #include "util/ButtonNavigator.h"
 #include "util/FrontlightScheduler.h"
+#if FREEINK_DEVICE_PICCO
+#include <esp_heap_caps.h>
+#include <esp_system.h>
+
+#include "util/FrontlightToggle.h"
+#endif
 #include "util/HardcoverSync.h"
 #include "util/HeapReport.h"
 #include "util/HeapTrace.h"
@@ -340,6 +346,101 @@ void putTiltSensorToSleepForDeepSleep() {
   }
   LOG_ERR("MAIN", "Tilt sensor did not confirm sleep before deep sleep");
 }
+
+#if FREEINK_DEVICE_PICCO
+// Sets the function bound to the slide switch (Reader Controls > Slide Switch,
+// one of CrossPointSettings::isSwitchableReaderAction) to the switch's position:
+// on = that function on. Runs at boot, on each move, and when the binding
+// changes. It compares the position with the last one APPLIED rather than
+// waiting for a change edge, so a move during sleep is caught at boot and a menu
+// toggle of the same function is left alone until the switch next moves.
+// Ported from upstream CrossPoint (#3947, #4234), remappable here.
+void handleSlideSwitch() {
+  static int appliedAction = -1;
+  static int appliedOn = -1;
+  if (!gpio.hasToggleSwitch()) return;
+  const bool on = gpio.isToggleSwitchOn();
+  const uint8_t action = SETTINGS.readerSlideSwitch;
+  if (appliedAction == action && appliedOn == static_cast<int>(on)) return;
+  appliedAction = action;
+  appliedOn = on;
+
+  switch (action) {
+    case CrossPointSettings::READER_ACTION_DARK_MODE: {
+      const uint8_t want = on ? CrossPointSettings::DARK_MODE_ON : CrossPointSettings::DARK_MODE_OFF;
+      if (SETTINGS.darkMode == want) return;
+      FrontlightScheduler::setDarkMode(want);  // arms the full refresh a polarity flip needs
+      break;
+    }
+    case CrossPointSettings::READER_ACTION_HIDE_STATUS_BAR: {
+      const uint8_t want = on ? 0 : 1;  // on = status bar shown
+      if (SETTINGS.statusBarHidden == want) return;
+      SETTINGS.statusBarHidden = want;
+      // The page re-centres at draw time (no reflow); the shift would ghost
+      // under a differential refresh.
+      display.requestResync(1);
+      break;
+    }
+    case CrossPointSettings::READER_ACTION_TOGGLE_PAGE_TURN_GESTURES: {
+      const uint8_t want = on ? 1 : 0;  // the action is "Disable Page-Turn Gestures"
+      if (SETTINGS.disablePageTurnGestures == want) return;
+      SETTINGS.disablePageTurnGestures = want;
+      break;
+    }
+    case CrossPointSettings::READER_ACTION_TOGGLE_FRONTLIGHT: {
+      if (!halFrontlight.present() || (SETTINGS.frontlightBrightness > 0) == on) return;
+      if (on) {
+        SETTINGS.frontlightBrightness = SETTINGS.frontlightLastBrightness > 0 ? SETTINGS.frontlightLastBrightness
+                                                                             : FrontlightToggle::FALLBACK_BRIGHTNESS;
+      } else {
+        SETTINGS.frontlightLastBrightness = SETTINGS.frontlightBrightness;
+        SETTINGS.frontlightBrightness = 0;
+      }
+      halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
+      break;
+    }
+    default:  // READER_ACTION_NONE: the switch does nothing
+      return;
+  }
+  SETTINGS.saveToFile();
+  activityManager.requestUpdate();
+  LOG_INF("SWITCH", "Slide switch %s -> action %u", on ? "on" : "off", action);
+}
+
+// Charge strip along the bottom of the retained sleep screen.
+void drawSleepChargeStrip(const bool charging, const uint16_t percent) {
+  RenderLock lock;
+  const int h = renderer.getLineHeight(SMALL_FONT_ID) + 12;
+  const int y = renderer.getScreenHeight() - h;
+  renderer.fillRect(0, y, renderer.getScreenWidth(), h, false);
+  char text[48];
+  snprintf(text, sizeof(text), "%s  %u%%", charging ? tr(STR_CHARGING) : tr(STR_CHARGED), percent);
+  renderer.drawCenteredText(SMALL_FONT_ID, y + 6, text);
+  renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+}
+
+// While USB powers the Picco, keep the sleep screen up in light sleep with a
+// charge strip, as stock does, instead of deep-sleeping (deep sleep cannot watch
+// the charger). The sleep frame is kept so unplugging can remove the strip: one
+// framebuffer (48 KB) in PSRAM, freed when the hold ends. Returns true when the
+// power button ended the hold. Ported from upstream CrossPoint (#3947).
+bool holdSleepWhileUsbPowered() {
+  if (!gpio.isUsbConnected()) return false;
+  const size_t frameSize = renderer.getBufferSize();
+  auto* const sleepFrame = static_cast<uint8_t*>(heap_caps_malloc(frameSize, MALLOC_CAP_SPIRAM));
+  if (sleepFrame) memcpy(sleepFrame, renderer.getFrameBuffer(), frameSize);
+  const bool buttonPressed = powerManager.holdWhileUsbPowered(gpio, drawSleepChargeStrip);
+  if (sleepFrame) {
+    if (!buttonPressed) {
+      RenderLock lock;
+      memcpy(renderer.getFrameBuffer(), sleepFrame, frameSize);
+      renderer.displayBuffer(HalDisplay::FAST_REFRESH);
+    }
+    heap_caps_free(sleepFrame);
+  }
+  return buttonPressed;
+}
+#endif
 }  // namespace
 
 // Enter deep sleep mode
@@ -399,6 +500,19 @@ void enterDeepSleep(bool fromTimeout) {
   HardcoverSync::pushBeforeSleep(renderer);
 
   halFrontlight.off();
+#if FREEINK_DEVICE_PICCO
+  if (holdSleepWhileUsbPowered()) {
+    // The power button ended the plugged-in hold: that press is a wake. Boot
+    // straight back up (the reader/home routing after a reset is the same as
+    // after a deep-sleep wake) rather than arming ext1 on a pin that is
+    // already held low.
+    LOG_INF("SLP", "Power button pressed during USB hold, restarting instead of sleeping");
+    esp_restart();
+  }
+  // TMA525C SET_POWER(SLEEP) and its pins pulled down; after the frontlight,
+  // which shares its I2C bus.
+  gpio.prepareForDeepSleep();
+#endif
   putTiltSensorToSleepForDeepSleep();
   display.deepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
@@ -555,6 +669,19 @@ void setup() {
 
   gpio.begin();
 
+#ifndef SIMULATOR
+  // The connect screens only see WL_CONNECT_FAILED ("General failure"); the
+  // driver's reason code says why (201 no AP, 202 auth fail, 15/204 handshake
+  // timeout, 2 auth expired...). One registration for the session.
+  WiFi.onEvent(
+      [](arduino_event_id_t, arduino_event_info_t info) {
+        LOG_INF("WIFI", "STA disconnected: reason %u, RSSI %d dBm",
+                static_cast<unsigned>(info.wifi_sta_disconnected.reason),
+                static_cast<int>(info.wifi_sta_disconnected.rssi));
+      },
+      ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+#endif
+
   // Lock in the runtime board profile right after hardware detection, before any
   // SDK driver reads BoardConfig::ACTIVE. The status-bar clock uses freeink::Rtc,
   // which reads the RTC address/bus from ACTIVE; without this, ACTIVE stays at the
@@ -628,9 +755,14 @@ void setup() {
   // restore the daytime level before the light comes up, not flash the night
   // level and correct it a loop later. No-op until the clock is trustworthy.
   FrontlightScheduler::evaluate();
+#if FREEINK_DEVICE_PICCO
+  // A switch moved during sleep is applied before the light comes up and before
+  // the first paint, so neither starts in the old state.
+  handleSlideSwitch();
+#endif
   halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
   ButtonNavigator::setMappedInputManager(mappedInputManager);
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   mappedInputManager.setRenderer(&renderer);
 #endif
 
@@ -729,7 +861,13 @@ void setup() {
   constexpr auto recoveryButton = HalGPIO::BTN_UP;
   constexpr const char* recoveryButtonName = "UP";
 #endif
-  if (wakeupReason == HalGPIO::WakeupReason::PowerButton) {
+  // The Picco has no second app slot to flash into (partitions_picco.csv).
+#if FREEINK_DEVICE_PICCO
+  constexpr bool recoveryAvailable = false;
+#else
+  constexpr bool recoveryAvailable = true;
+#endif
+  if (recoveryAvailable && wakeupReason == HalGPIO::WakeupReason::PowerButton) {
     // Refresh the cached button state a few times — isPressed() needs ~half a second to settle
     // after boot per the HalGPIO contract. Use a millis-based deadline so we always wait the full
     // settle window even if the loop body takes longer than expected on slow boots.
@@ -853,7 +991,7 @@ void loop() {
   const unsigned long loopStartTime = millis();
   static unsigned long lastMemPrint = 0;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Activities that own touch input (the readers' tap zones, the keyboard's
   // tap hit-testing) opt out of the global tap-anywhere-is-Confirm
   // convenience; every other screen — including the reader's own menus — gets
@@ -889,7 +1027,7 @@ void loop() {
   // into synthesized button presses.
   mappedInputManager.update();
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Home key off the reading screen is Home, on every screen including the
   // reader's own menus. (The reading screen dispatches its configurable
   // tap/double-tap/hold actions itself.) Already at Home it is a no-op rather
@@ -923,6 +1061,9 @@ void loop() {
     FrontlightScheduler::tick();
     if (SETTINGS.darkMode != darkBefore) activityManager.requestUpdate();
   }
+#if FREEINK_DEVICE_PICCO
+  handleSlideSwitch();
+#endif
 
   // Bluetooth HID maintenance: inactivity timeout and bonded-remote reconnect.
   // Cheap no-ops while Bluetooth is disabled.

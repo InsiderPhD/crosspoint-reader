@@ -20,7 +20,7 @@ class ConfirmationActivity : public Activity {
   int startY = 0;
   int lineHeight = 0;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // The X4 Pro has no bottom hint bar (buttonHintsHeight = 0), so the
   // Cancel/Confirm labels are drawn as real on-screen buttons instead, and
   // taps hit-test them. Geometry is deterministic from startY, shared by

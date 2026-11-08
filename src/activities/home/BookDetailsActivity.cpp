@@ -418,7 +418,7 @@ void BookDetailsActivity::loop() {
   if (!mappedInput.isPressed(MappedInputManager::Button::Confirm)) optionsHoldHandled = false;
   bool wantOptions = !optionsHoldHandled && mappedInput.isPressed(MappedInputManager::Button::Confirm) &&
                      mappedInput.getHeldTime() >= OPTIONS_HOLD_MS;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   {
     int lx, ly;
     if (mappedInput.wasTouchLongPressPoint(lx, ly)) {

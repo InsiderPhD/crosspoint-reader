@@ -905,8 +905,8 @@ bool PngToBmpConverter::pngFileToBmpStream(FsFile& pngFile, Print& bmpOut, bool 
 }
 
 bool PngToBmpConverter::pngFileToBmpStreamWithSize(FsFile& pngFile, Print& bmpOut, int targetMaxWidth,
-                                                   int targetMaxHeight) {
-  return pngFileToBmpStreamInternal(pngFile, bmpOut, targetMaxWidth, targetMaxHeight, false);
+                                                   int targetMaxHeight, bool crop) {
+  return pngFileToBmpStreamInternal(pngFile, bmpOut, targetMaxWidth, targetMaxHeight, false, crop);
 }
 
 bool PngToBmpConverter::pngFileTo1BitBmpStreamWithSize(FsFile& pngFile, Print& bmpOut, int targetMaxWidth,

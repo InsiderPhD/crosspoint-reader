@@ -329,7 +329,7 @@ void FileBrowserActivity::loop() {
       requestUpdate();
     });
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     // Full Touch: hit-test taps against the popup drawn by render(). Every
     // consumed path must swallow the Confirm this tap injected (its release
     // lands next frame): the close path via lockNextConfirmRelease is not
@@ -485,7 +485,7 @@ void FileBrowserActivity::loop() {
     }
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: only reached with no modal open (the sort menu and book
   // options blocks above return first).
   if (CrossPointSettings::FULL_TOUCH_UI && !files.empty()) {

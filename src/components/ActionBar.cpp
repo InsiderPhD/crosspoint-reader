@@ -1,6 +1,6 @@
 #include "ActionBar.h"
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 
 #include <GfxRenderer.h>
 #include <I18n.h>
@@ -172,4 +172,4 @@ void ActionBar::clear() {
   taskEXIT_CRITICAL(&slotsMux);
 }
 
-#endif  // FREEINK_DEVICE_X4PRO
+#endif  // FREEINK_CAP_TOUCH

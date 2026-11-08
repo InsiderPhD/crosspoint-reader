@@ -168,7 +168,7 @@ void BaseTheme::drawProgressBar(const GfxRenderer& renderer, Rect rect, const si
 }
 
 const ThemeMetrics& BaseTheme::themeMetrics() const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch turns the hint strip into the tappable action bar; gesture mode
   // draws nothing there and reclaims it. Out of line because the choice needs
   // SETTINGS, which the header must not pull in. UITheme caches the pointer
@@ -183,7 +183,7 @@ const ThemeMetrics& BaseTheme::themeMetrics() const {
 
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4, const bool allSlots) const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // No front buttons to label on the X4 Pro. In Full Touch the same four labels
   // become tap targets in the strip the metrics table reserved; in gesture mode
   // that height is 0 and ActionBar::draw draws nothing.
@@ -333,7 +333,7 @@ void BaseTheme::drawPowerButtonHint(GfxRenderer& renderer, const char* label) co
   // X4: Power button is on the right, above the Up/Down side hints. Vertical box,
   // label rotated 90° CW.
   const int x = screenWidth - buttonMargin - buttonWidth;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // X4 Pro: the side hints use the X3 placement (right-edge box at y=155), so anchor
   // just above that box — the X4's 345/140 anchor would land the power box on top of it.
   constexpr int sideHintsTopY = 155;

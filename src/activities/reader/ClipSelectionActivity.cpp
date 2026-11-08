@@ -43,7 +43,7 @@ ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputM
   if (preAnchored) {
     startMarkIdx = cursorIdx;
   }
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   if (adoptContact) {
     // Seed the drag tracker as though it had already seen this contact land on
     // the cursor word: touchWasHeld stops the first frame from re-reading the
@@ -142,7 +142,7 @@ void ClipSelectionActivity::loop() {
   const int total = static_cast<int>(wordList.words.size());
   using Button = MappedInputManager::Button;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Ahead of the buttons: while the finger that opened this screen is still
   // down, a side key or page-turn remote must not move the cursor out from
   // under the word it is holding.
@@ -173,7 +173,7 @@ void ClipSelectionActivity::loop() {
   buttonNavigator.onRelease({Button::Up}, [this, &moveCursor] { moveCursor(lineBackward(cursorIdx)); });
   buttonNavigator.onContinuous({Button::Up}, [this, &moveCursor] { moveCursor(lineBackward(cursorIdx)); });
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   if (selectMode) {
     // Touch is handleSelectTouch()'s alone; the buttons below still work.
   } else if (!lookupMode) {
@@ -247,7 +247,7 @@ void ClipSelectionActivity::loop() {
     // back to), so Back leaves.
     if (startMarkIdx != -1 && !selectMode) {
       startMarkIdx = -1;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
       startTapped = false;
 #endif
       requestUpdate();
@@ -261,7 +261,7 @@ void ClipSelectionActivity::loop() {
   }
 }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 bool ClipSelectionActivity::handleAdoptedContact() {
   if (!contactAdopted) return false;
 
@@ -685,7 +685,7 @@ void ClipSelectionActivity::render(RenderLock&&) {
 
   prewarmHighlightedWords();
   drawHighlights();
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // The toolbar is hidden while a finger is dragging either end of the range.
   if (selectMode) drawSelectOverlay(selectLayout(), !contactAdopted && selectDrag == SelectDrag::None);
 #endif

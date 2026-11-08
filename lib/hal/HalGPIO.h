@@ -124,12 +124,13 @@ class HalGPIO {
   // Should only be called when wakeup reason is PowerButton.
   void verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPressAllowed);
 
-  // Check if USB is connected. A direct hardware probe: ~1.5 ms blocking on the
+  // Check if a USB host is connected. A direct hardware probe: ~1.5 ms blocking on the
   // S3 boards, up to two fuel-gauge I2C reads on the X3. Use it for one-shot
   // boot decisions; anything on the loop or render path wants the cached getter.
   bool isUsbConnected() const;
 
-  // The latest sample update() took (refreshed at most once a second). Before
+  // The latest sample update() took (refreshed at most once a second). On the S3
+  // boards it also counts the charger STAT pin, so a wall charger shows. Before
   // the first update() it falls back to a direct probe, so setup-time callers
   // still report external power.
   bool isUsbConnectedCached() const;
@@ -179,6 +180,14 @@ class HalGPIO {
   // Level, not an edge: true while the home key is held. Needed because a
   // custom combo asks whether the key is down alongside another input.
   bool isHomeKeyDown() const;
+
+  // Two-position slide switch (Picco), read as a debounced level, not an edge.
+  bool hasToggleSwitch() const;
+  bool isToggleSwitchOn() const;
+
+  // Puts board input peripherals into their sleep state before deep sleep
+  // (Picco: TMA525C SET_POWER(SLEEP) and its pins pulled down). Inert elsewhere.
+  bool prepareForDeepSleep();
 
   // Live contact position while a finger is down (no tap-slop gate). Used for
   // gesture calibration and any future drag consumer.

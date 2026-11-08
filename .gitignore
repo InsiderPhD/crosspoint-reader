@@ -29,3 +29,7 @@ build
 
 # Desktop simulator sandboxed "SD card" (pio run -e simulator); books live in fs_/books/
 /fs_/
+
+# Full-flash dumps taken before the first upload (scripts/flash_backup.py).
+# They contain vendor firmware: never commit them.
+/device-backups/

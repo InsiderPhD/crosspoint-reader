@@ -1,5 +1,13 @@
 #pragma once
 
+// The touch UI is gated on FREEINK_CAP_TOUCH across src/, including in headers
+// that declare class members (this one among them) and can be parsed before
+// BoardConfig.h derives the flag. A touch env must therefore pass it on the
+// command line, or translation units would disagree on class layouts.
+#if (FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_PICCO) && !FREEINK_CAP_TOUCH
+#error "Touch boards must build with -DFREEINK_CAP_TOUCH=1 (see [env:x4pro] / [env:picco])"
+#endif
+
 #include <HalGPIO.h>
 
 class GfxRenderer;
@@ -17,7 +25,7 @@ class MappedInputManager {
 
   explicit MappedInputManager(HalGPIO& gpio) : gpio(gpio) {}
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Screen tap zones: thirds of the logical frame, cut along the axis chosen by
   // SETTINGS.readerTapZoneLayout. The names follow the default SIDES layout
   // (columns); under TAP_ZONES_TOP_BOTTOM the same three zones become bands and
@@ -157,7 +165,7 @@ class MappedInputManager {
   // X4 Pro (the plugin screens behind CROSSPOINT_SD_PLUGINS, TouchListNav)
   // need no #if of their own: on a board without a digitizer these fold away
   // to constants, so the touch branches cost nothing there.
-#if !FREEINK_DEVICE_X4PRO
+#if !FREEINK_CAP_TOUCH
   // Mirrors the X4 Pro declaration above; always None without a digitizer.
   enum class Swipe : uint8_t { None, Up, Down, Right };
   Swipe wasSwipe() const { return Swipe::None; }
@@ -167,7 +175,7 @@ class MappedInputManager {
   // True when the board has a touch digitizer. Screens gate touch-only
   // affordances on it and keep their button-hint chrome otherwise.
   bool hasTouch() const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     return gpio.hasTouch();
 #else
     return false;
@@ -177,7 +185,7 @@ class MappedInputManager {
   // Completed screen tap this frame in logical screen coordinates. Thin
   // board-neutral name for wasTapPoint(); false on a board without touch.
   bool wasScreenTapped(int& x, int& y) const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     return wasTapPoint(x, y);
 #else
     (void)x;
@@ -189,7 +197,7 @@ class MappedInputManager {
   // "Go home" gesture: a short home-key tap on the X4 Pro (the bottom-edge
   // swipe is deliberately unused); boards without the key have none.
   bool wasHomeGesture() const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     return homeGesture == HomeKeyGesture::Tap;
 #else
     return false;
@@ -200,7 +208,7 @@ class MappedInputManager {
   // logical coordinates as wasScreenTapped(). Consuming it obliges the caller
   // to suppressTouchContact() — see wasTouchLongPressPoint().
   bool wasScreenLongPress(int& x, int& y) const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     return wasTouchLongPressPoint(x, y);
 #else
     (void)x;
@@ -212,7 +220,7 @@ class MappedInputManager {
   // Board-neutral suppressTouchContact(), owed after wasScreenLongPress(); a
   // no-op on a board without a digitizer.
   void suppressScreenContact() const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     suppressTouchContact();
 #endif
   }
@@ -238,7 +246,7 @@ class MappedInputManager {
 
   void update() const {
     gpio.update();
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     processTouchInput();
 #endif
   }
@@ -266,7 +274,7 @@ class MappedInputManager {
  private:
   HalGPIO& gpio;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   const GfxRenderer* renderer = nullptr;
   bool homeKeyDoubleTap = false;
   // Written by processTouchInput() via resolveHomeKeyGesture().

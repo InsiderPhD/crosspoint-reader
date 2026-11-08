@@ -287,6 +287,13 @@ Result flashFromSdPath(const char* sdPath, ProgressCb onProgress, void* ctx, boo
     LOG_ERR("FLASH", "no next-update partition");
     return Result::NO_PARTITION;
   }
+  // A table with a single OTA slot (the Picco's stock layout) makes IDF hand
+  // back the RUNNING partition as the "next" one. Raw-writing over the image
+  // we are executing from would brick the device, so refuse outright.
+  if (dest == esp_ota_get_running_partition()) {
+    LOG_ERR("FLASH", "next-update partition is the running app (single-slot table); refusing");
+    return Result::NO_PARTITION;
+  }
 
   // When the caller already ran validateImageFile() against this same partition
   // size (e.g. SdFirmwareUpdateActivity validates before the confirmation

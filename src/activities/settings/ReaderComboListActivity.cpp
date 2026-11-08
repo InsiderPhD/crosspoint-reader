@@ -124,7 +124,7 @@ void ReaderComboListActivity::render(RenderLock&&) {
   // area: the bottom strip there belongs to the page counter.
   const int helpTop = listRect().y + kRowCount * metrics.listRowHeight + 2 * metrics.verticalSpacing;
   GUI.drawHelpText(renderer, Rect{0, helpTop, pageWidth, 20}, tr(STR_COMBO_CLEAR_HINT));
-#if !FREEINK_DEVICE_X4PRO
+#if !FREEINK_CAP_TOUCH
   // The front four share one ADC ladder and Up/Down another, so no chord can
   // hold two keys from the same group (see ReaderCombos::sharesLadder). Said up
   // front so nobody discovers it one rejected capture at a time.

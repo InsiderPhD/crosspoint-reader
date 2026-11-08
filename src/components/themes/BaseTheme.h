@@ -140,7 +140,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeRecentBooksCount = 1,
                                  .homeBackfillFromLibrary = false,
                                  .homePinnedBooks = false,
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
                                  // X4 Pro has no front buttons, so this strip holds the tappable
                                  // action bar instead of four button labels (see ActionBar.h).
                                  // A touch target wants more than the 40px a label needed.
@@ -168,7 +168,7 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .keyboardWidthPercent = 90,
                                  .keyboardKeyCornerRadius = 0};
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 // Gesture mode (Full Touch off): nothing is drawn in the hint strip, so screens
 // reclaim it. BaseTheme::themeMetrics() picks between the two at runtime, which
 // is why it is defined out of line -- the choice needs SETTINGS.

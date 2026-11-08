@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <BoardConfig.h>
 #include <HalFrontlight.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -10,6 +11,7 @@
 #include <Serialization.h>
 
 #include <cstring>
+#include <initializer_list>
 #include <string>
 
 #include "SettingsCompat.h"
@@ -362,7 +364,7 @@ void CrossPointSettings::sanitizeFrontlightSchedules(CrossPointSettings& setting
 
 bool CrossPointSettings::isUnavailableReaderAction(const uint8_t action) {
   if (action == READER_ACTION_TOGGLE_FRONTLIGHT) return !halFrontlight.present();
-#if !FREEINK_DEVICE_X4PRO
+#if !FREEINK_CAP_TOUCH
   // Only the X4 Pro has page-turn taps and swipes to pause.
   if (action == READER_ACTION_TOGGLE_PAGE_TURN_GESTURES) return true;
 #endif
@@ -620,6 +622,7 @@ bool CrossPointSettings::loadOwnFile() {
   // on a "migrated" flag a loaded file already carries, so a normal boot writes
   // nothing.
   if (migrateReaderActions(*this)) resave = true;
+  if (ensureReaderEscape()) resave = true;
   if (resave) {
     if (saveToFile()) {
       LOG_DBG("CPS", "Resaved settings to update format");
@@ -668,6 +671,7 @@ bool CrossPointSettings::importLegacyJson() {
     }
   }
   if (!loaded) return false;
+  ensureReaderEscape();
   if (!saveToFile()) LOG_ERR("CPS", "Failed to save imported settings to %s", SETTINGS_FILE);
   return true;
 }
@@ -970,4 +974,57 @@ const char* CrossPointSettings::legacySleepThemeFor(const uint8_t mode) {
     default:
       return "dark";
   }
+}
+
+bool CrossPointSettings::hasReaderEscape() const {
+  const auto anyEscape = [](std::initializer_list<uint8_t> actions) {
+    for (const uint8_t action : actions) {
+      if (isReaderEscapeAction(action)) return true;
+    }
+    return false;
+  };
+  // Side keys and Power exist on every board.
+  if (anyEscape({readerShortPressSideUp, readerLongPressSideUp, readerShortPressSideDown, readerLongPressSideDown,
+                 readerShortPressPower})) {
+    return true;
+  }
+#if FREEINK_CAP_TOUCH
+  // Full Touch: the front slots are the action bar and the horizontal swipe,
+  // taps only (their long-press rows are hidden). The home-key tap is also the
+  // Picco's bottom-edge swipe up (MappedInputManager::processTouchInput).
+  if (anyEscape({readerShortPressBack, readerShortPressConfirm, readerShortPressLeft, readerShortPressRight,
+                 readerTapLeft, readerTapMiddle, readerTapRight, readerShortPressHome})) {
+    return true;
+  }
+  if (readerHoldMode == READER_HOLD_SHORTCUT && anyEscape({readerHoldLeft, readerHoldMiddle, readerHoldRight})) {
+    return true;
+  }
+  if (BoardConfig::hasHomeKey()) {
+    // The home-key hold is hard-wired to the book menu (effectiveReaderLongPressHome).
+    return true;
+  }
+#else
+  if (anyEscape({readerShortPressBack, readerLongPressBack, readerShortPressConfirm, readerLongPressConfirm,
+                 readerShortPressLeft, readerLongPressLeft, readerShortPressRight, readerLongPressRight})) {
+    return true;
+  }
+#endif
+  for (uint8_t slot = 0; slot < READER_COMBO_SLOTS; slot++) {
+    if (readerComboButtons[slot] != 0 && isReaderEscapeAction(readerComboAction[slot])) return true;
+  }
+  return false;
+}
+
+bool CrossPointSettings::ensureReaderEscape() {
+  if (hasReaderEscape()) return false;
+#if FREEINK_DEVICE_PICCO
+  // Power is the Picco's only front-facing control that never moves.
+  readerShortPressPower = READER_ACTION_OPEN_MENU;
+#elif FREEINK_CAP_TOUCH
+  readerTapMiddle = READER_ACTION_OPEN_MENU;
+#else
+  readerShortPressConfirm = READER_ACTION_OPEN_MENU;
+#endif
+  LOG_INF("CPS", "No reader control opened the menu or left the book; restored one");
+  return true;
 }

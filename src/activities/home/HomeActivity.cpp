@@ -52,24 +52,41 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
   if (metrics.homePinnedBooks) loadPinnedBooks(maxBooks);
   const int pinnedCount = static_cast<int>(recentBooks.size());
 
+  // The selector starts on the most recently read book, wherever it sits: a
+  // pinned one keeps its slot at the left end of the shelf, so the selector
+  // goes there rather than to the first unpinned recent.
+  bool selectorPlaced = false;
   const auto& books = RECENT_BOOKS.getBooks();
   for (const RecentBook& book : books) {
-    // Limit to maximum number of recent books
-    if (recentBooks.size() >= maxBooks) {
-      break;
-    }
-
     // Skip if file no longer exists
     if (RecentBooksStore::isMissing(book)) {
       continue;
     }
 
-    // A pinned book that is also a recent is already on the shelf.
+    // A pinned book that is also a recent is already on the shelf. Checked
+    // before the slot limit so a full shelf of pins still places the selector.
     if (pinnedCount > 0 && RECENT_BOOKS.isPinned(book.path)) {
+      if (!selectorPlaced) {
+        for (int i = 0; i < pinnedCount; ++i) {
+          if (recentBooks[i].path == book.path) {
+            homeSelectorIndex = i;
+            selectorPlaced = true;
+            break;
+          }
+        }
+      }
       continue;
     }
 
-    if (recentBooks.size() == static_cast<size_t>(pinnedCount)) homeSelectorIndex = pinnedCount;
+    // Limit to maximum number of recent books
+    if (recentBooks.size() >= maxBooks) {
+      break;
+    }
+
+    if (!selectorPlaced) {
+      homeSelectorIndex = static_cast<int>(recentBooks.size());
+      selectorPlaced = true;
+    }
     recentBooks.push_back(book);
   }
 
@@ -560,7 +577,7 @@ void HomeActivity::loop() {
     return;
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: a touch hold targets the tile under the finger — move the
   // selector there first so checkLongPress below (which reads the same touch
   // event and suppresses the contact) opens the menu for that book.
@@ -592,7 +609,7 @@ void HomeActivity::loop() {
     }
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: horizontal swipes step through the cover slots, wrapping — the
   // carousel gesture, and useful on any multi-cover home.
   //
@@ -655,7 +672,7 @@ void HomeActivity::loop() {
   }
 }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 bool HomeActivity::rotateCoverSelection(const int delta) {
   const int coverCount = static_cast<int>(recentBooks.size());
   if (coverCount <= 1) return false;

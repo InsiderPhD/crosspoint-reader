@@ -49,7 +49,7 @@ class GfxRenderer;
 // ghost targets behind.
 namespace ActionBar {
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 
 // Slot -> logical button, matching MappedInputManager::mapLabels' four
 // arguments in order.

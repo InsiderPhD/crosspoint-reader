@@ -221,7 +221,7 @@ void EpubReaderMenuActivity::loop() {
     requestUpdate();
   });
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: a vertical swipe turns a page of the menu, same as the
   // paginated list screens (inert while the whole menu fits on one page).
   if (TouchListNav::pageSwipe(mappedInput, static_cast<int>(menuItems.size()), visibleMenuRows(), selectedIndex)) {

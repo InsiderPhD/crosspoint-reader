@@ -6,7 +6,9 @@
 HalFrontlight halFrontlight;  // Singleton instance
 
 void HalFrontlight::begin() {
-  if (!_manager.present()) {
+  // An I2C LED driver (Picco) only reports present() once begin() has had an
+  // ACK from it, so those boards must reach begin() before the check.
+  if (!_manager.present() && !BoardConfig::hasI2cFrontlight()) {
     return;
   }
   // parkForDeepSleep() latched the pads with gpio_hold_en(), and that hold
@@ -19,6 +21,10 @@ void HalFrontlight::begin() {
     if (pin >= 0) gpio_hold_dis(static_cast<gpio_num_t>(pin));
   }
   _manager.begin();
+  if (!_manager.present()) {
+    LOG_ERR("FLIGHT", "Frontlight driver did not answer on I2C");
+    return;
+  }
   _begun = true;
   LOG_INF("FLIGHT", "Frontlight ready (%s)", _manager.hasColorTemperature() ? "warm/cool" : "single channel");
 }
@@ -27,8 +33,11 @@ void HalFrontlight::apply(uint8_t brightnessPercent, uint8_t warmthPercent) {
   if (!_manager.present()) {
     return;
   }
-  _manager.setColorTemperature(warmthPercent);
+  // Brightness first: on the Picco's I2C LED driver a warmth write applied at
+  // brightness 0 is an off write, which puts the driver in standby right before
+  // the on write (upstream CrossPoint 8f4d035cb).
   _manager.setBrightness(brightnessPercent);
+  _manager.setColorTemperature(warmthPercent);
 }
 
 void HalFrontlight::off() {

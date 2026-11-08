@@ -34,7 +34,7 @@ namespace TouchListNav {
 
 enum class TapResult { None, SelectionMoved, Activated };
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 // The single two-tap vs one-tap decision for every Full Touch surface, including
 // the hand-rolled hit-tests (popups, Home tiles, Library grid, chapter lists).
 // With Yolo Selection on, any hit activates; otherwise only a tap on the item

@@ -27,7 +27,7 @@ bool SortMenu::checkTrigger(const MappedInputManager& input, SortMode current, c
   // Open with the cursor on the active field when it's offered here; otherwise start at the top.
   const int idx = optionIndexOf(current);
   cursorIndex_ = (idx >= 0) ? idx : 0;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   popupRectValid_ = false;  // stale from a previous open until render() runs
   dismissOnNextConfirm_ = false;
   swallowNextConfirm_ = false;
@@ -41,7 +41,7 @@ bool SortMenu::handleInput(ButtonNavigator& nav, const MappedInputManager& input
   nav.onNext([this] { cursorIndex_ = (cursorIndex_ + 1) % optionCount_; });
   nav.onPrevious([this] { cursorIndex_ = (cursorIndex_ - 1 + optionCount_) % optionCount_; });
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: a tap outside the popup closes the menu (committing the staged
   // choice, same as Back); a tap on an unselected field row moves the cursor
   // there (two-tap); a tap on the cursor's row stays with the injected Confirm
@@ -71,7 +71,7 @@ bool SortMenu::handleInput(ButtonNavigator& nav, const MappedInputManager& input
 #endif
 
   if (input.wasReleased(MappedInputManager::Button::Confirm)) {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     if (dismissOnNextConfirm_) {
       dismissOnNextConfirm_ = false;
       if (outMode) *outMode = chosen_;
@@ -114,7 +114,7 @@ void SortMenu::render(GfxRenderer& renderer) const {
   constexpr int BORDER = 2;
   constexpr int H_PAD = 14;
   constexpr int HEADER_H = 34;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   constexpr int OPTION_H = OPTION_ROW_H;  // shared with handleInput's tap-row mapping
 #else
   constexpr int OPTION_H = 30;
@@ -127,7 +127,7 @@ void SortMenu::render(GfxRenderer& renderer) const {
   const int px = (pageWidth - POPUP_W) / 2;
   const int py = (pageHeight - POPUP_H) / 2;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Cache the popup bounds for handleInput's tap handling.
   popupX_ = px;
   popupY_ = py;
@@ -162,7 +162,7 @@ void SortMenu::render(GfxRenderer& renderer) const {
 void SortMenu::close() {
   showing_ = false;
   cursorIndex_ = 0;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   popupRectValid_ = false;
   dismissOnNextConfirm_ = false;
   swallowNextConfirm_ = false;

@@ -130,6 +130,14 @@ void SleepActivity::renderThemeSleepScreen(const bool greyscale) const {
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
   }
 
+#if FREEINK_DEVICE_PICCO
+  // On USB power the Picco keeps this frame up and redraws a charge strip over
+  // it in B/W (main.cpp, holdSleepWhileUsbPowered). The grey passes below leave
+  // plane data in the framebuffer, so keep the B/W frame (PSRAM board, 48 KB)
+  // and put it back afterwards. Without it, skip the grey: the base stands.
+  if (!renderer.storeBwBuffer()) return;
+#endif
+
   renderer.clearScreen(0x00);
   renderer.setRenderMode(GfxRenderer::GRAYSCALE_LSB);
   SleepThemeRenderer::drawGreyImages(renderer, grey);
@@ -143,6 +151,9 @@ void SleepActivity::renderThemeSleepScreen(const bool greyscale) const {
   // displayGrayBuffer powers the rails off.
   renderer.displayGrayBuffer();
   renderer.setRenderMode(GfxRenderer::BW);
+#if FREEINK_DEVICE_PICCO
+  renderer.restoreBwBuffer();
+#endif
 }
 
 void SleepActivity::renderDefaultSleepScreen() const {

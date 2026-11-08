@@ -27,6 +27,13 @@ struct Rect;
  * deletes it). Themes are compiled per panel size, so only the build for this
  * device's screen is fetched, and a theme without one is not listed.
  *
+ * Preview: Confirm on a theme that would download (new or out of date) first
+ * shows the store's preview.png for this device's build (a screenshot the
+ * store's CI renders beside the build; not one of the theme's files), with
+ * Back / Download. The PNG lands on the SD card, is converted once to a BMP
+ * fitted to the preview area, and is deleted again when the preview closes.
+ * A missing or undecodable preview says so and still offers the download.
+ *
  * Updates: each build has a version (a hash of its files) that an install
  * records in the theme's store.ver. An installed theme whose version differs
  * (or that has none: installed by hand or by older firmware) is listed as
@@ -45,12 +52,20 @@ class SleepThemeDownloadActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
-  bool preventAutoSleep() override { return state_ == LOADING_CATALOG || state_ == DOWNLOADING; }
+  bool preventAutoSleep() override {
+    return state_ == LOADING_CATALOG || state_ == DOWNLOADING || state_ == PREVIEW_LOADING;
+  }
   bool skipLoopDelay() override { return true; }
   // As in DictionaryDownloadActivity: the list hit-tests taps itself, and the
   // delete confirmation must not be answerable by a stray tap.
   bool handlesDirectTouch() const override {
-    return (state_ == CATALOG_LIST && !entries_.empty()) || state_ == CONFIRM_DELETE || state_ == DOWNLOADING;
+    return (state_ == CATALOG_LIST && !entries_.empty()) || state_ == CONFIRM_DELETE || state_ == DOWNLOADING ||
+           state_ == PREVIEW_LOADING || state_ == PREVIEW;
+  }
+  // The preview's Download is only reachable from the action bar (a tap on the
+  // picture does nothing), so its Confirm slot must stay.
+  bool tapActivatesConfirm() const override {
+    return handlesDirectTouch() && state_ != PREVIEW_LOADING && state_ != PREVIEW;
   }
 
   // Public: the streaming catalog parser (.cpp) fills these as the body arrives.
@@ -75,6 +90,8 @@ class SleepThemeDownloadActivity final : public Activity {
     LOADING_CATALOG,
     CATALOG_LIST,
     CONFIRM_DELETE,
+    PREVIEW_LOADING,  // fetching + converting the selected theme's preview.png
+    PREVIEW,          // preview on screen: Back / Download
     DOWNLOADING,
     COMPLETE,
     ERROR,
@@ -92,6 +109,9 @@ class SleepThemeDownloadActivity final : public Activity {
   size_t currentFileTotal_ = 0;
   int downloadingIndex_ = -1;
   std::string errorMessage_;
+  // PREVIEW: whether the fitted preview BMP is on the card (false = show the
+  // "no preview" line instead).
+  bool previewReady_ = false;
 
   // Latched from the transfer's progress callback on Back; read by
   // HttpDownloader once per chunk. Single task, no ISR.
@@ -106,6 +126,14 @@ class SleepThemeDownloadActivity final : public Activity {
   void updateAll();
   void deleteSelected();
   void activateSelected();
+  // Fetches + converts the selected entry's preview, then shows PREVIEW (or
+  // returns to the list if Back cancelled the fetch).
+  void openPreview(const CatalogEntry& entry);
+  bool fetchPreview(const CatalogEntry& entry);
+  // Removes the preview's scratch files.
+  static void discardPreview();
+  // The fitted preview picture's box: the list body, inset.
+  Rect previewRect() const;
   // Polls input mid-transfer and latches cancelRequested_ on Back. Runs with
   // the render lock held: it must never render or request an update.
   void pollForCancel();

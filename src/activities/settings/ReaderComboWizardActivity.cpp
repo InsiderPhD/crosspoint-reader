@@ -25,13 +25,13 @@ constexpr size_t COMBO_TEXT_LEN = 64;
 // What to hold, and how to get out, both depend on what the board actually
 // has: front buttons on the X3/X4, two side keys plus the screen on the X4 Pro.
 const char* kPrompt() {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   return tr(STR_COMBO_PROMPT_TOUCH);
 #else
   return tr(STR_COMBO_PROMPT);
 #endif
 }
-#if !FREEINK_DEVICE_X4PRO
+#if !FREEINK_CAP_TOUCH
 // X3/X4 only: those boards draw no hint bar here (every front button is a
 // capture target), so the way out has to be said in words. The X4 Pro shows a
 // real Back button instead.
@@ -103,7 +103,7 @@ void ReaderComboWizardActivity::loop() {
   // The picker is on top of us; nothing here runs until it returns.
   if (step == Step::PickAction) return;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // The way out on a board with no front buttons: the action bar's Back slot,
   // or the left swipe that injects the same press. Checked before `armed` so a
   // user who cannot work out what to hold is never stuck on this screen.
@@ -128,7 +128,7 @@ void ReaderComboWizardActivity::loop() {
   }
 
   if (live != 0) {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     // A finger that crosses from one third into another is a swipe, not a grip,
     // and unioning its zones would record a chord of all three. heldTouchZone()
     // has no tap-slop gate — it follows a moving finger — so this screen owns
@@ -180,7 +180,7 @@ void ReaderComboWizardActivity::loop() {
   restartCapture(tr(STR_COMBO_NEED_TWO));
 }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 void ReaderComboWizardActivity::drawZoneMap(const Rect& area) const {
   if (area.height <= 0) return;
 
@@ -260,7 +260,7 @@ void ReaderComboWizardActivity::render(RenderLock&&) {
   const int topOffset = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
   const int contentHeight = pageHeight - topOffset - metrics.buttonHintsHeight - metrics.verticalSpacing;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // The chord is held against the glass here, so the content area IS the thing
   // being configured: the zone map takes it, and what has been captured so far
   // moves up beside the prompt.
@@ -289,7 +289,7 @@ void ReaderComboWizardActivity::render(RenderLock&&) {
   }
 #endif
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // The one slot this screen can honestly offer, drawn in the board's normal
   // lone-Back shape. Back is not capturable here, unlike on the X3/X4 where
   // every front button is a capture target and labelling them would be a lie,

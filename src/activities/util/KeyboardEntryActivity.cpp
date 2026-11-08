@@ -231,7 +231,7 @@ KeyboardEntryActivity::KeyGrid KeyboardEntryActivity::computeKeyGrid(const int f
   return g;
 }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 bool KeyboardEntryActivity::hitTestKey(const int lx, const int ly, int& row, int& col) const {
   const KeyGrid g = computeKeyGrid(renderedKeyboardStartY);
 
@@ -381,7 +381,7 @@ void KeyboardEntryActivity::mapColContentBottom(int& col, bool goingUp) const {
 void KeyboardEntryActivity::loop() {
   const int totalRows = getTotalRowCount();
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Direct tap-to-type. Handled before the button paths: a consumed tap already
   // pressed a key, and Ok may have finished the activity.
   if (!handleTouchInput()) {
@@ -762,7 +762,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   const KeyGrid grid = computeKeyGrid(inputStartY + inputHeight + lineHeight + metrics.verticalSpacing);
   const int keyboardStartY = grid.startY;
   const int keyWidth = grid.keyWidth;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Publish the drawn origin so touch hit-testing can reproduce this layout
   // even under a theme whose origin depends on the measured input height.
   renderedKeyboardStartY = keyboardStartY;

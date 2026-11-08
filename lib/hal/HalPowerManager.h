@@ -73,6 +73,15 @@ class HalPowerManager {
   // rather than falling back into loop() (see the implementation).
   [[noreturn]] void startDeepSleep(HalGPIO& gpio) const;
 
+#if FREEINK_DEVICE_PICCO
+  // While USB powers the device, light-sleep instead of deep sleep (deep sleep
+  // cannot observe the charger), calling onStatus whenever the charging state
+  // or percentage changes. Returns true when the power button ended the hold,
+  // false when USB went away or was never present. Ported from upstream
+  // CrossPoint (#3947): stock Onyx firmware shows charge progress the same way.
+  bool holdWhileUsbPowered(HalGPIO& gpio, void (*onStatus)(bool charging, uint16_t percent)) const;
+#endif
+
   // Whether the PREVIOUS boot ended in a rejected deep-sleep entry, and the
   // wake state captured at that moment. Clears the record, so it is reported
   // once. Ported from freeink-sdk d37a158, which fixes the same busy-loop in

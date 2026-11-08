@@ -304,7 +304,7 @@ inline void appendControlSettings(SettingSink& v) {
   v.push_back(SettingInfo::Toggle(StrId::STR_FRONT_BTN_FOLLOW_ORIENTATION,
                                   &CrossPointSettings::frontButtonFollowOrientation,
                                   "frontButtonFollowOrientation"
-#if !FREEINK_DEVICE_X4PRO
+#if !FREEINK_CAP_TOUCH
                                   // No front buttons on X4 Pro: keep the JSON key round-tripping
                                   // but hide the toggle (no category = hidden from UI).
                                   ,
@@ -313,7 +313,7 @@ inline void appendControlSettings(SettingSink& v) {
                                   ));
   v.push_back(SettingInfo::Toggle(StrId::STR_YOLO_SELECTION, &CrossPointSettings::yoloSelection,
                                   "yoloSelection"
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
                                   // Only meaningful under Full Touch, which is X4 Pro only.
                                   ,
                                   StrId::STR_CAT_SYSTEM

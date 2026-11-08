@@ -25,7 +25,7 @@
 #include "fontIds.h"
 
 const ThemeMetrics& LyraCarouselTheme::themeMetrics() const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // See BaseTheme::themeMetrics().
   return CrossPointSettings::FULL_TOUCH_UI ? LyraCarouselMetrics::values : LyraCarouselMetrics::noActionBarValues;
 #else

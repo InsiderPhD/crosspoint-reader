@@ -261,7 +261,7 @@ bool EpubReaderActivity::handleFootnoteSelectInput() {
       }
       return true;
     }
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     if (mappedInput.homeKeyGesture() != MappedInputManager::HomeKeyGesture::None) {
       cancelFootnoteSelect();
       return true;
@@ -271,7 +271,7 @@ bool EpubReaderActivity::handleFootnoteSelectInput() {
 
   // Every directional control steps, the side keys (and so a page-turn remote)
   // included: while the highlight is up they choose a footnote, not a page.
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   constexpr bool swapFront = false;
 #else
   const bool swapFront =

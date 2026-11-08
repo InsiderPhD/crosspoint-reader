@@ -1,6 +1,6 @@
 #include "SwipeToDelete.h"
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 
 #include <GfxRenderer.h>
 #include <I18n.h>

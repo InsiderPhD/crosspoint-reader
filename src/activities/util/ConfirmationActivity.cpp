@@ -49,12 +49,12 @@ void ConfirmationActivity::render(RenderLock&& lock) {
   }
 
   // Draw UI Elements
-#if !FREEINK_DEVICE_X4PRO
+#if !FREEINK_CAP_TOUCH
   const auto labels = mappedInput.mapLabels("", "", I18N.get(StrId::STR_CANCEL), I18N.get(StrId::STR_CONFIRM));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 #endif
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // No hint bar on the X4 Pro: draw Cancel/Confirm as real buttons. Left key =
   // Cancel = left button, right key = Confirm = right button; in Full Touch
   // they are also tap targets.
@@ -84,7 +84,7 @@ void ConfirmationActivity::render(RenderLock&& lock) {
   renderer.displayBuffer(HalDisplay::RefreshMode::FAST_REFRESH);
 }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 int ConfirmationActivity::buttonsY() const {
   int contentBottom = startY;
   if (!safeHeading.empty()) contentBottom += lineHeight + spacing;
@@ -101,7 +101,7 @@ void ConfirmationActivity::finishWith(const bool cancelled) {
 #endif
 
 void ConfirmationActivity::loop() {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Taps land on the drawn buttons. In Full Touch mode a tap anywhere else on
   // the screen is Cancel (dialogs must never confirm by accident); in gesture
   // mode a stray tap stays a no-op, matching the old hint-bar behavior.

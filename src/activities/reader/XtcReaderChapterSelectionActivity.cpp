@@ -79,7 +79,7 @@ void XtcReaderChapterSelectionActivity::loop() {
   const int pageItems = getPageItems();
   const int totalItems = static_cast<int>(xtc->getChapters().size());
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: first tap on a row moves the cursor there; a second tap on the
   // already-selected row jumps to the chapter. Rows are page-relative, so the
   // tapped item is the current page start plus the row.

@@ -311,7 +311,7 @@ void OpdsBookBrowserActivity::loop() {
   }
 
   if (state == BrowserState::BROWSING) {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     // Full Touch: first tap on a row moves the cursor there; a second tap on the
     // already-selected row opens (or downloads) it. Rows are page-relative, so
     // the tapped entry is the current page start plus the row.

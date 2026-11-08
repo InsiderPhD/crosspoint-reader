@@ -33,7 +33,7 @@
 #include "fontIds.h"
 
 const ThemeMetrics& BookshelfTheme::themeMetrics() const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // See BaseTheme::themeMetrics().
   return CrossPointSettings::FULL_TOUCH_UI ? BookshelfMetrics::values : BookshelfMetrics::noActionBarValues;
 #else

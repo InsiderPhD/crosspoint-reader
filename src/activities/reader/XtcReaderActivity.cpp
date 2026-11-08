@@ -71,7 +71,7 @@ void XtcReaderActivity::rememberBookOnceRendered(const bool renderLockHeld) {
 // still held as consumed so that press's release doesn't run a reader action.
 void XtcReaderActivity::onResume() {
   longPressBackFired = mappedInput.isPressed(MappedInputManager::Button::Back);
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // The Left/Right action slots dispatch on logical Up/Down (swipes) here.
   longPressLeftFired = mappedInput.isPressed(MappedInputManager::Button::Up);
   longPressRightFired = mappedInput.isPressed(MappedInputManager::Button::Down);
@@ -295,7 +295,7 @@ void XtcReaderActivity::loop() {
     if (executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(SETTINGS.readerShortPressBack))) return;
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // X4 Pro: Left/Right action slots belong to the swipe-up/swipe-down gestures
   // (logical Up/Down); the side keys are handled by the Side Up/Down blocks.
   // See EpubReaderActivity for the identical gating.
@@ -405,7 +405,7 @@ void XtcReaderActivity::loop() {
     }
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // ── Tap-and-hold zones (configurable; actions XTC lacks are no-ops) ───────
   // Runs before the tap zones: a hold fires while the finger is still down, and
   // suppressing the contact stops the lift from also firing a tap-zone action.

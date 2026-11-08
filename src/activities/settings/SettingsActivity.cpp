@@ -152,7 +152,7 @@ void SettingsActivity::onEnter() {
   }
 
   // Append device-only ACTION items — button remap goes first in System
-#if !FREEINK_DEVICE_X4PRO
+#if !FREEINK_CAP_TOUCH
   // X4 Pro has no front buttons; the remap wizard would wait forever for
   // presses that cannot happen.
   systemSettings.insert(systemSettings.begin(),
@@ -177,8 +177,12 @@ void SettingsActivity::onEnter() {
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_PLUGINS, SettingAction::Plugins));
 #endif
+#if !FREEINK_DEVICE_PICCO
+  // The Picco keeps Onyx's stock partition table (partitions_picco.csv), which
+  // has one app slot, so it cannot update itself; it is flashed over USB.
   systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
+#endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BATTERY, SettingAction::Battery));
   // Release Notes: reopens the What's New shown once after an update.
@@ -277,7 +281,7 @@ void SettingsActivity::onExit() {
 void SettingsActivity::loop() {
   bool hasChangedCategory = false;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Full Touch: a tap on a tab selects that category directly; a tap on a row
   // selects and toggles/activates it. Both hit-tests need the raw point, so
   // this reads wasTapPoint directly instead of the TouchListNav helper.
@@ -339,7 +343,7 @@ void SettingsActivity::loop() {
   }
 
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     // Full Touch: Back closes outright, like it does on every other screen and
     // on the button boards. It used to walk back one tab at a time and close
     // only from the first — which made leaving take as many gestures as there

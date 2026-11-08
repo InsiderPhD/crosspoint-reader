@@ -101,6 +101,20 @@ std::string deobfuscateFromBase64(const char* encoded, bool* ok) {
   result.resize(decodedLen);
   xorTransform(result);
   unwrapValidated(result);
+  // Every secret stored this way (WPA passphrases, API tokens, passwords,
+  // header values) is printable ASCII. A value XOR-ed with ANOTHER device's
+  // MAC -- an SD card copied from a different reader -- decodes to the right
+  // length but with control or high bytes, and used as-is it fails much later
+  // and less clearly (a Wi-Fi "General failure", a rejected token). Report it as
+  // undecodable so callers fall back to asking for it.
+  for (const char c : result) {
+    const auto byte = static_cast<uint8_t>(c);
+    if (byte < 0x20 || byte > 0x7E) {
+      LOG_INF("OBF", "Stored secret was saved on another device (hardware key mismatch); ignoring it");
+      if (ok) *ok = false;
+      return "";
+    }
+  }
   return result;
 }
 

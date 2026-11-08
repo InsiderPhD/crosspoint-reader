@@ -41,7 +41,7 @@ class SwipeToDelete {
   // Rows a screen does not want deletable (folders, a parent entry...).
   using RowFilter = bool (*)(const void* ctx, int row);
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   Event handle(const MappedInputManager& input, const Rect& listRect, int itemCount, int selectedIndex,
                bool hasSubtitle, int& outRow, RowFilter canDelete = nullptr, const void* ctx = nullptr);
   void draw(const GfxRenderer& renderer, const Rect& listRect, int itemCount, int selectedIndex,

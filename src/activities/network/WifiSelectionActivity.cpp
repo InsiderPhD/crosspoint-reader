@@ -171,10 +171,11 @@ void WifiSelectionActivity::processWifiScanResults() {
     // selectedSSID / enteredPassword still hold the saved credential from the
     // failed quick attempt. Retry only when the scan actually sees it; an
     // out-of-range network goes to the picker instead of the forget prompt.
-    const bool visible = std::any_of(networks.begin(), networks.end(),
-                                     [this](const WifiNetworkInfo& n) { return n.ssid == selectedSSID; });
-    if (visible) {
-      LOG_DBG("WIFI", "Retrying saved network after scan: %s", selectedSSID.c_str());
+    const auto found = std::find_if(networks.begin(), networks.end(),
+                                    [this](const WifiNetworkInfo& n) { return n.ssid == selectedSSID; });
+    if (found != networks.end()) {
+      LOG_INF("WIFI", "Retrying saved network after scan: %s (RSSI %d dBm)", selectedSSID.c_str(),
+              static_cast<int>(found->rssi));
       autoConnecting = true;
       usedSavedPassword = true;
       attemptConnection();
@@ -364,6 +365,18 @@ void WifiSelectionActivity::loop() {
 
   // Handle save prompt state
   if (state == WifiSelectionState::SAVE_PROMPT) {
+    if (CrossPointSettings::FULL_TOUCH_UI) {
+      // Bar: Back = Don't save, Confirm = Save. No inline Yes/No to move between.
+      if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+        RenderLock lock(*this);
+        WIFI_STORE.addCredential(selectedSSID, enteredPassword);
+      }
+      if (mappedInput.wasPressed(MappedInputManager::Button::Confirm) ||
+          mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+        onComplete(true);
+      }
+      return;
+    }
     if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
         mappedInput.wasPressed(MappedInputManager::Button::Left)) {
       if (savePromptSelection > 0) {
@@ -393,6 +406,30 @@ void WifiSelectionActivity::loop() {
 
   // Handle forget prompt state (connection failed with saved credentials)
   if (state == WifiSelectionState::FORGET_PROMPT) {
+    // Either path ends in the network list; `forget` decides whether the saved
+    // credential goes first.
+    const auto finish = [this](const bool forget) {
+      if (forget) {
+        RenderLock lock(*this);
+        WIFI_STORE.removeCredential(selectedSSID);
+        // Update the network list to reflect the change
+        const auto network = find_if(networks.begin(), networks.end(),
+                                     [this](const WifiNetworkInfo& net) { return net.ssid == selectedSSID; });
+        if (network != networks.end()) {
+          network->hasSavedPassword = false;
+        }
+      }
+      startWifiScan();
+    };
+    if (CrossPointSettings::FULL_TOUCH_UI) {
+      // Bar: Back = Cancel, Confirm = Forget. No inline choice to move between.
+      if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
+        finish(true);
+      } else if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+        finish(false);
+      }
+      return;
+    }
     if (mappedInput.wasPressed(MappedInputManager::Button::Up) ||
         mappedInput.wasPressed(MappedInputManager::Button::Left)) {
       if (forgetPromptSelection > 0) {
@@ -406,22 +443,10 @@ void WifiSelectionActivity::loop() {
         requestUpdate();
       }
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      if (forgetPromptSelection == 1) {
-        RenderLock lock(*this);
-        // User chose "Forget network" - forget the network
-        WIFI_STORE.removeCredential(selectedSSID);
-        // Update the network list to reflect the change
-        const auto network = find_if(networks.begin(), networks.end(),
-                                     [this](const WifiNetworkInfo& net) { return net.ssid == selectedSSID; });
-        if (network != networks.end()) {
-          network->hasSavedPassword = false;
-        }
-      }
-      // Go back to network list (whether Cancel or Forget network was selected)
-      startWifiScan();
+      finish(forgetPromptSelection == 1);
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
       // Skip forgetting, go back to network list
-      startWifiScan();
+      finish(false);
     }
     return;
   }
@@ -715,6 +740,13 @@ void WifiSelectionActivity::renderSavePrompt() const {
 
   renderer.drawCenteredText(UI_10_FONT_ID, top + 40, tr(STR_SAVE_PASSWORD));
 
+  if (CrossPointSettings::FULL_TOUCH_UI) {
+    // The answers are the action bar's own buttons (loop(): Back = No, Confirm = Yes).
+    const auto labels = mappedInput.mapLabels(tr(STR_NO), tr(STR_YES), "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    return;
+  }
+
   // Draw Yes/No buttons
   const int buttonY = top + 80;
   constexpr int buttonWidth = 60;
@@ -772,6 +804,13 @@ void WifiSelectionActivity::renderForgetPrompt() const {
   renderer.drawCenteredText(UI_10_FONT_ID, top, ssidInfo.c_str());
 
   renderer.drawCenteredText(UI_10_FONT_ID, top + 40, tr(STR_FORGET_AND_REMOVE));
+
+  if (CrossPointSettings::FULL_TOUCH_UI) {
+    // The answers are the action bar's own buttons (loop(): Back = Cancel, Confirm = Forget).
+    const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_FORGET_BUTTON), "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    return;
+  }
 
   // Draw Cancel/Forget network buttons
   const int buttonY = top + 80;

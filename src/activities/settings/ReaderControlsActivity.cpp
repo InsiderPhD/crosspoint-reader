@@ -33,7 +33,7 @@ namespace {
 
 constexpr uint8_t kFixedRow = 13;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
 // X4 Pro: row 0 is the rightward swipe and the action bar's Back button, row 2
 // the bar's Confirm button (its swipe is disabled on the reading screen, see
 // MappedInputManager::setConfirmSwipeIgnored), rows 4/6 the bar's Left/Right.
@@ -44,7 +44,9 @@ constexpr uint8_t kFixedRow = 13;
 // while Hold Action is Shortcut, see rebuildVisibleRows), 17/24/18 the home key
 // tap, double tap and long press; the side keys and Power keep their
 // short/long pairs.
-constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 22, 25, 14, 19, 15, 20, 16, 21, 17, 24, 18, 8, 9, 10, 11, 12, 13, 23};
+// Row 26, the slide switch (Picco), sits with the other physical controls just
+// before Custom Combos and only shows on a board that has the switch.
+constexpr uint8_t kRowIds[] = {0, 2, 4, 6, 22, 25, 14, 19, 15, 20, 16, 21, 17, 24, 18, 8, 9, 10, 11, 12, 13, 26, 23};
 
 // Row 22 is a layout choice, not a bindable action: it has no entry in
 // fieldForRow() and toggles in place instead of opening the action picker.
@@ -63,18 +65,23 @@ constexpr uint8_t kRowIds[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 23}
 // Last row everywhere: Custom Combos opens the chord list rather than binding
 // an action of its own, so it has no entry in fieldForRow().
 constexpr uint8_t kCustomCombosRow = 23;
+
+// The slide switch takes only on/off actions, which its position sets (see
+// CrossPointSettings::isSwitchableReaderAction and main.cpp handleSlideSwitch).
+constexpr uint8_t kSlideSwitchRow = 26;
 }  // namespace
 
 void ReaderControlsActivity::rebuildVisibleRows() {
   static_assert(sizeof(kRowIds) <= sizeof(visibleRowIds), "visibleRowIds cannot hold every row");
   visibleRowCount = 0;
   for (const uint8_t row : kRowIds) {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     // Outside Shortcut a hold is a word gesture and the per-zone actions do not
     // apply, so their rows would be dead controls. Their stored values are left
     // alone and come back with the rows.
     if (isHoldZoneRow(row) && SETTINGS.readerHoldMode != CrossPointSettings::READER_HOLD_SHORTCUT) continue;
 #endif
+    if (row == kSlideSwitchRow && !gpio.hasToggleSwitch()) continue;
     visibleRowIds[visibleRowCount++] = row;
   }
   if (selectedRow >= visibleRowCount) selectedRow = static_cast<uint8_t>(visibleRowCount - 1);
@@ -92,6 +99,8 @@ void ReaderControlsActivity::onExit() { Activity::onExit(); }
 
 void ReaderControlsActivity::loop() {
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    // Backstop for edits the per-pick guard cannot see (Custom Combos).
+    if (SETTINGS.ensureReaderEscape()) isDirty = true;
     if (isDirty) {
       SETTINGS.saveToFile();
     }
@@ -165,6 +174,12 @@ void ReaderControlsActivity::render(RenderLock&&) {
   const auto hints = mappedInput.mapLabels(tr(STR_SAVE_AND_BACK), tr(STR_CHANGE), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, hints.btn1, hints.btn2, hints.btn3, hints.btn4);
 
+  if (escapeRefused) {
+    // Stays up until the next repaint (the next input).
+    GUI.drawPopup(renderer, tr(STR_READER_ESCAPE_REQUIRED));
+    escapeRefused = false;
+  }
+
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer();
 }
@@ -173,7 +188,8 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
   static char buf[48];
   if (row >= kTotalRows) return "";
   if (row == kCustomCombosRow) return tr(STR_CUSTOM_COMBOS);
-#if FREEINK_DEVICE_X4PRO
+  if (row == kSlideSwitchRow) return tr(STR_SLIDE_SWITCH);
+#if FREEINK_CAP_TOUCH
   // The first and last zone are named for the axis in force, so the rows read
   // the way the screen is actually divided. The slots behind them do not move
   // (see MappedInputManager::TapZone).
@@ -209,7 +225,7 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
 #endif
   const char* btn;
   switch (row / 2) {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
     // The front four. Back is reached by a horizontal swipe, which reads
     // backwards from the slot name -- on hardware a RIGHTWARD flick lands on
     // the Back slot -- so that row is labelled by the gesture the user actually
@@ -245,7 +261,7 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
       break;
 #endif
     case 4:
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
       // X4 Pro side keys sit left/right of the screen, like the X3's, and a
       // vertical swipe is their gesture twin -- both reach this row.
       btn = tr(STR_DIR_SIDE_L);
@@ -255,7 +271,7 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
 #endif
       break;
     case 5:
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
       btn = tr(STR_DIR_SIDE_R);
 #else
       btn = gpio.deviceIsX3() ? tr(STR_DIR_SIDE_R) : tr(STR_DIR_DOWN);
@@ -265,7 +281,7 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
       btn = "Power";
       break;
   }
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Front rows are flicks and action-bar taps — no press-type suffix.
   if (row < 8) {
     snprintf(buf, sizeof(buf), "%s", btn);
@@ -294,7 +310,7 @@ const char* ReaderControlsActivity::getRowActionName(const uint8_t row) const {
     // CrossPointSettings::effectiveReaderLongPressHome).
     return tr(STR_READER_ACTION_OPEN_MENU);
   }
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   if (row == kTapZoneLayoutRow) {
     return tapZonesAreBands() ? tr(STR_TAP_ZONES_TOP_BOTTOM) : tr(STR_TAP_ZONES_SIDES);
   }
@@ -437,6 +453,8 @@ uint8_t* ReaderControlsActivity::fieldForRow(const uint8_t row) const {
       return &SETTINGS.readerHoldRight;
     case 24:
       return &SETTINGS.readerDoubleTapHome;
+    case kSlideSwitchRow:
+      return &SETTINGS.readerSlideSwitch;
     default:
       return nullptr;
   }
@@ -462,7 +480,7 @@ void ReaderControlsActivity::activateRow(const uint8_t row) {
     startActivityForResult(std::make_unique<ReaderComboListActivity>(renderer, mappedInput), nullptr);
     return;
   }
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   if (row == kTapZoneLayoutRow) {
     // Two values: a tap flips it in place rather than opening a picker, and the
     // re-render immediately relabels the tap/hold rows below it.
@@ -494,11 +512,20 @@ void ReaderControlsActivity::openActionPicker(const uint8_t row) {
   uint8_t* field = fieldForRow(row);
   if (!field) return;
 
-  startActivityForResult(std::make_unique<ReaderActionSelectActivity>(renderer, mappedInput, getRowTitle(row), *field),
+  startActivityForResult(std::make_unique<ReaderActionSelectActivity>(renderer, mappedInput, getRowTitle(row), *field,
+                                                                     /*switchableOnly=*/row == kSlideSwitchRow),
                          [this, field](const ActivityResult& result) {
                            const auto* picked = std::get_if<ReaderActionResult>(&result.data);
                            if (!picked || picked->action == *field) return;
+                           const uint8_t previous = *field;
                            *field = picked->action;
+                           if (!SETTINGS.hasReaderEscape()) {
+                             // That was the last control out of a book: keep it.
+                             *field = previous;
+                             escapeRefused = true;
+                             requestUpdate();
+                             return;
+                           }
                            // Batched: the single save happens when this screen exits.
                            isDirty = true;
                          });

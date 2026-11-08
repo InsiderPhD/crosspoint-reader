@@ -72,7 +72,7 @@ bool BookContextMenu::checkLongPress(const MappedInputManager& input, std::strin
 
   bool opened = false;
   bool viaTouch = false;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // Holding a finger on the screen opens the menu for the selected book. The
   // rest of the contact is consumed so the lift cannot also register as a tap
   // (which would immediately Confirm the first menu option).
@@ -91,7 +91,7 @@ bool BookContextMenu::checkLongPress(const MappedInputManager& input, std::strin
 
   triggered_ = true;
   showing_ = true;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   popupRectValid_ = false;  // set by the first render() of this open cycle
 #endif
   // A touch hold has no Confirm button to wait out — the menu is interactive
@@ -127,7 +127,7 @@ bool BookContextMenu::handleInput(ButtonNavigator& nav, const MappedInputManager
     return false;
   }
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // A tap outside the popup dismisses the menu. In Full Touch mode an inside
   // tap hit-tests the option rows: a tap on an unselected row moves the
   // highlight there (two-tap model), a tap on the highlighted row falls
@@ -197,7 +197,7 @@ void BookContextMenu::render(GfxRenderer& renderer) const {
   constexpr int BORDER = 2;
   constexpr int H_PAD = 14;
   constexpr int INFO_H = 28;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   constexpr int OPTION_H = OPTION_ROW_H;  // shared with handleInput's tap-row mapping
 #else
   constexpr int OPTION_H = 34;
@@ -240,7 +240,7 @@ void BookContextMenu::render(GfxRenderer& renderer) const {
   const int px = (pageWidth - POPUP_W) / 2;
   const int py = (pageHeight - POPUP_H) / 2;
 
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   popupX_ = px;
   popupY_ = py;
   popupW_ = POPUP_W;
@@ -279,7 +279,7 @@ void BookContextMenu::close() {
   triggered_ = false;
   awaitingRelease_ = false;
   selectedIndex_ = 0;
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   popupRectValid_ = false;
 #endif
 }

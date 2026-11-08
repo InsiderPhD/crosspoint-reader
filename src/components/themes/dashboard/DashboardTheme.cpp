@@ -26,7 +26,7 @@
 #include "util/TimeUtils.h"
 
 const ThemeMetrics& DashboardTheme::themeMetrics() const {
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   // See BaseTheme::themeMetrics().
   return CrossPointSettings::FULL_TOUCH_UI ? DashboardMetrics::values : DashboardMetrics::noActionBarValues;
 #else

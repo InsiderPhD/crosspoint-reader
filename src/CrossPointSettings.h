@@ -422,6 +422,27 @@ class CrossPointSettings {
   // actions: hidden from the picker unless a slot already holds one (a
   // settings.json carried over from another device), and a no-op when run.
   static bool isUnavailableReaderAction(uint8_t action);
+  // Actions that get the reader out of the page: the book menu (whose rows
+  // include Home) or straight out of the book.
+  static constexpr bool isReaderEscapeAction(const uint8_t action) {
+    return action == READER_ACTION_OPEN_MENU || action == READER_ACTION_GO_HOME || action == READER_ACTION_FILE_BROWSER;
+  }
+  // True when at least one reader control REACHABLE ON THIS BOARD (button,
+  // tap zone, hold, home key or bottom-edge swipe, Power, a defined combo) is
+  // bound to an escape action, so no mapping can trap the user inside a book.
+  bool hasReaderEscape() const;
+  // Restores an escape when hasReaderEscape() is false, on the control that is
+  // always reachable on this board. Returns true when it changed a setting.
+  bool ensureReaderEscape();
+  // Actions that are a persistent on/off state the slide switch can SET rather
+  // than flip, and that apply from any screen without a reflow. Bionic Reading
+  // (repaginates the open chapter) and Bluetooth (heap/radio policy) are toggles
+  // too, but only the reader can carry them out safely.
+  static constexpr bool isSwitchableReaderAction(const uint8_t action) {
+    return action == READER_ACTION_NONE || action == READER_ACTION_TOGGLE_FRONTLIGHT ||
+           action == READER_ACTION_DARK_MODE || action == READER_ACTION_HIDE_STATUS_BAR ||
+           action == READER_ACTION_TOGGLE_PAGE_TURN_GESTURES;
+  }
 
   // Reader button-hint bar mode. Cycles Off -> Short -> Long -> Front-only Short -> Front-only Long.
   // The FRONT_* modes show only the front-button bar (no side/power hints).
@@ -747,7 +768,7 @@ class CrossPointSettings {
   // there, and always off on the button boards (whose layouts must not reserve
   // the bar). Compile-time so a settings.json carried between devices cannot
   // switch it; the old "fullTouchUi" key is ignored on load.
-#if FREEINK_DEVICE_X4PRO
+#if FREEINK_CAP_TOUCH
   static constexpr bool FULL_TOUCH_UI = true;
 #else
   static constexpr bool FULL_TOUCH_UI = false;
@@ -806,6 +827,13 @@ class CrossPointSettings {
   // and tap zones bound to anything else keep working. Persisted, like
   // CrossInk's key of the same name, so a pause survives sleep.
   uint8_t disablePageTurnGestures = 0;
+  // What the Picco's slide switch controls, as a READER_ACTION_* restricted to
+  // isSwitchableReaderAction(): the switch's position SETS that function's state
+  // (on = the action's thing is on), at boot and on each move (main.cpp
+  // handleSlideSwitch). Remapped in Reader Controls. Present on every build so
+  // settings.json round-trips; only the Picco shows it. Deliberately not
+  // upstream's "slideSwitchAction" key, whose 0/1/2 values are not reader actions.
+  uint8_t readerSlideSwitch = READER_ACTION_TOGGLE_FRONTLIGHT;
 
   // Per-button reader actions (short and long press for each logical button).
   // Defaults match legacy hard-coded behaviour so existing users see no change.
@@ -821,7 +849,14 @@ class CrossPointSettings {
   uint8_t readerLongPressSideUp = READER_ACTION_SKIP_CHAPTER_BACK;
   uint8_t readerShortPressSideDown = READER_ACTION_PAGE_FORWARD;
   uint8_t readerLongPressSideDown = READER_ACTION_SKIP_CHAPTER_FORWARD;
-  uint8_t readerShortPressPower = READER_ACTION_PAGE_FORWARD;
+#if FREEINK_DEVICE_PICCO
+  // No home key and no front buttons: a Power tap opens the book menu, the way
+  // out of a book (its Home row) and to everything else.
+  static constexpr uint8_t DEFAULT_READER_SHORT_PRESS_POWER = READER_ACTION_OPEN_MENU;
+#else
+  static constexpr uint8_t DEFAULT_READER_SHORT_PRESS_POWER = READER_ACTION_PAGE_FORWARD;
+#endif
+  uint8_t readerShortPressPower = DEFAULT_READER_SHORT_PRESS_POWER;
   // X4 Pro touch: screen tap zones (thirds of the screen) and the capacitive
   // home key. Fields exist on every build for settings.json round-trip; only
   // the X4 Pro reader dispatches them.
