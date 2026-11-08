@@ -1202,6 +1202,42 @@ void drawFallback(GfxRenderer& renderer, const char* themeName) {
   if (dark) renderer.invertScreen();
 }
 
+bool drawPreview(GfxRenderer& renderer, const char* bmpPath, const int boxX, const int boxY, const int boxW,
+                 const int boxH, const bool negative) {
+  if (boxW <= 0 || boxH <= 0) return false;
+  FsFile file;
+  if (!Storage.openFileForRead("STH", bmpPath, file)) return false;
+  bool drawn = false;
+  Bitmap bitmap(file);
+  if (bitmap.parseHeaders() == BmpReaderError::Ok && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
+    const int bw = bitmap.getWidth();
+    const int bh = bitmap.getHeight();
+    // Fit by whichever side binds first, in integers (no FPU on the C3).
+    int w = bw;
+    int h = bh;
+    if (w > boxW) {
+      h = h * boxW / w;
+      w = boxW;
+    }
+    if (h > boxH) {
+      w = w * boxH / h;
+      h = boxH;
+    }
+    w = std::max(1, w);
+    h = std::max(1, h);
+    const int x = boxX + (boxW - w) / 2;
+    const int y = boxY + (boxH - h) / 2;
+    // Resampled, not drawBitmap: that paints every grey pixel black.
+    renderer.drawBitmapResampled(bitmap, x, y, w, h,
+                                 negative ? GfxRenderer::ResampleFilter::Invert : GfxRenderer::ResampleFilter::Dither);
+    // Outline: a mostly white theme otherwise has no edge on the page.
+    renderer.drawRect(x - 1, y - 1, w + 2, h + 2);
+    drawn = true;
+  }
+  file.close();
+  return drawn;
+}
+
 void showSleepImages() {
   ThemeInfo info;
   if (inspect(SETTINGS.sleepTheme, info) && info.showsSleepImage) return;

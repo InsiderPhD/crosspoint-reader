@@ -131,6 +131,10 @@ class ActivityManager {
   bool consumesTouchInput() const;
   bool handlesDirectTouch() const;
   bool ownsSwipes() const;
+  bool handlesHomeTap() const;
+  // Screens whose status-bar strip opens the light panel on a tap (Home, the
+  // file browser, the library, Settings), as upstream CrossPoint does.
+  bool statusBarOpensLightPanel() const;
   bool keepsBluetoothActive() const;
   // Shut the BLE stack down if the current activity does not need it. Called at
   // the transition point so the incoming screen allocates against the recovered

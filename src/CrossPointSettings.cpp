@@ -363,7 +363,7 @@ void CrossPointSettings::sanitizeFrontlightSchedules(CrossPointSettings& setting
 }
 
 bool CrossPointSettings::isUnavailableReaderAction(const uint8_t action) {
-  if (action == READER_ACTION_TOGGLE_FRONTLIGHT) return !halFrontlight.present();
+  if (action == READER_ACTION_TOGGLE_FRONTLIGHT || action == READER_ACTION_LIGHT_PANEL) return !halFrontlight.present();
 #if !FREEINK_CAP_TOUCH
   // Only the X4 Pro has page-turn taps and swipes to pause.
   if (action == READER_ACTION_TOGGLE_PAGE_TURN_GESTURES) return true;

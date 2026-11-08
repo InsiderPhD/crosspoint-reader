@@ -1,6 +1,5 @@
 #include "SleepThemeDownloadActivity.h"
 
-#include <Bitmap.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -82,6 +81,31 @@ std::string catalogBase() {
 
 std::string themeDir(const std::string& id) { return std::string(SleepThemeRenderer::THEMES_DIR) + "/" + id; }
 std::string partDir(const std::string& id) { return std::string(SleepThemeRenderer::THEMES_DIR) + "/." + id + ".part"; }
+
+// Converts a fetched preview PNG to a 2-bit BMP fitted within boxW x boxH, then
+// deletes the PNG unless keepPng. Runs after the TLS session has closed, so the
+// PNG inflate and its row buffers (sized by the ~500 px preview width) never
+// share the heap with it; all of it is freed before this returns.
+bool convertPreview(const char* pngPath, const std::string& bmpPath, const int boxW, const int boxH,
+                    const bool keepPng) {
+  bool converted = false;
+  FsFile png;
+  if (Storage.openFileForRead("STD", pngPath, png)) {
+    FsFile bmp;
+    if (Storage.openFileForWrite("STD", bmpPath, bmp)) {
+      // Fit (not crop): the whole screen, shrunk.
+      converted = PngToBmpConverter::pngFileToBmpStreamWithSize(png, bmp, boxW, boxH, /*crop=*/false);
+      bmp.flush();
+      bmp.close();
+    }
+    png.close();
+  }
+  if (!keepPng) Storage.remove(pngPath);
+  LOG_DBG("STD", "Preview -> %s: %s; heap free=%u largest=%u", bmpPath.c_str(), converted ? "ok" : "failed",
+          ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
+  if (!converted && Storage.exists(bmpPath.c_str())) Storage.remove(bmpPath.c_str());
+  return converted;
+}
 
 // Streaming catalog parser (SAX, like the dictionary catalog's): entries land
 // straight in the output vector, and only this device's build is kept.
@@ -555,6 +579,43 @@ bool SleepThemeDownloadActivity::downloadEntry(CatalogEntry& entry) {
     }
   }
 
+  // The store's screenshot, saved as the pickers' preview. Optional: a theme
+  // whose preview is missing or fails to convert still installs. When the
+  // store's preview screen already fetched it for this theme, that PNG is
+  // reused instead of fetched again.
+  {
+    const std::string stagedPng = staging + "/preview.png";
+    bool havePng = false;
+    if (previewId_ == entry.id && Storage.exists(PREVIEW_PNG)) {
+      havePng = Storage.rename(PREVIEW_PNG, stagedPng.c_str());
+    }
+    if (!havePng) {
+      if (auto* fcm = renderer.getFontCacheManager()) {
+        fcm->clearCachesDeep();
+      }
+      auto result = HttpDownloader::HTTP_ERROR;
+      {
+        TlsFramebufferBorrow borrow(renderer);
+        result = HttpDownloader::downloadToFile(
+            base + "preview.png", stagedPng, [this](size_t, size_t) { pollForCancel(); },
+            /*allowConfiguredAuth=*/false, /*expectedSize=*/0, &cancelRequested_);
+      }
+      if (result == HttpDownloader::ABORTED) {
+        Storage.removeDir(staging.c_str());
+        RenderLock lock(*this);
+        state_ = CATALOG_LIST;
+        return false;
+      }
+      havePng = result == HttpDownloader::OK;
+      if (!havePng) LOG_ERR("STD", "No preview for %s (%d); installing without one", entry.id.c_str(), result);
+    }
+    if (havePng) {
+      const int side = std::max(renderer.getScreenWidth(), renderer.getScreenHeight());
+      convertPreview(stagedPng.c_str(), staging + "/" + SleepThemeRenderer::PREVIEW_FILE, side, side,
+                     /*keepPng=*/false);
+    }
+  }
+
   // Which build this is, for the update check. Written before the swap so a
   // theme never lands without it.
   if (!entry.version.empty() && !Storage.writeFile((staging + "/" + VERSION_FILE).c_str(), entry.version.c_str())) {
@@ -646,6 +707,7 @@ void SleepThemeDownloadActivity::activateSelected() {
 void SleepThemeDownloadActivity::discardPreview() {
   if (Storage.exists(PREVIEW_PNG)) Storage.remove(PREVIEW_PNG);
   if (Storage.exists(PREVIEW_BMP)) Storage.remove(PREVIEW_BMP);
+  previewId_.clear();
 }
 
 Rect SleepThemeDownloadActivity::previewRect() const {
@@ -710,30 +772,10 @@ bool SleepThemeDownloadActivity::fetchPreview(const CatalogEntry& entry) {
   }
 
   const Rect box = previewRect();
-  FsFile png;
-  if (!Storage.openFileForRead("STD", PREVIEW_PNG, png)) {
-    discardPreview();
-    return false;
-  }
-  FsFile bmp;
-  if (!Storage.openFileForWrite("STD", PREVIEW_BMP, bmp)) {
-    png.close();
-    discardPreview();
-    return false;
-  }
-  // Fit (not crop): the whole screen, shrunk to the preview area.
-  const bool converted = PngToBmpConverter::pngFileToBmpStreamWithSize(png, bmp, box.width, box.height, /*crop=*/false);
-  png.close();
-  bmp.flush();
-  bmp.close();
-  Storage.remove(PREVIEW_PNG);
-  LOG_DBG("STD", "Preview %s: %s; heap free=%u largest=%u", entry.id.c_str(), converted ? "ok" : "convert failed",
-          ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
-  if (!converted) {
-    Storage.remove(PREVIEW_BMP);
-    return false;
-  }
-  return true;
+  // The PNG stays until the preview closes: Download installs it as the theme's
+  // own preview instead of fetching it again.
+  previewId_ = entry.id;
+  return convertPreview(PREVIEW_PNG, PREVIEW_BMP, box.width, box.height, /*keepPng=*/true);
 }
 
 // --- Input handling ---
@@ -816,14 +858,16 @@ void SleepThemeDownloadActivity::loop() {
       }
       requestUpdate();
     } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      discardPreview();
       CatalogEntry* entry = entryAtRow(selectedIndex_);
       if (entry == nullptr) {
+        discardPreview();
         RenderLock lock(*this);
         state_ = CATALOG_LIST;
         return;
       }
+      // downloadEntry() moves the fetched PNG into the theme; drop the rest.
       downloadEntry(*entry);
+      discardPreview();
       requestUpdateAndWait();
     }
   } else if (state_ == COMPLETE) {
@@ -964,30 +1008,11 @@ void SleepThemeDownloadActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state_ == PREVIEW) {
-    bool drawn = false;
-    if (previewReady_) {
-      FsFile file;
-      if (Storage.openFileForRead("STD", PREVIEW_BMP, file)) {
-        Bitmap bitmap(file);
-        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
-          const Rect box = previewRect();
-          const int w = std::min(bitmap.getWidth(), box.width);
-          const int h = std::min(bitmap.getHeight(), box.height);
-          const int x = box.x + (box.width - w) / 2;
-          const int y = box.y + (box.height - h) / 2;
-          // Resampled, not drawBitmap: that paints every grey black. Dark mode
-          // inverts the whole screen below, so the picture is drawn as its
-          // negative to come out as the theme really looks.
-          renderer.drawBitmapResampled(
-              bitmap, x, y, w, h,
-              SETTINGS.darkMode ? GfxRenderer::ResampleFilter::Invert : GfxRenderer::ResampleFilter::Dither);
-          // Outline: a mostly white theme otherwise has no edge on the page.
-          renderer.drawRect(x - 1, y - 1, w + 2, h + 2);
-          drawn = true;
-        }
-        file.close();
-      }
-    }
+    const Rect box = previewRect();
+    // Dark mode inverts the whole screen below: draw the negative so the
+    // picture comes out as the theme really looks.
+    const bool drawn = previewReady_ && SleepThemeRenderer::drawPreview(renderer, PREVIEW_BMP, box.x, box.y, box.width,
+                                                                        box.height, SETTINGS.darkMode);
     if (!drawn) renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_SLEEP_THEME_NO_PREVIEW));
     const CatalogEntry* entry = entryAtRow(selectedIndex_);
     const char* action = entry != nullptr && entry->updateAvailable ? tr(STR_UPDATE) : tr(STR_DOWNLOAD);

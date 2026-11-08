@@ -65,6 +65,9 @@ class HalDisplay {
   // grayscale images) re-render through their usual path instead of being
   // flattened to the B/W framebuffer.
   void requestResync(uint8_t settlePasses = 1) { einkDisplay.requestResync(settlePasses); }
+  // Drive the panel's border ring black (dark mode) on panels that support it
+  // (Picco SSD1677); applied by the next full refresh. Cheap to call every loop.
+  void setDarkBorder(bool dark) { einkDisplay.setDarkBorder(dark); }
 
   // Defer the FAST-streak GC promotion (see applyRefreshPolicy) while a burst-
   // input screen is up: on the keyboard it landed a >1 s flash mid-word every

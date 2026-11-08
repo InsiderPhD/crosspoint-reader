@@ -33,6 +33,9 @@ struct Rect;
  * Back / Download. The PNG lands on the SD card, is converted once to a BMP
  * fitted to the preview area, and is deleted again when the preview closes.
  * A missing or undecodable preview says so and still offers the download.
+ * Every install also saves the preview, fitted within the panel's long side
+ * squared, as <theme>/preview.bmp (SleepThemeRenderer::PREVIEW_FILE) for
+ * SleepThemeSelectActivity; one that fails to fetch or convert is skipped.
  *
  * Updates: each build has a version (a hash of its files) that an install
  * records in the theme's store.ver. An installed theme whose version differs
@@ -112,6 +115,8 @@ class SleepThemeDownloadActivity final : public Activity {
   // PREVIEW: whether the fitted preview BMP is on the card (false = show the
   // "no preview" line instead).
   bool previewReady_ = false;
+  // The theme whose preview PNG is waiting at the card root (empty = none).
+  std::string previewId_;
 
   // Latched from the transfer's progress callback on Back; read by
   // HttpDownloader once per chunk. Single task, no ISR.
@@ -131,7 +136,7 @@ class SleepThemeDownloadActivity final : public Activity {
   void openPreview(const CatalogEntry& entry);
   bool fetchPreview(const CatalogEntry& entry);
   // Removes the preview's scratch files.
-  static void discardPreview();
+  void discardPreview();
   // The fitted preview picture's box: the list body, inset.
   Rect previewRect() const;
   // Polls input mid-transfer and latches cancelRequested_ on Back. Runs with

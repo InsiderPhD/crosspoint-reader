@@ -60,11 +60,22 @@ class ClipSelectionActivity final : public Activity {
   // Clip. Dragging a handle moves that end; a tap on the toolbar acts; a tap
   // off the selection cancels, and holding another word starts over there.
   // Lookup returns a WordPickResult, Clip a ClippingResult, so the caller
-  // handles both. Built on the visible page only (no cross-page handles).
+  // handles both.
+  // Cross-page (every touch clip mode, not lookup): a drag held still on the
+  // last word of the page turns to the next built page, and on the first word
+  // to the previous one (see dragPageTurn). Up to 3 pages are built.
   ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList, int fontId,
                         Section& section, int startPageInSection, int marginTop, int marginLeft,
                         int initialCursorIdx = 0, bool preAnchored = false, bool lookupMode = false,
                         bool adoptContact = false, bool selectMode = false, bool lookupAvailable = false);
+
+#if FREEINK_CAP_TOUCH
+  // The adopted contact is a drag that began in the reader (Hold Action = Look
+  // Up & Highlight), not a hold: the finger has already moved, so a lift that
+  // reached no second word is a flick and cancels instead of leaving the start
+  // word anchored. Call before the activity starts.
+  void setDragEntry() { dragEntry = true; }
+#endif
 
   void onEnter() override;
   void onExit() override;
@@ -127,6 +138,8 @@ class ClipSelectionActivity final : public Activity {
   // until that contact ends; while it is set nothing but the drag tracker may
   // act on input.
   bool contactAdopted = false;
+  // See setDragEntry().
+  bool dragEntry = false;
   // Runs the drag tracker for an adopted contact. True while it owns the frame.
   bool handleAdoptedContact();
 
@@ -135,6 +148,21 @@ class ClipSelectionActivity final : public Activity {
   // Lookup mode: a drag that starts on the cursor word selects a phrase and
   // looks it up on lift. True while it owns the contact.
   bool handleLookupDrag();
+
+  // Cross-page drag: holding the dragged end still on the page's last (first)
+  // word turns to the next (previous) built page with the cursor on its first
+  // (last) word. The finger is then still over the old page's edge, so the
+  // turn latches: the finger does not move the cursor (or turn again) until it
+  // has moved away from where the page turned. Called each held frame of a
+  // range drag, before the finger is resolved to a word; true when the finger
+  // must not move the cursor.
+  bool dragPageTurn(int fingerX, int fingerY);
+  void resetDragPageTurn();
+  int edgeDwellWord = -1;
+  unsigned long edgeDwellStartMs = 0;
+  bool pageTurnLatched = false;
+  int latchX = 0;
+  int latchY = 0;
 
   // --- Select mode (handles + toolbar) ---
   struct Box {
@@ -188,4 +216,7 @@ class ClipSelectionActivity final : public Activity {
   // previous line.
   int lineForward(int idx) const;
   int lineBackward(int idx) const;
+  // First / last word of the page that word idx is on.
+  int pageFirstWord(int idx) const;
+  int pageLastWord(int idx) const;
 };

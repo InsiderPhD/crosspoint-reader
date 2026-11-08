@@ -399,6 +399,9 @@ class CrossPointSettings {
     // Touch boards: pause / resume the page-turn taps and swipes (see
     // disablePageTurnGestures). Unavailable without a digitizer.
     READER_ACTION_TOGGLE_PAGE_TURN_GESTURES = 29,
+    // Opens the light panel (brightness + warmth sliders, on/off) over the page.
+    // Offered only on boards with a frontlight (isUnavailableReaderAction).
+    READER_ACTION_LIGHT_PANEL = 30,
     READER_ACTION_COUNT
   };
 
@@ -435,13 +438,20 @@ class CrossPointSettings {
   // always reachable on this board. Returns true when it changed a setting.
   bool ensureReaderEscape();
   // Actions that are a persistent on/off state the slide switch can SET rather
-  // than flip, and that apply from any screen without a reflow. Bionic Reading
-  // (repaginates the open chapter) and Bluetooth (heap/radio policy) are toggles
-  // too, but only the reader can carry them out safely.
+  // than flip. Frontlight, dark mode, status bar and page-turn gestures apply
+  // from any screen (main.cpp handleSlideSwitch). Bluetooth (heap/radio policy)
+  // and Auto Page Turn (reader-owned timer) only the EPUB reader can carry out,
+  // so the reader applies those itself (EpubReaderActivity::applySlideSwitch).
+  // Bionic Reading is left out: it repaginates the open chapter.
   static constexpr bool isSwitchableReaderAction(const uint8_t action) {
     return action == READER_ACTION_NONE || action == READER_ACTION_TOGGLE_FRONTLIGHT ||
            action == READER_ACTION_DARK_MODE || action == READER_ACTION_HIDE_STATUS_BAR ||
-           action == READER_ACTION_TOGGLE_PAGE_TURN_GESTURES;
+           action == READER_ACTION_TOGGLE_PAGE_TURN_GESTURES || action == READER_ACTION_TOGGLE_BLUETOOTH ||
+           action == READER_ACTION_AUTO_PAGE_TURN;
+  }
+  // True for the switchable actions only the EPUB reader can carry out.
+  static constexpr bool isReaderOnlySwitchAction(const uint8_t action) {
+    return action == READER_ACTION_TOGGLE_BLUETOOTH || action == READER_ACTION_AUTO_PAGE_TURN;
   }
 
   // Reader button-hint bar mode. Cycles Off -> Short -> Long -> Front-only Short -> Front-only Long.
@@ -834,6 +844,11 @@ class CrossPointSettings {
   // settings.json round-trips; only the Picco shows it. Deliberately not
   // upstream's "slideSwitchAction" key, whose 0/1/2 values are not reader actions.
   uint8_t readerSlideSwitch = READER_ACTION_TOGGLE_FRONTLIGHT;
+  // Last auto page-turn option started from the reader menu (menu index:
+  // 1 = Auto from reading speed, 2+ = fixed durations; 0 = none yet). The slide
+  // switch, bound to Auto Page Turn, restarts at this speed. Written only when
+  // it changes (EpubReaderActivity's reader-menu result handler).
+  uint8_t autoPageTurnLast = 0;
 
   // Per-button reader actions (short and long press for each logical button).
   // Defaults match legacy hard-coded behaviour so existing users see no change.

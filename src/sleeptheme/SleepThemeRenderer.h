@@ -75,6 +75,18 @@ void drawBuiltIn(GfxRenderer& renderer, bool dark);
 // with the stats card for "stats"/"stats-dark", inverted for the dark ones.
 void drawFallback(GfxRenderer& renderer, const char* themeName);
 
+// A store install saves the store's screenshot of the theme in its folder
+// under this name: a 2-bit BMP fitted within the panel's long side squared,
+// so it serves either UI orientation. Shown by the theme pickers only; the
+// sleep screen never reads it.
+inline constexpr char PREVIEW_FILE[] = "preview.bmp";
+
+// Draws a preview BMP fitted (aspect kept, centred, never enlarged) in the box,
+// dithered, with a 1 px outline. negative draws it inverted, for a screen that
+// is inverted as a whole afterwards (dark mode). False, drawing nothing, when
+// the file is missing or unreadable.
+bool drawPreview(GfxRenderer& renderer, const char* bmpPath, int boxX, int boxY, int boxW, int boxH, bool negative);
+
 // Draws the plan's images in the renderer's current (grey) render mode.
 void drawGreyImages(const GfxRenderer& renderer, const GreyPlan& plan);
 

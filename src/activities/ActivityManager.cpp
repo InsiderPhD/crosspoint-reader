@@ -370,6 +370,14 @@ bool ActivityManager::handlesDirectTouch() const { return currentActivity && cur
 
 bool ActivityManager::ownsSwipes() const { return currentActivity && currentActivity->ownsSwipes(); }
 
+bool ActivityManager::handlesHomeTap() const { return currentActivity && currentActivity->handlesHomeTap(); }
+
+bool ActivityManager::statusBarOpensLightPanel() const {
+  if (!currentActivity || pendingAction != PendingAction::None) return false;
+  const std::string& name = currentActivity->name;
+  return name == "Home" || name == "FileBrowser" || name == "Library" || name == "Settings";
+}
+
 bool ActivityManager::keepsBluetoothActive() const {
   return currentActivity && currentActivity->keepsBluetoothActive();
 }

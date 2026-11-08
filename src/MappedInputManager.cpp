@@ -113,6 +113,7 @@ void MappedInputManager::processTouchInput() const {
   // still be reported as fresh on the next.
   swipe = Swipe::None;
   tapConsumedByActionBar = false;
+  ignoredSwipeEnd = false;
 
   // Home key first: a bar contact also reports as an edge screen tap, so drop
   // the rest of the contact the moment a home-key event fires (the GT911 raises
@@ -161,6 +162,10 @@ void MappedInputManager::processTouchInput() const {
 
   // The activity reads the drag itself; this swipe was its finger lifting.
   if (swipesIgnored) {
+    const LogicalTouchPoint end = toLogicalPoint(nxe, nye);
+    ignoredSwipeEndX = static_cast<int16_t>(end.x);
+    ignoredSwipeEndY = static_cast<int16_t>(end.y);
+    ignoredSwipeEnd = true;
     return;
   }
 

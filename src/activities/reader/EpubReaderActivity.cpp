@@ -68,6 +68,7 @@
 #include "activities/settings/FontLayoutPreviewActivity.h"
 #include "activities/settings/ReaderControlsActivity.h"  // for ReaderControlsActivity::actionName()
 #include "activities/settings/ReaderMenuSettingsActivity.h"
+#include "activities/util/FrontlightPanelActivity.h"
 #include "clippings/ClippingsManager.h"
 #include "clippings/HighlightOffsetFinder.h"
 #include "components/UITheme.h"
@@ -787,6 +788,10 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  // Once a page is up and no render is in flight: the Bluetooth path frees the
+  // section and paints a popup, the auto-turn path may reflow.
+  if (section && !RenderLock::peek()) applySlideSwitch();
+
   READING_STATS.tickActiveSession(activityManager.isQuietFor(ReadingStatsStore::DEFERRED_SAVE_QUIET_MS));
 
   // Record book completion on the main task (not render task) to avoid racing stats store.
@@ -1045,6 +1050,9 @@ void EpubReaderActivity::loop() {
   }
 
 #if FREEINK_CAP_TOUCH
+  // ── Hold Action = Look Up & Highlight: a drag that starts on a word clips ──
+  if (handleDragClip()) return;
+
   // ── Tap-and-hold zones (configurable; default Clip in every zone) ─────────
   // Runs before the tap zones: a hold fires while the finger is still down, and
   // suppressing the contact stops the lift from also firing a tap-zone action.
@@ -1866,6 +1874,48 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
   }
 }
 
+void EpubReaderActivity::applySlideSwitch() {
+  using A = CrossPointSettings;
+  if (!gpio.hasToggleSwitch()) return;
+  const uint8_t action = SETTINGS.readerSlideSwitch;
+  if (!A::isReaderOnlySwitchAction(action)) return;
+  const bool on = gpio.isToggleSwitchOn();
+  // Act on the position last APPLIED, not on an edge: entering a book with the
+  // switch on starts the function, and a menu toggle of it is left alone until
+  // the switch next moves.
+  if (slideSwitchAppliedAction == action && slideSwitchAppliedOn == static_cast<int8_t>(on)) return;
+  slideSwitchAppliedAction = action;
+  slideSwitchAppliedOn = on;
+  LOG_INF("SWITCH", "Reader slide switch %s -> action %u", on ? "on" : "off", action);
+
+  if (action == A::READER_ACTION_TOGGLE_BLUETOOTH) {
+    auto& btMgr = BluetoothHIDManager::getInstance();
+    if (on) {
+      // Wanted but torn down for a section build: auto-restore brings it back.
+      if (!btMgr.isEnabled() && !btMgr.isBluetoothWanted()) toggleBluetoothFromReader();
+    } else if (btMgr.isEnabled()) {
+      toggleBluetoothFromReader();
+    } else if (btMgr.isBluetoothWanted()) {
+      btMgr.setBluetoothWanted(false);  // disarm a pending auto-restore
+    }
+    return;
+  }
+
+  // READER_ACTION_AUTO_PAGE_TURN: on = restart at the last speed used.
+  if (automaticPageTurnActive == on) return;
+  if (on) {
+    uint8_t option = SETTINGS.autoPageTurnLast;
+    const bool usable = option >= 1 && option < PAGE_TURN_DURATIONS_MS.size() &&
+                        (option != 1 || SETTINGS.readingSpeedSecondsPerPage > 0);
+    // Same fallback as the Auto Page Turn action: reading speed when calibrated.
+    if (!usable) option = SETTINGS.readingSpeedSecondsPerPage > 0 ? 1 : 2;
+    toggleAutoPageTurn(option);
+  } else {
+    toggleAutoPageTurn(0);
+  }
+  requestUpdate();
+}
+
 namespace {
 // Most turns held while a page renders. Enough to skip ahead on purpose; small enough that
 // leaning on a button through a slow render cannot run away through the chapter.
@@ -2015,7 +2065,8 @@ const char* clipVisibleText(const char* text) { return clipword::hasEmSpacePrefi
 }  // namespace
 
 bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY, const bool forLookup,
-                                            const bool liveContact, const bool selectMode, const bool tapEntry) {
+                                            const bool liveContact, const bool selectMode, const bool tapEntry,
+                                            const bool dragEntry) {
   if (!section || !epub) {
     requestUpdate();
     return false;
@@ -2042,8 +2093,9 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
     // A lookup is about the word on screen, so it builds only the visible page:
     // letting the cursor wander onto pages the reader is not showing would be
     // confusing, and the extra two pages are pure heap for a one-word pick.
-    // Select mode's handles live on the visible page too.
-    const int pagesToLoad = (forLookup || selectMode) ? 1 : std::min(3, section->pageCount - startPage);
+    // Clips (select mode included) get the next two pages too, for a drag held
+    // at the page edge to carry the range across (ClipSelectionActivity::dragPageTurn).
+    const int pagesToLoad = forLookup ? 1 : std::min(3, section->pageCount - startPage);
 
     for (int pageIdx = 0; pageIdx < pagesToLoad; ++pageIdx) {
       section->currentPage = startPage + pageIdx;
@@ -2162,7 +2214,7 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
   if (clipWords.words.empty()) {
     // A hold on an all-image page is "no word under the finger", not an error:
     // leave the page exactly as it is.
-    if (liveContact || tapEntry) return false;
+    if (liveContact || tapEntry || dragEntry) return false;
     LOG_ERR(forLookup ? "DICT" : "CLIP", "No selectable words on current EPUB page");
     requestUpdate();
     return false;
@@ -2190,11 +2242,12 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
     if (forLookup && !dictionaryLookupAllowed()) return false;
   }
 
-  // A tap looks up only the word it lands on. findWordAt snaps to the nearest
-  // word, which would make a margin or a blank line look something up and leave
-  // no way to tap-turn the page, so the box is checked here. The slop covers
-  // the gap between words and a finger landing a little off the glyphs.
-  if (tapEntry) {
+  // A tap or a drag acts only on the word it lands on. findWordAt snaps to the
+  // nearest word, which would make a margin or a blank line look something up
+  // (or start a clip) and leave no way to tap- or swipe-turn the page, so the
+  // box is checked here. The slop covers the gap between words and a finger
+  // landing a little off the glyphs.
+  if (tapEntry || dragEntry) {
     if (!preAnchored) return false;
     constexpr int kTapSlop = 8;
     const WordRef& hit = clipWords.words[initialCursorIdx];
@@ -2202,12 +2255,15 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
         anchorY >= hit.y + hit.h + kTapSlop) {
       return false;
     }
+  }
+
+  if (tapEntry) {
     // On the text, so the tap is spent even if the lookup cannot run (the
     // message says why).
     if (!dictionaryLookupAllowed()) return true;
     // Same text the selector's lookup takes: the word as laid out, without the
     // paragraph-indent marker. DictionaryLookup strips punctuation itself.
-    const std::string word = clipVisibleText(clipWords.textOf(hit));
+    const std::string word = clipVisibleText(clipWords.textOf(clipWords.words[initialCursorIdx]));
     if (word.empty()) return false;
     performDictionaryLookup(word);
     return true;
@@ -2258,20 +2314,74 @@ bool EpubReaderActivity::startClipSelection(const int anchorX, const int anchorY
     return true;
   }
 
-  startActivityForResult(
-      std::make_unique<ClipSelectionActivity>(renderer, mappedInput, std::move(clipWords), readerFontId, *section,
-                                              startPage, orientedMarginTop, orientedMarginLeft, initialCursorIdx,
-                                              preAnchored, /*lookupMode=*/false, liveContact),
-      [this, bookTitle = std::move(bookTitle), author = std::move(author),
-       chapterTitle = std::move(chapterTitle)](const ActivityResult& result) {
-        // get_if, not get: a default ActivityResult is NOT cancelled but holds monostate, and
-        // std::get on the wrong alternative aborts under -fno-exceptions.
-        const auto* clipPtr = result.isCancelled ? nullptr : std::get_if<ClippingResult>(&result.data);
-        if (clipPtr) saveClipping(*clipPtr, bookTitle, author, chapterTitle);
-        requestUpdate();
-      });
+  auto selector = std::make_unique<ClipSelectionActivity>(
+      renderer, mappedInput, std::move(clipWords), readerFontId, *section, startPage, orientedMarginTop,
+      orientedMarginLeft, initialCursorIdx, preAnchored, /*lookupMode=*/false, liveContact);
+#if FREEINK_CAP_TOUCH
+  if (dragEntry) selector->setDragEntry();
+#endif
+  startActivityForResult(std::move(selector), [this, bookTitle = std::move(bookTitle), author = std::move(author),
+                                               chapterTitle = std::move(chapterTitle)](const ActivityResult& result) {
+    // get_if, not get: a default ActivityResult is NOT cancelled but holds monostate, and
+    // std::get on the wrong alternative aborts under -fno-exceptions.
+    const auto* clipPtr = result.isCancelled ? nullptr : std::get_if<ClippingResult>(&result.data);
+    if (clipPtr) saveClipping(*clipPtr, bookTitle, author, chapterTitle);
+    requestUpdate();
+  });
   return true;
 }
+
+#if FREEINK_CAP_TOUCH
+bool EpubReaderActivity::handleDragClip() {
+  if (SETTINGS.readerHoldMode != CrossPointSettings::READER_HOLD_LOOKUP_HIGHLIGHT) {
+    dragClip = DragClip::Idle;
+    return false;
+  }
+
+  // A new contact starts tracking at its touch-down point.
+  int lx, ly;
+  if (mappedInput.wasTouchDownPoint(lx, ly)) {
+    dragClip = DragClip::Tracking;
+    dragClipStartX = static_cast<int16_t>(lx);
+    dragClipStartY = static_cast<int16_t>(ly);
+    return false;
+  }
+  // The finger as heldTouchPoint() sees it: nothing while the contact is
+  // suppressed (a hold or a zone action already spent it), on the action bar,
+  // or on the home key, so none of those can become a clip.
+  if (mappedInput.isHomeKeyDown() || !mappedInput.heldTouchPoint(lx, ly)) {
+    dragClip = DragClip::Idle;
+    return false;
+  }
+  if (dragClip == DragClip::Spent) return false;
+  if (dragClip == DragClip::Idle) {
+    // Fallback for a touch-down edge that an earlier return in loop() (or a
+    // sub-screen still open when the finger landed) kept from reaching here.
+    dragClip = DragClip::Tracking;
+    dragClipStartX = static_cast<int16_t>(lx);
+    dragClipStartY = static_cast<int16_t>(ly);
+    return false;
+  }
+
+  // A swipe's distance (InputManager::TOUCH_SWIPE_MIN_PX). Below it a lift is
+  // still a tap (the SDK's tap release slop runs up to the swipe distance), and
+  // a tap on a word here is a lookup, so starting the clip any earlier would
+  // take lookups away from a finger that wobbled.
+  constexpr int kDragStartPx = 60;
+  const int dx = lx - dragClipStartX;
+  const int dy = ly - dragClipStartY;
+  if (dx * dx + dy * dy < kDragStartPx * kDragStartPx) return false;
+
+  // One try per contact: whichever way it goes, the rest of this contact is
+  // either the selector's drag or an ordinary swipe.
+  dragClip = DragClip::Spent;
+  // Off the text (a margin, a picture, blank space) it stays a swipe and its
+  // lift turns the page as before. On a word the selector adopts the live
+  // contact; its ownsSwipes() keeps the lift from being injected as a swipe.
+  return startClipSelection(dragClipStartX, dragClipStartY, /*forLookup=*/false, /*liveContact=*/true,
+                            /*selectMode=*/false, /*tapEntry=*/false, /*dragEntry=*/true);
+}
+#endif
 
 void EpubReaderActivity::saveClipping(const ClippingResult& clip, const std::string& bookTitle,
                                       const std::string& author, const std::string& chapterTitle) {
@@ -3980,6 +4090,12 @@ void EpubReaderActivity::openReaderMenu() {
     const auto& menu = std::get<MenuResult>(result.data);
     applyOrientation(menu.orientation);
     toggleAutoPageTurn(menu.pageTurnOption);
+    // The speed picked here is the one the slide switch restarts at. Only the
+    // menu records it: the Auto Page Turn action always starts at Auto/60s.
+    if (automaticPageTurnActive && menu.pageTurnOption != 0 && SETTINGS.autoPageTurnLast != menu.pageTurnOption) {
+      SETTINGS.autoPageTurnLast = menu.pageTurnOption;
+      SETTINGS.saveToFile();
+    }
     if (menu.buttonHints != SETTINGS.showButtonHints) {
       SETTINGS.showButtonHints = menu.buttonHints;
       SETTINGS.saveToFile();
@@ -4202,6 +4318,14 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
       // this is still held: the list's HeldButtonGuard eats its release.
       onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::SELECT_CHAPTER);
       return true;
+
+    case A::READER_ACTION_LIGHT_PANEL:
+#if FREEINK_CAP_FRONTLIGHT
+      if (CrossPointSettings::isUnavailableReaderAction(action)) return false;
+      startActivityForResult(std::make_unique<FrontlightPanelActivity>(renderer, mappedInput),
+                             [this](const ActivityResult&) { requestUpdate(); });
+#endif
+      return false;
 
     case A::READER_ACTION_TOGGLE_FRONTLIGHT:
       // No repaint: the page is unchanged, only the light behind it.

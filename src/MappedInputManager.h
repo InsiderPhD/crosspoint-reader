@@ -115,6 +115,9 @@ class MappedInputManager {
   // buttons are exactly such points. Suppressing it here fixes all of them at
   // once, which is also the honest layering — the contact is spent.
   bool wasTapPoint(int& lx, int& ly) const;
+  // Spend this frame's tap on something outside the current activity (main.cpp's
+  // status-bar tap opening the light panel), so the screen does not act on it too.
+  void consumeScreenTap() const { tapConsumedByActionBar = true; }
 
   // Touch-down edge in the same coordinate space as wasTapPoint(), for screens
   // that act the moment a finger lands (the keyboard). The same contact still
@@ -153,6 +156,17 @@ class MappedInputManager {
   // heldTouchZone() (follows a moving finger, reports from first contact, and
   // a finger on an action-bar button doesn't count) -- for drag gestures.
   bool heldTouchPoint(int& lx, int& ly) const;
+
+  // Where this frame's swipe ended, when it was dropped because the activity
+  // owns swipes (setSwipesIgnored). Lets a drag tracker that missed the
+  // finger's last frames (the clip selector, opened mid-drag) still read where
+  // the drag ended.
+  bool wasIgnoredSwipeEnd(int& lx, int& ly) const {
+    if (!ignoredSwipeEnd) return false;
+    lx = ignoredSwipeEndX;
+    ly = ignoredSwipeEndY;
+    return true;
+  }
 
   // The readers' configurable home-key actions and main.cpp's Home route.
   HomeKeyGesture homeKeyGesture() const { return homeGesture; }
@@ -294,9 +308,14 @@ class MappedInputManager {
   mutable int16_t swipeStartX = 0;
   mutable int16_t swipeStartY = 0;
   // This frame's tap landed on an action-bar button and became that button's
-  // press; wasTapPoint()/wasTapZone() must not also report it. Cleared at the
+  // press (or was spent via consumeScreenTap()); wasTapPoint()/wasTapZone()
+  // must not also report it. Cleared at the
   // start of every update().
   mutable bool tapConsumedByActionBar = false;
+  // See wasIgnoredSwipeEnd(). Cleared at the start of every update().
+  mutable bool ignoredSwipeEnd = false;
+  mutable int16_t ignoredSwipeEndX = 0;
+  mutable int16_t ignoredSwipeEndY = 0;
 
   // A touch point mapped into the logical frame, carried with the logical
   // screen size so callers can classify against it without re-deriving it.

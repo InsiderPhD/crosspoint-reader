@@ -39,6 +39,7 @@
 #include "activities/ActivityManager.h"
 #include "activities/RenderLock.h"  // RenderLock::peek() for the BLE auto-restore render gate
 #include "activities/settings/SdFirmwareUpdateActivity.h"
+#include "activities/util/FrontlightPanelActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
@@ -391,7 +392,7 @@ void handleSlideSwitch() {
       if (!halFrontlight.present() || (SETTINGS.frontlightBrightness > 0) == on) return;
       if (on) {
         SETTINGS.frontlightBrightness = SETTINGS.frontlightLastBrightness > 0 ? SETTINGS.frontlightLastBrightness
-                                                                             : FrontlightToggle::FALLBACK_BRIGHTNESS;
+                                                                              : FrontlightToggle::FALLBACK_BRIGHTNESS;
       } else {
         SETTINGS.frontlightLastBrightness = SETTINGS.frontlightBrightness;
         SETTINGS.frontlightBrightness = 0;
@@ -399,6 +400,11 @@ void handleSlideSwitch() {
       halFrontlight.apply(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth);
       break;
     }
+    case CrossPointSettings::READER_ACTION_TOGGLE_BLUETOOTH:
+    case CrossPointSettings::READER_ACTION_AUTO_PAGE_TURN:
+      // Reader-only: EpubReaderActivity::applySlideSwitch reads the position
+      // itself on entry and on each move. Nothing to do elsewhere.
+      return;
     default:  // READER_ACTION_NONE: the switch does nothing
       return;
   }
@@ -742,6 +748,8 @@ void setup() {
   // turn set the language.
   I18N.loadSettings();
   SETTINGS.loadFromFile();
+  // Before the first paint, so a dark-mode boot isn't framed in white.
+  display.setDarkBorder(SETTINGS.darkMode != 0);
   BOOT_PHASE("settings.json");
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
@@ -1033,7 +1041,7 @@ void loop() {
   // tap/double-tap/hold actions itself.) Already at Home it is a no-op rather
   // than a rebuild and repaint of the same screen.
   if (!onReadingScreen && mappedInputManager.homeKeyGesture() == MappedInputManager::HomeKeyGesture::Tap &&
-      !activityManager.isAtHome()) {
+      !activityManager.isAtHome() && !activityManager.handlesHomeTap()) {
     activityManager.goHome();
   }
 #endif
@@ -1099,6 +1107,10 @@ void loop() {
   // The renderer needs to know dark mode is coming so it can exempt content
   // images from the whole-screen invert that applies it.
   renderer.setDarkMode(SETTINGS.darkMode != 0);
+  // The border ring outside the framebuffer isn't inverted with the page; on
+  // panels whose border follows the waveform (Picco) it would frame a dark page
+  // in white.
+  display.setDarkBorder(SETTINGS.darkMode != 0);
   // Suppress images whenever Bluetooth is in play — the stack being UP *or* the user
   // wanting it (auto-restore may have it momentarily down for a section build). Two
   // reasons: (1) a connected remote leaves ~10-20KB free and the JPEG decoder wants
@@ -1346,6 +1358,21 @@ void loop() {
   } else {
     longBackHomeFired = false;
   }
+
+#if FREEINK_CAP_TOUCH && FREEINK_CAP_FRONTLIGHT
+  // A tap on the status-bar strip of Home / the browsers / Settings opens the
+  // light panel, where upstream CrossPoint users look for it. (Its top-edge swipe
+  // is deliberately not ported.) The tap is spent here so the screen beneath
+  // does not act on it too.
+  if (halFrontlight.present() && activityManager.statusBarOpensLightPanel()) {
+    int tapX = 0;
+    int tapY = 0;
+    if (mappedInputManager.wasScreenTapped(tapX, tapY) && tapY < UITheme::getInstance().getMetrics().homeTopPadding) {
+      mappedInputManager.consumeScreenTap();
+      activityManager.pushActivity(std::make_unique<FrontlightPanelActivity>(renderer, mappedInputManager));
+    }
+  }
+#endif
 
   const unsigned long activityStartTime = millis();
   activityManager.loop();

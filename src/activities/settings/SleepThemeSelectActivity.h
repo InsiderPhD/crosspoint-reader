@@ -18,7 +18,9 @@ class MappedInputManager;
  * opens the theme store (SleepThemeDownloadActivity, which also updates
  * installed themes).
  *
- * Confirm on a theme offers Use or Delete.
+ * Confirm on a theme opens its preview (the preview.bmp a store install saved
+ * in its folder, or "No preview available") with Back / Use, plus Delete when
+ * the theme is on the card.
  *
  * Themes come from the store or from the web UI's Sleep Themes page. With none
  * installed, or the configured one missing, the screen says so above the list.
@@ -33,13 +35,21 @@ class SleepThemeSelectActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
   bool handlesDirectTouch() const override { return true; }
+  // The preview's Use is only on the action bar (a tap on the picture does
+  // nothing), so its Confirm slot must stay.
+  bool tapActivatesConfirm() const override { return previewIndex < 0; }
 
  private:
   void discover();
   void addBuiltIns();
   void useTheme(const std::string& name);
   void handleSelection();
-  void openThemeActions(int index);
+  void openPreview(int index);
+  void closePreview();
+  void loopPreview();
+  void renderPreview();
+  // The theme has a folder on the card (so Delete applies), not just a built-in.
+  static bool onCard(const std::string& name);
   void confirmDelete(const std::string& name);
   void deleteTheme(const std::string& name);
   void openStore();
@@ -59,4 +69,6 @@ class SleepThemeSelectActivity final : public Activity {
   // and leads to the store instead of silently listing other themes.
   bool configuredMissing = false;
   int selectedIndex = 0;
+  // Index into themes of the theme being previewed; -1 = showing the list.
+  int previewIndex = -1;
 };

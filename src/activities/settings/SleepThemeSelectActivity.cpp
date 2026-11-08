@@ -15,7 +15,6 @@
 #include "MappedInputManager.h"
 #include "SleepThemeDownloadActivity.h"
 #include "activities/util/ConfirmationActivity.h"
-#include "activities/util/ListPickerActivity.h"
 #include "fontIds.h"
 #include "sleeptheme/SleepThemeRenderer.h"
 #include "util/TouchListNav.h"
@@ -83,6 +82,10 @@ void SleepThemeSelectActivity::addBuiltIns() {
 }
 
 void SleepThemeSelectActivity::loop() {
+  if (previewIndex >= 0) {
+    loopPreview();
+    return;
+  }
   if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     finish();
     return;
@@ -129,14 +132,8 @@ void SleepThemeSelectActivity::handleSelection() {
     openStore();
     return;
   }
-  openThemeActions(selectedIndex);
+  openPreview(selectedIndex);
 }
-
-namespace {
-constexpr int ACTION_USE = 0;
-constexpr int ACTION_DELETE = 1;
-constexpr int ACTION_COUNT = 2;
-}  // namespace
 
 void SleepThemeSelectActivity::useTheme(const std::string& name) {
   {
@@ -149,37 +146,48 @@ void SleepThemeSelectActivity::useTheme(const std::string& name) {
   finish();
 }
 
-void SleepThemeSelectActivity::openThemeActions(const int index) {
-  // The name is copied into the callbacks: the list is rescanned (and this
-  // vector replaced) before a delete finishes.
-  const std::string name = themes[static_cast<size_t>(index)];
-  // A built-in that isn't on the card has nothing to delete.
+bool SleepThemeSelectActivity::onCard(const std::string& name) {
   char path[96];
   snprintf(path, sizeof(path), "%s/%s/theme.bin", SleepThemeRenderer::THEMES_DIR, name.c_str());
-  if (!Storage.exists(path)) {
-    useTheme(name);
+  return Storage.exists(path);
+}
+
+void SleepThemeSelectActivity::openPreview(const int index) {
+  {
+    RenderLock lock(*this);
+    previewIndex = index;
+  }
+  requestUpdate();
+}
+
+void SleepThemeSelectActivity::closePreview() {
+  {
+    RenderLock lock(*this);
+    previewIndex = -1;
+  }
+  requestUpdate();
+}
+
+void SleepThemeSelectActivity::loopPreview() {
+  if (previewIndex >= static_cast<int>(themes.size())) {
+    closePreview();
     return;
   }
-  // Heap: one small activity, gone before this list is back on screen.
-  auto picker = makeUniqueNoThrow<ListPickerActivity>(
-      renderer, mappedInput, themes[static_cast<size_t>(index)].c_str(), ACTION_COUNT, 0,
-      [](int row) { return std::string(row == ACTION_USE ? tr(STR_SLEEP_THEME_USE) : tr(STR_DELETE)); }, nullptr,
-      /*markInitial=*/false);
-  if (!picker) {
-    LOG_ERR("STS", "OOM: theme action list");
-    return;
-  }
-  startActivityForResult(std::move(picker), [this, name](const ActivityResult& result) {
-    if (result.isCancelled) {
-      requestUpdate();
-      return;
-    }
-    if (std::get<ListPickResult>(result.data).index == ACTION_DELETE) {
-      confirmDelete(name);
-      return;
-    }
+  // Copied: a delete rescans (replaces) the list before it finishes.
+  const std::string name = themes[static_cast<size_t>(previewIndex)];
+  if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    closePreview();
+  } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
     useTheme(name);
-  });
+  } else if (mappedInput.wasReleased(MappedInputManager::Button::Left) && onCard(name)) {
+    // On release: ConfirmationActivity cancels on a Left release, so acting on
+    // the press would let this same press's release dismiss it.
+    {
+      RenderLock lock(*this);
+      previewIndex = -1;
+    }
+    confirmDelete(name);
+  }
 }
 
 void SleepThemeSelectActivity::confirmDelete(const std::string& name) {
@@ -238,8 +246,41 @@ Rect SleepThemeSelectActivity::listRect() const {
   return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
 }
 
+void SleepThemeSelectActivity::renderPreview() {
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto pageHeight = renderer.getScreenHeight();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const std::string& name = themes[static_cast<size_t>(previewIndex)];
+
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, name.c_str());
+
+  const int top = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int height = pageHeight - top - metrics.buttonHintsHeight - metrics.verticalSpacing;
+  char path[96];
+  snprintf(path, sizeof(path), "%s/%s/%s", SleepThemeRenderer::THEMES_DIR, name.c_str(),
+           SleepThemeRenderer::PREVIEW_FILE);
+  // Dark mode inverts the whole screen afterwards: draw the negative so the
+  // picture comes out as the theme really looks.
+  if (!SleepThemeRenderer::drawPreview(renderer, path, metrics.contentSidePadding, top,
+                                       pageWidth - 2 * metrics.contentSidePadding, height, SETTINGS.darkMode)) {
+    renderer.drawCenteredText(UI_10_FONT_ID, (pageHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2,
+                              tr(STR_SLEEP_THEME_NO_PREVIEW));
+  }
+
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SLEEP_THEME_USE_SHORT), onCard(name) ? tr(STR_DELETE) : "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
 void SleepThemeSelectActivity::render(RenderLock&&) {
   renderer.clearScreen();
+
+  if (previewIndex >= 0 && previewIndex < static_cast<int>(themes.size())) {
+    renderPreview();
+    if (SETTINGS.darkMode) renderer.invertScreen();
+    renderer.displayBuffer();
+    return;
+  }
 
   const auto pageWidth = renderer.getScreenWidth();
   const auto metrics = UITheme::getInstance().getMetrics();

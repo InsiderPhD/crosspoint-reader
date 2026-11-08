@@ -67,6 +67,10 @@ class Activity {
   // injected Back/Confirm would land on this screen (or, once it has
   // finished, on the one beneath it).
   virtual bool ownsSwipes() const { return false; }
+  // X4 Pro only. True for overlays that close themselves on a home-key tap
+  // (the light panel): main.cpp then skips its global tap-is-Go-Home, which
+  // would otherwise close the book underneath as well.
+  virtual bool handlesHomeTap() const { return false; }
   // X4 Pro Full Touch only. True while a tap on the highlighted element does
   // exactly what the action bar's Confirm slot would do, which makes that slot
   // a second way to run the same handler. ActionBar then leaves it out and the

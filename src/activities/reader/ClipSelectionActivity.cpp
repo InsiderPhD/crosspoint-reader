@@ -1,11 +1,13 @@
 #include "ClipSelectionActivity.h"
 
+#include <Arduino.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 #include "CrossPointSettings.h"
@@ -19,6 +21,14 @@
 namespace {
 // Hold Confirm this long in lookup mode to anchor the first word of a phrase.
 constexpr unsigned long LOOKUP_ANCHOR_HOLD_MS = 500;
+#if FREEINK_CAP_TOUCH
+// Hold a range drag still on the page's last (first) word this long to turn to
+// the next (previous) page.
+constexpr unsigned long PAGE_TURN_DWELL_MS = 700;
+// Logical pixels the finger must move from where the page turned before it
+// drives the cursor again (about 3-4 mm on the X4 Pro).
+constexpr int PAGE_TURN_RELEASE_PX = 30;
+#endif
 }  // namespace
 
 ClipSelectionActivity::ClipSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, WordList wordList,
@@ -262,6 +272,54 @@ void ClipSelectionActivity::loop() {
 }
 
 #if FREEINK_CAP_TOUCH
+void ClipSelectionActivity::resetDragPageTurn() {
+  edgeDwellWord = -1;
+  pageTurnLatched = false;
+}
+
+bool ClipSelectionActivity::dragPageTurn(const int fingerX, const int fingerY) {
+  const unsigned long now = millis();
+  const int total = static_cast<int>(wordList.words.size());
+
+  if (pageTurnLatched) {
+    // One turn per hold: a finger left where the page turned stays latched
+    // (holding on must not race through pages faster than e-ink can show
+    // them). Moving on hands it the cursor again, so going a further page is
+    // the same gesture once more on the new page.
+    if (std::abs(fingerX - latchX) + std::abs(fingerY - latchY) <= PAGE_TURN_RELEASE_PX) return true;
+    resetDragPageTurn();
+    return false;
+  }
+
+  // Only the dragged end sitting on the page edge counts, so a range that
+  // merely passes through the last word on its way somewhere else never turns.
+  // Words are stored page by page, so the next (previous) page starts (ends)
+  // just past this page's last (first) word.
+  int next = -1;
+  if (cursorIdx == pageLastWord(cursorIdx) && cursorIdx + 1 < total) {
+    next = cursorIdx + 1;
+  } else if (cursorIdx == pageFirstWord(cursorIdx) && cursorIdx > 0) {
+    next = cursorIdx - 1;
+  }
+  if (next < 0) {
+    edgeDwellWord = -1;
+    return false;
+  }
+  if (edgeDwellWord != cursorIdx) {
+    edgeDwellWord = cursorIdx;
+    edgeDwellStartMs = now;
+    return false;
+  }
+  if (now - edgeDwellStartMs < PAGE_TURN_DWELL_MS) return false;
+
+  cursorIdx = next;
+  pageTurnLatched = true;
+  latchX = fingerX;
+  latchY = fingerY;
+  requestUpdate();
+  return true;
+}
+
 bool ClipSelectionActivity::handleAdoptedContact() {
   if (!contactAdopted) return false;
 
@@ -270,6 +328,7 @@ bool ClipSelectionActivity::handleAdoptedContact() {
   int lx, ly;
   const bool held = mappedInput.heldTouchPoint(lx, ly);
   if (held) {
+    if (dragging && dragPageTurn(lx, ly)) return true;
     const int idx = clipword::findWordAt(wordList, wordList.words[cursorIdx].pageIdx, lx, ly);
     if (!dragging && idx >= 0 && idx != contactStartWord) {
       dragging = true;
@@ -289,13 +348,38 @@ bool ClipSelectionActivity::handleAdoptedContact() {
   // whatever is left of the contact in every case: its eventual lift must not
   // come back as a tap on a word, an action-bar press, or (once this screen has
   // finished, in the same frame) a tap zone in the reader.
+  // A drag begun in the reader can end while the reader is still building the
+  // word list, so this screen never saw the finger move. Its lift was a swipe
+  // (ignored, since this screen owns swipes): its end point is where the range
+  // ends.
+  if (dragEntry) {
+    int ex, ey;
+    if (mappedInput.wasIgnoredSwipeEnd(ex, ey)) {
+      const int idx = clipword::findWordAt(wordList, wordList.words[cursorIdx].pageIdx, ex, ey);
+      if (idx >= 0 && idx != contactStartWord) {
+        dragging = true;
+        startMarkIdx = contactStartWord;
+        cursorIdx = idx;
+      }
+    }
+  }
+
   mappedInput.suppressTouchContact();
   contactAdopted = false;
   touchWasHeld = false;
+  resetDragPageTurn();
   // A drag that came back to the word it started on is a finger that wandered
   // during the hold, not a range.
   const bool draggedRange = dragging && cursorIdx != contactStartWord;
   dragging = false;
+  if (dragEntry && !draggedRange) {
+    // A swipe across a single word: nothing to clip, back to the page.
+    ActivityResult result;
+    result.isCancelled = true;
+    setResult(std::move(result));
+    finish();
+    return true;
+  }
   if (selectMode) {
     // Lifting never finishes here: it settles the range and brings up the
     // handles and the toolbar.
@@ -343,16 +427,19 @@ bool ClipSelectionActivity::handleLookupDrag() {
 }
 
 bool ClipSelectionActivity::handleRangeTouch() {
-  const int page = wordList.words[cursorIdx].pageIdx;
   int lx, ly;
 
   // Drag: the word the finger came down on is the start, the word under it now
   // is the end, and lifting saves. A contact only becomes a drag once the
   // finger reaches a different word, so a tap (or a wobbly one) stays a tap.
   const bool held = mappedInput.heldTouchPoint(lx, ly);
+  if (held && touchWasHeld && dragging && dragPageTurn(lx, ly)) return true;
+  // Read after a possible page turn: the finger resolves on the page shown.
+  const int page = wordList.words[cursorIdx].pageIdx;
   if (held) {
     const int idx = clipword::findWordAt(wordList, page, lx, ly);
     if (!touchWasHeld) {
+      resetDragPageTurn();
       contactStartWord = idx;
       dragging = false;
     } else if (!dragging && idx >= 0 && contactStartWord >= 0 && idx != contactStartWord) {
@@ -438,8 +525,14 @@ ClipSelectionActivity::SelectLayout ClipSelectionActivity::selectLayout() const 
 
   const int from = startMarkIdx == -1 ? cursorIdx : std::min(startMarkIdx, cursorIdx);
   const int to = startMarkIdx == -1 ? cursorIdx : std::max(startMarkIdx, cursorIdx);
-  const Box first = wordBox(from);
-  const Box last = wordBox(to);
+  // A range dragged across a page turn runs off the page shown (the cursor's):
+  // only an end on this page gets a handle, and the toolbar is placed against
+  // the part of the range on this page.
+  const int page = wordList.words[cursorIdx].pageIdx;
+  const bool startShown = wordList.words[from].pageIdx == page;
+  const bool endShown = wordList.words[to].pageIdx == page;
+  const Box first = wordBox(startShown ? from : pageFirstWord(cursorIdx));
+  const Box last = wordBox(endShown ? to : pageLastWord(cursorIdx));
 
   // Handles: a stem along the selection's outer edge, a dot past the line
   // (above the start, below the end). The hit box is split at the word's
@@ -461,8 +554,8 @@ ClipSelectionActivity::SelectLayout ClipSelectionActivity::selectLayout() const 
     h.hit = {midX - HANDLE_HIT / 2, hitTop, HANDLE_HIT, hitBottom - hitTop};
     return h;
   };
-  layout.start = makeHandle(first, true);
-  layout.end = makeHandle(last, false);
+  if (startShown) layout.start = makeHandle(first, true);
+  if (endShown) layout.end = makeHandle(last, false);
 
   // Toolbar: Look Up (only with a dictionary set) | Clip.
   const bool visible[ACTION_COUNT] = {lookupAvailable, true};
@@ -480,8 +573,8 @@ ClipSelectionActivity::SelectLayout ClipSelectionActivity::selectLayout() const 
   }
   const int barH = std::min(safe.h, std::max(BAR_MIN_H, renderer.getLineHeight(BAR_FONT_ID) + 2 * BAR_PAD_Y));
 
-  const int selTop = std::min(first.y, layout.start.dot.y);
-  const int selBottom = std::max(last.y + last.h, layout.end.dot.y + layout.end.dot.h);
+  const int selTop = startShown ? std::min(first.y, layout.start.dot.y) : first.y;
+  const int selBottom = endShown ? std::max(last.y + last.h, layout.end.dot.y + layout.end.dot.h) : last.y + last.h;
   const int reach = SELECTION_GAP + POINTER_H;
   const auto clampX = [&](const int x) { return std::clamp(x, safe.x, safe.x + safe.w - barW); };
   int anchorX = first.x + first.w / 2;
@@ -509,6 +602,7 @@ ClipSelectionActivity::SelectLayout ClipSelectionActivity::selectLayout() const 
       const Box bar{x, barY, barW, barH};
       for (const auto* h : {&layout.start, &layout.end}) {
         for (const auto* b : {&h->dot, &h->stem}) {
+          if (b->w <= 0) continue;  // handle off this page
           if (b->x < bar.x + bar.w && bar.x < b->x + b->w && b->y < bar.y + bar.h && bar.y < b->y + b->h) return true;
         }
       }
@@ -537,6 +631,7 @@ ClipSelectionActivity::SelectLayout ClipSelectionActivity::selectLayout() const 
 
 void ClipSelectionActivity::drawSelectOverlay(const SelectLayout& layout, const bool showActions) const {
   for (const auto* h : {&layout.start, &layout.end}) {
+    if (h->stem.w <= 0) continue;  // that end of the range is on another page
     renderer.fillRect(h->stem.x, h->stem.y, h->stem.w, h->stem.h, true);
     renderer.fillRoundedRect(h->dot.x, h->dot.y, h->dot.w, h->dot.h, DOT_SIZE / 2, Color::Black);
   }
@@ -585,11 +680,12 @@ void ClipSelectionActivity::runSelectAction(const int action) {
 }
 
 bool ClipSelectionActivity::handleSelectTouch() {
-  const int page = wordList.words[cursorIdx].pageIdx;
   int lx, ly;
 
   if (selectDrag != SelectDrag::None) {
     if (mappedInput.heldTouchPoint(lx, ly)) {
+      if (dragPageTurn(lx, ly)) return true;
+      const int page = wordList.words[cursorIdx].pageIdx;
       const int idx = clipword::findWordAt(wordList, page, lx + dragOffsetX, ly + dragOffsetY);
       if (idx >= 0 && idx != cursorIdx) {
         cursorIdx = idx;
@@ -600,10 +696,12 @@ bool ClipSelectionActivity::handleSelectTouch() {
     // Lifted (or a second finger / the action bar took over): the range stands.
     mappedInput.suppressTouchContact();
     selectDrag = SelectDrag::None;
+    resetDragPageTurn();
     requestUpdate();
     return true;
   }
 
+  const int page = wordList.words[cursorIdx].pageIdx;
   if (mappedInput.wasTouchDownPoint(lx, ly)) {
     const SelectLayout layout = selectLayout();
     const int from = std::min(startMarkIdx, cursorIdx);
@@ -665,7 +763,8 @@ bool ClipSelectionActivity::handleSelectTouch() {
     const int from = std::min(startMarkIdx, cursorIdx);
     const int to = std::max(startMarkIdx, cursorIdx);
     for (int i = from; i <= to; ++i) {
-      if (wordBox(i).contains(lx, ly)) return true;  // a tap on the selection keeps it
+      // Only the part of the range on this page is under the finger.
+      if (wordList.words[i].pageIdx == page && wordBox(i).contains(lx, ly)) return true;  // keeps the selection
     }
     // Anywhere else: done with the selection, back to the page.
     ActivityResult result;
@@ -853,4 +952,19 @@ int ClipSelectionActivity::lineBackward(const int idx) const {
     first = i;  // walk back to that line's first word
   }
   return first;
+}
+
+int ClipSelectionActivity::pageFirstWord(int idx) const {
+  const auto& words = wordList.words;
+  const uint8_t page = words[idx].pageIdx;
+  while (idx > 0 && words[idx - 1].pageIdx == page) --idx;
+  return idx;
+}
+
+int ClipSelectionActivity::pageLastWord(int idx) const {
+  const auto& words = wordList.words;
+  const int total = static_cast<int>(words.size());
+  const uint8_t page = words[idx].pageIdx;
+  while (idx + 1 < total && words[idx + 1].pageIdx == page) ++idx;
+  return idx;
 }

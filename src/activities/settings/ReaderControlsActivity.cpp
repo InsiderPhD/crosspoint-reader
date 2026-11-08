@@ -262,9 +262,10 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
 #endif
     case 4:
 #if FREEINK_CAP_TOUCH
-      // X4 Pro side keys sit left/right of the screen, like the X3's, and a
-      // vertical swipe is their gesture twin -- both reach this row.
-      btn = tr(STR_DIR_SIDE_L);
+      // X4 Pro side keys sit left/right of the screen, like the X3's; the
+      // Picco's are Up/Down like the X4's. A vertical swipe is their gesture
+      // twin -- both reach this row.
+      btn = gpio.sideKeysAreLeftRight() ? tr(STR_DIR_SIDE_L) : tr(STR_DIR_UP);
 #else
       // X3 side buttons sit left/right, not up/down — label them accordingly.
       btn = gpio.deviceIsX3() ? tr(STR_DIR_SIDE_L) : tr(STR_DIR_UP);
@@ -272,7 +273,7 @@ const char* ReaderControlsActivity::getRowTitle(const uint8_t row) const {
       break;
     case 5:
 #if FREEINK_CAP_TOUCH
-      btn = tr(STR_DIR_SIDE_R);
+      btn = gpio.sideKeysAreLeftRight() ? tr(STR_DIR_SIDE_R) : tr(STR_DIR_DOWN);
 #else
       btn = gpio.deviceIsX3() ? tr(STR_DIR_SIDE_R) : tr(STR_DIR_DOWN);
 #endif
@@ -395,6 +396,8 @@ const char* ReaderControlsActivity::actionName(const CrossPointSettings::READER_
       return tr(STR_READER_ACTION_ROTATE_180);
     case CrossPointSettings::READER_ACTION_TOGGLE_PAGE_TURN_GESTURES:
       return tr(STR_DISABLE_PAGE_TURN_GESTURES);
+    case CrossPointSettings::READER_ACTION_LIGHT_PANEL:
+      return tr(STR_LIGHT_PANEL);
     default:
       return tr(STR_NONE_OPT);
   }
@@ -513,7 +516,7 @@ void ReaderControlsActivity::openActionPicker(const uint8_t row) {
   if (!field) return;
 
   startActivityForResult(std::make_unique<ReaderActionSelectActivity>(renderer, mappedInput, getRowTitle(row), *field,
-                                                                     /*switchableOnly=*/row == kSlideSwitchRow),
+                                                                      /*switchableOnly=*/row == kSlideSwitchRow),
                          [this, field](const ActivityResult& result) {
                            const auto* picked = std::get_if<ReaderActionResult>(&result.data);
                            if (!picked || picked->action == *field) return;

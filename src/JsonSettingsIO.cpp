@@ -320,6 +320,7 @@ void JsonSettingsIO::serializeSettings(const CrossPointSettings& s, JsonDocument
   doc["readerLongPressHome"] = s.readerLongPressHome;
   doc["readerDoubleTapHome"] = s.readerDoubleTapHome;
   doc["readerSlideSwitch"] = s.readerSlideSwitch;
+  doc["autoPageTurnLast"] = s.autoPageTurnLast;
   doc["frontlightLastBrightness"] = s.frontlightLastBrightness;
   // Time zone + DST — picked on dedicated screens, so persisted by hand rather
   // than through SettingsList (that list stays resident for the whole session).
@@ -524,7 +525,7 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
       clampAction(doc["readerLongPressSideDown"] | (uint8_t)S::READER_ACTION_SKIP_CHAPTER_FORWARD,
                   S::READER_ACTION_SKIP_CHAPTER_FORWARD);
   s.readerShortPressPower = clampAction(doc["readerShortPressPower"] | S::DEFAULT_READER_SHORT_PRESS_POWER,
-                                       S::DEFAULT_READER_SHORT_PRESS_POWER);
+                                        S::DEFAULT_READER_SHORT_PRESS_POWER);
   s.readerTapLeft = clampAction(doc["readerTapLeft"] | (uint8_t)S::READER_ACTION_PAGE_BACK, S::READER_ACTION_PAGE_BACK);
   s.readerTapMiddle =
       clampAction(doc["readerTapMiddle"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
@@ -548,6 +549,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
       clampAction(doc["readerDoubleTapHome"] | (uint8_t)S::READER_ACTION_OPEN_MENU, S::READER_ACTION_OPEN_MENU);
   s.readerSlideSwitch = doc["readerSlideSwitch"] | (uint8_t)S::READER_ACTION_TOGGLE_FRONTLIGHT;
   if (!S::isSwitchableReaderAction(s.readerSlideSwitch)) s.readerSlideSwitch = S::READER_ACTION_TOGGLE_FRONTLIGHT;
+  // Range-checked where it is used (EpubReaderActivity::applySlideSwitch).
+  s.autoPageTurnLast = doc["autoPageTurnLast"] | (uint8_t)0;
   s.frontlightLastBrightness = clamp(doc["frontlightLastBrightness"] | (uint8_t)0, 101, 0);
   // Absent on a file from older firmware: stays NOT_CHOSEN, and the zone is
   // derived from the retired clockUtcOffsetQ / timeZonePreset loaded above.

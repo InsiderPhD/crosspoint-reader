@@ -24,6 +24,7 @@
 #include "RecentBooksStore.h"
 #include "XtcReaderChapterSelectionActivity.h"
 #include "activities/home/ReadingStatsDetailActivity.h"
+#include "activities/util/FrontlightPanelActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/FinishedBookMover.h"
@@ -233,6 +234,14 @@ bool XtcReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION ac
         ScreenshotUtil::takeScreenshot(renderer);
       }
       return true;
+
+    case A::READER_ACTION_LIGHT_PANEL:
+#if FREEINK_CAP_FRONTLIGHT
+      if (CrossPointSettings::isUnavailableReaderAction(action)) return false;
+      startActivityForResult(std::make_unique<FrontlightPanelActivity>(renderer, mappedInput),
+                             [this](const ActivityResult&) { requestUpdate(); });
+#endif
+      return false;
 
     case A::READER_ACTION_TOGGLE_FRONTLIGHT:
       return FrontlightToggle::toggle();

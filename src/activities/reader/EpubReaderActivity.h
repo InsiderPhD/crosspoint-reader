@@ -92,6 +92,16 @@ class EpubReaderActivity final : public Activity {
   bool longPressRightFired = false;
   bool longPressPageBackFired = false;
   bool longPressPageForwardFired = false;
+#if FREEINK_CAP_TOUCH
+  // Hold Action = Look Up & Highlight's drag-to-clip (see handleDragClip).
+  // Idle: no contact. Tracking: a contact that may still become a clip, first
+  // seen at dragClipStart. Spent: this contact already had its one try (or is
+  // a swipe) and stays what it is until the finger lifts.
+  enum class DragClip : uint8_t { Idle, Tracking, Spent };
+  DragClip dragClip = DragClip::Idle;
+  int16_t dragClipStartX = 0;
+  int16_t dragClipStartY = 0;
+#endif
   bool showBookmarkMessage = false;
   bool bookmarkMessageWasRemoval = false;
   unsigned long bookmarkMessageTime = 0UL;
@@ -242,6 +252,13 @@ class EpubReaderActivity final : public Activity {
   // that alters layout while staying in the reader.
   void reflowCurrentChapter();
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
+  // Picco slide switch bound to Bluetooth or Auto Page Turn: sets that state to
+  // the switch position on entry and on each move (see main.cpp handleSlideSwitch
+  // for the actions that apply everywhere).
+  void applySlideSwitch();
+  // Last binding/position applySlideSwitch carried out; -1 = not yet this visit.
+  int16_t slideSwitchAppliedAction = -1;
+  int8_t slideSwitchAppliedOn = -1;
   void pageTurn(bool isForwardTurn);
   // A page-turn press from any source (buttons, tap zones, tilt, the Bluetooth remote).
   // Turns at once on a settled page; while a render is in flight the press is counted in
@@ -295,8 +312,19 @@ class EpubReaderActivity final : public Activity {
   // point (not the nearest one) with no selector; returns false without
   // repainting when the point misses the text, so the caller can hand the tap
   // to the tap zones.
+  // dragEntry (with liveContact): Look Up & Highlight's drag. Like a hold's
+  // live contact, but only when the point is ON a word (not the nearest one),
+  // and the overlay cancels rather than waits if the drag never reached a
+  // second word. False when the point misses the text: the contact stays a
+  // swipe.
   bool startClipSelection(int anchorX = -1, int anchorY = -1, bool forLookup = false, bool liveContact = false,
-                          bool selectMode = false, bool tapEntry = false);
+                          bool selectMode = false, bool tapEntry = false, bool dragEntry = false);
+#if FREEINK_CAP_TOUCH
+  // Hold Action = Look Up & Highlight: a contact that lands on a word and moves
+  // a swipe's distance becomes a clip drag (start word -> finger, lift saves)
+  // instead of a swipe. True when the selector opened and loop() must return.
+  bool handleDragClip();
+#endif
   // Stores a finished selection as a clipping and shows the saved/failed popup.
   void saveClipping(const ClippingResult& clip, const std::string& bookTitle, const std::string& author,
                     const std::string& chapterTitle);
