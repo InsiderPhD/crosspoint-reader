@@ -1,8 +1,8 @@
 # Onyx BOOX Picco (experimental)
 
 The Picco (SDK name "Onyx Picco / BOOX Tiles") is an ESP32-S3 e-reader with a
-3.97" 800x480 panel, touch, a capacitive home pad, a warm/cool frontlight and a
-slide switch. It builds as its own binary, `[env:picco]`, and runs the X4 Pro's
+3.97" 800x480 panel, touch, two side keys, a warm/cool frontlight and a slide
+switch (no front or home buttons). It builds as its own binary, `[env:picco]`, and runs the X4 Pro's
 Full Touch UI.
 
 ## Before you flash: back up the stock firmware
