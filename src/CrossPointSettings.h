@@ -278,6 +278,7 @@ class CrossPointSettings {
     LYRA_CAROUSEL = 4,
     DASHBOARD = 5,
     BOOKSHELF = 6,
+    LICORICE = 7,
     UI_THEME_COUNT
   };
 

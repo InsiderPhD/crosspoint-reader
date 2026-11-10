@@ -458,6 +458,8 @@ void LyraCarouselTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect,
                            true);
 }
 
+const uint8_t* LyraCarouselTheme::menuIconBitmap(const UIIcon icon) { return menuIcon(icon); }
+
 int LyraCarouselTheme::menuBlockTopY(const GfxRenderer& renderer, const ThemeMetrics& metrics) {
   // buttonCount only sets tile width, so one is as good as any here.
   return computeMenuLayout(renderer, metrics, 1).labelY;

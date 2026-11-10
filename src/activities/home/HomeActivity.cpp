@@ -31,6 +31,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/SyncBookLauncher.h"
+#include "util/TimeUtils.h"
 #include "util/TouchListNav.h"
 
 // Largest-free-block floor below which arriving home triggers a defrag restart.
@@ -316,6 +317,7 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
 void HomeActivity::onEnter() {
   Activity::onEnter();
+  GUI.onHomeEnter();
 
   // Heap defragmentation checkpoint. Long reader sessions (32KB inflate blocks,
   // JPEG decode) and a BLE enable/disable cycle (freeing NimBLE returns ~48KB but
@@ -558,6 +560,18 @@ void HomeActivity::loop() {
     return;
   }
 
+  // Wall-clock homes repaint on the minute. Polled once a second (localtime is
+  // not free) and never under the book menu, which would lose its frame. The
+  // repaint restores the cover snapshot, so it costs one fast refresh.
+  if (UITheme::getInstance().getMetrics().homeLiveClock && !contextMenu.isOpen() &&
+      millis() - lastClockCheckMs >= 1000) {
+    lastClockCheckMs = millis();
+    uint16_t minute = 0;
+    if (TimeUtils::getLocalMinuteOfDay(minute) && static_cast<int16_t>(minute) != shownClockMinute) {
+      requestUpdate();
+    }
+  }
+
   const int menuCount = getMenuItemCount();
 
   // Active modal — drive it and dispatch the chosen action (if any) on a terminal event.
@@ -750,6 +764,11 @@ void HomeActivity::render(RenderLock&&) {
   renderer.clearScreen();
   bool bufferRestored = coverBufferStored && restoreCoverBuffer();
 
+  if (metrics.homeLiveClock) {
+    uint16_t minute = 0;
+    shownClockMinute = TimeUtils::getLocalMinuteOfDay(minute) ? static_cast<int16_t>(minute) : -1;
+  }
+
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding}, nullptr);
 
   // Record the tile rect so storeCoverBuffer (called from the theme) knows
@@ -777,7 +796,9 @@ void HomeActivity::render(RenderLock&&) {
   const auto labels = contextMenu.isOpen()
                           ? mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN))
                           : mappedInput.mapLabels("", tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (!metrics.homeHideButtonHints || contextMenu.isOpen()) {
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  }
 
   contextMenu.render(renderer);
 

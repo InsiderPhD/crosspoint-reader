@@ -60,6 +60,14 @@ struct ThemeMetrics {
   // Pinned books (RecentBooksStore::getPinnedPaths) take the first slots and
   // the book menus offer Pin / Unpin. Again only for a home with a shelf.
   bool homePinnedBooks;
+  // The home strip draws a wall clock, so HomeActivity repaints when the
+  // minute changes (Licorice). Off everywhere else: one refresh a minute is a
+  // real battery cost for a header clock nobody watches.
+  bool homeLiveClock;
+  // Home draws no button-hint bar (except under the book menu, whose Back needs
+  // a label): its screen is navigated directly. The theme then lays out over
+  // the strip; on the X4 Pro an undrawn action bar publishes no tap targets.
+  bool homeHideButtonHints;
 
   int buttonHintsHeight;
   int sideButtonHintsWidth;
@@ -140,6 +148,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .homeRecentBooksCount = 1,
                                  .homeBackfillFromLibrary = false,
                                  .homePinnedBooks = false,
+                                 .homeLiveClock = false,
+                                 .homeHideButtonHints = false,
 #if FREEINK_CAP_TOUCH
                                  // X4 Pro has no front buttons, so this strip holds the tappable
                                  // action bar instead of four button labels (see ActionBar.h).
@@ -268,6 +278,9 @@ class BaseTheme {
   // button grid) can move by rows; the drawn geometry is the theme's to know.
   enum class NavDirection : uint8_t { Up, Down, Left, Right };
   virtual int homeNavigate(int selectorIndex, int coverCount, int totalCount, NavDirection dir) const { return -1; }
+  // HomeActivity is being entered (not merely redrawn), for a theme that
+  // refreshes something once per visit (Licorice picks a new clipping).
+  virtual void onHomeEnter() const {}
 
   // Component drawing methods
   virtual void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total) const;

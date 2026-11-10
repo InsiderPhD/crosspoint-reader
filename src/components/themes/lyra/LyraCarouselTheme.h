@@ -62,6 +62,10 @@ class LyraCarouselTheme : public LyraTheme {
   // above it without duplicating the constants drawButtonMenu anchors with.
   static int menuBlockTopY(const GfxRenderer& renderer, const ThemeMetrics& metrics);
 
+  // The 32 px bitmap for a home-menu icon, or nullptr for one the menu never
+  // shows. For themes that draw their own menu over the same icon set.
+  static const uint8_t* menuIconBitmap(UIIcon icon);
+
   void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,
                            std::function<bool()> storeCoverBuffer) const override;

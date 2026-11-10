@@ -30,7 +30,8 @@ namespace SettingsListDetail {
 // the themes after it. Position i shows kUiThemeOptions[i].
 constexpr uint8_t kUiThemeOptions[] = {CrossPointSettings::CLASSIC,       CrossPointSettings::LYRA,
                                        CrossPointSettings::LYRA_3_COVERS, CrossPointSettings::LYRA_CAROUSEL,
-                                       CrossPointSettings::DASHBOARD,     CrossPointSettings::BOOKSHELF};
+                                       CrossPointSettings::DASHBOARD,     CrossPointSettings::BOOKSHELF,
+                                       CrossPointSettings::LICORICE};
 
 inline uint8_t getUiThemeIndex() {
   const uint8_t theme =
@@ -173,11 +174,11 @@ inline void appendDisplaySettings(SettingSink& v) {
       {StrId::STR_PAGES_1, StrId::STR_PAGES_5, StrId::STR_PAGES_10, StrId::STR_PAGES_15, StrId::STR_PAGES_30},
       "refreshFrequency", StrId::STR_CAT_DISPLAY));
   // Persisted directly in JsonSettingsIO: a DynamicEnum has no valuePtr.
-  v.push_back(
-      SettingInfo::DynamicEnum(StrId::STR_UI_THEME,
-                               {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                                StrId::STR_THEME_LYRA_CAROUSEL, StrId::STR_THEME_DASHBOARD, StrId::STR_THEME_BOOKSHELF},
-                               getUiThemeIndex, setUiThemeIndex, "uiTheme", StrId::STR_CAT_DISPLAY));
+  v.push_back(SettingInfo::DynamicEnum(
+      StrId::STR_UI_THEME,
+      {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED, StrId::STR_THEME_LYRA_CAROUSEL,
+       StrId::STR_THEME_DASHBOARD, StrId::STR_THEME_BOOKSHELF, StrId::STR_THEME_LICORICE},
+      getUiThemeIndex, setUiThemeIndex, "uiTheme", StrId::STR_CAT_DISPLAY));
   v.push_back(SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                                   StrId::STR_CAT_DISPLAY));
   v.push_back(SettingInfo::Toggle(StrId::STR_READER_DARK_MODE, &CrossPointSettings::darkMode, "darkMode",

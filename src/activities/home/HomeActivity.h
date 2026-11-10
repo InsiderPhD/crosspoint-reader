@@ -19,6 +19,10 @@ class HomeActivity final : public Activity {
   bool firstRenderDone = false;
   bool coverRendered = false;      // Track if cover has been rendered once
   bool coverBufferStored = false;  // Track if cover buffer is stored
+  // Live-clock themes (ThemeMetrics::homeLiveClock): the local minute of day
+  // the last render showed, and when loop() last looked. -1 = clock unknown.
+  int16_t shownClockMinute = -1;
+  unsigned long lastClockCheckMs = 0;
   BookContextMenu contextMenu;
   FileRenameFlow renameFlow;
   // Set by Book Info (a child of this screen) when it renames the book, so the
