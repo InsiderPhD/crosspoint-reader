@@ -37,30 +37,50 @@ off). Check `espefuse.py --chip esp32s3 summary` before the first flash:
 `SECURE_BOOT_EN` must be off and `SPI_BOOT_CRYPT_CNT` 0, or a self-built image
 will not boot.
 
-## Partition layout: stock, app only
+## Partition layout: two app slots
 
-The build uses Onyx's own partition table (`partitions_picco.csv`, read from a
-retail unit, via upstream CrossPoint), and `scripts/app_only_upload.py` writes
-only the app into the stock `app` (ota_0) slot at `0xE0000`. Onyx's bootloader,
-NVS and `safeboot` recovery partition are left alone.
+`partitions_picco.csv` is Onyx's stock partition table (read from a retail
+unit, via upstream CrossPoint) with its single 14.4 MB `app` slot split into
+two OTA slots of about 7.2 MB each. NVS, otadata, the `safeboot` recovery
+partition, spiffs and coredump keep their stock offsets.
 
-There is a single app slot, so the Picco cannot update itself: "Check for
-updates", "SD firmware update" and the Down+Power recovery boot are disabled,
-and `FirmwareFlasher` refuses to write over the running app. Update over USB.
+| Partition | Offset | Size |
+| --- | --- | --- |
+| `safeboot` (Onyx recovery) | `0x20000` | 768 KB |
+| `app0` (ota_0) | `0xE0000` | 7.19 MB |
+| `app1` (ota_1) | `0x810000` | 7.25 MB |
 
-### A Picco that was flashed before this layout existed
+With two slots the Picco updates itself like the other boards: **Check for
+updates**, **SD firmware update** and the Down+Power recovery boot write the
+new firmware into the other slot and switch to it.
 
-If a device was flashed with a full upload of an older `[env:picco]` (our own
-partition table and bootloader), an app-only upload to `0xE0000` will never
-boot. Run the one-off relayout once, then go back to `[env:picco]`:
+### Moving a Picco to the two-slot table (once)
+
+A Picco on Onyx's stock table, or flashed with an earlier build of this fork,
+has one app slot. It runs this firmware fine but hides the update rows, because
+the only place to write an update is over the running app. Move it once with a
+full flash:
 
 ```sh
 pio run -e picco-relayout -t upload
 ```
 
-It writes the Arduino bootloader, the stock partition table, otadata selecting
-`ota_0` and the app. It cannot bring back Onyx's bootloader or `safeboot` image:
-only a backup can.
+It writes the Arduino bootloader, the two-slot partition table, otadata
+selecting `ota_0` and the app. NVS keeps its offset, so settings should
+survive. It cannot bring back Onyx's bootloader or `safeboot` image: only a
+backup can, so take the backup first (the command does it for you on the first
+upload to each device).
+
+### Everyday USB uploads
+
+`pio run -e picco -t upload` (through `scripts/app_only_upload.py`) writes the
+app into `ota_0` at `0xE0000` and otadata selecting `ota_0`, and leaves the
+bootloader, partition table, NVS and `safeboot` alone. The otadata write matters
+after an OTA or SD update, when the device is booting `ota_1`.
+
+The CrossPoint web flasher (crosspointreader.com/install) also works on either
+table: for the Picco it reads the partition table from the device and writes
+the app into whichever slot is booting.
 
 ## Controls
 
@@ -81,7 +101,7 @@ touchscreen and the slide switch.
 ## Status
 
 Built against the freeink-sdk Picco profile, with upstream CrossPoint's Picco
-work ported (charger setup, stock layout, slide switch, plugged-in sleep with a
+work ported (charger setup, stock partition offsets, slide switch, plugged-in sleep with a
 charge strip, touch-controller sleep). Unverified on hardware:
 
 - **Swipe directions.** Assumed to share the tap frame

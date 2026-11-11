@@ -1,5 +1,7 @@
 #pragma once
 
+#include <esp_ota_ops.h>
+
 #include <cstddef>
 #include <cstdint>
 
@@ -68,5 +70,18 @@ const char* resultName(Result r);
 // True for the two "built for another device" rejections, which the UI reports
 // with their own message rather than a generic invalid/write-failed one.
 inline bool isWrongDevice(Result r) { return r == Result::BAD_CHIP || r == Result::WRONG_BOARD; }
+
+// True when the partition table has a second app slot to flash into. A table
+// with one OTA slot (a Picco still on Onyx's stock layout) makes IDF return the
+// running partition as the "next" one, so OTA / SD updates and recovery boot
+// are hidden there; partitions_picco.csv now has two slots.
+inline bool canSelfUpdate() {
+#ifdef SIMULATOR
+  return true;  // host stubs return no partitions; keep the rows visible
+#else
+  const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
+  return next != nullptr && next != esp_ota_get_running_partition();
+#endif
+}
 
 }  // namespace firmware_flash

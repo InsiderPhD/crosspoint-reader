@@ -18,7 +18,7 @@ This gives you an idea of what features are avaliable for which device, I freque
 | **Xteink X3** | ESP32-C3 | Same as X4, plus: tilt to turn page, accurate time, button hints are remapped |
 | **Xteink X4C** | ESP32-S3 | Same as X3 plus: sd-plugins, autosync for hardcover/bookfusion/KOReader, Bluetooth unrestricted |
 | **Xteink X4 Pro** | ESP32-S3 | Same as X4C, plus: touchscreen, keyboard for searches, light (with nightshift to customize settings based on time)  |
-| **BOOX Picco** *(experimental)* | ESP32-S3 | Same as X4 Pro (touch UI, warm/cool light), plus: the slide switch can be bound to light, dark mode, Bluetooth or auto page turn. No front or home buttons, so Home is a swipe up from the bottom edge. Updates over USB only (no OTA or SD updates). **Back up the stock firmware before you flash**; see [docs/picco.md](docs/picco.md) |
+| **BOOX Picco** *(experimental)* | ESP32-S3 | Same as X4 Pro (touch UI, warm/cool light), plus: the slide switch can be bound to light, dark mode, Bluetooth or auto page turn. No front or home buttons, so Home is a swipe up from the bottom edge. OTA and SD updates once the device is on the two-slot partition table (one USB flash with `picco-relayout`). **Back up the stock firmware before you flash**; see [docs/picco.md](docs/picco.md) |
 
 You won't see any progress bars on this firmware, this is intentional, when we need memory for things like downloading books I intentially use the memory that the screen usually takes up to get a few more KB out of the device. 
 
@@ -56,6 +56,8 @@ With that in mind, basically all non-english translations are non-existant, sorr
 - **Hyphenation toggle** — dictionary hyphenation is back as a Reader setting rather than a build-time constant.
 - **File Browser progress column** — right-aligned `X` (finished, ≥90%), `21%` (in progress), or blank (unopened/directory) on every row.
 - **Sleep themes** — the sleep screen is now a theme. See [Custom sleep screens](#custom-sleep-screens) below.
+- **Build-while-you-read** — a chapter with no layout cache no longer sits behind the "Indexing" popup until the whole chapter is laid out. The layout runs in short slices on the main loop and the first page goes up as soon as it exists (under a second for a novel that is one 650 KB file); page turns during the build show each page as the build reaches it. Shape borrowed from witchhunt-reader's Background-C.
+- **Split Long Chapters** — the web uploader's **Optimize EPUB** (Advanced Mode) now cuts any chapter over 8,000 words or 32 KB into several files at a heading or scene break, fixing every link, the OPF and the NCX, so the reader never has to lay out a whole book as one chapter. Books already on the card can be done in place: tick them in the File Manager and press **Optimize Selected**; the original is kept as `name.epub.bak`, and the reading position survives unless chapters were split. Ported from witchhunt-reader / CrossInk (Julia Nguyen).
 
 ## Custom sleep screens
 

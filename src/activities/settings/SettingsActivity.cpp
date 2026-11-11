@@ -50,6 +50,7 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/FirmwareFlasher.h"
 #include "util/FrontlightScheduler.h"
 #include "util/TimeUtils.h"
 #include "util/TimeZoneRegistry.h"
@@ -177,12 +178,12 @@ void SettingsActivity::onEnter() {
   }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_PLUGINS, SettingAction::Plugins));
 #endif
-#if !FREEINK_DEVICE_PICCO
-  // The Picco keeps Onyx's stock partition table (partitions_picco.csv), which
-  // has one app slot, so it cannot update itself; it is flashed over USB.
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
-#endif
+  // Hidden on a single-slot partition table (a Picco still on Onyx's stock
+  // layout): there is nowhere to flash an update but over the running app.
+  if (firmware_flash::canSelfUpdate()) {
+    systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
+    systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
+  }
   systemSettings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_BATTERY, SettingAction::Battery));
   // Release Notes: reopens the What's New shown once after an update.

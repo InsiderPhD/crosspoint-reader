@@ -68,6 +68,13 @@ whole folder (`<root>/<name>`, only ever a direct child of a plugin root),
 including its token and config files. Because the picker uses the hold,
 Confirm opens a row on release there.
 
+**In the browser**, the Plugins page lists every installed plugin folder under
+**Installed plugins** (`GET /api/plugins/installed`), including data-only
+plugins with no `plugin.js` that `/api/plugins` leaves out, tagged by what
+they provide (web page, on-device screen, sleep-screen values, daily list),
+each with a Remove button (`POST /api/plugins/remove`, `name=<folder>`, the same
+direct-child-of-a-root rule as the reader).
+
 `<root>` is any of `/.crosspoint/plugins`, `/plugins`, or `/.plugins` — the
 first two-dot-free options exist so plugins are easy to copy onto the card
 from a computer. All three roots are scanned; on a name collision the earlier
@@ -520,6 +527,16 @@ and a theme shows a key with `{{plugin.<name>.<key>}}`, e.g.
   (a `sleep.enter` handler that fetches the file brings WiFi up at sleep, see
   `plugin-events.md`), or ship a file that holds a whole list and rotate it
   from your own code when the device is next online.
+- **Daily rotation (`sleep-vars-daily.jsonl`).** For values that change every
+  day (a word, a quote), ship a JSON Lines file beside `sleep-vars.json`: one
+  flat object per line, one line per day. When the device draws the sleep
+  screen it counts the non-blank lines, takes line `local day number % count`,
+  and lays that line's keys over `sleep-vars.json` (the daily value wins). It
+  works offline, needs no plugin code, and only the chosen line is held in
+  memory, so a year of entries is fine (each line at most 2 KB; a longer or
+  malformed line is logged and skipped). While the clock is unknown the daily
+  file is skipped and `sleep-vars.json` shows alone, so put a fallback there.
+  Example: the `word-of-the-day` plugin in the sleep-themes repo.
 - **Format.** Strings or whole numbers (numbers become their text), 2KB read cap:
   the same rules as the book metadata sidecar. Values are always text, so they
   go in text elements and expressions, not on bars or images. A value longer

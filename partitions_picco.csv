@@ -1,10 +1,15 @@
-# Onyx Picco / BOOX Tiles stock layout (read from a retail unit). CrossPoint
-# installs into the stock `app` (ota_0) slot and leaves the vendor bootloader,
-# otadata, NVS and the `safeboot` recovery partition untouched.
+# Onyx Picco / BOOX Tiles. Onyx's stock layout (read from a retail unit) with
+# its single 14.4MB `app` slot split into two OTA slots, so the Picco can
+# update itself over OTA / SD like the other boards. NVS, otadata, `safeboot`
+# (Onyx recovery), spiffs and coredump keep their stock offsets.
+#
+# Stock had: app, app, ota_0, 0xE0000, 0xE70000
+# Moving a unit to this table takes one full flash: pio run -e picco-relayout -t upload
 # Name,   Type, SubType,  Offset,   Size,     Flags
 nvs,      data, nvs,      0x9000,   0xC000,
 otadata,  data, ota,      0x15000,  0x2000,
 safeboot, app,  factory,  0x20000,  0xC0000,
-app,      app,  ota_0,    0xE0000,  0xE70000,
+app0,     app,  ota_0,    0xE0000,  0x730000,
+app1,     app,  ota_1,    0x810000, 0x740000,
 spiffs,   data, spiffs,   0xF50000, 0x80000,
 coredump, data, coredump, 0xFD0000, 0x10000,
