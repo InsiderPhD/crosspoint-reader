@@ -15,6 +15,7 @@
 #include <esp_task_wdt.h>
 
 #include <algorithm>
+#include <cstring>
 #include <memory>
 #include <new>
 
@@ -246,6 +247,8 @@ void CrossPointWebServer::begin() {
 
   // Upload endpoint with special handling for multipart form data
   server->on("/upload", HTTP_POST, [this] { handleUploadPost(upload); }, [this] { handleUpload(upload); });
+  // In-place optimize from the File Manager: the browser sends the optimized book back here.
+  server->on("/api/book/replace", HTTP_POST, [this] { handleBookReplace(); }, [this] { handleBookReplaceData(); });
 
   // Create folder endpoint
   server->on("/mkdir", HTTP_POST, [this] { handleCreateFolder(); });
@@ -293,6 +296,8 @@ void CrossPointWebServer::begin() {
   server->on("/plugin-host.js", HTTP_GET, [this] { handlePluginHostJs(); });
   server->on("/js/plugin-host.js", HTTP_GET, [this] { handlePluginHostJs(); });
   server->on("/api/plugins", HTTP_GET, [this] { handlePluginList(); });
+  server->on("/api/plugins/installed", HTTP_GET, [this] { handlePluginInstalled(); });
+  server->on("/api/plugins/remove", HTTP_POST, [this] { handlePluginRemove(); });
   server->on("/plugin", HTTP_GET, [this] { handlePluginFile(); });
   server->on("/plugins-run", HTTP_GET, [this] { handlePluginRunnerPage(); });
   server->on("/api/relay", HTTP_POST, [this] { handleRelay(); });
@@ -910,7 +915,12 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     // Get upload path from query parameter (defaults to root if not specified)
     // Note: We use query parameter instead of form data because multipart form
     // fields aren't available until after file upload completes
-    if (server->hasArg("path")) {
+    if (!state.replaceTarget.isEmpty()) {
+      // /api/book/replace: the destination is the book itself, whatever the browser named the part.
+      const int slash = state.replaceTarget.lastIndexOf('/');
+      state.fileName = state.replaceTarget.substring(slash + 1);
+      state.path = slash > 0 ? state.replaceTarget.substring(0, slash) : "/";
+    } else if (server->hasArg("path")) {
       state.path = server->arg("path");
       // Ensure path starts with /
       if (!state.path.startsWith("/")) {
@@ -1013,7 +1023,17 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
       if (state.error.isEmpty() && state.staged) {
         esp_task_wdt_reset();  // removing a large original walks its cluster chain
         const String dest = uploadDestPath(state);
-        if (!Storage.remove(dest.c_str()) || !Storage.rename(uploadWritePath(state).c_str(), dest.c_str())) {
+        bool originalAside;
+        if (state.replaceTarget.isEmpty()) {
+          originalAside = Storage.remove(dest.c_str());
+        } else {
+          // The original stays as <book>.bak. A .bak already there holds an older
+          // original and is kept; this one then simply goes.
+          const String backup = dest + ".bak";
+          originalAside = Storage.exists(backup.c_str()) ? Storage.remove(dest.c_str())
+                                                         : Storage.rename(dest.c_str(), backup.c_str());
+        }
+        if (!originalAside || !Storage.rename(uploadWritePath(state).c_str(), dest.c_str())) {
           LOG_ERR("WEB", "[UPLOAD] Replace failed: %s", dest.c_str());
           // If the original is already gone the staged copy is the only one left: keep it.
           if (Storage.exists(dest.c_str())) {
@@ -1038,11 +1058,11 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
         LOG_DBG("WEB", "[UPLOAD] Diagnostics: %d writes, total write time: %lu ms (%.1f%%)", writeCount, totalWriteTime,
                 writePercent);
 
-        // Clear epub cache to prevent stale metadata issues when overwriting files
-        String filePath = state.path;
-        if (!filePath.endsWith("/")) filePath += "/";
-        filePath += state.fileName;
-        clearEpubCacheIfNeeded(filePath);
+        // Clear epub cache to prevent stale metadata issues when overwriting files.
+        // A replace decides in handleBookReplace() whether the reading position survives.
+        if (state.replaceTarget.isEmpty()) {
+          clearEpubCacheIfNeeded(uploadDestPath(state));
+        }
       }
     }
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
@@ -1072,6 +1092,98 @@ void CrossPointWebServer::handleUploadPost(UploadState& state) const {
     const String error = state.error.isEmpty() ? "Unknown error during upload" : state.error;
     server->send(400, "text/plain", error);
   }
+}
+
+namespace {
+
+// keep=1: the optimizer left the chapter list as it was, so progress.bin still
+// fits the book. Everything laid out from the old content (book.bin, sections,
+// cover thumbs, extracted images, the TXT index) goes; the BookFusion cover
+// sidecar is artwork, not layout, and stays. Names are collected before anything
+// is deleted: removing entries while walking the folder confuses the FAT cursor.
+void dropLayoutCache(const String& bookPath) {
+  Epub epub(bookPath.c_str(), "/.crosspoint");
+  const std::string cacheDir = epub.getCachePath();
+  struct Doomed {
+    std::string name;
+    bool isDir;
+  };
+  std::vector<Doomed> doomed;
+  doomed.reserve(8);
+  {
+    HalFile dir = Storage.open(cacheDir.c_str());
+    if (dir && dir.isDirectory()) {
+      for (HalFile entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
+        char name[128];
+        if (entry.getName(name, sizeof(name)) == 0) continue;
+        if (strcmp(name, "progress.bin") == 0 || strcmp(name, ".bookfusion-cover") == 0) continue;
+        doomed.push_back({name, entry.isDirectory()});
+      }
+    }
+    dir.close();
+  }
+  for (const auto& d : doomed) {
+    esp_task_wdt_reset();  // the sections folder of a long book is many files
+    const std::string full = cacheDir + "/" + d.name;
+    if (!(d.isDir ? Storage.removeDir(full.c_str()) : Storage.remove(full.c_str()))) {
+      LOG_ERR("WEB", "Could not drop %s", full.c_str());
+    }
+  }
+  // Metadata is rebuilt now, as clearEpubCacheIfNeeded() does after an upload.
+  esp_task_wdt_reset();
+  epub.load(/*buildIfMissing=*/true, /*skipLoadingCss=*/true);
+  esp_task_wdt_reset();
+  LibraryActivity::invalidateIndexCache();
+}
+
+}  // namespace
+
+void CrossPointWebServer::handleBookReplaceData() {
+  const HTTPUpload& up = server->upload();
+  if (up.status == UPLOAD_FILE_START) {
+    const String target = normalizeWebPath(server->arg("path"));
+    const bool ok = target != "/" && FsHelpers::hasEpubExtension(target) &&
+                    !protectedpaths::isSensitivePath(target.c_str()) && Storage.exists(target.c_str());
+    bookReplaceRefused = !ok;
+    upload.replaceTarget = ok ? target : "";
+    if (!ok) {
+      LOG_ERR("WEB", "Refused book replace: %s", target.c_str());
+    }
+  }
+  if (bookReplaceRefused) return;  // the body still streams in; nothing is written
+  handleUpload(upload);
+}
+
+void CrossPointWebServer::handleBookReplace() {
+  const String path = upload.replaceTarget;
+  upload.replaceTarget = "";  // never leaks into a later /upload
+  if (bookReplaceRefused) {
+    bookReplaceRefused = false;
+    server->send(400, "application/json", "{\"error\":\"not a book on the card\"}");
+    return;
+  }
+  if (!upload.success) {
+    JsonDocument doc;
+    doc["error"] = upload.error.isEmpty() ? "upload failed" : upload.error.c_str();
+    String json;
+    serializeJson(doc, json);
+    server->send(400, "application/json", json);
+    return;
+  }
+  const bool keep = server->arg("keep") == "1";
+  if (keep) {
+    dropLayoutCache(path);
+  } else {
+    clearEpubCacheIfNeeded(path);
+  }
+  LOG_DBG("WEB", "Replaced %s (%u B, reading position %s)", path.c_str(), static_cast<unsigned>(upload.size),
+          keep ? "kept" : "reset");
+  JsonDocument doc;
+  doc["ok"] = true;
+  doc["keptReadingState"] = keep;
+  String json;
+  serializeJson(doc, json);
+  server->send(200, "application/json", json);
 }
 
 void CrossPointWebServer::handleCreateFolder() const {

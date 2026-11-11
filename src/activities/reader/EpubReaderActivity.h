@@ -1,4 +1,5 @@
 #pragma once
+#include <BluetoothHIDManager.h>
 #include <Epub.h>
 #include <Epub/FootnoteEntry.h>
 #include <Epub/Section.h>
@@ -54,11 +55,56 @@ class EpubReaderActivity final : public Activity {
   // requests because a net count applied in one direction lands on exactly the page the
   // presses would have reached one by one, and cannot be replayed out of order. Bounded by
   // MAX_QUEUED_PAGE_TURNS. Main task only. See requestPageTurn().
-  int8_t queuedPageTurns = 0;
-  // True while render() is building a section file (the "Indexing" popup). Written by the
-  // render task, read by the main task: presses made while it is set are dropped, since the
-  // reader has not yet been shown the page they would turn from.
+  // Atomic for one reader on the render task: renderContents skips the grey pass when a turn
+  // is already waiting (see "flipping does not wait for the grey").
+  std::atomic<int8_t> queuedPageTurns{0};
+  // True while the current section is being built (build-while-you-read below). Set by
+  // render() on the render task when it starts the build, cleared by the main task when the
+  // build ends. loop() steps the build while it is set; main.cpp keeps the CPU at full
+  // speed and the loop delay short (skipLoopDelay / preventAutoSleep).
   std::atomic<bool> sectionBuildActive{false};
+
+  // ── Build-while-you-read ─────────────────────────────────────────────────
+  // The shape of witchhunt-reader's Background-C. On a cache miss render() starts the section
+  // build and returns at once; stepCurrentSectionBuild() advances it in BUILD_SLICE_MS slices
+  // from loop() (main task, under the RenderLock), and the render task draws the page the
+  // reader is waiting on straight from the half-built cache file as soon as that page exists,
+  // the "Indexing" popup until then. A page turn made during the build moves
+  // section->currentPage optimistically: the page shows once the build reaches it.
+  static constexpr uint32_t BUILD_SLICE_MS = 40;
+  // The page target was consumed when the build started (section->currentPage); a target
+  // that needs the final page count (last page, percent, a position scaled from an old
+  // count) or an anchor the parser has not reached waits for completion.
+  bool buildTargetIsPage = true;
+  // Page drawn from the in-progress build, or given up on: the step stops nudging the render
+  // task about it. -1 while none.
+  int buildDisplayedPage = -1;
+  bool buildPopupShown = false;
+  // The build failed outright: render() shows the Index Failed popup once instead of
+  // starting another build.
+  bool buildFailed = false;
+  // Held for the whole build when it did not fit beside the BLE stack (see render()).
+  std::optional<BleMemoryPause> buildBlePause;
+  unsigned long buildStartMs = 0UL;
+  // One slice of the current section's build, from loop(). Draws nothing itself.
+  void stepCurrentSectionBuild();
+  // The render pass while a build is live: the requested page from the half-built file, or
+  // the indexing popup.
+  void renderSectionBuildingPass(int orientedMarginTop, int orientedMarginRight, int orientedMarginBottom,
+                                 int orientedMarginLeft);
+  // A plain black-and-white draw of a mid-build page: images as placeholders, no
+  // grayscale pass, glyph slots handed back afterwards so the build keeps its heap.
+  void drawBuildPage(Page& page, int orientedMarginTop, int orientedMarginRight, int orientedMarginBottom,
+                     int orientedMarginLeft);
+  // Bookkeeping common to every end of a build (done, failed, abandoned).
+  void finishSectionBuild();
+  // Records the loaded section's page count in the book's per-spine table.
+  void noteSectionPageCount();
+  // Lands the pending navigation (page jump, anchor, percent, scaled position) on the
+  // loaded section. keepCurrentPage: a page target already consumed by a build is kept
+  // (only clamped) instead of being replaced by nextPageNumber.
+  void applyPendingPosition(bool keepCurrentPage);
+  void drawIndexFailed();
   // Whether the last drawn status bar showed the remote as connected. Written by
   // the (const) renderStatusBar(), hence mutable.
   mutable bool statusBarShowsRemote = false;
@@ -366,6 +412,10 @@ class EpubReaderActivity final : public Activity {
   void loop() override;
   void render(RenderLock&& lock) override;
   bool isReaderActivity() const override { return true; }
+  // A build in slices wants the loop back as soon as possible, at full clock, and must not
+  // be cut short by the idle sleep.
+  bool skipLoopDelay() override { return sectionBuildActive.load(std::memory_order_relaxed); }
+  bool preventAutoSleep() override { return sectionBuildActive.load(std::memory_order_relaxed); }
   // Dispatches tap zones and home-key actions itself (X4 Pro).
   bool consumesTouchInput() const override { return true; }
   ScreenshotInfo getScreenshotInfo() const override;

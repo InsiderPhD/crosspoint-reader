@@ -524,9 +524,14 @@ void EpubReaderClippingListActivity::render(RenderLock&&) {
     return;
   }
 
+  // Standalone (Clippings / Stats / Book Info) has no book on screen, so the
+  // header names it; inside the reader it stays "Clippings".
+  const std::string header = renderer.truncatedText(
+      UI_12_FONT_ID, isStandalone() && !bookTitle.empty() ? bookTitle.c_str() : tr(STR_CLIPPINGS),
+      contentWidth - DETAIL_SIDE_MARGIN * 2, EpdFontFamily::BOLD);
   const int titleX =
-      contentX + (contentWidth - renderer.getTextWidth(UI_12_FONT_ID, tr(STR_CLIPPINGS), EpdFontFamily::BOLD)) / 2;
-  renderer.drawText(UI_12_FONT_ID, titleX, 15 + contentY, tr(STR_CLIPPINGS), true, EpdFontFamily::BOLD);
+      contentX + (contentWidth - renderer.getTextWidth(UI_12_FONT_ID, header.c_str(), EpdFontFamily::BOLD)) / 2;
+  renderer.drawText(UI_12_FONT_ID, titleX, 15 + contentY, header.c_str(), true, EpdFontFamily::BOLD);
 
   const int pageItems = getPageItems();
   const int total = static_cast<int>(clippings.size());
@@ -548,12 +553,18 @@ void EpubReaderClippingListActivity::render(RenderLock&&) {
 
     const Clipping& clipping = clippings[itemIndex];
     buildOneLineSnippetText(clipping.text, snippetText);
+    // In curly quotes; truncatedText's ellipsis replaces the closing mark on a long one.
+    snippetText.insert(0, "\xE2\x80\x9C");
+    snippetText += "\xE2\x80\x9D";
     const std::string snippetTrunc = renderer.truncatedText(UI_10_FONT_ID, snippetText.c_str(), contentWidth - 40);
     renderer.drawText(UI_10_FONT_ID, marginLeft, rowY + 5, snippetTrunc.c_str(), !isSelected);
 
+    // Chapter and the page within it (the only page number a clipping stores).
     const char* chapter = clipping.chapterTitle[0] != '\0' ? clipping.chapterTitle : tr(STR_UNKNOWN_CHAPTER);
-    const std::string chapterTrunc = renderer.truncatedText(SMALL_FONT_ID, chapter, contentWidth - 40);
-    renderer.drawText(SMALL_FONT_ID, marginLeft, rowY + 31, chapterTrunc.c_str(), !isSelected);
+    char location[CLIPPING_CHAPTER_TITLE_MAX + 24];
+    snprintf(location, sizeof(location), tr(STR_CLIPPING_LOCATION_FORMAT), chapter, clipping.startPage + 1);
+    const std::string locationTrunc = renderer.truncatedText(SMALL_FONT_ID, location, contentWidth - 40);
+    renderer.drawText(SMALL_FONT_ID, marginLeft, rowY + 31, locationTrunc.c_str(), !isSelected);
   }
 
   // Page count, in the strip every scrollable screen reserves for it.

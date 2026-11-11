@@ -31,6 +31,13 @@ class RecentBooksStore {
   // Books pinned to the Bookshelf home: they take the first shelf slots, in pin
   // order, whatever has been opened since. Shelving or deleting a book unpins it.
   std::vector<std::string> pinnedPaths;
+  // The list is read from the card the first time anything asks for it and can be released
+  // again (release()) while a screen that never shows it is up -- the reader, for the whole of
+  // a session. Keeping it resident from boot cost ~4.5 KB and split the largest free block
+  // before a book was even opened (witchhunt-reader's measurement; same store shape here).
+  // Every mutation saves at once, so releasing never loses anything.
+  mutable bool loaded_ = false;
+  void ensureLoaded() const;
 
  public:
   static constexpr size_t MAX_SHELVED_BOOKS = 16;
@@ -65,7 +72,10 @@ class RecentBooksStore {
   // skips it. Persists.
   void shelveBook(const std::string& path);
   bool isShelved(const std::string& path) const;
-  const std::vector<std::string>& getShelvedPaths() const { return shelvedPaths; }
+  const std::vector<std::string>& getShelvedPaths() const {
+    ensureLoaded();
+    return shelvedPaths;
+  }
 
   // Pin / unpin for the Bookshelf home. pinBook also takes the path off the
   // shelved list. Both persist. togglePin returns the new state.
@@ -73,7 +83,10 @@ class RecentBooksStore {
   void unpinBook(const std::string& path);
   bool togglePin(const std::string& path);
   bool isPinned(const std::string& path) const;
-  const std::vector<std::string>& getPinnedPaths() const { return pinnedPaths; }
+  const std::vector<std::string>& getPinnedPaths() const {
+    ensureLoaded();
+    return pinnedPaths;
+  }
 
   // True if the book's backing file is no longer present on the SD card.
   static bool isMissing(const RecentBook& book);
@@ -82,11 +95,19 @@ class RecentBooksStore {
   // Returns true if any entry was removed. Does not persist — caller decides.
   bool pruneMissing();
 
-  // Get the list of recent books (most recent first)
-  const std::vector<RecentBook>& getBooks() const { return recentBooks; }
+  // Get the list of recent books (most recent first). The reference is valid until release().
+  const std::vector<RecentBook>& getBooks() const {
+    ensureLoaded();
+    return recentBooks;
+  }
 
   // Get the count of recent books
-  int getCount() const { return static_cast<int>(recentBooks.size()); }
+  int getCount() const {
+    ensureLoaded();
+    return static_cast<int>(recentBooks.size());
+  }
+  // Frees the list; the next access reads it again. For screens that do not show it.
+  void release();
 
   bool saveToFile() const;
 

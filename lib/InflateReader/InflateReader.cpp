@@ -33,10 +33,11 @@ static_assert(std::is_standard_layout<InflateReader>::value,
 
 InflateReader::~InflateReader() { deinit(); }
 
-bool InflateReader::init(const bool streaming) {
+bool InflateReader::init(const bool streaming, const size_t uncompressedSize) {
   deinit();  // free any previously allocated ring buffer and reset state
 
   if (streaming) {
+    ringBytes = ringSizeFor(uncompressedSize);
     // Prefer a leased buffer (see InflateScratchLease): it is contiguous by
     // construction, whereas the heap may have no 32KB block left at all.
     if (g_scratchBuffer && !g_scratchInUse && g_scratchLength >= INFLATE_DICT_SIZE) {
@@ -48,23 +49,23 @@ bool InflateReader::init(const bool streaming) {
       LOG_DBG("INF", "Using leased %u-byte dictionary (no heap allocation)", (unsigned)INFLATE_DICT_SIZE);
       return true;
     }
-    ringBuffer = static_cast<uint8_t*>(malloc(INFLATE_DICT_SIZE));
+    ringBuffer = static_cast<uint8_t*>(malloc(ringBytes));
     if (!ringBuffer) {
       // This single 32KB request is the allocation that fails first on this
       // device, and free-byte totals never explain why. Dump the region map at
       // the exact moment of failure: it shows whether the heap is genuinely
       // exhausted, or merely cut into pieces none of which is big enough — and
       // in the latter case, which region and how many free blocks it holds.
-      LOG_ERR("INF", "Inflate dictionary malloc(%u) FAILED: free=%u largest=%u", (unsigned)INFLATE_DICT_SIZE,
+      LOG_ERR("INF", "Inflate dictionary malloc(%u) FAILED: free=%u largest=%u", (unsigned)ringBytes,
               (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
               (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
       heap_caps_print_heap_info(MALLOC_CAP_8BIT);
       return false;
     }
-    memset(ringBuffer, 0, INFLATE_DICT_SIZE);
+    memset(ringBuffer, 0, ringBytes);
   }
 
-  uzlib_uncompress_init(&decomp, ringBuffer, ringBuffer ? INFLATE_DICT_SIZE : 0);
+  uzlib_uncompress_init(&decomp, ringBuffer, ringBuffer ? ringBytes : 0);
   return true;
 }
 

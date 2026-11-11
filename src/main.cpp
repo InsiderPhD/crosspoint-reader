@@ -43,6 +43,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "images/LoadingIcon.h"
+#include "network/FirmwareFlasher.h"
 #include "util/ButtonNavigator.h"
 #include "util/FrontlightScheduler.h"
 #if FREEINK_DEVICE_PICCO
@@ -752,7 +753,7 @@ void setup() {
   display.setDarkBorder(SETTINGS.darkMode != 0);
   BOOT_PHASE("settings.json");
   APP_STATE.loadFromFile();
-  RECENT_BOOKS.loadFromFile();
+  // RECENT_BOOKS loads itself on first use (Home, Library); nothing at boot needs it.
   KOREADER_STORE.loadFromFile();
   UITheme::getInstance().reload();
   BOOT_PHASE("state/recents/i18n");
@@ -869,13 +870,8 @@ void setup() {
   constexpr auto recoveryButton = HalGPIO::BTN_UP;
   constexpr const char* recoveryButtonName = "UP";
 #endif
-  // The Picco has no second app slot to flash into (partitions_picco.csv).
-#if FREEINK_DEVICE_PICCO
-  constexpr bool recoveryAvailable = false;
-#else
-  constexpr bool recoveryAvailable = true;
-#endif
-  if (recoveryAvailable && wakeupReason == HalGPIO::WakeupReason::PowerButton) {
+  // Not on a single-slot partition table (a Picco still on Onyx's stock layout).
+  if (firmware_flash::canSelfUpdate() && wakeupReason == HalGPIO::WakeupReason::PowerButton) {
     // Refresh the cached button state a few times — isPressed() needs ~half a second to settle
     // after boot per the HalGPIO contract. Use a millis-based deadline so we always wait the full
     // settle window even if the loop body takes longer than expected on slow boots.

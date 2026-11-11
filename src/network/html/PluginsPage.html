@@ -314,6 +314,15 @@
         font-size: 1em;
       }
     }
+    /* Installed plugins: one row per folder on the card. */
+    #installed-list { list-style: none; margin: 0; padding: 0; }
+    #installed-list li { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid #e3e6ea; }
+    #installed-list li:first-child { border-top: 0; }
+    #installed-list .info { flex: 1; min-width: 0; }
+    #installed-list .meta { color: #7f8c8d; font-size: 0.85em; overflow-wrap: anywhere; }
+    #installed-list .tag { display: inline-block; margin: 4px 4px 0 0; padding: 1px 8px; border: 1px solid #bdc3c7; border-radius: 10px; font-size: 0.8em; color: #555; }
+    #installed-list .remove { flex: none; min-height: 36px; padding: 6px 14px; border: 1px solid #c0392b; border-radius: 6px; background: #fff; color: #c0392b; cursor: pointer; }
+    #installed-list .remove:disabled { opacity: 0.5; cursor: default; }
   </style>
 </head>
 <body>
@@ -330,6 +339,12 @@
 
   <div id="plugin-status" class="loader-container">
     <span class="loader"></span>
+  </div>
+
+  <div class="card" id="installed-card" hidden>
+    <h2>Installed plugins</h2>
+    <p id="installed-note" class="empty-note"></p>
+    <ul id="installed-list"></ul>
   </div>
 
   <div id="plugin-container"></div>
@@ -376,7 +391,84 @@
     } else {
       status.remove();
     }
+    // After the plugin host has loaded: one request at a time (see above).
+    await loadInstalled();
   })();
+
+  // Every plugin folder on the card, including ones with no page of their own
+  // (data-only plugins such as sleep-screen values), with a Remove each.
+  async function loadInstalled() {
+    const card = document.getElementById('installed-card');
+    const list = document.getElementById('installed-list');
+    const note = document.getElementById('installed-note');
+    let data;
+    try {
+      const res = await fetch('/api/plugins/installed');
+      if (!res.ok) return;
+      data = await res.json();
+    } catch (e) {
+      return;
+    }
+    card.hidden = false;
+    list.textContent = '';
+    if (!data.enabled) {
+      note.textContent = 'Plugins are off. Turn on Settings → System → Enable Plugins to list and use them.';
+      return;
+    }
+    if (!data.plugins.length) {
+      note.textContent = 'No plugins on the SD card yet.';
+      return;
+    }
+    note.textContent = '';
+    const KINDS = [
+      ['web', 'Web page'],
+      ['device', 'On the reader'],
+      ['sleepValues', 'Sleep screen values'],
+      ['daily', 'Daily list'],
+    ];
+    for (const p of data.plugins) {
+      const li = document.createElement('li');
+      const info = document.createElement('div');
+      info.className = 'info';
+      const title = document.createElement('strong');
+      title.textContent = p.title || p.name;
+      info.append(title);
+      if (p.version) info.append(' v' + p.version);
+      if (p.description) {
+        const d = document.createElement('div');
+        d.textContent = p.description;
+        info.append(d);
+      }
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = p.dir;
+      info.append(meta);
+      for (const [key, label] of KINDS) {
+        if (!p[key]) continue;
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = label;
+        info.append(tag);
+      }
+      const remove = document.createElement('button');
+      remove.className = 'remove';
+      remove.textContent = 'Remove';
+      remove.onclick = async () => {
+        if (!confirm('Remove ' + (p.title || p.name) + '? This deletes ' + p.dir + ' and its settings.')) return;
+        remove.disabled = true;
+        const body = new URLSearchParams({ name: p.name });
+        const res = await fetch('/api/plugins/remove', { method: 'POST', body }).catch(() => null);
+        if (res && res.ok) {
+          location.reload();  // its own card (if any) goes too
+        } else {
+          remove.disabled = false;
+          alert('Could not remove ' + p.name + (res ? ': ' + (await res.text()) : '.'));
+        }
+      };
+      li.append(info, remove);
+      list.append(li);
+    }
+  }
 </script>
 </body>
 </html>

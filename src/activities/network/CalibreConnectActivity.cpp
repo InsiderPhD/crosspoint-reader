@@ -130,12 +130,18 @@ void CalibreConnectActivity::loop() {
     const auto status = webServer->getWsUploadStatus();
     bool changed = false;
     if (status.inProgress) {
-      if (status.received != lastProgressReceived || status.total != lastProgressTotal ||
-          status.filename != currentUploadName) {
+      // A new file or a finished one repaints at once; the byte count only every
+      // PROGRESS_REPAINT_MS. Redrawing after every chunk kept the card waiting on the
+      // panel for most of the transfer (witchhunt-reader measured the same).
+      const bool newFile = status.filename != currentUploadName;
+      if (newFile || status.received != lastProgressReceived || status.total != lastProgressTotal) {
         lastProgressReceived = status.received;
         lastProgressTotal = status.total;
         currentUploadName = status.filename;
-        changed = true;
+        if (newFile || millis() - lastProgressRepaintMs >= PROGRESS_REPAINT_MS) {
+          lastProgressRepaintMs = millis();
+          changed = true;
+        }
       }
     } else if (lastProgressReceived != 0 || lastProgressTotal != 0) {
       lastProgressReceived = 0;

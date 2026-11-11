@@ -20,6 +20,16 @@ namespace SleepThemePluginVars {
 
 inline constexpr char FILE_NAME[] = "sleep-vars.json";
 
+// Optional rotation beside FILE_NAME: one flat JSON object per line (JSON
+// Lines), one line per day. The line for today (local day number modulo the
+// count of non-blank lines) is laid over FILE_NAME's values, so a plugin can
+// ship a year of words or quotes that change daily with no network and no
+// plugin code running. Only the chosen line is held in memory (each line at
+// most DAILY_LINE_MAX bytes). Skipped while the clock is unknown: FILE_NAME's
+// values then show alone, so a plugin can put a fallback there.
+inline constexpr char DAILY_FILE_NAME[] = "sleep-vars-daily.jsonl";
+inline constexpr size_t DAILY_LINE_MAX = 2048;
+
 // True when name (not NUL-terminated) has the shape plugin.<name>.<key>. Built
 // on every board, so a theme using plugin values never logs as unknown.
 bool isPluginVar(const char* name, size_t nameLen);

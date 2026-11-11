@@ -1092,7 +1092,24 @@ void GfxRenderer::drawImage(const uint8_t bitmap[], const int x, const int y, co
 }
 
 void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, const int width, const int height) const {
-  display.drawImageTransparent(bitmap, y, getScreenWidth() - width - x, height, width);
+  // Icon bitmaps are stored pre-rotated for Portrait: `width` panel rows of
+  // `height` pixels each, a clear bit = ink. Portrait blits them straight in.
+  if (orientation == Portrait) {
+    display.drawImageTransparent(bitmap, y, getScreenWidth() - width - x, height, width);
+    return;
+  }
+  // Any other orientation: un-rotate each ink pixel back to its logical
+  // position and let drawPixel() rotate it for the current orientation.
+  // Icons are tiny (16-32 px), so the per-pixel path costs nothing noticeable.
+  const int rowBytes = (height + 7) / 8;
+  for (int row = 0; row < width; row++) {
+    const uint8_t* src = bitmap + row * rowBytes;
+    for (int col = 0; col < height; col++) {
+      if (!(src[col >> 3] & (0x80 >> (col & 7)))) {
+        drawPixel(x + width - 1 - row, y + col, true);
+      }
+    }
+  }
 }
 
 void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, const int maxWidth, const int maxHeight,
@@ -1264,6 +1281,13 @@ void GfxRenderer::drawBitmap1Bit(const Bitmap& bitmap, const int x, const int y,
     }
 
     for (int bmpX = 0; bmpX < bitmap.getWidth(); bmpX++) {
+      // Four white pixels packed in one 0xFF byte draw nothing: step over the whole byte.
+      // Most of a cover tile is background, so this is most of the loop (unscaled only: a
+      // scaled row maps source pixels unevenly, so it keeps the per-pixel path).
+      if (!isScaled && (bmpX & 3) == 0 && outputRow[bmpX / 4] == 0xFF) {
+        bmpX += 3;
+        continue;
+      }
       int screenX = x + (isScaled ? static_cast<int>(std::floor(bmpX * scale)) : bmpX);
       if (screenX >= getScreenWidth()) {
         break;

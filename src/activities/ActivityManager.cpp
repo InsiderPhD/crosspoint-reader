@@ -9,6 +9,7 @@
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "components/ActionBar.h"
+#include "home/ClippingsActivity.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/GroupBrowserActivity.h"
@@ -267,6 +268,8 @@ void ActivityManager::goToFileTransfer() {
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToStats() { replaceActivity(std::make_unique<ReadingStatsActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToClippings() { replaceActivity(std::make_unique<ClippingsActivity>(renderer, mappedInput)); }
 
 void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));

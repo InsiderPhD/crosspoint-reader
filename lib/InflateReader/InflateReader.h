@@ -85,10 +85,18 @@ class InflateReader {
   InflateReader(const InflateReader&) = delete;
   InflateReader& operator=(const InflateReader&) = delete;
 
-  // Initialise decompressor. streaming=true allocates a 32KB ring buffer needed
-  // when read() or readAtMost() will be called multiple times.
+  // Initialise decompressor. streaming=true allocates the LZ77 ring buffer needed
+  // when read() or readAtMost() will be called multiple times: 32KB, or, when the
+  // entry's uncompressed size is known, min(32KB, max(size, 512)) -- a stream can
+  // never reference further back than it has produced, so a small entry needs only
+  // a small window (witchhunt-reader's ringSizeFor). A leased buffer is used whole.
   // Returns false only in streaming mode if the ring buffer allocation fails.
-  bool init(bool streaming = false);
+  bool init(bool streaming = false, size_t uncompressedSize = 0);
+  static constexpr size_t MIN_RING_BYTES = 512;
+  static size_t ringSizeFor(size_t uncompressedSize) {
+    if (uncompressedSize == 0 || uncompressedSize >= INFLATE_DICT_BYTES) return INFLATE_DICT_BYTES;
+    return uncompressedSize < MIN_RING_BYTES ? MIN_RING_BYTES : uncompressedSize;
+  }
 
   // Release the ring buffer and reset internal state.
   void deinit();
@@ -123,6 +131,7 @@ class InflateReader {
  private:
   uzlib_uncomp decomp = {};
   uint8_t* ringBuffer = nullptr;
+  size_t ringBytes = 0;
   // True when ringBuffer points at a leased buffer we must not free.
   bool ringBufferBorrowed = false;
 };

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <BufferedFile.h>
+#include <HalStorage.h>
 #include <expat.h>
 
 #include <climits>
@@ -9,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <new>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -130,6 +133,16 @@ class ChapterHtmlSlimParser {
   int partWordBufferIndex = 0;
   bool nextWordContinues = false;  // true when next flushed word attaches to previous (inline element boundary)
   bool htmlEnded = false;          // </html> seen; a later expat error is trailing junk, not a broken chapter
+  // ── Streaming parse state (beginStreaming / stepStreaming / finishStreaming) ──
+  // The expat parser and the open chapter file live here between slices, so a build can
+  // hand the loop task back every few chunks and be resumed. Null / closed when no
+  // stream is live. Freed by the destructor if a build is abandoned mid-stream.
+  XML_Parser streamParser_ = nullptr;
+  FsFile streamFile_;
+  uint32_t streamStartMs_ = 0;
+  uint32_t streamTotalBytes_ = 0;
+  uint32_t streamBytesFed_ = 0;
+  void dropStream();
   std::unique_ptr<ParsedText> currentTextBlock = nullptr;
   std::unique_ptr<Page> currentPage = nullptr;
   int16_t currentPageNextY = 0;
@@ -335,7 +348,18 @@ class ChapterHtmlSlimParser {
   // ~512-byte nodes, so a long chapter never needs one large free block (a vector doubling past
   // 512 anchors needs ~28 KB contiguous, and a failed allocation aborts under -fno-exceptions).
   int completedPageCount = 0;
+  // Anchor map (id -> first page). Streamed to the spill file as each anchor is found when the
+  // build gave one (setAnchorSpillPath), in the section file's own record format so finalize
+  // copies it verbatim; held in `anchorData` otherwise. A chapter can carry up to
+  // MAX_ANCHORS_PER_CHAPTER of these, and on a page-list or footnote-heavy book they were the
+  // largest chapter-sized allocation a build made (witchhunt-reader's measurement, same shape).
   std::deque<std::pair<std::string, uint16_t>> anchorData;
+  std::string anchorSpillPath;
+  FsFile anchorSpillFile;
+  std::optional<serialization::BufferedFileWriter> anchorSpill;
+  uint16_t anchorCount_ = 0;
+  void recordAnchor(const char* id, size_t idLen, uint16_t page);
+  void closeAnchorSpill();
   std::string pendingAnchorId;          // deferred until after previous text block is flushed
   std::vector<std::string> tocAnchors;  // the list of anchors that are TOC chapter boundaries
   bool recordPageBreakAnchors = false;
@@ -461,12 +485,42 @@ class ChapterHtmlSlimParser {
         contentBase(contentBase),
         imageBasePath(imageBasePath) {}
 
-  ~ChapterHtmlSlimParser() = default;
+  ~ChapterHtmlSlimParser();
   // Call before parseAndBuildPages(). A setter rather than one more constructor argument.
   void setTextLayout(const TextLayoutOptions& options) { textLayout = options; }
+  // One call does the whole chapter: beginStreaming + stepStreaming(0) + finishStreaming.
   bool parseAndBuildPages();
+  // The same parse in resumable slices, so a section can be built while the reader already
+  // shows its first pages (EpubReaderActivity's build-while-you-read; the shape is
+  // witchhunt-reader's setup / write / finalize). beginStreaming runs the footnote pre-scan,
+  // opens the chapter file and creates the expat parser; stepStreaming feeds it in 1 KB chunks
+  // until the file is consumed (Done), a parse error (Failed) or, with budgetMs != 0, the
+  // budget is spent (More: call again); finishStreaming lays out what the last chunk left and
+  // releases the pre-scan store. Page callbacks fire from inside stepStreaming.
+  enum class StreamStep : uint8_t { More, Done, Failed };
+  bool beginStreaming();
+  StreamStep stepStreaming(uint32_t budgetMs);
+  bool finishStreaming();
+  // Percent of the chapter file fed to the parser (0-100); 100 once the stream is consumed.
+  int streamPercent() const {
+    return streamTotalBytes_ == 0 ? 100 : static_cast<int>(streamBytesFed_ * 100ULL / streamTotalBytes_);
+  }
+  // Pages handed to completePageFn so far.
+  int completedPages() const { return completedPageCount; }
+  // Where an id landed in the pages laid out so far: lets the reader turn a link or TOC
+  // target into a page before the build is over. False while unseen (or still pending).
+  bool lookupAnchorInActiveBuild(const std::string& id, uint16_t& page) const;
   void addLineToPage(std::unique_ptr<TextBlock> line, uint32_t visibleOffset);
+  // Anchors held in RAM; empty when they were spilled (see anchorsSpilled / finishAnchorSpill).
   const std::deque<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
+  // Call before beginStreaming(): anchors go to this file instead of RAM. The file is the
+  // caller's to remove.
+  void setAnchorSpillPath(const std::string& path) { anchorSpillPath = path; }
+  bool anchorsSpilled() const { return anchorSpill.has_value() || (anchorData.empty() && anchorCount_ > 0); }
+  uint16_t anchorCount() const { return anchorCount_; }
+  // Flushes and closes the spill so its bytes (anchorCount() records of writeString + uint16
+  // page) can be appended to the section file. False if any write failed.
+  bool finishAnchorSpill();
   // Also record the ids of page-break markers (epub:type="pagebreak"), which are
   // usually <span>s and so skipped as anchors. Only worth its RAM for a book that
   // has a publisher page list to jump by (see PageList.h); off by default.

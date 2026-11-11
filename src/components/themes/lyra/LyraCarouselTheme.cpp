@@ -20,6 +20,7 @@
 #include "components/icons/library.h"
 #include "components/icons/recent.h"
 #include "components/icons/settings2.h"
+#include "components/icons/clippings.h"
 #include "components/icons/stats.h"
 #include "components/icons/transfer.h"
 #include "fontIds.h"
@@ -153,6 +154,8 @@ const uint8_t* menuIcon(UIIcon icon) {
       return LibraryIcon;
     case UIIcon::Stats:
       return StatsIcon;
+    case UIIcon::Clippings:
+      return ClippingsIcon;
     default:
       return nullptr;
   }

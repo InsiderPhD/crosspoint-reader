@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BufferedFile.h>
 #include <HalStorage.h>
 
 #include <algorithm>
@@ -114,6 +115,11 @@ class BookMetadataCache {
   uint32_t writeTocEntry(FsFile& file, const TocEntry& entry) const;
   SpineEntry readSpineEntry(FsFile& file) const;
   TocEntry readTocEntry(FsFile& file) const;
+  // The same entries through the buffered wrappers (buildBookBin): see BufferedFile.h.
+  uint32_t writeSpineEntry(serialization::BufferedFileWriter& out, const SpineEntry& entry) const;
+  uint32_t writeTocEntry(serialization::BufferedFileWriter& out, const TocEntry& entry) const;
+  SpineEntry readSpineEntry(serialization::BufferedFileReader& in) const;
+  TocEntry readTocEntry(serialization::BufferedFileReader& in) const;
   void cacheSpineCumulativeSizes();
   // Spine index of a normalised href, -1 when it is not a spine item. TOC pass only.
   int16_t findSpineIndexForHref(const std::string& href);

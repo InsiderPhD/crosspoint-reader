@@ -45,7 +45,7 @@ constexpr ThemeMetrics noActionBarValues = [] {
 //  - The folder holds the other home menu items as square tiles, iOS style.
 //  - The clipping is a random one from /My Clippings.txt, re-picked on every
 //    visit to Home; it is read straight from the file, one entry, so no
-//    clippings store is loaded.
+//    clippings store is loaded. The card IS the Clippings button.
 //  - The book bar at the bottom is the one book place (selector index 0).
 //
 // Notes:
@@ -86,9 +86,13 @@ class LicoriceTheme : public LyraCarouselTheme {
   mutable Rect bookBar;
   mutable Rect statsCard;
   mutable Rect folderCard;
+  mutable Rect clipCard;
   // Recorded by drawButtonMenu: Stats' menu index (shown as the month card)
   // and the menu index in each folder tile, row by row; -1 = empty.
   mutable int statsMenuIndex = -1;
+  // Clippings' menu index (UIIcon::Clippings), shown as the
+  // clipping card; -1 = not in the menu.
+  mutable int clipMenuIndex = -1;
   mutable int folderMenuIndex[kFolderSlots] = {-1, -1, -1, -1};
   mutable Rect folderTiles[kFolderSlots];
   // The clipping on show, kept for the visit so redraws do not reshuffle it.

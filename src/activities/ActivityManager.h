@@ -103,6 +103,7 @@ class ActivityManager {
   void goToFileTransfer();
   void goToSettings();
   void goToStats();
+  void goToClippings();
   void goToFileBrowser(std::string path = {});
   void goToTagBrowser();
   void goToAuthorBrowser();

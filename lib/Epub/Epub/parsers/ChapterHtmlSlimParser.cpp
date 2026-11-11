@@ -284,6 +284,8 @@ constexpr size_t PARSE_BUFFER_SIZE = 1024;
 // every text fragment (e.g. Kobo KePub spans). The cap prevents unbounded heap growth
 // on resource-constrained devices (~380KB heap). TOC anchors bypass this cap.
 constexpr size_t MAX_ANCHORS_PER_CHAPTER = 1024;
+// Staging for the anchor spill: a page-list book writes one short record per printed page.
+constexpr size_t ANCHOR_SPILL_BUFFER_BYTES = 512;
 
 // Table grid: per-ROW buffer budget. Deterministic attributed bytes rather than a heap sample
 // (a heap check only trips once the memory is already committed). Charged per word, so it can
@@ -957,20 +959,14 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
       const auto style = currentTextBlock->getBlockStyle();
       currentTextBlock->setBlockStyle(style.getCombinedBlockStyle(blockStyle, BlockStyle::CombineAxis::Vertical));
 
-      if (!pendingAnchorId.empty()) {
-        anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
-        pendingAnchorId.clear();
-      }
+      recordPendingAnchor();
       return;
     }
 
     makePages();
   }
   // Record deferred anchor after previous block is flushed
-  if (!pendingAnchorId.empty()) {
-    anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
-    pendingAnchorId.clear();
-  }
+  recordPendingAnchor();
   // nothrow: one of these per paragraph, and a throwing new aborts under
   // -fno-exceptions. A null block is tolerated by the emit paths below.
   currentTextBlock.reset(new (std::nothrow)
@@ -1041,10 +1037,7 @@ void ChapterHtmlSlimParser::emitHorizontalRule(const BlockStyle& blockStyle) {
   currentPageNextY = static_cast<int16_t>(currentPageNextY + ruleThickness + bottomSpacing);
   previousBlockBottomMargin = 0;
 
-  if (!pendingAnchorId.empty()) {
-    anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
-    pendingAnchorId.clear();
-  }
+  recordPendingAnchor();
 }
 
 namespace {
@@ -1150,7 +1143,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
         idAttr = idValue;
         const bool isTocAnchor =
             std::find(self->tocAnchors.begin(), self->tocAnchors.end(), idValue) != self->tocAnchors.end();
-        if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER)) {
+        if (isTocAnchor || (!isNonNavigableInlineElement(name) && self->anchorCount_ < MAX_ANCHORS_PER_CHAPTER)) {
           self->pendingAnchorId = idValue;
         }
       } else if (strcmp(atts[i], "dir") == 0) {
@@ -1164,7 +1157,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
     // anchor. Unlike a block's id this is recorded at once, against the page
     // being filled: a marker sits mid-paragraph, and deferring it to the next
     // block would both land a page late and lose it to that block's own id.
-    if (self->recordPageBreakAnchors && self->anchorData.size() < MAX_ANCHORS_PER_CHAPTER) {
+    if (self->recordPageBreakAnchors && self->anchorCount_ < MAX_ANCHORS_PER_CHAPTER) {
       const char* idValue = nullptr;
       bool isPageBreak = false;
       for (int i = 0; atts[i]; i += 2) {
@@ -1181,7 +1174,7 @@ void XMLCALL ChapterHtmlSlimParser::startElement(void* userData, const XML_Char*
       isPageBreak = isPageBreak || (idValue && looksLikePageBreakId(idValue));
       if (isPageBreak && idValue && idValue[0] != '\0') {
         if (self->pendingAnchorId == idValue) self->pendingAnchorId.clear();
-        self->anchorData.push_back({idValue, static_cast<uint16_t>(self->completedPageCount)});
+        self->recordAnchor(idValue, strlen(idValue), static_cast<uint16_t>(self->completedPageCount));
       }
     }
   }
@@ -2442,7 +2435,7 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   }
 }
 
-bool ChapterHtmlSlimParser::parseAndBuildPages() {
+bool ChapterHtmlSlimParser::beginStreaming() {
   // Initialize block style stack with a root entry representing "no ancestor block elements".
   // The user's paragraph alignment is set as the default so child elements without explicit
   // text-align inherit it correctly through getCombinedBlockStyle.
@@ -2580,76 +2573,102 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   paragraphAlignmentBlockStyle.alignment = align;
   startNewTextBlock(paragraphAlignmentBlockStyle);
 
-  XML_Parser parser = XML_ParserCreate(nullptr);
-  int done;
+  anchorCount_ = 0;
+  anchorData.clear();
+  if (!anchorSpillPath.empty()) {
+    if (Storage.openFileForWrite("EHP", anchorSpillPath, anchorSpillFile)) {
+      anchorSpill.emplace(anchorSpillFile, ANCHOR_SPILL_BUFFER_BYTES);
+    } else {
+      LOG_ERR("EHP", "Could not open anchor spill %s; holding anchors in RAM", anchorSpillPath.c_str());
+    }
+  }
+
+  streamParser_ = XML_ParserCreate(nullptr);
   htmlEnded = false;
 
-  if (!parser) {
+  if (!streamParser_) {
     LOG_ERR("EHP", "Couldn't allocate memory for parser");
     return false;
   }
 
   // Handle HTML entities (like &nbsp;) that aren't in XML spec or DTD
   // Using DefaultHandlerExpand preserves normal entity expansion from DOCTYPE
-  XML_SetDefaultHandlerExpand(parser, defaultHandlerExpand);
+  XML_SetDefaultHandlerExpand(streamParser_, defaultHandlerExpand);
 
-  FsFile file;
-  if (!Storage.openFileForRead("EHP", filepath, file)) {
-    destroyXmlParser(parser);
+  if (!Storage.openFileForRead("EHP", filepath, streamFile_)) {
+    destroyXmlParser(streamParser_);
+    streamParser_ = nullptr;
     return false;
   }
 
   // Show indexing popup if not already shown before pre-scan.
-  if (!popupShown && popupFn && file.size() >= MIN_SIZE_FOR_POPUP) {
+  if (!popupShown && popupFn && streamFile_.size() >= MIN_SIZE_FOR_POPUP) {
     popupFn();
   }
 
-  XML_SetUserData(parser, this);
-  XML_SetElementHandler(parser, startElement, endElement);
-  XML_SetCharacterDataHandler(parser, characterData);
+  XML_SetUserData(streamParser_, this);
+  XML_SetElementHandler(streamParser_, startElement, endElement);
+  XML_SetCharacterDataHandler(streamParser_, characterData);
 
+  streamTotalBytes_ = streamFile_.size();
+  streamBytesFed_ = 0;
   // Compute the time taken to parse and build pages
-  const uint32_t chapterStartTime = millis();
+  streamStartMs_ = millis();
+  return true;
+}
+
+ChapterHtmlSlimParser::StreamStep ChapterHtmlSlimParser::stepStreaming(const uint32_t budgetMs) {
+  if (!streamParser_) {
+    LOG_ERR("EHP", "stepStreaming without a live stream");
+    return StreamStep::Failed;
+  }
+  const uint32_t sliceStart = millis();
+  int done;
   do {
-    void* const buf = XML_GetBuffer(parser, PARSE_BUFFER_SIZE);
+    void* const buf = XML_GetBuffer(streamParser_, PARSE_BUFFER_SIZE);
     if (!buf) {
       LOG_ERR("EHP", "Couldn't allocate memory for buffer");
-      destroyXmlParser(parser);
-      file.close();
-      return false;
+      dropStream();
+      return StreamStep::Failed;
     }
 
-    const size_t len = file.read(buf, PARSE_BUFFER_SIZE);
+    const size_t len = streamFile_.read(buf, PARSE_BUFFER_SIZE);
 
-    if (len == 0 && file.available() > 0) {
+    if (len == 0 && streamFile_.available() > 0) {
       LOG_ERR("EHP", "File read error");
-      destroyXmlParser(parser);
-      file.close();
-      return false;
+      dropStream();
+      return StreamStep::Failed;
     }
+    streamBytesFed_ += len;
 
-    done = file.available() == 0;
+    done = streamFile_.available() == 0;
 
-    if (XML_ParseBuffer(parser, static_cast<int>(len), done) == XML_STATUS_ERROR) {
+    if (XML_ParseBuffer(streamParser_, static_cast<int>(len), done) == XML_STATUS_ERROR) {
       if (htmlEnded) {
         // Junk after </html> (stray markup, a second document, NULs) is "junk after
         // document element" to expat. Every page is already laid out, so finish the
         // chapter normally instead of throwing the whole section away.
-        LOG_DBG("EHP", "Ignoring trailing data after </html>: %s", XML_ErrorString(XML_GetErrorCode(parser)));
+        LOG_DBG("EHP", "Ignoring trailing data after </html>: %s", XML_ErrorString(XML_GetErrorCode(streamParser_)));
         break;
       }
-      LOG_ERR("EHP", "Parse error at line %lu:\n%s", XML_GetCurrentLineNumber(parser),
-              XML_ErrorString(XML_GetErrorCode(parser)));
-      destroyXmlParser(parser);
-      file.close();
-      return false;
+      LOG_ERR("EHP", "Parse error at line %lu:\n%s", XML_GetCurrentLineNumber(streamParser_),
+              XML_ErrorString(XML_GetErrorCode(streamParser_)));
+      dropStream();
+      return StreamStep::Failed;
+    }
+    // Yield between chunks, never inside one: a chunk's layout work and its page writes are
+    // complete here, so a resumed slice picks up at a clean boundary.
+    if (!done && budgetMs != 0 && millis() - sliceStart >= budgetMs) {
+      return StreamStep::More;
     }
   } while (!done);
-  LOG_DBG("EHP", "Time to parse and build pages: %lu ms", millis() - chapterStartTime);
+  LOG_DBG("EHP", "Time to parse and build pages: %lu ms", millis() - streamStartMs_);
+  streamBytesFed_ = streamTotalBytes_;
+  dropStream();
+  return StreamStep::Done;
+}
 
-  destroyXmlParser(parser);
-  file.close();
-
+bool ChapterHtmlSlimParser::finishStreaming() {
   // Unterminated table at EOF: its buffered row and packed fragment would otherwise be lost.
   if (currentTable) {
     currentTableCell = nullptr;
@@ -2662,10 +2681,7 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   resolveLeadingImageAsBlock();
   if (currentTextBlock) {
     makePages();
-    if (!pendingAnchorId.empty()) {
-      anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
-      pendingAnchorId.clear();
-    }
+    recordPendingAnchor();
     completeCurrentPage();
     currentPage.reset();
     currentTextBlock.reset();
@@ -2678,6 +2694,59 @@ bool ChapterHtmlSlimParser::parseAndBuildPages() {
   footnoteBodyPool.reset();
 
   return true;
+}
+
+void ChapterHtmlSlimParser::dropStream() {
+  closeAnchorSpill();
+  if (streamParser_) {
+    destroyXmlParser(streamParser_);
+    streamParser_ = nullptr;
+  }
+  if (streamFile_) {
+    streamFile_.close();
+  }
+}
+
+ChapterHtmlSlimParser::~ChapterHtmlSlimParser() { dropStream(); }
+
+bool ChapterHtmlSlimParser::parseAndBuildPages() {
+  if (!beginStreaming()) {
+    return false;
+  }
+  if (stepStreaming(0) != StreamStep::Done) {
+    return false;
+  }
+  return finishStreaming();
+}
+
+bool ChapterHtmlSlimParser::lookupAnchorInActiveBuild(const std::string& id, uint16_t& page) const {
+  for (const auto& entry : anchorData) {
+    if (entry.first == id) {
+      page = entry.second;
+      return true;
+    }
+  }
+  if (!anchorSpill || anchorCount_ == 0) return false;
+  // Spilled: read what has been written so far through a second handle (the writer is
+  // flushed first). Rare -- a link into the chapter being built -- so a linear scan is fine.
+  const_cast<serialization::BufferedFileWriter&>(*anchorSpill).flush();
+  const_cast<FsFile&>(anchorSpillFile).flush();
+  FsFile in;
+  if (!Storage.openFileForRead("EHP", anchorSpillPath, in)) return false;
+  bool found = false;
+  char name[128];
+  for (uint16_t i = 0; i < anchorCount_ && !found; i++) {
+    uint32_t len = 0;
+    uint16_t p = 0;
+    if (in.read(&len, sizeof(len)) != sizeof(len) || len > sizeof(name)) break;
+    if (in.read(name, len) != static_cast<int>(len) || in.read(&p, sizeof(p)) != sizeof(p)) break;
+    if (len == id.size() && memcmp(name, id.data(), len) == 0) {
+      page = p;
+      found = true;
+    }
+  }
+  in.close();
+  return found;
 }
 
 int ChapterHtmlSlimParser::preScanAnchors(const std::string& filepath, FootnoteBodyEntry* entries, int maxEntries,
@@ -3124,8 +3193,33 @@ void ChapterHtmlSlimParser::breakPage() {
 
 void ChapterHtmlSlimParser::recordPendingAnchor() {
   if (pendingAnchorId.empty()) return;
-  anchorData.push_back({std::move(pendingAnchorId), static_cast<uint16_t>(completedPageCount)});
+  recordAnchor(pendingAnchorId.data(), pendingAnchorId.size(), static_cast<uint16_t>(completedPageCount));
   pendingAnchorId.clear();
+}
+
+void ChapterHtmlSlimParser::recordAnchor(const char* id, const size_t idLen, const uint16_t page) {
+  if (anchorSpill) {
+    // The section file's anchor record: writeString (uint32 length + bytes) then the page.
+    const auto len = static_cast<uint32_t>(idLen);
+    anchorSpill->write(&len, sizeof(len));
+    anchorSpill->write(id, idLen);
+    anchorSpill->write(&page, sizeof(page));
+  } else {
+    anchorData.push_back({std::string(id, idLen), page});
+  }
+  anchorCount_++;
+}
+
+bool ChapterHtmlSlimParser::finishAnchorSpill() {
+  if (!anchorSpill) return true;
+  const bool ok = anchorSpill->flush();
+  closeAnchorSpill();
+  return ok;
+}
+
+void ChapterHtmlSlimParser::closeAnchorSpill() {
+  anchorSpill.reset();  // the writer flushes on destruction; it must go before the file
+  if (anchorSpillFile) anchorSpillFile.close();
 }
 
 // A footnote ref inside a grid cell never reaches addLineToPage (the only place that assigns

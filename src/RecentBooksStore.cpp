@@ -22,6 +22,7 @@ RecentBooksStore RecentBooksStore::instance;
 
 void RecentBooksStore::addBook(const std::string& path, const std::string& title, const std::string& author,
                                const std::string& coverBmpPath) {
+  ensureLoaded();
   // Re-opening the book that is already first with identical details (sleep-wake
   // resume, Continue Reading) changes nothing: skip both the per-entry exists()
   // probes below and the full JSON rewrite. Stale entries can wait for the next
@@ -66,6 +67,7 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
 
 void RecentBooksStore::updateBook(const std::string& path, const std::string& title, const std::string& author,
                                   const std::string& coverBmpPath) {
+  ensureLoaded();
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end()) {
@@ -79,6 +81,7 @@ void RecentBooksStore::updateBook(const std::string& path, const std::string& ti
 }
 
 void RecentBooksStore::removeBook(const std::string& path) {
+  ensureLoaded();
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   const bool wasPinned = isPinned(path);
@@ -89,6 +92,7 @@ void RecentBooksStore::removeBook(const std::string& path) {
 
 bool RecentBooksStore::updatePath(const std::string& oldPath, const std::string& newPath,
                                   const std::string& oldCachePath, const std::string& newCachePath) {
+  ensureLoaded();
   if (oldPath == newPath) return true;
   bool changed = false;
 
@@ -116,6 +120,7 @@ bool RecentBooksStore::updatePath(const std::string& oldPath, const std::string&
 }
 
 void RecentBooksStore::shelveBook(const std::string& path) {
+  ensureLoaded();
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end()) recentBooks.erase(it);
@@ -128,10 +133,12 @@ void RecentBooksStore::shelveBook(const std::string& path) {
 }
 
 bool RecentBooksStore::isShelved(const std::string& path) const {
+  ensureLoaded();
   return std::find(shelvedPaths.begin(), shelvedPaths.end(), path) != shelvedPaths.end();
 }
 
 void RecentBooksStore::pinBook(const std::string& path) {
+  ensureLoaded();
   if (isPinned(path)) return;
   if (pinnedPaths.size() >= MAX_PINNED_BOOKS) pinnedPaths.erase(pinnedPaths.begin());
   pinnedPaths.push_back(path);
@@ -140,12 +147,14 @@ void RecentBooksStore::pinBook(const std::string& path) {
 }
 
 void RecentBooksStore::unpinBook(const std::string& path) {
+  ensureLoaded();
   const size_t before = pinnedPaths.size();
   pinnedPaths.erase(std::remove(pinnedPaths.begin(), pinnedPaths.end(), path), pinnedPaths.end());
   if (pinnedPaths.size() != before) saveToFile();
 }
 
 bool RecentBooksStore::togglePin(const std::string& path) {
+  ensureLoaded();
   if (isPinned(path)) {
     unpinBook(path);
     return false;
@@ -155,10 +164,12 @@ bool RecentBooksStore::togglePin(const std::string& path) {
 }
 
 bool RecentBooksStore::isPinned(const std::string& path) const {
+  ensureLoaded();
   return std::find(pinnedPaths.begin(), pinnedPaths.end(), path) != pinnedPaths.end();
 }
 
 void RecentBooksStore::updateProgress(const std::string& path, int8_t progressPercent) {
+  ensureLoaded();
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
   if (it != recentBooks.end() && it->progressPercent != progressPercent) {
@@ -170,12 +181,14 @@ void RecentBooksStore::updateProgress(const std::string& path, int8_t progressPe
 bool RecentBooksStore::isMissing(const RecentBook& book) { return !Storage.exists(book.path.c_str()); }
 
 bool RecentBooksStore::pruneMissing() {
+  ensureLoaded();
   const size_t before = recentBooks.size();
   recentBooks.erase(std::remove_if(recentBooks.begin(), recentBooks.end(), &isMissing), recentBooks.end());
   return recentBooks.size() != before;
 }
 
 bool RecentBooksStore::saveToFile() const {
+  ensureLoaded();
   Storage.mkdir("/.crosspoint");
   return JsonSettingsIO::saveRecentBooks(*this, RECENT_BOOKS_FILE_JSON);
 }
@@ -208,7 +221,24 @@ RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
   return RecentBook{path, "", "", ""};
 }
 
+void RecentBooksStore::ensureLoaded() const {
+  if (!loaded_) const_cast<RecentBooksStore*>(this)->loadFromFile();
+}
+
+void RecentBooksStore::release() {
+  if (!loaded_) return;
+  std::vector<RecentBook>().swap(recentBooks);
+  std::vector<std::string>().swap(shelvedPaths);
+  std::vector<std::string>().swap(pinnedPaths);
+  loaded_ = false;
+}
+
 bool RecentBooksStore::loadFromFile() {
+  // Marked before the read: saveToFile() (the binary migration below) asks for the list too.
+  loaded_ = true;
+  recentBooks.clear();
+  shelvedPaths.clear();
+  pinnedPaths.clear();
   // Try JSON first
   if (Storage.exists(RECENT_BOOKS_FILE_JSON)) {
     String json = Storage.readFile(RECENT_BOOKS_FILE_JSON);

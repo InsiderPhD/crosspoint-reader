@@ -29,8 +29,11 @@ bool saveProgress(Epub& epub, const int spineIndex, const int currentPage, const
 
   const float chapterProgress =
       (pageCount > 0) ? static_cast<float>(currentPage) / static_cast<float>(pageCount) : 0.0f;
+  // Updated and let go again: the reader never shows the list, and its ~4.5 KB are worth
+  // more to the chapter layout than a re-read costs on the next Home.
   RECENT_BOOKS.updateProgress(epub.getPath(),
                               static_cast<int8_t>(epub.calculateProgress(spineIndex, chapterProgress) * 100.0f));
+  RECENT_BOOKS.release();
   return written;
 }
 

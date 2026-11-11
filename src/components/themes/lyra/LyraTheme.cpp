@@ -22,6 +22,7 @@
 #include "components/icons/bookfusion32.h"
 #include "components/icons/check24.h"
 #include "components/icons/check32.h"
+#include "components/icons/clippings.h"
 #include "components/icons/cover.h"
 #include "components/icons/file24.h"
 #include "components/icons/files24.h"
@@ -133,6 +134,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return Check32Icon;
       case UIIcon::Stats:
         return StatsIcon;
+      case UIIcon::Clippings:
+        return ClippingsIcon;
       default:
         return nullptr;
     }
@@ -688,11 +691,11 @@ void LyraTheme::drawEmptyRecents(const GfxRenderer& renderer, const Rect rect) c
 void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                const std::function<std::string(int index)>& buttonLabel,
                                const std::function<UIIcon(int index)>& rowIcon) const {
+  const int rowHeight = buttonMenuRowHeight(rect, buttonCount);
   for (int i = 0; i < buttonCount; ++i) {
     int tileWidth = rect.width - LyraMetrics::values.contentSidePadding * 2;
     Rect tileRect = Rect{rect.x + LyraMetrics::values.contentSidePadding,
-                         rect.y + i * (LyraMetrics::values.menuRowHeight + LyraMetrics::values.menuSpacing), tileWidth,
-                         LyraMetrics::values.menuRowHeight};
+                         rect.y + i * (rowHeight + LyraMetrics::values.menuSpacing), tileWidth, rowHeight};
 
     const bool selected = selectedIndex == i;
 
@@ -704,7 +707,7 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     const char* label = labelStr.c_str();
     int textX = tileRect.x + 16;
     const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
-    const int textY = tileRect.y + (LyraMetrics::values.menuRowHeight - lineHeight) / 2;
+    const int textY = tileRect.y + (rowHeight - lineHeight) / 2;
 
     if (rowIcon != nullptr) {
       UIIcon icon = rowIcon(i);

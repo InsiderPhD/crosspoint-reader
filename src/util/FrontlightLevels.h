@@ -10,6 +10,9 @@
 // where the useful resolution lives: 1% is duty 1 of 1023, 5% is 7, 10% is 23.
 // Dense rungs down there give a genuinely dark-room-usable light; above ~30% a
 // 10-point step is barely a visible change, so the top half stays coarse.
+// On the Picco's I2C LED driver the same dense rungs cover the span from the
+// driver's floor (5 mA full scale, brightness code 1) at 1% up to the retail
+// firmware's dimmest step at about 22%.
 //
 // The stored setting is still a plain 0-100 percentage — the web UI's slider
 // steps in 1% and can set values off this ladder. nearestIndex() snaps those to

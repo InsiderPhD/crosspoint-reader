@@ -47,6 +47,7 @@ int LicoriceTheme::hitTestRecentBookCover(const Rect& rect, const int slotCount,
 int LicoriceTheme::hitTestButtonMenu(const Rect& rect, const int buttonCount, const int lx, const int ly) const {
   (void)rect;  // the menu lives in the folder card and the month card, not in rect
   if (statsMenuIndex >= 0 && statsMenuIndex < buttonCount && contains(statsCard, lx, ly)) return statsMenuIndex;
+  if (clipMenuIndex >= 0 && clipMenuIndex < buttonCount && contains(clipCard, lx, ly)) return clipMenuIndex;
   for (int k = 0; k < kFolderSlots; ++k) {
     if (folderMenuIndex[k] >= 0 && folderMenuIndex[k] < buttonCount && contains(folderTiles[k], lx, ly)) {
       return folderMenuIndex[k];
@@ -55,8 +56,8 @@ int LicoriceTheme::hitTestButtonMenu(const Rect& rect, const int buttonCount, co
   return -1;
 }
 
-// Positions: the month card on top, the folder's 2x2 grid under it, the book
-// bar at the bottom. A move off an edge stays put (returns selectorIndex);
+// Positions: the month card on top, the folder's 2x2 grid under it with the
+// clipping card to its right, the book bar at the bottom. A move off an edge stays put (returns selectorIndex);
 // -1 falls back to the linear order, used only before the first draw has
 // recorded the menu or for Left/Right on the book.
 int LicoriceTheme::homeNavigate(const int selectorIndex, const int coverCount, const int totalCount,
@@ -67,6 +68,7 @@ int LicoriceTheme::homeNavigate(const int selectorIndex, const int coverCount, c
   const auto orStay = [&](const int target) { return target >= 0 ? target : selectorIndex; };
   const int book = coverCount > 0 ? 0 : -1;
   const int stats = selectorOf(statsMenuIndex);
+  const int clip = selectorOf(clipMenuIndex);
 
   if (selectorIndex < coverCount) {
     if (dir == NavDirection::Up) return orStay(folder(2) >= 0 ? folder(2) : folder(0));
@@ -75,6 +77,18 @@ int LicoriceTheme::homeNavigate(const int selectorIndex, const int coverCount, c
   }
   if (stats >= 0 && selectorIndex == stats) {
     return dir == NavDirection::Down ? orStay(folder(0)) : selectorIndex;
+  }
+  if (clip >= 0 && selectorIndex == clip) {
+    switch (dir) {
+      case NavDirection::Up:
+        return orStay(stats);
+      case NavDirection::Down:
+        return orStay(book);
+      case NavDirection::Left:
+        return orStay(folder(1) >= 0 ? folder(1) : folder(0));
+      case NavDirection::Right:
+        return selectorIndex;
+    }
   }
   for (int k = 0; k < kFolderSlots; ++k) {
     if (folder(k) != selectorIndex) continue;
@@ -88,7 +102,7 @@ int LicoriceTheme::homeNavigate(const int selectorIndex, const int coverCount, c
       case NavDirection::Left:
         return col == 1 ? orStay(folder(row * 2)) : selectorIndex;
       case NavDirection::Right:
-        return col == 0 ? orStay(folder(row * 2 + 1)) : selectorIndex;
+        return col == 0 ? orStay(folder(row * 2 + 1)) : orStay(clip);
     }
   }
   return -1;
@@ -987,6 +1001,7 @@ void LicoriceTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const 
   bookBar = l.bar;
   statsCard = l.stats;
   folderCard = l.folder;
+  clipCard = l.clip;
 
   tm now{};
   uint32_t epoch = 0;
@@ -1019,6 +1034,7 @@ void LicoriceTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, const int b
                                    const std::function<UIIcon(int index)>& rowIcon) const {
   (void)rect;
   statsMenuIndex = -1;
+  clipMenuIndex = -1;
   for (int& index : folderMenuIndex) index = -1;
   if (buttonCount <= 0 || folderCard.width <= 0) return;
 
@@ -1026,11 +1042,14 @@ void LicoriceTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, const int b
   for (int i = 0; i < buttonCount; ++i) {
     if (statsMenuIndex < 0 && rowIcon != nullptr && rowIcon(i) == UIIcon::Stats) {
       statsMenuIndex = i;
+    } else if (clipMenuIndex < 0 && rowIcon != nullptr && rowIcon(i) == UIIcon::Clippings) {
+      clipMenuIndex = i;
     } else if (placed < kFolderSlots) {
       folderMenuIndex[placed++] = i;
     }
   }
   if (statsMenuIndex >= 0 && selectedIndex == statsMenuIndex) drawSelectedFrame(renderer, statsCard);
+  if (clipMenuIndex >= 0 && selectedIndex == clipMenuIndex) drawSelectedFrame(renderer, clipCard);
 
   // No frame round the folder: the four tiles fill its place as live tiles,
   // their outer edges flush with the cards around them.

@@ -269,7 +269,9 @@ void SleepThemeSelectActivity::renderPreview() {
 
   const auto labels =
       mappedInput.mapLabels(tr(STR_BACK), tr(STR_SLEEP_THEME_USE_SHORT), onCard(name) ? tr(STR_DELETE) : "", "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // Delete is an action on the Left slot: touch boards only draw (and hit-test)
+  // that slot when the screen asks for all of them.
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
 }
 
 void SleepThemeSelectActivity::render(RenderLock&&) {

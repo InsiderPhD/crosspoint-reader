@@ -496,19 +496,28 @@ int BaseTheme::hitTestTabBar(const GfxRenderer& renderer, const Rect& rect, cons
   return -1;
 }
 
+int BaseTheme::buttonMenuRowHeight(const Rect& rect, const int buttonCount) const {
+  constexpr int kMinRowHeight = 32;  // a UI_10 label plus a little air
+  const ThemeMetrics& m = themeMetrics();
+  if (buttonCount <= 0) return m.menuRowHeight;
+  const int fit = (rect.height - buttonMenuTopOffset()) / buttonCount - m.menuSpacing;
+  return std::clamp(fit, kMinRowHeight, m.menuRowHeight);
+}
+
 int BaseTheme::hitTestButtonMenu(const Rect& rect, int buttonCount, int lx, int ly) const {
   const ThemeMetrics& m = themeMetrics();
   if (lx < rect.x + m.contentSidePadding || lx >= rect.x + rect.width - m.contentSidePadding) {
     return -1;
   }
-  const int pitch = m.menuRowHeight + m.menuSpacing;
+  const int rowHeight = buttonMenuRowHeight(rect, buttonCount);
+  const int pitch = rowHeight + m.menuSpacing;
   const int rel = ly - rect.y - buttonMenuTopOffset();
   if (rel < 0) {
     return -1;
   }
   const int index = rel / pitch;
   // Taps in the spacing gap between tiles are a miss.
-  if (index >= buttonCount || rel % pitch >= m.menuRowHeight) {
+  if (index >= buttonCount || rel % pitch >= rowHeight) {
     return -1;
   }
   return index;
@@ -1132,18 +1141,19 @@ void BaseTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
 void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                const std::function<std::string(int index)>& buttonLabel,
                                const std::function<UIIcon(int index)>& rowIcon) const {
+  const int rowHeight = buttonMenuRowHeight(rect, buttonCount);
   for (int i = 0; i < buttonCount; ++i) {
     const int tileY = BaseMetrics::values.verticalSpacing + rect.y +
-                      static_cast<int>(i) * (BaseMetrics::values.menuRowHeight + BaseMetrics::values.menuSpacing);
+                      static_cast<int>(i) * (rowHeight + BaseMetrics::values.menuSpacing);
 
     const bool selected = selectedIndex == i;
 
     if (selected) {
       renderer.fillRect(rect.x + BaseMetrics::values.contentSidePadding, tileY,
-                        rect.width - BaseMetrics::values.contentSidePadding * 2, BaseMetrics::values.menuRowHeight);
+                        rect.width - BaseMetrics::values.contentSidePadding * 2, rowHeight);
     } else {
       renderer.drawRect(rect.x + BaseMetrics::values.contentSidePadding, tileY,
-                        rect.width - BaseMetrics::values.contentSidePadding * 2, BaseMetrics::values.menuRowHeight);
+                        rect.width - BaseMetrics::values.contentSidePadding * 2, rowHeight);
     }
 
     std::string labelStr = buttonLabel(i);
@@ -1151,8 +1161,7 @@ void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, label);
     const int textX = rect.x + (rect.width - textWidth) / 2;
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-    const int textY =
-        tileY + (BaseMetrics::values.menuRowHeight - lineHeight) / 2;  // vertically centered assuming y is top of text
+    const int textY = tileY + (rowHeight - lineHeight) / 2;  // vertically centered assuming y is top of text
     // Invert text when the tile is selected, to contrast with the filled background
     renderer.drawText(UI_10_FONT_ID, textX, textY, label, selectedIndex != i);
   }
@@ -1232,6 +1241,12 @@ void BaseTheme::drawStatusBarSide(GfxRenderer& renderer, const StatusBarSide dra
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
   renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                    &orientedMarginLeft);
+  // Inverted maps the portrait top's 9px inset onto the bottom edge, which
+  // floated the bottom bar 6px above where it sits in every other
+  // orientation. Anchor it at the usual bottom inset; the body text's reserve
+  // (computeOrientedMargins) is untouched, so pagination and the section cache
+  // key don't change -- the bar just moves down into its own gap.
+  orientedMarginBottom = std::min(orientedMarginBottom, GfxRenderer::VIEWABLE_MARGIN_BOTTOM);
 
   const int screenWidth = renderer.getScreenWidth();
   const int screenHeight = renderer.getScreenHeight();

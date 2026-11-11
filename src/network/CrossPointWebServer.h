@@ -44,6 +44,11 @@ class CrossPointWebServer {
     // Replacing an existing file: data goes to "<file>.part", which replaces
     // the file only after the whole upload is written.
     bool staged = false;
+    // /api/book/replace: the exact book being replaced. Empty for /upload, whose
+    // destination is the "path" folder plus the uploaded file's own name. Set, the
+    // original steps aside as "<file>.bak" instead of being removed, and the cache
+    // is left for handleBookReplace() to decide about.
+    String replaceTarget;
 
     // Upload write buffer - batches small writes into larger SD card operations
     // 4KB is a good balance: large enough to reduce syscall overhead, small enough
@@ -119,6 +124,15 @@ class CrossPointWebServer {
   void releaseRequestArguments() const;
   void handleUpload(UploadState& state) const;
   void handleUploadPost(UploadState& state) const;
+  // POST /api/book/replace?path=<book.epub>&keep=0|1 (multipart: the new book). The
+  // File Manager's in-place optimize: swaps the optimized copy in over the book,
+  // keeping the original as .bak. keep=1 keeps the reading position (the chapter
+  // list did not change); otherwise the book starts afresh, as after a re-upload.
+  void handleBookReplace();
+  void handleBookReplaceData();
+  // /api/book/replace was asked for something that is not a book on the card; the
+  // body is read and dropped, and the POST completion answers 400.
+  bool bookReplaceRefused = false;
   void handleCreateFolder() const;
   void handleRename() const;
   void handleMove() const;
@@ -166,9 +180,11 @@ class CrossPointWebServer {
   bool readJsonBody(JsonDocument& out) const;
   // 403 "plugin system disabled" (true) while the Plugins setting is off.
   bool rejectIfPluginsDisabled() const;
-  void handlePluginHostJs() const;  // GET /plugin-host.js, /js/plugin-host.js -> shared browser host
-  void handlePluginList() const;    // GET  /api/plugins   -> discovered plugins
-  void handlePluginFile() const;    // GET  /plugin?name&file -> serve SD file
+  void handlePluginHostJs() const;     // GET /plugin-host.js, /js/plugin-host.js -> shared browser host
+  void handlePluginList() const;       // GET  /api/plugins   -> discovered plugins
+  void handlePluginInstalled() const;  // GET  /api/plugins/installed -> every plugin folder, for the list
+  void handlePluginRemove() const;     // POST /api/plugins/remove    name=<folder> -> delete it
+  void handlePluginFile() const;       // GET  /plugin?name&file -> serve SD file
   // GET /plugins-run: the headless job runner — every plugin loaded with its
   // UI hidden, so registered actions execute jobs while the page stays open.
   void handlePluginRunnerPage() const;

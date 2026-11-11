@@ -21,6 +21,8 @@ class CalibreConnectActivity final : public Activity {
   std::string connectedSSID;
   unsigned long lastHandleClientTime = 0;
   size_t lastProgressReceived = 0;
+  static constexpr unsigned long PROGRESS_REPAINT_MS = 4000UL;
+  unsigned long lastProgressRepaintMs = 0UL;
   size_t lastProgressTotal = 0;
   std::string currentUploadName;
   std::string lastCompleteName;

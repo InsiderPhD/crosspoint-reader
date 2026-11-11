@@ -39,7 +39,7 @@
 static constexpr size_t FRAG_RESTART_THRESHOLD = 24 * 1024;
 
 int HomeActivity::getMenuItemCount() const {
-  return 5 + getCoverSlotsUsed();  // Library, File Browser, File transfer, Stats, Settings
+  return 6 + getCoverSlotsUsed();  // Library, File Browser, File transfer, Stats, Settings, Clippings
 }
 
 int HomeActivity::getCoverSlotsUsed() const { return static_cast<int>(recentBooks.size()); }
@@ -710,10 +710,10 @@ Rect HomeActivity::coverStripRect() const {
 
 Rect HomeActivity::menuRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  return Rect{
-      0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing, renderer.getScreenWidth(),
-      renderer.getScreenHeight() -
-          (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing * 2 + metrics.buttonHintsHeight)};
+  // From under the cover strip down to the button hints, so a theme that fits
+  // its menu to the rect (BaseTheme::buttonMenuRowHeight) stops above them.
+  const int top = metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.verticalSpacing;
+  return Rect{0, top, renderer.getScreenWidth(), renderer.getScreenHeight() - top - metrics.buttonHintsHeight};
 }
 
 int HomeActivity::tileIndexAt(const int lx, const int ly) const {
@@ -738,7 +738,8 @@ void HomeActivity::activateSelectedTile() {
     const int fileBrowserIdx = idx++;
     const int fileTransferIdx = idx++;
     const int statsIdx = idx++;
-    const int settingsIdx = idx;
+    const int settingsIdx = idx++;
+    const int clippingsIdx = idx;
 
     if (selectorIndex < static_cast<int>(recentBooks.size())) {
       onSelectBook(recentBooks[selectorIndex].path);
@@ -752,6 +753,8 @@ void HomeActivity::activateSelectedTile() {
       onStatsOpen();
     } else if (menuSelectedIndex == settingsIdx) {
       onSettingsOpen();
+    } else if (menuSelectedIndex == clippingsIdx) {
+      activityManager.goToClippings();
     }
   }
 }
@@ -783,9 +786,9 @@ void HomeActivity::render(RenderLock&&) {
                           bufferRestored, std::bind(&HomeActivity::storeCoverBuffer, this));
 
   // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_LIBRARY), tr(STR_BROWSE_FILES), tr(STR_FILE_TRANSFER),
-                                        tr(STR_READING_STATS), tr(STR_SETTINGS_TITLE)};
-  std::vector<UIIcon> menuIcons = {Library, Folder, Transfer, Stats, Settings};
+  std::vector<const char*> menuItems = {tr(STR_LIBRARY),       tr(STR_BROWSE_FILES),   tr(STR_FILE_TRANSFER),
+                                        tr(STR_READING_STATS), tr(STR_SETTINGS_TITLE), tr(STR_CLIPPINGS)};
+  std::vector<UIIcon> menuIcons = {Library, Folder, Transfer, Stats, Settings, Clippings};
 
   const int menuOffset = getCoverSlotsUsed();
   GUI.drawButtonMenu(

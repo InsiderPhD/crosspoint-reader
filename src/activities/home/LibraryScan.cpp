@@ -256,7 +256,19 @@ bool indexEnabled() { return SETTINGS.libraryUseIndex != 0; }
 
 const char* indexPath() { return library::libraryIndexPath(); }
 
+// The per-folder walk below answers "was the card edited while the device was off": every
+// change the firmware itself makes (upload, WebDAV, OPDS, BookFusion, a plugin, a delete or
+// move) already calls invalidateIndex(). The card cannot be edited by anything else while the
+// firmware runs, so the walk need only happen once per boot and after an invalidation; on a
+// card of a thousand folders it was every Library open that paid for it (witchhunt-reader
+// measured 42 s on 1,790 folders; it moved to a write marker, this is the same saving kept
+// within our existing marker).
+namespace {
+bool verifiedThisBoot = false;
+}  // namespace
+
 bool indexIsCurrent() {
+  if (verifiedThisBoot) return true;
   // Storage.open, not openFileForRead: a missing marker is the normal "never
   // built" state, not an error line.
   HalFile marker = Storage.open(CLX_MARKER_PATH);
@@ -294,13 +306,15 @@ bool indexIsCurrent() {
   // The marker only vouches for the index it was written with.
   library::LibraryIndexFile index;
   if (!index.open(library::libraryIndexPath())) return false;
-  return index.bookCount() == header.bookCount;
+  verifiedThisBoot = index.bookCount() == header.bookCount;
+  return verifiedThisBoot;
 }
 
 IndexRefresh refreshIndex(const library::BuildCallbacks* ui) {
   Storage.mkdir("/.crosspoint");  // No-op if it exists; a failure surfaces in the opens below.
   // Stale from here until a build completes. The index itself stays: the
   // builder reconciles against it and keeps it when the build does not finish.
+  verifiedThisBoot = false;  // the marker goes now; a failed rebuild must not keep the old verdict
   Storage.remove(CLX_MARKER_PATH);
   Storage.remove(CLX_MARKER_NEW_PATH);
 
@@ -430,6 +444,7 @@ void enumerateBooks(std::vector<std::string>& outPaths) {
 }
 
 void invalidateIndex() {
+  verifiedThisBoot = false;
   if (Storage.exists(LIBRARY_INDEX_PATH)) {
     Storage.remove(LIBRARY_INDEX_PATH);
     LOG_DBG(MODULE, "Invalidated library index cache");

@@ -1577,6 +1577,9 @@
           bmp: encodeBmp(bgBits, width, height),
           mask: maskBits && encodeBmp(maskBits, width, height),
           front: front && encodeBmp(front, width, height),
+          // What the device's Sleep Theme picker shows for this theme
+          // (SleepThemeRenderer::PREVIEW_FILE); store installs save one too.
+          preview: encodeBmp(previewBits, width, height),
           fontFiles,
         };
         if (overlay) log('Overlay: the page that was showing stays wherever the theme is transparent.');
@@ -1715,6 +1718,7 @@
           if (compiled.mask) await upload(dir, 'mask.bmp', compiled.mask);
           if (compiled.front) await upload(dir, 'front.bmp', compiled.front);
           for (const [i, f] of compiled.fontFiles.entries()) await upload(dir, 'f' + i + '.cpfont', f);
+          if (compiled.preview) await upload(dir, 'preview.bmp', compiled.preview);
           // Kept so the theme can be recompiled after a firmware update.
           await mkdir(dir, 'source');
           const made = new Set();
@@ -1774,6 +1778,31 @@
         }
       }
 
+      // The store's preview.png (a black-and-white screenshot from its CI) as
+      // the 1-bit BMP the device draws, or null when there is none.
+      async function storePreviewBmp(url) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return null;
+          const img = await createImageBitmap(await res.blob());
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, img.width, img.height);
+          ctx.drawImage(img, 0, 0);
+          const px = ctx.getImageData(0, 0, img.width, img.height).data;
+          const black = new Uint8Array(img.width * img.height);
+          for (let i = 0; i < black.length; i++) {
+            black[i] = px[i * 4] * 299 + px[i * 4 + 1] * 587 + px[i * 4 + 2] * 114 < 128000 ? 1 : 0;
+          }
+          return encodeBmp(black, img.width, img.height);
+        } catch (e) {
+          return null;
+        }
+      }
+
       async function installFromStore(theme, button) {
         const key = storeBuildKey();
         const build = theme.builds[key];
@@ -1791,6 +1820,11 @@
           // Which build this is: the device's store screen and this page offer
           // an update when the store's version moves on.
           if (build.version) blobs.push(['store.ver', new Blob([build.version])]);
+          // The picture the device's Sleep Theme picker shows (SleepThemeRenderer::PREVIEW_FILE),
+          // as the device's own store install saves it. Optional: a theme without one still installs.
+          msg.textContent = 'Downloading ' + theme.name + ': preview...';
+          const preview = await storePreviewBmp(STORE_BASE + key + '/' + theme.id + '/preview.png');
+          if (preview) blobs.push(['preview.bmp', new Blob([preview])]);
           // A new theme becomes the sleep screen when the configured one isn't on
           // the card. Updates never switch it, and light and dark are built in.
           const onCard = await installedThemeNames();
@@ -1883,7 +1917,24 @@
             tag.textContent = update ? 'update available' : 'installed';
             card.append(tag);
           }
-          card.append(desc, button);
+          card.append(desc);
+          // A plugin the theme needs, and where to get it (the catalog's "requires").
+          if (t.requires && t.requires.plugin) {
+            const req = document.createElement('p');
+            req.className = 'muted';
+            req.style.margin = '0 0 8px';
+            req.append('Needs the ');
+            const name = document.createElement(t.requires.url ? 'a' : 'strong');
+            name.textContent = (t.requires.name || t.requires.plugin) + ' plugin';
+            if (t.requires.url && /^https?:\/\//.test(t.requires.url)) {
+              name.href = t.requires.url;
+              name.target = '_blank';
+              name.rel = 'noopener';
+            }
+            req.append(name, device.plugins === false ? ' (X4 Pro, X4C or Picco only).' : '.');
+            card.append(req);
+          }
+          card.append(button);
           grid.appendChild(card);
         }
       }

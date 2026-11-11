@@ -1,5 +1,6 @@
 #include "SleepThemeDownloadActivity.h"
 
+#include <DevicePolicy.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
@@ -25,6 +26,7 @@
 #include "network/WifiPowerSaveGuard.h"
 #include "sleeptheme/SleepThemeRenderer.h"
 #include "util/HardcoverSync.h"
+#include "util/PluginLocations.h"
 #include "util/TouchListNav.h"
 
 namespace {
@@ -48,6 +50,9 @@ constexpr size_t MAX_NAME_LEN = 48;
 constexpr size_t MAX_DESCRIPTION_LEN = 96;
 // A build's version: a short content hash.
 constexpr size_t MAX_VERSION_LEN = 16;
+// A required plugin's display name and where to get it (shown, never fetched).
+constexpr size_t MAX_REQUIRES_NAME_LEN = 48;
+constexpr size_t MAX_REQUIRES_URL_LEN = 160;
 // Written into a theme folder by an install: the version it installed.
 constexpr const char* VERSION_FILE = "store.ver";
 
@@ -150,7 +155,11 @@ class ThemeCatalogJsonStream final : public Stream {
     VERSION,
     FILES,
     FILE_NAME,
-    FILE_SIZE
+    FILE_SIZE,
+    REQUIRES,
+    REQ_PLUGIN,
+    REQ_NAME,
+    REQ_URL
   };
 
   static void sOnKey(void* ctx, const char* key, size_t len) {
@@ -190,6 +199,13 @@ class ThemeCatalogJsonStream final : public Stream {
         lastKey_ = LastKey::VERSION;
     } else if (inBuilds_ && depth_ == buildsDepth_) {
       if (keyIs(key, len, buildKey_)) lastKey_ = LastKey::MY_BUILD;
+    } else if (inRequires_ && depth_ == requiresDepth_) {
+      if (keyIs(key, len, "plugin"))
+        lastKey_ = LastKey::REQ_PLUGIN;
+      else if (keyIs(key, len, "name"))
+        lastKey_ = LastKey::REQ_NAME;
+      else if (keyIs(key, len, "url"))
+        lastKey_ = LastKey::REQ_URL;
     } else if (inTheme_ && depth_ == themeDepth_) {
       if (keyIs(key, len, "id"))
         lastKey_ = LastKey::ID;
@@ -199,6 +215,8 @@ class ThemeCatalogJsonStream final : public Stream {
         lastKey_ = LastKey::DESCRIPTION;
       else if (keyIs(key, len, "builds"))
         lastKey_ = LastKey::BUILDS;
+      else if (keyIs(key, len, "requires"))
+        lastKey_ = LastKey::REQUIRES;
     } else if (rootSeen_ && depth_ == 1) {
       if (keyIs(key, len, "themes")) lastKey_ = LastKey::THEMES;
     }
@@ -220,6 +238,16 @@ class ThemeCatalogJsonStream final : public Stream {
         break;
       case LastKey::VERSION:
         current_.version.assign(value, std::min(len, MAX_VERSION_LEN));
+        break;
+      case LastKey::REQ_PLUGIN:
+        // One over, like the id: an over-long name fails validation in finishTheme().
+        current_.requiresPlugin.assign(value, std::min(len, MAX_ID_LEN + 1));
+        break;
+      case LastKey::REQ_NAME:
+        current_.requiresName.assign(value, std::min(len, MAX_REQUIRES_NAME_LEN));
+        break;
+      case LastKey::REQ_URL:
+        current_.requiresUrl.assign(value, std::min(len, MAX_REQUIRES_URL_LEN));
         break;
       default:
         break;
@@ -243,6 +271,9 @@ class ThemeCatalogJsonStream final : public Stream {
       hasBuild_ = false;
       inTheme_ = true;
       themeDepth_ = depth_ + 1;
+    } else if (inTheme_ && !inRequires_ && lastKey_ == LastKey::REQUIRES && depth_ == themeDepth_) {
+      inRequires_ = true;
+      requiresDepth_ = depth_ + 1;
     } else if (inTheme_ && !inBuilds_ && lastKey_ == LastKey::BUILDS && depth_ == themeDepth_) {
       inBuilds_ = true;
       buildsDepth_ = depth_ + 1;
@@ -269,6 +300,8 @@ class ThemeCatalogJsonStream final : public Stream {
         current_.files.push_back(std::move(currentFile_));
       }
       inFile_ = false;
+    } else if (inRequires_ && depth_ == requiresDepth_) {
+      inRequires_ = false;
     } else if (inMyBuild_ && depth_ == myBuildDepth_) {
       inMyBuild_ = false;
     } else if (inBuilds_ && depth_ == buildsDepth_) {
@@ -316,6 +349,18 @@ class ThemeCatalogJsonStream final : public Stream {
     }
     if (outEntries_.size() >= MAX_CATALOG_ENTRIES) return;
     if (current_.name.empty()) current_.name = current_.id;
+    // The plugin id is looked up as a folder name: drop a malformed one (the
+    // theme still installs, it just can't say what it needs).
+    if (!current_.requiresPlugin.empty() && !isValidId(current_.requiresPlugin)) {
+      LOG_ERR("STD", "Theme '%s' requires an invalid plugin id, ignored", current_.id.c_str());
+      current_.requiresPlugin.clear();
+    }
+    if (current_.requiresPlugin.empty()) {
+      current_.requiresName.clear();
+      current_.requiresUrl.clear();
+    } else if (current_.requiresName.empty()) {
+      current_.requiresName = current_.requiresPlugin;
+    }
     outEntries_.push_back(std::move(current_));
   }
 
@@ -333,6 +378,7 @@ class ThemeCatalogJsonStream final : public Stream {
   uint8_t myBuildDepth_ = 0;
   uint8_t filesDepth_ = 0;
   uint8_t fileDepth_ = 0;
+  uint8_t requiresDepth_ = 0;
   bool rootSeen_ = false;
   bool rootClosed_ = false;
   bool inThemes_ = false;
@@ -341,6 +387,7 @@ class ThemeCatalogJsonStream final : public Stream {
   bool inMyBuild_ = false;
   bool inFiles_ = false;
   bool inFile_ = false;
+  bool inRequires_ = false;
   bool hasBuild_ = false;
   bool filesOk_ = true;
 };
@@ -710,10 +757,80 @@ void SleepThemeDownloadActivity::discardPreview() {
   previewId_.clear();
 }
 
+// UI_10 lines under the preview of a theme that needs a plugin: its name,
+// then up to two of what is still to do (see pluginStatus()).
+constexpr int REQUIRES_LINES = 3;
+
+namespace {
+
+// The plugin's folder is on the card, in any plugin root (whether or not
+// plugins are switched on).
+bool pluginOnCard(const std::string& id) {
+  char path[96];
+  for (const char* root : PluginLocations::kRoots) {
+    snprintf(path, sizeof(path), "%s/%s", root, id.c_str());
+    if (Storage.exists(path)) return true;
+  }
+  return false;
+}
+
+// What the reader still has to do before a theme's required plugin works
+// here, written into buf ("" when there is nothing to say).
+void pluginStatus(const SleepThemeDownloadActivity::CatalogEntry& entry, char* buf, const size_t bufSize) {
+  buf[0] = '\0';
+#if CROSSPOINT_SD_PLUGINS
+  if (!pluginOnCard(entry.requiresPlugin)) {
+    if (entry.requiresUrl.empty()) return;
+    // The scheme is noise on a screen nobody can click.
+    const char* url = entry.requiresUrl.c_str();
+    if (strncmp(url, "https://", 8) == 0) url += 8;
+    if (strncmp(url, "http://", 7) == 0) url += 7;
+    snprintf(buf, bufSize, tr(STR_SLEEP_THEME_PLUGIN_GET), url);
+  } else if (!SETTINGS.pluginsEnabled) {
+    snprintf(buf, bufSize, "%s", tr(STR_SLEEP_THEME_PLUGIN_ENABLE));
+  } else {
+    snprintf(buf, bufSize, "%s", tr(STR_SLEEP_THEME_PLUGIN_READY));
+  }
+#else
+  (void)entry;
+  snprintf(buf, bufSize, "%s", tr(STR_SLEEP_THEME_PLUGIN_UNSUPPORTED));
+#endif
+}
+
+}  // namespace
+
+const SleepThemeDownloadActivity::CatalogEntry* SleepThemeDownloadActivity::selectedEntry() const {
+  const int index = selectedIndex_ - entryRowOffset();
+  if (index < 0 || index >= static_cast<int>(entries_.size())) return nullptr;
+  return &entries_[static_cast<size_t>(index)];
+}
+
 Rect SleepThemeDownloadActivity::previewRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect body = listRect();
-  return Rect{body.x + metrics.contentSidePadding, body.y, body.width - 2 * metrics.contentSidePadding, body.height};
+  int height = body.height;
+  const CatalogEntry* entry = selectedEntry();
+  if (entry != nullptr && !entry->requiresPlugin.empty()) {
+    height -= REQUIRES_LINES * renderer.getLineHeight(UI_10_FONT_ID) + metrics.verticalSpacing;
+  }
+  return Rect{body.x + metrics.contentSidePadding, body.y, body.width - 2 * metrics.contentSidePadding, height};
+}
+
+void SleepThemeDownloadActivity::drawRequirement(const CatalogEntry& entry, const Rect& box) {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  int y = box.y + box.height + metrics.verticalSpacing;
+  char line[96];
+  snprintf(line, sizeof(line), tr(STR_SLEEP_THEME_NEEDS_PLUGIN), entry.requiresName.c_str());
+  renderer.drawCenteredText(UI_10_FONT_ID, y, line, true, EpdFontFamily::BOLD);
+  y += lineHeight;
+  char status[MAX_REQUIRES_URL_LEN + 32];
+  pluginStatus(entry, status, sizeof(status));
+  if (status[0] == '\0') return;
+  for (const auto& wrapped : renderer.wrappedText(UI_10_FONT_ID, status, box.width, REQUIRES_LINES - 1)) {
+    renderer.drawCenteredText(UI_10_FONT_ID, y, wrapped.c_str());
+    y += lineHeight;
+  }
 }
 
 void SleepThemeDownloadActivity::openPreview(const CatalogEntry& entry) {
@@ -869,6 +986,18 @@ void SleepThemeDownloadActivity::loop() {
       downloadEntry(*entry);
       discardPreview();
       requestUpdateAndWait();
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+      // Delete (installed, out-of-date themes only). On release, as in
+      // SleepThemeSelectActivity, so the same press can't leak into the next screen.
+      const CatalogEntry* entry = entryAtRow(selectedIndex_);
+      if (entry != nullptr && entry->installed) {
+        discardPreview();
+        {
+          RenderLock lock(*this);
+          state_ = CONFIRM_DELETE;
+        }
+        requestUpdate();
+      }
     }
   } else if (state_ == COMPLETE) {
     if (mappedInput.wasPressed(MappedInputManager::Button::Back) ||
@@ -1015,9 +1144,13 @@ void SleepThemeDownloadActivity::render(RenderLock&&) {
                                                                         box.height, SETTINGS.darkMode);
     if (!drawn) renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_SLEEP_THEME_NO_PREVIEW));
     const CatalogEntry* entry = entryAtRow(selectedIndex_);
+    if (entry != nullptr && !entry->requiresPlugin.empty()) drawRequirement(*entry, box);
     const char* action = entry != nullptr && entry->updateAvailable ? tr(STR_UPDATE) : tr(STR_DOWNLOAD);
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), action, "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    // An installed theme (shown here because it is out of date) can also be
+    // deleted instead of updated.
+    const char* remove = entry != nullptr && entry->installed ? tr(STR_DELETE) : "";
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), action, remove, "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, /*allSlots=*/true);
   } else if (state_ == DOWNLOADING) {
     const auto& entry = entries_[static_cast<size_t>(downloadingIndex_)];
     char status[96];

@@ -112,6 +112,7 @@ enum UIIcon {
   Files,
   Search,
   Stats,
+  Clippings,
   None,  // Render nothing — the row reserves icon space but draws blank.
 };
 
@@ -395,4 +396,8 @@ class BaseTheme {
   // leads with verticalSpacing, Lyra starts flush. Keep in lockstep with the
   // theme's drawButtonMenu.
   virtual int buttonMenuTopOffset() const { return themeMetrics().verticalSpacing; }
+  // Row height of a drawButtonMenu list: menuRowHeight, squeezed so all
+  // buttonCount rows fit in rect (Home's six items under a tall cover strip).
+  // Shared by the list draws and hitTestButtonMenu so taps match the rows.
+  int buttonMenuRowHeight(const Rect& rect, int buttonCount) const;
 };

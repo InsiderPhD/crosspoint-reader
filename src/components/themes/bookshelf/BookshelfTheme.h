@@ -41,19 +41,15 @@ constexpr ThemeMetrics noActionBarValues = [] {
 // it -- some face-out, some spine-out. Moving the selector along the shelf
 // changes what the card previews; the card itself opens the book it shows.
 //
-// The home menu is split in two:
-//  - Menu item 0 (Library) is drawn at the end of the shelf as a small stack
-//    of books lying flat, so the selector steps off the last book onto it.
-//  - The remaining items are a grid of large buttons: 2x2 in portrait, 4x1 in
-//    landscape (two rows would squeeze out the card there).
-// This leans on HomeActivity listing Library first; the label still comes from
-// the menu callback, so only the position is assumed.
+// The home menu (Library, Files, Transfer, Statistics, Settings, Clippings) is
+// a grid of large buttons under the shelf: two columns of three rows in
+// portrait, 6x1 in landscape (two rows would squeeze out the card there).
 //
 // Rendering split, to keep the per-selection cost to one cover read:
 //  - The shelf (books + plank) is static, so it is drawn once and captured by
 //    the home screen's cover snapshot.
-//  - The hero card, the Library stack and the grid are drawn after the
-//    snapshot is taken, so each selection change repaints only those.
+//  - The hero card and the grid are drawn after the snapshot is taken, so
+//    each selection change repaints only those.
 class BookshelfTheme : public LyraTheme {
  public:
   const ThemeMetrics& themeMetrics() const override;
@@ -62,8 +58,7 @@ class BookshelfTheme : public LyraTheme {
                            const int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,
                            std::function<bool()> storeCoverBuffer) const override;
 
-  // Draws the Library stack and the button grid on a frame whose shelf was
-  // just laid out; any other caller gets LyraTheme's plain list.
+  // Draws the button grid on a frame whose shelf was just laid out; any other caller gets LyraTheme's plain list.
   void drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                       const std::function<std::string(int index)>& buttonLabel,
                       const std::function<UIIcon(int index)>& rowIcon) const override;

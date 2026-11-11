@@ -109,6 +109,75 @@ void CrossPointWebServer::handlePluginList() const {
   server->send(200, "application/json", out);
 }
 
+// GET /api/plugins/installed
+// {"enabled":true,"plugins":[{"name","dir","title","description","version",
+//   "web","device","sleepValues","daily"}]}
+// Every plugin folder discovery finds, including ones with no plugin.js (which
+// /api/plugins leaves out because the host has nothing to load for them), so
+// the page can say what is on the card. Empty while Enable Plugins is off:
+// discovery itself is off then.
+void CrossPointWebServer::handlePluginInstalled() const {
+  JsonDocument doc;
+  doc["enabled"] = SETTINGS.pluginsEnabled != 0;
+  JsonArray arr = doc["plugins"].to<JsonArray>();
+  // Only the fields the list shows, so a large manifest costs no more than a small one.
+  JsonDocument filter;
+  filter["title"] = true;
+  filter["description"] = true;
+  filter["version"] = true;
+  for (const auto& e : PluginLocations::scanPlugins()) {
+    JsonObject obj = arr.add<JsonObject>();
+    obj["name"] = e.name;
+    obj["dir"] = e.dir;
+    obj["title"] = e.name;
+    obj["web"] = e.hasPluginJs;
+    obj["device"] = e.hasDevice;
+    obj["sleepValues"] = Storage.exists((e.dir + "/sleep-vars.json").c_str());
+    obj["daily"] = Storage.exists((e.dir + "/sleep-vars-daily.jsonl").c_str());
+    // manifest.json first, device.json over it: the same precedence as the reader's list.
+    for (const char* file : {"manifest.json", "device.json"}) {
+      std::string raw;
+      const std::string path = e.dir + "/" + file;
+      if (!Storage.exists(path.c_str()) || !Storage.readFileToString("WEB", path, 16 * 1024, raw)) continue;
+      JsonDocument m;
+      if (deserializeJson(m, raw, DeserializationOption::Filter(filter)) != DeserializationError::Ok) continue;
+      if (m["title"].is<const char*>()) obj["title"] = m["title"];
+      if (m["description"].is<const char*>()) obj["description"] = m["description"];
+      if (m["version"].is<const char*>()) obj["version"] = m["version"];
+    }
+  }
+  String out;
+  serializeJson(doc, out);
+  server->send(200, "application/json", out);
+}
+
+// POST /api/plugins/remove  name=<folder>
+// Deletes one plugin folder, with its token and config files: the web side of
+// the reader's hold-to-uninstall. Only ever a direct child of a plugin root.
+void CrossPointWebServer::handlePluginRemove() const {
+  const String name = server->arg("name");
+  if (!safeComponent(name) || name[0] == '.') {
+    server->send(400, "text/plain", "bad plugin name");
+    return;
+  }
+  const std::string dir = PluginLocations::findPluginDir(name.c_str());
+  bool direct = false;
+  for (const char* root : PluginLocations::kRoots) {
+    if (dir == std::string(root) + "/" + name.c_str()) direct = true;
+  }
+  if (dir.empty() || !direct) {
+    server->send(404, "text/plain", "no such plugin");
+    return;
+  }
+  if (!Storage.removeDir(dir.c_str())) {
+    LOG_ERR("WEB", "Failed to remove plugin %s", dir.c_str());
+    server->send(500, "text/plain", "could not remove the plugin folder");
+    return;
+  }
+  LOG_INF("WEB", "Removed plugin %s", dir.c_str());
+  server->send(200, "text/plain", "ok");
+}
+
 // GET /plugin?name=<plugin>&file=<file> -> serve /.crosspoint/plugins/<plugin>/<file>
 void CrossPointWebServer::handlePluginFile() const {
   const String name = server->arg("name");

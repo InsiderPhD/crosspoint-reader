@@ -6,6 +6,7 @@
 #include <cstring>
 
 #if CROSSPOINT_SD_PLUGINS  // SD-card plugins: PSRAM boards only, see lib/DevicePolicy
+#include <ArduinoJson.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -15,6 +16,7 @@
 
 #include "util/PluginHttp.h"
 #include "util/PluginLocations.h"
+#include "util/TimeUtils.h"
 #endif
 
 namespace SleepThemePluginVars {
@@ -102,13 +104,111 @@ std::string pluginDir(const char* segment) {
   return "";
 }
 
+bool isBlank(const char c) { return c == ' ' || c == '\t' || c == '\r'; }
+
+// Streams file once, counting its non-blank lines. With line non-null, stops
+// at line number target (0-based, blank lines not counted) and copies it into
+// line (lineLen bytes, not NUL-terminated); tooLong is set when it did not fit
+// in cap bytes. Reads through a small stack buffer: a year of entries is tens
+// of KB and is never held whole.
+uint32_t walkLines(HalFile& file, const uint32_t target, char* line, const size_t cap, size_t& lineLen, bool& tooLong) {
+  uint32_t count = 0;
+  bool blank = true;
+  size_t len = 0;
+  char chunk[128];
+  for (int n = file.read(chunk, sizeof(chunk)); n > 0; n = file.read(chunk, sizeof(chunk))) {
+    for (int i = 0; i < n; i++) {
+      const char c = chunk[i];
+      if (c == '\n') {
+        if (!blank) {
+          if (line != nullptr && count == target) {
+            lineLen = len;
+            return count + 1;
+          }
+          count++;
+        }
+        blank = true;
+        len = 0;
+        continue;
+      }
+      if (!isBlank(c)) blank = false;
+      if (line != nullptr && count == target) {
+        if (len < cap) {
+          line[len++] = c;
+        } else {
+          tooLong = true;
+        }
+      }
+    }
+  }
+  if (!blank) {  // last line, without a trailing newline
+    if (line != nullptr && count == target) lineLen = len;
+    count++;
+  }
+  return count;
+}
+
+// Lays today's line of the plugin's DAILY_FILE_NAME over out (same key: the
+// daily value wins). Leaves out alone when there is no such file, the clock is
+// unknown, or the line is unusable.
+void mergeDaily(const std::string& dir, pluginhttp::Headers& out) {
+  const std::string path = dir + "/" + DAILY_FILE_NAME;
+  if (!Storage.exists(path.c_str())) return;
+  const uint32_t now = TimeUtils::getCurrentValidTimestamp();
+  if (now == 0) return;  // no date, no "today": the plain values stand
+
+  FsFile file;
+  if (!Storage.openFileForRead("STH", path, file)) return;
+  size_t lineLen = 0;
+  bool tooLong = false;
+  const uint32_t count = walkLines(file, 0, nullptr, 0, lineLen, tooLong);
+  if (count == 0 || !file.seekSet(0)) {
+    file.close();
+    return;
+  }
+  const uint32_t target = TimeUtils::getLocalDayOrdinal(now) % count;
+  // Heap, not stack: a line may be up to 2KB, far past the 256-byte stack-local
+  // limit. Freed when this returns (once per plugin per sleep screen).
+  auto line = makeUniqueNoThrow<char[]>(DAILY_LINE_MAX);
+  if (!line) {
+    LOG_ERR("STH", "malloc failed: %u bytes daily line", static_cast<unsigned>(DAILY_LINE_MAX));
+    file.close();
+    return;
+  }
+  walkLines(file, target, line.get(), DAILY_LINE_MAX, lineLen, tooLong);
+  file.close();
+  if (tooLong) {
+    LOG_ERR("STH", "%s line %lu is over %u bytes, skipped", path.c_str(), static_cast<unsigned long>(target + 1),
+            static_cast<unsigned>(DAILY_LINE_MAX));
+    return;
+  }
+
+  JsonDocument doc;
+  if (deserializeJson(doc, line.get(), lineLen) != DeserializationError::Ok || !doc.is<JsonObjectConst>()) {
+    LOG_ERR("STH", "%s line %lu is not a JSON object", path.c_str(), static_cast<unsigned long>(target + 1));
+    return;
+  }
+  for (JsonPairConst kv : doc.as<JsonObjectConst>()) {
+    std::string value = pluginhttp::variantToString(kv.value());
+    bool replaced = false;
+    for (auto& existing : out) {
+      if (existing.first == kv.key().c_str()) {
+        existing.second = std::move(value);
+        replaced = true;
+        break;
+      }
+    }
+    if (!replaced) out.emplace_back(kv.key().c_str(), std::move(value));
+  }
+}
+
 void loadValues(const std::string& dir, pluginhttp::Headers& out) {
   out.clear();
   if (dir.empty()) return;
   const std::string path = dir + "/" + FILE_NAME;
   // Most plugins publish nothing; don't let readFileToString log each of them.
-  if (!Storage.exists(path.c_str())) return;
-  pluginhttp::loadConfigFile(path, out);
+  if (Storage.exists(path.c_str())) pluginhttp::loadConfigFile(path, out);
+  mergeDaily(dir, out);
 }
 
 // The plugin's values from the frame cache, loading them on first use. Null

@@ -3,6 +3,7 @@
 #include <BoardConfig.h>
 #include <Logging.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <esp_netif.h>
 #include <esp_netif_sntp.h>
 #include <freertos/FreeRTOS.h>
@@ -207,10 +208,112 @@ bool HalClock::syncFromNTP() {
   return true;
 }
 
+// ---- direct SNTP query ----------------------------------------------------
+//
+// esp_sntp sends nothing when it starts: IDF ships CONFIG_LWIP_SNTP_STARTUP_DELAY=y with a
+// 5000 ms maximum, so the FIRST packet leaves after a uniformly random 0-5 s (a fleet must
+// not stampede a public pool at power-on). On a sync the user is waiting for that is 2.5 s of
+// dead air on average, and it is compiled into the prebuilt SDK libs where sdkconfig cannot
+// reach it. A client SNTP request is one 48-byte datagram, so asking directly costs a few
+// lines and skips both the delay and lwIP's serial per-server timeout: the gateway (most home
+// routers answer NTP) and one anycast address that needs no DNS are asked at once and the
+// first valid answer wins. Fast path only: syncSystemClockFromNtp() falls back to the full
+// client whenever it returns false. Ported in shape from witchhunt-reader's quickSntpQuery.
+namespace {
+constexpr uint16_t NTP_PORT = 123;
+constexpr size_t NTP_PACKET_SIZE = 48;
+// Seconds between the NTP epoch (1900-01-01) and the Unix epoch (1970-01-01).
+constexpr uint32_t NTP_TO_UNIX_OFFSET = 2208988800UL;
+// A malformed or spoofed reply that sets the clock is worse than no sync at all (it would also
+// break TLS certificate validity checks), so anything outside a plausible window is dropped.
+constexpr time_t NTP_MIN_PLAUSIBLE_EPOCH = 1735689600;  // 2025-01-01
+constexpr time_t NTP_MAX_PLAUSIBLE_EPOCH = 2524608000;  // 2050-01-01
+// A gateway answers in single-digit ms and a public server in tens; past this the fast path is
+// not going to work here and the fallback wants the remaining budget.
+constexpr uint32_t QUICK_SNTP_TIMEOUT_MS = 1000;
+
+bool quickSntpQuery(const IPAddress* targets, const size_t targetCount, time_t& outEpoch, IPAddress& outSource) {
+  WiFiUDP udp;
+  if (udp.begin(0) == 0) {
+    LOG_DBG("CLK", "Quick SNTP: could not open a UDP socket");
+    return false;
+  }
+  uint8_t packet[NTP_PACKET_SIZE] = {};
+  packet[0] = 0x1B;  // LI=0, VN=3, Mode=3 (client)
+  size_t sent = 0;
+  for (size_t i = 0; i < targetCount; ++i) {
+    if (static_cast<uint32_t>(targets[i]) == 0) continue;
+    if (udp.beginPacket(targets[i], NTP_PORT) != 1) continue;
+    udp.write(packet, NTP_PACKET_SIZE);
+    if (udp.endPacket() == 1) sent++;
+  }
+  if (sent == 0) {
+    udp.stop();
+    return false;
+  }
+  const uint32_t deadline = millis() + QUICK_SNTP_TIMEOUT_MS;
+  while (static_cast<int32_t>(millis() - deadline) < 0) {
+    const int size = udp.parsePacket();
+    if (size <= 0) {
+      vTaskDelay(pdMS_TO_TICKS(5));
+      continue;
+    }
+    uint8_t reply[NTP_PACKET_SIZE] = {};
+    const int received = (size >= static_cast<int>(NTP_PACKET_SIZE)) ? udp.read(reply, NTP_PACKET_SIZE) : 0;
+    // Nothing of that datagram may be left behind: parsePacket() refuses the next one while the
+    // receive buffer still holds anything, and the good answer is often queued behind a bad one.
+    udp.flush();
+    if (received < static_cast<int>(NTP_PACKET_SIZE)) continue;
+    const uint8_t leapIndicator = reply[0] >> 6;
+    const uint8_t mode = reply[0] & 0x07;
+    const uint8_t stratum = reply[1];
+    // LI=3: the server's own clock is unsynchronised; mode 4 is a server reply, 5 a broadcast;
+    // stratum 0 is a kiss-o'-death and 16+ unsynchronised. Arrived, but not to be believed.
+    if (leapIndicator == 3 || (mode != 4 && mode != 5) || stratum == 0 || stratum > 15) continue;
+    // Transmit timestamp, seconds part: bytes 40..43, big endian.
+    const uint32_t ntpSeconds = (static_cast<uint32_t>(reply[40]) << 24) | (static_cast<uint32_t>(reply[41]) << 16) |
+                                (static_cast<uint32_t>(reply[42]) << 8) | static_cast<uint32_t>(reply[43]);
+    if (ntpSeconds <= NTP_TO_UNIX_OFFSET) continue;
+    const time_t epoch = static_cast<time_t>(ntpSeconds - NTP_TO_UNIX_OFFSET);
+    if (epoch < NTP_MIN_PLAUSIBLE_EPOCH || epoch > NTP_MAX_PLAUSIBLE_EPOCH) {
+      LOG_DBG("CLK", "Quick SNTP: rejecting implausible epoch %lld", static_cast<long long>(epoch));
+      continue;
+    }
+    outEpoch = epoch;
+    outSource = udp.remoteIP();
+    udp.stop();
+    return true;
+  }
+  udp.stop();
+  return false;
+}
+}  // namespace
+
 bool HalClock::syncSystemClockFromNtp(const uint32_t timeoutMs) {
   if (WiFi.status() != WL_CONNECTED) {
     LOG_ERR("CLK", "WiFi not connected, cannot sync NTP");
     return false;
+  }
+
+  // Ask directly first (see quickSntpQuery); the full client below runs whenever this fails.
+  {
+    const unsigned long quickStartMs = millis();
+    IPAddress targets[2];
+    size_t count = 0;
+    const IPAddress gateway = WiFi.gatewayIP();
+    if (static_cast<uint32_t>(gateway) != 0) targets[count++] = gateway;
+    targets[count++] = IPAddress(162, 159, 200, 1);  // time.cloudflare.com anycast, no DNS needed
+    time_t epoch = 0;
+    IPAddress source;
+    if (quickSntpQuery(targets, count, epoch, source)) {
+      timeval tv = {};
+      tv.tv_sec = epoch;
+      settimeofday(&tv, nullptr);
+      LOG_INF("CLK", "Quick SNTP: %s answered in %lu ms", source.toString().c_str(), millis() - quickStartMs);
+      return true;
+    }
+    LOG_DBG("CLK", "Quick SNTP: no usable answer after %lu ms; falling back to the SNTP client",
+            millis() - quickStartMs);
   }
 
   // One sync at a time (see ntpSyncBusy). A second caller waits its turn for at

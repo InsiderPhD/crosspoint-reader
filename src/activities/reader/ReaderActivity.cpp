@@ -26,6 +26,8 @@ void RenderedBookGate::rememberOpenBook(const std::string& path, const std::stri
   APP_STATE.openEpubPath = path;
   APP_STATE.saveToFile();  // no card write when the path is the one already on disk
   RECENT_BOOKS.addBook(path, title, author, thumbBmpPath);
+  // Saved; the reader never shows the list, so its heap goes back to the chapter layout.
+  RECENT_BOOKS.release();
 }
 
 bool ReaderActivity::isXtcFile(const std::string& path) { return FsHelpers::hasXtcExtension(path); }

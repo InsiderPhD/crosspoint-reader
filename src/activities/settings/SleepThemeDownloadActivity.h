@@ -85,6 +85,11 @@ class SleepThemeDownloadActivity final : public Activity {
     std::string version;             // this build's version; empty in an older catalog
     bool installed = false;
     bool updateAvailable = false;  // installed, and its store.ver differs from version
+    // A plugin the theme needs ("requires" in the catalog), shown on the
+    // preview with where to get it. Empty = none.
+    std::string requiresPlugin;  // plugin folder name
+    std::string requiresName;    // display name
+    std::string requiresUrl;     // where to get it
   };
 
  private:
@@ -137,8 +142,12 @@ class SleepThemeDownloadActivity final : public Activity {
   bool fetchPreview(const CatalogEntry& entry);
   // Removes the preview's scratch files.
   void discardPreview();
-  // The fitted preview picture's box: the list body, inset.
+  // The fitted preview picture's box: the list body, inset, less room for the
+  // required-plugin lines when the selected theme has one.
   Rect previewRect() const;
+  const CatalogEntry* selectedEntry() const;
+  // Under the preview: the plugin the theme needs and what is still to do.
+  void drawRequirement(const CatalogEntry& entry, const Rect& box);
   // Polls input mid-transfer and latches cancelRequested_ on Back. Runs with
   // the render lock held: it must never render or request an update.
   void pollForCancel();

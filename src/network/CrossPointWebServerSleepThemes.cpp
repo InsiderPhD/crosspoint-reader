@@ -2,6 +2,7 @@
 // and previews against. Uploading the compiled files reuses /mkdir and
 // /upload. See src/sleeptheme/ and docs/file-formats.md.
 #include <ArduinoJson.h>
+#include <DevicePolicy.h>
 #include <HalDisplay.h>
 #include <Logging.h>
 
@@ -20,7 +21,8 @@ void CrossPointWebServer::handleSleepThemesPage() const {
 }
 
 // GET /api/sleep-theme/vars
-// {"panelWidth":800,"panelHeight":480,"themesDir":"/sleep-themes","active":"name",
+// {"panelWidth":800,"panelHeight":480,"themesDir":"/sleep-themes","formatVersion":1,
+//  "plugins":true (this board runs SD plugins),"active":"name",
 //  "limits":{...},"vars":[{"name":"stats.total_hours","kind":"number","value":"61","raw":61},...]}
 // Values are the user's real ones right now, so the page previews with them.
 // Streamed one var at a time to keep the response off the heap.
@@ -33,11 +35,11 @@ void CrossPointWebServer::handleSleepThemeVars() const {
 
   char buf[256];
   snprintf(buf, sizeof(buf),
-           "{\"panelWidth\":%u,\"panelHeight\":%u,\"themesDir\":\"%s\",\"formatVersion\":%u,"
+           "{\"panelWidth\":%u,\"panelHeight\":%u,\"themesDir\":\"%s\",\"formatVersion\":%u,\"plugins\":%s,"
            "\"limits\":{\"elements\":%u,\"fonts\":%u,\"strings\":%u},\"active\":",
            display.getDisplayWidth(), display.getDisplayHeight(), SleepThemeRenderer::THEMES_DIR,
-           SleepThemeFormat::VERSION, SleepThemeFormat::MAX_ELEMENTS, SleepThemeFormat::MAX_FONTS,
-           SleepThemeFormat::MAX_STRING_TABLE);
+           SleepThemeFormat::VERSION, CROSSPOINT_SD_PLUGINS ? "true" : "false", SleepThemeFormat::MAX_ELEMENTS,
+           SleepThemeFormat::MAX_FONTS, SleepThemeFormat::MAX_STRING_TABLE);
   server->sendContent(buf);
   {
     JsonDocument doc;

@@ -23,6 +23,7 @@
 #include "components/UITheme.h"
 #include "components/icons/book.h"
 #include "components/icons/bookfusion24.h"
+#include "components/icons/clippings.h"
 #include "components/icons/cover.h"
 #include "components/icons/folder.h"
 #include "components/icons/library.h"
@@ -69,7 +70,7 @@ constexpr int kProgressBarH = 6;
 constexpr int kProgressTextGap = 6;
 
 // Shelf: books stand bottom-aligned on a plank, packed from the left like a
-// real shelf, with the Library stack after the last one.
+// real shelf.
 constexpr int kSectionTopGap = 18;
 constexpr int kSectionLabelGap = 8;
 constexpr int kBookGap = 8;
@@ -94,25 +95,15 @@ constexpr int kSpineBandInset = 7;
 constexpr uint32_t kSpineOneIn = 3;
 constexpr int kSpineFontId = SMALL_FONT_ID;
 
-// Library stack: books lying flat, spines facing out. Its width is reserved at
-// the end of the shelf whatever the books take, so a full shelf of covers
-// never pushes it off the edge.
-constexpr int kLibraryW = 72;       // minimum; the stack grows into free shelf to fit its label
-constexpr int kLibraryTextPad = 6;  // between the label and each end band
-constexpr int kLibraryBottomBookH = 12;
-constexpr int kLibraryTopBookPad = 4;  // above and below the label
-constexpr int kLibraryTopBookInset = 4;
-constexpr int kLibraryBandInset = 6;
-
 // Button grid.
-constexpr int kGridCellH = 64;
-constexpr int kGridGap = 10;
+constexpr int kGridCellH = 52;
+constexpr int kGridGap = 8;
 constexpr int kGridBottomGap = 10;
 constexpr int kGridCornerRadius = 10;
 constexpr int kGridIconSize = 32;  // must match the bitmaps; drawIcon does not scale
-constexpr int kGridIconPad = 16;
-constexpr int kGridLabelFontId = UI_12_FONT_ID;
-constexpr int kGridMaxCells = 4;
+constexpr int kGridIconPad = 14;
+constexpr int kGridLabelFontId = UI_10_FONT_ID;
+constexpr int kGridMaxCells = 6;  // the whole home menu, Library first
 
 constexpr int kPlaceholderIconSize = 32;
 constexpr int kMaxShelfSlots = BookshelfMetrics::values.homeRecentBooksCount;
@@ -129,7 +120,7 @@ static_assert(kMaxShelfSlots >= kMaxFaceOut, "the shelf holds at least kMaxFaceO
 // the home screen.
 
 // The book the hero card previews. Follows the selector while it is on the
-// shelf and holds still while the selector is on Library or the grid, so
+// shelf and holds still while the selector is in the grid, so
 // leaving the shelf does not snap the card back to the first book.
 int focusedIdx = 0;
 
@@ -141,18 +132,6 @@ int drawnSlotCount = 0;
 // aspect, and the selection outline needs it on the frames that reuse the
 // snapshot instead of re-reading the thumbnail.
 Rect drawnArtwork[kMaxShelfSlots];
-
-// Where the Library stack goes (just after the last book) and the plank under
-// it. Set by drawRecentBookCover; drawButtonMenu paints the stack there.
-int libraryX = 0;
-int libraryPlankY = 0;
-int libraryShelfH = 0;
-int libraryMaxW = kLibraryW;    // free shelf from libraryX to the right edge
-Rect drawnLibrary{0, 0, 0, 0};  // hit area
-
-// True while the selector is on the Library stack: the card then advertises
-// the Library instead of a book, and a tap on it opens the Library.
-bool heroShowsLibrary = false;
 
 // Set when drawRecentBookCover lays out a shelf, cleared by drawButtonMenu:
 // a drawButtonMenu call with no shelf behind it is not the home screen.
@@ -167,7 +146,7 @@ struct GridLayout {
 };
 GridLayout drawnGrid{0, 0, 0, 0, 0};
 
-// 2x2 in portrait; one row of four in landscape, where a second row would
+// Two columns of three rows in portrait; one row of six in landscape, where a second row would
 // leave no height for the card.
 GridLayout computeGrid(const GfxRenderer& renderer, const ThemeMetrics& metrics) {
   int top = 0;
@@ -178,7 +157,7 @@ GridLayout computeGrid(const GfxRenderer& renderer, const ThemeMetrics& metrics)
 
   GridLayout g{};
   const bool wide = renderer.getScreenWidth() > renderer.getScreenHeight();
-  g.cols = wide ? 4 : 2;
+  g.cols = wide ? 6 : 2;
   g.rows = kGridMaxCells / g.cols;
   g.left = kContentInset + left;
   const int width = renderer.getScreenWidth() - kContentInset - right - g.left;
@@ -221,13 +200,13 @@ Layout computeLayout(const GfxRenderer& renderer, const Rect& rect, const ThemeM
   const int contentTop = rect.y + kTopInset;
   const int gridTop = computeGrid(renderer, metrics).top;
 
-  // Worst case the shelf holds kMaxFaceOut covers plus the forced spines and
-  // the Library stack. Each cover gets an equal share of what those leave,
+  // Worst case the shelf holds kMaxFaceOut covers plus the forced spines.
+  // Each cover gets an equal share of what those leave,
   // sized for a full shelf even when fewer books exist, so a cover keeps its
   // size as the recents list grows.
   l.slotCount = std::min(bookCount, kMaxShelfSlots);
   const int spinesW = (kMaxShelfSlots - kMaxFaceOut) * (kSpineW + kBookGap);
-  const int slotW = (contentW - kLibraryW - kBookGap - spinesW) / kMaxFaceOut;
+  const int slotW = (contentW - spinesW) / kMaxFaceOut;
   l.shelfCoverMaxW = std::max(1, slotW - kBookGap);
 
   const int available = gridTop - kShelfGridGap - contentTop;
@@ -367,23 +346,14 @@ void drawPlank(const GfxRenderer& renderer, const Layout& l) {
   renderer.drawLine(x, l.plankY + kPlankH - 1, x + w - 1, l.plankY + kPlankH - 1, true);
 }
 
-// Records where the Library stack stands: at x on this shelf, free to run to
-// the shelf's right edge. drawLibraryStack picks the width and the hit rect.
-void placeLibrary(const Layout& l, const int x) {
-  libraryX = x;
-  libraryPlankY = l.plankY;
-  libraryShelfH = l.shelfCoverMaxH;
-  libraryMaxW = std::max(kLibraryW, l.right - x);
-}
-
 void drawShelf(const GfxRenderer& renderer, const Layout& l, const std::vector<RecentBook>& books,
                const int thumbHeight) {
   renderer.drawText(kLabelFontId, l.left, l.sectionLabelY, tr(STR_MENU_RECENT_BOOKS), true, EpdFontFamily::BOLD);
 
   // Books pack from the left, so a spine takes only its own width and the gap
-  // before the Library stack varies like a real shelf. Each book is at most
-  // shelfCoverMaxW wide and only the first kMaxFaceOut positions can show a
-  // cover, so the stack's reserved width is never overrun.
+  // at the end varies like a real shelf. Each book is at most shelfCoverMaxW
+  // wide and only the first kMaxFaceOut positions can show a cover, so the
+  // row never overruns the shelf.
   int x = l.left + kBookGap / 2;
   for (int i = 0; i < l.slotCount; ++i) {
     const uint32_t hash = pathHash(books[i].path);
@@ -402,11 +372,10 @@ void drawShelf(const GfxRenderer& renderer, const Layout& l, const std::vector<R
     x += drawn.width + kBookGap;
   }
   drawnSlotCount = l.slotCount;
-  placeLibrary(l, x + kBookGap);
   drawPlank(renderer, l);
 }
 
-// Outline around a book (or the Library stack) plus a caret on the plank
+// Outline around a book plus a caret on the plank
 // front, so the selection reads even on a cover that is mostly black.
 void drawShelfSelection(const GfxRenderer& renderer, const Rect& a, const int plankY) {
   renderer.drawRoundedRect(a.x - kSelectOutset, a.y - kSelectOutset, a.width + 2 * kSelectOutset,
@@ -416,47 +385,6 @@ void drawShelfSelection(const GfxRenderer& renderer, const Rect& a, const int pl
   for (int row = 0; row < kCaretH && row < kPlankFaceH - 1; ++row) {
     renderer.drawLine(cx - row, caretTop + row, cx + row, caretTop + row, true);
   }
-}
-
-// ---- library stack ----
-
-// Two books lying flat on the plank, spines out: a plain one underneath and a
-// dark one on top carrying the label. Only as long as the label needs (never
-// under kLibraryW), using the free shelf the books left, so the label reads in
-// full whenever there is room. Returns the stack's rect.
-Rect drawLibraryStack(const GfxRenderer& renderer, const char* label) {
-  const int x = libraryX;
-  const int plankY = libraryPlankY;
-  if (label == nullptr) label = "";
-
-  const int labelW = renderer.getTextWidth(kSpineFontId, label, EpdFontFamily::BOLD);
-  const int wantW = labelW + 2 * (kLibraryTopBookInset + kLibraryBandInset + kLibraryTextPad);
-  const int stackW = std::clamp(wantW, kLibraryW, libraryMaxW);
-  drawnLibrary = Rect{x - kBookGap / 2, plankY - libraryShelfH, stackW + kBookGap, libraryShelfH};
-
-  const Rect under{x, plankY - kLibraryBottomBookH, stackW, kLibraryBottomBookH};
-  renderer.fillRect(under.x, under.y, under.width, under.height, false);
-  renderer.drawRoundedRect(under.x, under.y, under.width, under.height, 1, 2, true);
-  renderer.drawLine(under.x + kLibraryBandInset, under.y + 2, under.x + kLibraryBandInset, under.y + under.height - 3,
-                    true);
-  renderer.drawLine(under.x + under.width - 1 - kLibraryBandInset, under.y + 2,
-                    under.x + under.width - 1 - kLibraryBandInset, under.y + under.height - 3, true);
-
-  const int topH = renderer.getLineHeight(kSpineFontId) + 2 * kLibraryTopBookPad;
-  const Rect top{x + kLibraryTopBookInset, under.y - topH, stackW - 2 * kLibraryTopBookInset, topH};
-  renderer.fillRoundedRect(top.x, top.y, top.width, top.height, 2, Color::Black);
-  renderer.drawLine(top.x + kLibraryBandInset, top.y + 2, top.x + kLibraryBandInset, top.y + top.height - 3, false);
-  renderer.drawLine(top.x + top.width - 1 - kLibraryBandInset, top.y + 2, top.x + top.width - 1 - kLibraryBandInset,
-                    top.y + top.height - 3, false);
-
-  const int textMaxW = top.width - 2 * (kLibraryBandInset + kLibraryTextPad);
-  if (textMaxW > 0) {
-    const std::string visible = renderer.truncatedText(kSpineFontId, label, textMaxW, EpdFontFamily::BOLD);
-    const int textW = renderer.getTextWidth(kSpineFontId, visible.c_str(), EpdFontFamily::BOLD);
-    renderer.drawText(kSpineFontId, top.x + (top.width - textW) / 2, top.y + kLibraryTopBookPad, visible.c_str(), false,
-                      EpdFontFamily::BOLD);
-  }
-  return Rect{x, top.y, stackW, plankY - top.y};
 }
 
 // ---- button grid ----
@@ -478,6 +406,8 @@ const uint8_t* gridIcon(const UIIcon icon) {
       return LibraryIcon;
     case UIIcon::Stats:
       return StatsIcon;
+    case UIIcon::Clippings:
+      return ClippingsIcon;
     default:
       return nullptr;
   }
@@ -716,34 +646,6 @@ void drawHero(const GfxRenderer& renderer, const Layout& l, const RecentBook& bo
   drawBlurb(renderer, flow, book);
 }
 
-// The card while the Library stack is selected. The stack's own label is only
-// a few letters wide, so this is where the Library is actually named: a
-// light box with the library icon in place of a cover, and "View Library".
-void drawLibraryHero(const GfxRenderer& renderer, const Layout& l) {
-  renderer.fillRect(l.left, l.heroCover.y, l.right - l.left, l.heroCover.height, false);
-
-  const Rect& box = l.heroCover;
-  renderer.fillRoundedRect(box.x, box.y, box.width, box.height, kHeroCornerRadius, Color::LightGray);
-  renderer.drawRoundedRect(box.x, box.y, box.width, box.height, 1, kHeroCornerRadius, true);
-  renderer.drawIcon(LibraryIcon, box.x + (box.width - kGridIconSize) / 2, box.y + (box.height - kGridIconSize) / 2,
-                    kGridIconSize, kGridIconSize);
-
-  int y = box.y;
-  renderer.drawText(kLabelFontId, l.heroTextX, y, tr(STR_LIBRARY), true, EpdFontFamily::BOLD);
-  y += renderer.getLineHeight(kLabelFontId) + kHeroLabelGap;
-  for (const auto& line :
-       renderer.wrappedText(kTitleFontId, tr(STR_VIEW_LIBRARY), l.heroTextW, kHeroTitleMaxLines, EpdFontFamily::BOLD)) {
-    renderer.drawText(kTitleFontId, l.heroTextX, y, line.c_str(), true, EpdFontFamily::BOLD);
-    y += renderer.getLineHeight(kTitleFontId);
-  }
-  y += 4;
-  for (const auto& line :
-       renderer.wrappedText(kAuthorFontId, tr(STR_VIEW_LIBRARY_HINT), l.heroTextW, kHeroAuthorMaxLines)) {
-    renderer.drawText(kAuthorFontId, l.heroTextX, y, line.c_str(), true);
-    y += renderer.getLineHeight(kAuthorFontId);
-  }
-}
-
 // The shelf slots are recorded by drawShelf, which only runs on frames that
 // repaint the shelf -- their positions depend on each cover's aspect, which
 // the snapshot frames never re-read.
@@ -765,13 +667,11 @@ void BookshelfTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const
   if (bookCount == 0) {
     drawEmptyRecents(renderer, Rect{rect.x, rect.y, rect.width, layout.sectionLabelY - rect.y});
     drawPlank(renderer, layout);
-    placeLibrary(layout, layout.left + kBookGap / 2);
     shelfLaidOut = true;
     coverRendered = false;
     coverBufferStored = false;
     focusedIdx = 0;
     drawnSlotCount = 0;
-    heroShowsLibrary = false;
     return;
   }
 
@@ -791,12 +691,7 @@ void BookshelfTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const
   }
   shelfLaidOut = true;
 
-  // HomeActivity numbers the menu straight after the books, and Library is
-  // its first item, so the selector sits on the stack at index bookCount.
-  heroShowsLibrary = layout.showHero && selectorIndex == bookCount;
-  if (heroShowsLibrary) {
-    drawLibraryHero(renderer, layout);
-  } else if (layout.showHero) {
+  if (layout.showHero) {
     drawHero(renderer, layout, recentBooks[focusedIdx], metrics.homeCoverHeight);
   }
   if (selectorIndex >= 0 && selectorIndex < layout.slotCount) {
@@ -812,9 +707,6 @@ int BookshelfTheme::hitTestRecentBookCover(const Rect& rect, const int slotCount
     return r.width > 0 && lx >= r.x && lx < r.x + r.width && ly >= r.y && ly < r.y + r.height;
   };
   if (contains(drawnHero)) {
-    // Showing the Library, the card belongs to the menu: hitTestButtonMenu
-    // resolves it.
-    if (heroShowsLibrary) return -1;
     return focusedIdx < slotCount ? focusedIdx : -1;
   }
   for (int i = 0; i < drawnSlotCount; ++i) {
@@ -836,17 +728,10 @@ void BookshelfTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int button
   shelfLaidOut = false;
   if (buttonCount <= 0) return;
 
-  // Item 0 is Library: it lives on the shelf.
-  const std::string libraryLabel = buttonLabel(0);
-  const Rect stack = drawLibraryStack(renderer, libraryLabel.c_str());
-  if (selectedIndex == 0) {
-    drawShelfSelection(renderer, stack, libraryPlankY);
-  }
-
   drawnGrid = computeGrid(renderer, themeMetrics());
-  const int cells = std::min(buttonCount - 1, drawnGrid.cols * drawnGrid.rows);
+  const int cells = std::min(buttonCount, drawnGrid.cols * drawnGrid.rows);
   for (int cell = 0; cell < cells; ++cell) {
-    const int index = cell + 1;
+    const int index = cell;
     const std::string label = buttonLabel(index);
     const uint8_t* icon = rowIcon != nullptr ? gridIcon(rowIcon(index)) : nullptr;
     drawGridCell(renderer, gridCell(drawnGrid, cell), label.c_str(), icon, selectedIndex == index);
@@ -860,11 +745,9 @@ int BookshelfTheme::hitTestButtonMenu(const Rect& rect, const int buttonCount, c
   const auto contains = [lx, ly](const Rect& r) {
     return r.width > 0 && lx >= r.x && lx < r.x + r.width && ly >= r.y && ly < r.y + r.height;
   };
-  if (contains(drawnLibrary)) return 0;
-  if (heroShowsLibrary && contains(drawnHero)) return 0;
-  const int cells = std::min(buttonCount - 1, drawnGrid.cols * drawnGrid.rows);
+  const int cells = std::min(buttonCount, drawnGrid.cols * drawnGrid.rows);
   for (int cell = 0; cell < cells; ++cell) {
-    if (contains(gridCell(drawnGrid, cell))) return cell + 1;
+    if (contains(gridCell(drawnGrid, cell))) return cell;
   }
   return -1;
 }
@@ -875,41 +758,39 @@ int BookshelfTheme::homeNavigate(const int selectorIndex, const int coverCount, 
   // HomeActivity's linear step is already right.
   if (drawnGrid.cols <= 0 || dir == NavDirection::Left || dir == NavDirection::Right) return -1;
 
-  const int libraryIdx = coverCount;  // Library is menu item 0, straight after the books
-  const int cells = std::min(totalCount - coverCount - 1, drawnGrid.cols * drawnGrid.rows);
+  const int gridStart = coverCount;  // menu item 0 (Library) is the first cell
+  const int cells = std::min(totalCount - coverCount, drawnGrid.cols * drawnGrid.rows);
   if (cells <= 0) return -1;
 
   const auto centerX = [](const Rect& r) { return r.x + r.width / 2; };
-  const auto shelfItemX = [&](const int idx) {
-    if (idx < coverCount && idx < drawnSlotCount) return centerX(drawnArtwork[idx]);
-    return centerX(drawnLibrary);
-  };
+  const int books = std::min(coverCount, drawnSlotCount);
 
-  if (selectorIndex <= libraryIdx) {
+  if (selectorIndex < gridStart) {
     if (dir == NavDirection::Up) return selectorIndex;  // top of the page: nowhere to go
-    // Down: the top-row cell nearest the shelf item.
-    const int x = shelfItemX(selectorIndex);
+    // Down: the top-row cell nearest the book.
+    const int x = selectorIndex < books ? centerX(drawnArtwork[selectorIndex]) : 0;
     int best = 0;
     for (int cell = 1; cell < std::min(cells, drawnGrid.cols); ++cell) {
       if (std::abs(centerX(gridCell(drawnGrid, cell)) - x) < std::abs(centerX(gridCell(drawnGrid, best)) - x)) {
         best = cell;
       }
     }
-    return libraryIdx + 1 + best;
+    return gridStart + best;
   }
 
-  const int cell = selectorIndex - libraryIdx - 1;
+  const int cell = selectorIndex - gridStart;
   if (dir == NavDirection::Down) {
     const int below = cell + drawnGrid.cols;
-    return below < cells ? libraryIdx + 1 + below : selectorIndex;
+    return below < cells ? gridStart + below : selectorIndex;
   }
   if (cell >= drawnGrid.cols) return selectorIndex - drawnGrid.cols;
+  if (books <= 0) return selectorIndex;
 
-  // Up from the top row: the shelf item nearest the cell, Library included.
+  // Up from the top row: the book nearest the cell.
   const int x = centerX(gridCell(drawnGrid, cell));
-  int best = libraryIdx;
-  for (int i = 0; i < coverCount; ++i) {
-    if (std::abs(shelfItemX(i) - x) < std::abs(shelfItemX(best) - x)) best = i;
+  int best = 0;
+  for (int i = 1; i < books; ++i) {
+    if (std::abs(centerX(drawnArtwork[i]) - x) < std::abs(centerX(drawnArtwork[best]) - x)) best = i;
   }
   return best;
 }
