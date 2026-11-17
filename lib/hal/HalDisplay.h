@@ -119,8 +119,8 @@ class HalDisplay {
   bool displayGray16Image(const uint8_t* levels, bool turnOffScreen = true) {
     return einkDisplay.displayGray16Image(levels, turnOffScreen);
   }
-  // Calibration: paths[l] = {black frames 0..15, white frames 0..3}.
-  bool setGray16Levels(const uint8_t (*paths)[2]) { return einkDisplay.setGray16Levels(paths); }
+  // Calibration: paths[l] = {black 0..15, white 0..3, deep 0 or 24} frames.
+  bool setGray16Levels(const uint8_t (*paths)[3]) { return einkDisplay.setGray16Levels(paths); }
 
   // Tiled grayscale: stream one band of a plane (lsbPlane selects LSB/MSB RAM)
   // straight to the controller; supportsStripGrayscale() gates the path. See

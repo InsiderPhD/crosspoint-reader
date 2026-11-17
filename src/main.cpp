@@ -1075,8 +1075,7 @@ void run() {
 
 // Measured L* of the driver's default levels (photos of this reader,
 // picco-gray-cal design-reader-final.json), for mapping glyph coverage.
-constexpr float LEVEL_LSTAR[16] = {101.3f, 95.1f, 91.2f, 86.9f, 82.3f, 78.2f, 75.4f, 70.9f,
-                                   68.1f,  64.1f, 59.6f, 55.3f, 51.8f, 48.6f, 44.0f, 40.3f};
+constexpr float LEVEL_LSTAR[16] = {101.2f, 98.0f, 94.0f, 89.5f, 84.3f, 79.5f, 74.6f, 68.5f, 64.3f, 59.2f, 54.6f, 50.6f, 47.3f, 42.0f, 37.7f, 31.8f};
 
 // `CMD:GRAY16TEXT [path]`: the same paragraph anti-aliased with 16, 4 and 2
 // levels, from a .ttf/.otf (default: the first in /fonts). See Gray16TextDemo.
@@ -1090,11 +1089,11 @@ void text(const String& path) {
   showAndHold(levels);
 }
 
-// `CMD:GRAY16CELLS b,w b,w ...`: 15 (black, white) paths for patches 1..15
+// `CMD:GRAY16CELLS b,w[,deep] ...`: 15 (black, white, deep) paths for patches 1..15
 // (patch 0 and the page stay white), loaded into the driver's level table and
 // shown, so picco-gray-cal can measure the reader's own refresh form.
 void cells(const String& args) {
-  uint8_t paths[16][2] = {{0, 0}};
+  uint8_t paths[16][3] = {{0, 0, 0}};
   int n = 0;
   int pos = 0;
   while (pos < static_cast<int>(args.length()) && n < 15) {
@@ -1105,16 +1104,20 @@ void cells(const String& args) {
     if (tok.isEmpty()) break;
     const int comma = tok.indexOf(',');
     if (comma < 0) {
-      LOG_ERR("G16", "bad cell '%s' (want b,w)", tok.c_str());
+      LOG_ERR("G16", "bad cell '%s' (want b,w or b,w,deep)", tok.c_str());
       return;
     }
-    const long b = tok.substring(0, comma).toInt(), w = tok.substring(comma + 1).toInt();
-    if (b < 0 || b > 15 || w < 0 || w > 3 || w > b) {
-      LOG_ERR("G16", "cell %d out of range: %ld,%ld (black 0..15, white 0..3, white <= black)", n + 1, b, w);
+    const int comma2 = tok.indexOf(',', comma + 1);
+    const long b = tok.substring(0, comma).toInt();
+    const long w = tok.substring(comma + 1, comma2 < 0 ? tok.length() : comma2).toInt();
+    const long x = comma2 < 0 ? 0 : tok.substring(comma2 + 1).toInt();
+    if (b < 0 || b > 15 || w < 0 || w > 3 || (x != 0 && x != 24) || w > b + x) {
+      LOG_ERR("G16", "cell %d out of range: %ld,%ld,%ld (black 0..15, white 0..3, deep 0 or 24)", n + 1, b, w, x);
       return;
     }
     paths[n + 1][0] = static_cast<uint8_t>(b);
     paths[n + 1][1] = static_cast<uint8_t>(w);
+    paths[n + 1][2] = static_cast<uint8_t>(x);
     ++n;
   }
   if (n != 15) {
