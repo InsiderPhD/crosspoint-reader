@@ -36,6 +36,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/Activity.h"
+#include "platform/Gray16TextDemo.h"
 #include "activities/ActivityManager.h"
 #include "activities/RenderLock.h"  // RenderLock::peek() for the BLE auto-restore render gate
 #include "activities/settings/SdFirmwareUpdateActivity.h"
@@ -1014,29 +1015,29 @@ uint8_t levelAt(int x, int y) {
   return static_cast<uint8_t>(row * 4 + col);
 }
 
-void run() {
+// The levels buffer for a test page, or nullptr (logged) when the 16-level path
+// or the expected panel is missing. 192 KB: too big for internal RAM, so PSRAM;
+// showAndHold() frees it right after the refresh (the driver keeps its own copy
+// for the exit balance).
+uint8_t* allocLevels() {
   if (!display.supportsGray16Image()) {
     LOG_ERR("G16", "16-level path unavailable (panel, or inverted output)");
-    return;
+    return nullptr;
   }
   if (display.getDisplayWidth() != W || display.getDisplayHeight() != H) {
-    LOG_ERR("G16", "test grid is for %ux%u, panel is %ux%u", W, H, display.getDisplayWidth(),
+    LOG_ERR("G16", "test pages are for %ux%u, panel is %ux%u", W, H, display.getDisplayWidth(),
             display.getDisplayHeight());
-    return;
+    return nullptr;
   }
-  // 192 KB of levels: too big for internal RAM, so PSRAM, freed right after the
-  // refresh (the driver keeps its own copy for the exit balance).
   constexpr size_t bytes = static_cast<size_t>(W / 2) * H;
   auto* levels = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  if (!levels) {
-    LOG_ERR("G16", "malloc failed: %u bytes", static_cast<unsigned>(bytes));
-    return;
-  }
-  for (int y = 0; y < H; ++y) {
-    for (int x = 0; x < W; x += 2) {
-      levels[y * (W / 2) + x / 2] = static_cast<uint8_t>(levelAt(x, y) << 4 | levelAt(x + 1, y));
-    }
-  }
+  if (!levels) LOG_ERR("G16", "malloc failed: %u bytes", static_cast<unsigned>(bytes));
+  return levels;
+}
+
+// Show `levels` (freed here), then hold it for a photo: nothing else may refresh
+// the panel until a key, touch or serial line, or HOLD_MS.
+void showAndHold(uint8_t* levels) {
   RenderLock lock;  // the activity render task must not draw over it
   const unsigned long t0 = millis();
   const bool ok = display.displayGray16Image(levels, true);
@@ -1048,7 +1049,6 @@ void run() {
   }
   LOG_INF("G16", "16-level grid shown in %lu ms; any key, touch or serial line returns (max %lu s)", millis() - t0,
           HOLD_MS / 1000);
-  // Hold the image for a photo: nothing else may refresh the panel meanwhile.
   const unsigned long holdStart = millis();
   while (millis() - holdStart < HOLD_MS) {
     esp_task_wdt_reset();
@@ -1061,6 +1061,35 @@ void run() {
   activityManager.requestUpdate();  // the redraw gives the drive back and clears (Ssd2677Driver::exitGray16)
   LOG_INF("G16", "returned after %lu s", (millis() - holdStart) / 1000);
 }
+
+void run() {
+  uint8_t* levels = allocLevels();
+  if (!levels) return;
+  for (int y = 0; y < H; ++y) {
+    for (int x = 0; x < W; x += 2) {
+      levels[y * (W / 2) + x / 2] = static_cast<uint8_t>(levelAt(x, y) << 4 | levelAt(x + 1, y));
+    }
+  }
+  showAndHold(levels);
+}
+
+// Measured L* of the driver's default levels (photos of this reader,
+// picco-gray-cal design-reader-final.json), for mapping glyph coverage.
+constexpr float LEVEL_LSTAR[16] = {101.3f, 95.1f, 91.2f, 86.9f, 82.3f, 78.2f, 75.4f, 70.9f,
+                                   68.1f,  64.1f, 59.6f, 55.3f, 51.8f, 48.6f, 44.0f, 40.3f};
+
+// `CMD:GRAY16TEXT [path]`: the same paragraph anti-aliased with 16, 4 and 2
+// levels, from a .ttf/.otf (default: the first in /fonts). See Gray16TextDemo.
+void text(const String& path) {
+  uint8_t* levels = allocLevels();
+  if (!levels) return;
+  if (!gray16demo::render(levels, W, H, path.isEmpty() ? nullptr : path.c_str(), LEVEL_LSTAR)) {
+    free(levels);
+    return;
+  }
+  showAndHold(levels);
+}
+
 // `CMD:GRAY16CELLS b,w b,w ...`: 15 (black, white) paths for patches 1..15
 // (patch 0 and the page stay white), loaded into the driver's level table and
 // shown, so picco-gray-cal can measure the reader's own refresh form.
@@ -1301,6 +1330,10 @@ void loop() {
         gray16test::run();
       } else if (cmd.startsWith("GRAY16CELLS ")) {
         gray16test::cells(cmd.substring(12));
+      } else if (cmd == "GRAY16TEXT" || cmd.startsWith("GRAY16TEXT ")) {
+        String path = cmd.length() > 10 ? cmd.substring(11) : String();
+        path.trim();
+        gray16test::text(path);
       }
 #endif
 #endif
