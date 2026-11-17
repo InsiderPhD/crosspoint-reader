@@ -1084,21 +1084,19 @@ void run() {
   showAndHold(levels);
 }
 
-// `CMD:GRAY16TURN [topUp [turns]]`: page A (the grid, patch i = level i) drawn
-// clean, then `turns` fast turns -- no full clears -- alternating B (patch i =
-// level 15 - i) and A, the last one held for a photo. Every B patch sits on a
-// different A level, so drift and ghosting show up per patch; an odd count ends
-// on B. topUp: extra white frames (0/4/8/12) on the old page's gray pixels.
+// `CMD:GRAY16TURN [turns]`: page A (the grid, patch i = level i) drawn clean,
+// then `turns` fast turns -- one dissolve each, no full clears -- alternating B
+// (patch i = level 15 - i) and A, the last one held for a photo. Every B patch
+// sits on a different A level, so drift and ghosting show per patch; an odd
+// count ends on B. The erase dose comes from GRAY16PASSES.
 void turn(const String& arg) {
-  const int space = arg.indexOf(' ');
-  const long topUp = arg.isEmpty() ? 0 : arg.substring(0, space < 0 ? arg.length() : space).toInt();
-  const long turns = space < 0 ? 1 : arg.substring(space + 1).toInt();
+  const long turns = arg.isEmpty() ? 1 : arg.toInt();
   if (turns < 1 || turns > 30) {
     LOG_ERR("G16", "turns must be 1..30");
     return;
   }
-  if (!display.setGray16Turn(static_cast<uint8_t>(topUp), 255)) {
-    LOG_ERR("G16", "setGray16Turn refused (topUp must be 0/4/8/12)");
+  if (!display.setGray16Turn(255)) {
+    LOG_ERR("G16", "setGray16Turn refused");
     return;
   }
   uint8_t* levels = allocLevels();
@@ -1134,7 +1132,40 @@ void turn(const String& arg) {
   delay(1500);
   fill(turns % 2 == 1);
   showAndHold(levels, true);
-  display.setGray16Turn(0, 0);
+  display.setGray16Turn(0);
+}
+
+// `CMD:GRAY16PASSES b1,b2,b3 w1,w2,w3 erase`: coarse-black and pull-back doses
+// and the fast-turn erase, in frames.
+void passes(const String& args) {
+  long v[7];
+  int n = 0, pos = 0;
+  while (n < 7 && pos <= static_cast<int>(args.length())) {
+    int end = pos;
+    while (end < static_cast<int>(args.length()) && args[end] != ',' && args[end] != ' ') ++end;
+    if (end == pos) {
+      ++pos;
+      continue;
+    }
+    v[n++] = args.substring(pos, end).toInt();
+    pos = end + 1;
+  }
+  if (n != 7) {
+    LOG_ERR("G16", "want b1,b2,b3 w1,w2,w3 erase");
+    return;
+  }
+  const uint8_t black[3] = {static_cast<uint8_t>(v[0]), static_cast<uint8_t>(v[1]), static_cast<uint8_t>(v[2])};
+  const uint8_t white[3] = {static_cast<uint8_t>(v[3]), static_cast<uint8_t>(v[4]), static_cast<uint8_t>(v[5])};
+  RenderLock lock;
+  // New doses are checked against the loaded level paths; an all-white table
+  // is valid with any doses, and the GRAY16CELLS that follows replaces it.
+  static constexpr uint8_t allWhite[16][3] = {};
+  display.setGray16Levels(allWhite);
+  if (!display.setGray16Passes(black, white, static_cast<uint8_t>(v[6]))) {
+    LOG_ERR("G16", "setGray16Passes refused (doses 1..63, erase 0..63, and every level path must still net 0..39)");
+    return;
+  }
+  LOG_INF("G16", "passes: black %ld/%ld/%ld white %ld/%ld/%ld erase %ld", v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
 }
 
 // Measured L* of the driver's default levels (photos of this reader,
@@ -1153,9 +1184,10 @@ void text(const String& path) {
   showAndHold(levels);
 }
 
-// `CMD:GRAY16CELLS b,w[,deep] ...`: 15 (black, white, deep) paths for patches 1..15
-// (patch 0 and the page stay white), loaded into the driver's level table and
-// shown, so picco-gray-cal can measure the reader's own refresh form.
+// `CMD:GRAY16CELLS bi,wi,d ...`: 15 paths for patches 1..15 (patch 0 and the
+// page stay white) as dose indices -- black 0..3, white 0..3 into the doses set
+// by GRAY16PASSES, deep 0/1 -- loaded into the driver's level table and shown,
+// so picco-gray-cal can measure the reader's own refresh form.
 void cells(const String& args) {
   uint8_t paths[16][3] = {{0, 0, 0}};
   int n = 0;
@@ -1166,22 +1198,19 @@ void cells(const String& args) {
     const String tok = args.substring(pos, end < 0 ? args.length() : end);
     pos = end < 0 ? args.length() : end;
     if (tok.isEmpty()) break;
-    const int comma = tok.indexOf(',');
-    if (comma < 0) {
-      LOG_ERR("G16", "bad cell '%s' (want b,w or b,w,deep)", tok.c_str());
+    const int c1 = tok.indexOf(','), c2 = c1 < 0 ? -1 : tok.indexOf(',', c1 + 1);
+    if (c1 < 0 || c2 < 0) {
+      LOG_ERR("G16", "bad cell '%s' (want bi,wi,d)", tok.c_str());
       return;
     }
-    const int comma2 = tok.indexOf(',', comma + 1);
-    const long b = tok.substring(0, comma).toInt();
-    const long w = tok.substring(comma + 1, comma2 < 0 ? tok.length() : comma2).toInt();
-    const long x = comma2 < 0 ? 0 : tok.substring(comma2 + 1).toInt();
-    if (b < 0 || b > 15 || w < 0 || w > 3 || (x != 0 && x != 24) || w > b + x) {
-      LOG_ERR("G16", "cell %d out of range: %ld,%ld,%ld (black 0..15, white 0..3, deep 0 or 24)", n + 1, b, w, x);
+    const long bi = tok.substring(0, c1).toInt(), wi = tok.substring(c1 + 1, c2).toInt(), d = tok.substring(c2 + 1).toInt();
+    if (bi < 0 || bi > 3 || wi < 0 || wi > 3 || d < 0 || d > 1) {
+      LOG_ERR("G16", "cell %d out of range: %ld,%ld,%ld (indices 0..3, 0..3, 0/1)", n + 1, bi, wi, d);
       return;
     }
-    paths[n + 1][0] = static_cast<uint8_t>(b);
-    paths[n + 1][1] = static_cast<uint8_t>(w);
-    paths[n + 1][2] = static_cast<uint8_t>(x);
+    paths[n + 1][0] = static_cast<uint8_t>(bi);
+    paths[n + 1][1] = static_cast<uint8_t>(wi);
+    paths[n + 1][2] = static_cast<uint8_t>(d);
     ++n;
   }
   if (n != 15) {
@@ -1191,7 +1220,7 @@ void cells(const String& args) {
   {
     RenderLock lock;
     if (!display.setGray16Levels(paths)) {
-      LOG_ERR("G16", "setGray16Levels refused");
+      LOG_ERR("G16", "setGray16Levels refused (a path nets outside 0..39 frames with the current doses)");
       return;
     }
   }
@@ -1397,6 +1426,8 @@ void loop() {
         gray16test::run();
       } else if (cmd.startsWith("GRAY16CELLS ")) {
         gray16test::cells(cmd.substring(12));
+      } else if (cmd.startsWith("GRAY16PASSES ")) {
+        gray16test::passes(cmd.substring(13));
       } else if (cmd == "GRAY16TURN" || cmd.startsWith("GRAY16TURN ")) {
         String arg = cmd.length() > 10 ? cmd.substring(11) : String();
         arg.trim();

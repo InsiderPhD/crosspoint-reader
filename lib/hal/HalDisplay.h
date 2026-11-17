@@ -120,8 +120,12 @@ class HalDisplay {
   bool displayGray16Image(const uint8_t* levels, bool turnOffScreen = true, bool fast = false) {
     return einkDisplay.displayGray16Image(levels, turnOffScreen, fast);
   }
-  bool setGray16Turn(uint8_t topUp, uint8_t scrubEvery) { return einkDisplay.setGray16Turn(topUp, scrubEvery); }
-  // Calibration: paths[l] = {black 0..15, white 0..3, deep 0 or 24} frames.
+  bool setGray16Turn(uint8_t scrubEvery) { return einkDisplay.setGray16Turn(scrubEvery); }
+  // Calibration: coarse-black and pull-back doses and the fast-turn erase, in frames.
+  bool setGray16Passes(const uint8_t black[3], const uint8_t white[3], uint8_t erase) {
+    return einkDisplay.setGray16Passes(black, white, erase);
+  }
+  // Calibration: paths[l] = {black dose index 0..3, white dose index 0..3, deep 0/1}.
   bool setGray16Levels(const uint8_t (*paths)[3]) { return einkDisplay.setGray16Levels(paths); }
 
   // Tiled grayscale: stream one band of a plane (lsbPlane selects LSB/MSB RAM)
