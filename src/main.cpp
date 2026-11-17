@@ -990,6 +990,121 @@ void setup() {
   HeapReport::logBrief("boot.done");
 }
 
+#if FREEINK_DEVICE_PICCO && defined(ENABLE_SERIAL_LOG)
+// Dev-only (`CMD:GRAY16TEST`): the picco-gray-cal patch grid -- levels 0..15 in
+// a 4x4 grid, level-15 corner markers -- through the panel's 16-level path, so
+// a photo of the reader can be measured with picco-gray-cal/host/analyze.py.
+// The geometry must match that tool's (its firmware's GEOM reply).
+namespace gray16test {
+constexpr uint16_t W = 800, H = 480;
+constexpr int GRID_X0 = 70, GRID_Y0 = 55, PATCH_W = 150, PATCH_H = 85, GAP_X = 20, GAP_Y = 10;
+constexpr int FID_X = 17, FID_Y = 10, FID_SIZE = 36;
+// Long enough to fetch a camera; the wait loop feeds the loop watchdog itself.
+constexpr unsigned long HOLD_MS = 10UL * 60 * 1000;
+
+uint8_t levelAt(int x, int y) {
+  const bool fx = (x >= FID_X && x < FID_X + FID_SIZE) || (x >= W - FID_X - FID_SIZE && x < W - FID_X);
+  const bool fy = (y >= FID_Y && y < FID_Y + FID_SIZE) || (y >= H - FID_Y - FID_SIZE && y < H - FID_Y);
+  if (fx && fy) return 15;
+  const int gx = x - GRID_X0, gy = y - GRID_Y0;
+  if (gx < 0 || gy < 0) return 0;
+  const int col = gx / (PATCH_W + GAP_X), row = gy / (PATCH_H + GAP_Y);
+  if (col >= 4 || row >= 4) return 0;
+  if (gx - col * (PATCH_W + GAP_X) >= PATCH_W || gy - row * (PATCH_H + GAP_Y) >= PATCH_H) return 0;
+  return static_cast<uint8_t>(row * 4 + col);
+}
+
+void run() {
+  if (!display.supportsGray16Image()) {
+    LOG_ERR("G16", "16-level path unavailable (panel, or inverted output)");
+    return;
+  }
+  if (display.getDisplayWidth() != W || display.getDisplayHeight() != H) {
+    LOG_ERR("G16", "test grid is for %ux%u, panel is %ux%u", W, H, display.getDisplayWidth(),
+            display.getDisplayHeight());
+    return;
+  }
+  // 192 KB of levels: too big for internal RAM, so PSRAM, freed right after the
+  // refresh (the driver keeps its own copy for the exit balance).
+  constexpr size_t bytes = static_cast<size_t>(W / 2) * H;
+  auto* levels = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!levels) {
+    LOG_ERR("G16", "malloc failed: %u bytes", static_cast<unsigned>(bytes));
+    return;
+  }
+  for (int y = 0; y < H; ++y) {
+    for (int x = 0; x < W; x += 2) {
+      levels[y * (W / 2) + x / 2] = static_cast<uint8_t>(levelAt(x, y) << 4 | levelAt(x + 1, y));
+    }
+  }
+  RenderLock lock;  // the activity render task must not draw over it
+  const unsigned long t0 = millis();
+  const bool ok = display.displayGray16Image(levels, true);
+  free(levels);
+  levels = nullptr;
+  if (!ok) {
+    LOG_ERR("G16", "displayGray16Image refused");
+    return;
+  }
+  LOG_INF("G16", "16-level grid shown in %lu ms; any key, touch or serial line returns (max %lu s)", millis() - t0,
+          HOLD_MS / 1000);
+  // Hold the image for a photo: nothing else may refresh the panel meanwhile.
+  const unsigned long holdStart = millis();
+  while (millis() - holdStart < HOLD_MS) {
+    esp_task_wdt_reset();
+    delay(20);
+    gpio.update();
+    if (gpio.wasAnyPressed() || gpio.wasTouchActivity() || logSerial.available() > 0) break;
+  }
+  while (logSerial.available() > 0) logSerial.read();
+  lock.unlock();
+  activityManager.requestUpdate();  // the redraw gives the drive back and clears (Ssd2677Driver::exitGray16)
+  LOG_INF("G16", "returned after %lu s", (millis() - holdStart) / 1000);
+}
+// `CMD:GRAY16CELLS b,w b,w ...`: 15 (black, white) paths for patches 1..15
+// (patch 0 and the page stay white), loaded into the driver's level table and
+// shown, so picco-gray-cal can measure the reader's own refresh form.
+void cells(const String& args) {
+  uint8_t paths[16][2] = {{0, 0}};
+  int n = 0;
+  int pos = 0;
+  while (pos < static_cast<int>(args.length()) && n < 15) {
+    while (pos < static_cast<int>(args.length()) && args[pos] == ' ') ++pos;
+    const int end = args.indexOf(' ', pos);
+    const String tok = args.substring(pos, end < 0 ? args.length() : end);
+    pos = end < 0 ? args.length() : end;
+    if (tok.isEmpty()) break;
+    const int comma = tok.indexOf(',');
+    if (comma < 0) {
+      LOG_ERR("G16", "bad cell '%s' (want b,w)", tok.c_str());
+      return;
+    }
+    const long b = tok.substring(0, comma).toInt(), w = tok.substring(comma + 1).toInt();
+    if (b < 0 || b > 15 || w < 0 || w > 3 || w > b) {
+      LOG_ERR("G16", "cell %d out of range: %ld,%ld (black 0..15, white 0..3, white <= black)", n + 1, b, w);
+      return;
+    }
+    paths[n + 1][0] = static_cast<uint8_t>(b);
+    paths[n + 1][1] = static_cast<uint8_t>(w);
+    ++n;
+  }
+  if (n != 15) {
+    LOG_ERR("G16", "need 15 cells, got %d", n);
+    return;
+  }
+  {
+    RenderLock lock;
+    if (!display.setGray16Levels(paths)) {
+      LOG_ERR("G16", "setGray16Levels refused");
+      return;
+    }
+  }
+  LOG_INF("G16", "level table loaded");
+  run();
+}
+}  // namespace gray16test
+#endif
+
 void loop() {
   static unsigned long maxLoopDuration = 0;
   const unsigned long loopStartTime = millis();
@@ -1180,6 +1295,14 @@ void loop() {
           LOG_ERR("CMD", "Unknown button: %s", name.c_str());
         }
       }
+#if FREEINK_DEVICE_PICCO
+      // Dev-only: `CMD:GRAY16TEST` shows the 16-level test grid (see gray16test).
+      else if (cmd == "GRAY16TEST") {
+        gray16test::run();
+      } else if (cmd.startsWith("GRAY16CELLS ")) {
+        gray16test::cells(cmd.substring(12));
+      }
+#endif
 #endif
     }
   }

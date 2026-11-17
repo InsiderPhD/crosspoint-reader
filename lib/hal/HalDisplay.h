@@ -112,6 +112,16 @@ class HalDisplay {
   // fall back to an ordinary display and skip the grayscale pass entirely.
   bool displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback = HALF_REFRESH, bool turnOffScreen = false);
 
+  // Absolute 16-level image on panels that have it (Picco SE0400NQW47): 4 bpp,
+  // 0 = white .. 15 = darkest, panel-native rows of getDisplayWidth()/2 bytes.
+  // The framebuffer is untouched; the next display call clears the image.
+  bool supportsGray16Image() const { return einkDisplay.supportsGray16Image(); }
+  bool displayGray16Image(const uint8_t* levels, bool turnOffScreen = true) {
+    return einkDisplay.displayGray16Image(levels, turnOffScreen);
+  }
+  // Calibration: paths[l] = {black frames 0..15, white frames 0..3}.
+  bool setGray16Levels(const uint8_t (*paths)[2]) { return einkDisplay.setGray16Levels(paths); }
+
   // Tiled grayscale: stream one band of a plane (lsbPlane selects LSB/MSB RAM)
   // straight to the controller; supportsStripGrayscale() gates the path. See
   // EInkDisplay::writeGrayscalePlaneStrip.
