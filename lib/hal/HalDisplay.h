@@ -116,9 +116,11 @@ class HalDisplay {
   // 0 = white .. 15 = darkest, panel-native rows of getDisplayWidth()/2 bytes.
   // The framebuffer is untouched; the next display call clears the image.
   bool supportsGray16Image() const { return einkDisplay.supportsGray16Image(); }
-  bool displayGray16Image(const uint8_t* levels, bool turnOffScreen = true) {
-    return einkDisplay.displayGray16Image(levels, turnOffScreen);
+  // fast: turn from a 16-level image already up without the full clears.
+  bool displayGray16Image(const uint8_t* levels, bool turnOffScreen = true, bool fast = false) {
+    return einkDisplay.displayGray16Image(levels, turnOffScreen, fast);
   }
+  bool setGray16Turn(uint8_t topUp, uint8_t scrubEvery) { return einkDisplay.setGray16Turn(topUp, scrubEvery); }
   // Calibration: paths[l] = {black 0..15, white 0..3, deep 0 or 24} frames.
   bool setGray16Levels(const uint8_t (*paths)[3]) { return einkDisplay.setGray16Levels(paths); }
 

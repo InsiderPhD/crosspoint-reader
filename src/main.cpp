@@ -1037,10 +1037,10 @@ uint8_t* allocLevels() {
 
 // Show `levels` (freed here), then hold it for a photo: nothing else may refresh
 // the panel until a key, touch or serial line, or HOLD_MS.
-void showAndHold(uint8_t* levels) {
+void showAndHold(uint8_t* levels, bool fast = false) {
   RenderLock lock;  // the activity render task must not draw over it
   const unsigned long t0 = millis();
-  const bool ok = display.displayGray16Image(levels, true);
+  const bool ok = display.displayGray16Image(levels, true, fast);
   free(levels);
   levels = nullptr;
   if (!ok) {
@@ -1062,6 +1062,17 @@ void showAndHold(uint8_t* levels) {
   LOG_INF("G16", "returned after %lu s", (millis() - holdStart) / 1000);
 }
 
+// Page B of the turn test: patch i shows level 15 - i; page and markers as on A.
+uint8_t turnLevelAt(int x, int y) {
+  const int gx = x - GRID_X0, gy = y - GRID_Y0;
+  if (gx >= 0 && gy >= 0) {
+    const int col = gx / (PATCH_W + GAP_X), row = gy / (PATCH_H + GAP_Y);
+    if (col < 4 && row < 4 && gx - col * (PATCH_W + GAP_X) < PATCH_W && gy - row * (PATCH_H + GAP_Y) < PATCH_H)
+      return static_cast<uint8_t>(15 - (row * 4 + col));
+  }
+  return levelAt(x, y);
+}
+
 void run() {
   uint8_t* levels = allocLevels();
   if (!levels) return;
@@ -1071,6 +1082,59 @@ void run() {
     }
   }
   showAndHold(levels);
+}
+
+// `CMD:GRAY16TURN [topUp [turns]]`: page A (the grid, patch i = level i) drawn
+// clean, then `turns` fast turns -- no full clears -- alternating B (patch i =
+// level 15 - i) and A, the last one held for a photo. Every B patch sits on a
+// different A level, so drift and ghosting show up per patch; an odd count ends
+// on B. topUp: extra white frames (0/4/8/12) on the old page's gray pixels.
+void turn(const String& arg) {
+  const int space = arg.indexOf(' ');
+  const long topUp = arg.isEmpty() ? 0 : arg.substring(0, space < 0 ? arg.length() : space).toInt();
+  const long turns = space < 0 ? 1 : arg.substring(space + 1).toInt();
+  if (turns < 1 || turns > 30) {
+    LOG_ERR("G16", "turns must be 1..30");
+    return;
+  }
+  if (!display.setGray16Turn(static_cast<uint8_t>(topUp), 255)) {
+    LOG_ERR("G16", "setGray16Turn refused (topUp must be 0/4/8/12)");
+    return;
+  }
+  uint8_t* levels = allocLevels();
+  if (!levels) return;
+  for (int y = 0; y < H; ++y)
+    for (int x = 0; x < W; x += 2) levels[y * (W / 2) + x / 2] = static_cast<uint8_t>(levelAt(x, y) << 4 | levelAt(x + 1, y));
+  {
+    RenderLock lock;
+    const unsigned long t0 = millis();
+    if (!display.displayGray16Image(levels, true, false)) {
+      LOG_ERR("G16", "page A refused");
+      free(levels);
+      return;
+    }
+    LOG_INF("G16", "turn test: page A shown in %lu ms", millis() - t0);
+  }
+  auto fill = [&](bool pageB) {
+    for (int y = 0; y < H; ++y)
+      for (int x = 0; x < W; x += 2)
+        levels[y * (W / 2) + x / 2] = pageB ? static_cast<uint8_t>(turnLevelAt(x, y) << 4 | turnLevelAt(x + 1, y))
+                                            : static_cast<uint8_t>(levelAt(x, y) << 4 | levelAt(x + 1, y));
+  };
+  // All but the last turn, about a page-reading pause apart (shortened).
+  for (long t = 1; t < turns; ++t) {
+    delay(1500);
+    fill(t % 2 == 1);
+    RenderLock lock;
+    const unsigned long t0 = millis();
+    display.displayGray16Image(levels, true, true);
+    LOG_INF("G16", "turn %ld/%ld in %lu ms", t, turns, millis() - t0);
+    esp_task_wdt_reset();
+  }
+  delay(1500);
+  fill(turns % 2 == 1);
+  showAndHold(levels, true);
+  display.setGray16Turn(0, 0);
 }
 
 // Measured L* of the driver's default levels (photos of this reader,
@@ -1333,6 +1397,10 @@ void loop() {
         gray16test::run();
       } else if (cmd.startsWith("GRAY16CELLS ")) {
         gray16test::cells(cmd.substring(12));
+      } else if (cmd == "GRAY16TURN" || cmd.startsWith("GRAY16TURN ")) {
+        String arg = cmd.length() > 10 ? cmd.substring(11) : String();
+        arg.trim();
+        gray16test::turn(arg);
       } else if (cmd == "GRAY16TEXT" || cmd.startsWith("GRAY16TEXT ")) {
         String path = cmd.length() > 10 ? cmd.substring(11) : String();
         path.trim();
