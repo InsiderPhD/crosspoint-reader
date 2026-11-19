@@ -412,8 +412,11 @@ static void convertScanlineToGray(const PngDecodeContext& ctx, uint8_t* grayRow)
 }
 
 bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink, int targetWidth, int targetHeight,
-                                                   bool oneBit, bool crop) {
-  LOG_DBG("PNG", "Converting PNG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : "2-bit", targetWidth, targetHeight);
+                                                   bool oneBit, bool crop, bool eightBit) {
+  // 8-bit grayscale output: every tone kept, no dithering (pngFileToGrayBmpStream).
+  const bool eight = (USE_8BIT_OUTPUT || eightBit) && !oneBit;
+  LOG_DBG("PNG", "Converting PNG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : eight ? "8-bit" : "2-bit",
+          targetWidth, targetHeight);
 
   // Verify PNG signature
   uint8_t sig[8];
@@ -665,7 +668,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
 
   // Write BMP header
   int bytesPerRow;
-  if (USE_8BIT_OUTPUT && !oneBit) {
+  if (eight) {
     writeBmpHeader8bit(bmpOut, outWidth, outHeight);
     bytesPerRow = (outWidth + 3) / 4 * 4;
   } else if (oneBit) {
@@ -702,7 +705,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
       LOG_ERR("PNG", "OOM: Atkinson1BitDitherer or row buffers");
       success = false;
     }
-  } else if (!USE_8BIT_OUTPUT) {
+  } else if (!eight) {
     if (USE_ATKINSON) {
       atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(outWidth);
       if (!atkinsonDitherer || !atkinsonDitherer->isValid()) {
@@ -750,7 +753,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
       // Direct output (no scaling)
       memset(rowBuffer, 0, bytesPerRow);
 
-      if (USE_8BIT_OUTPUT && !oneBit) {
+      if (eight) {
         for (int x = 0; x < outWidth; x++) {
           rowBuffer[x] = adjustPixel(toneLut[grayRow[x]]);
         }
@@ -815,7 +818,7 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
       while (srcY_fp >= nextOutY_srcStart && currentOutY < outHeight) {
         memset(rowBuffer, 0, bytesPerRow);
 
-        if (USE_8BIT_OUTPUT && !oneBit) {
+        if (eight) {
           for (int x = 0; x < outWidth; x++) {
             const uint8_t gray = toneLut[static_cast<uint8_t>((rowCount[x] > 0) ? (rowAccum[x] / rowCount[x]) : 0)];
             rowBuffer[x] = adjustPixel(gray);
@@ -895,6 +898,11 @@ bool PngToBmpConverter::pngFileToBmpStreamInternal(FsFile& pngFile, Print& sink,
     LOG_DBG("PNG", "Successfully converted PNG to BMP");
   }
   return success;
+}
+
+bool PngToBmpConverter::pngFileToGrayBmpStream(FsFile& pngFile, Print& bmpOut, bool crop) {
+  return pngFileToBmpStreamInternal(pngFile, bmpOut, display.getDisplayHeight(), display.getDisplayWidth(), false, crop,
+                                    /*eightBit=*/true);
 }
 
 bool PngToBmpConverter::pngFileToBmpStream(FsFile& pngFile, Print& bmpOut, bool crop) {

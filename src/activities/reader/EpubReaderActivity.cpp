@@ -11,6 +11,12 @@
 #include <GfxRenderer.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
+#if FREEINK_DEVICE_PICCO
+#include <TtfEpdFont.h>
+#include <esp_heap_caps.h>
+
+#include "platform/Gray16Levels.h"
+#endif
 #include <I18n.h>
 #include <InflateReader.h>
 #include <Logging.h>
@@ -710,6 +716,17 @@ void EpubReaderActivity::rememberBookOnceRendered(const bool renderLockHeld) {
 void EpubReaderActivity::onExit() {
   Activity::onExit();
   clearQueuedPageTurns();
+#if FREEINK_DEVICE_PICCO
+  // Leave the rest of the UI on its usual paths: 2-bit TrueType glyphs, no
+  // fast 16-level turns. The next screen's redraw gives a 16-level page its
+  // drive back and clears it (Ssd2677Driver::exitGray16).
+#if CROSSPOINT_VECTOR_FONTS
+  TtfEpdFont::setGray16Glyphs(false);
+#endif
+  display.setGray16Turn(0);
+  heap_caps_free(gray16Buffer);
+  gray16Buffer = nullptr;
+#endif
 
   // A page rendered but loop() has not run since (sleep or Home in that gap):
   // remember the book now, ahead of the APP_STATE save below.
@@ -2779,6 +2796,11 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
 }
 
 void EpubReaderActivity::render(RenderLock&& lock) {
+#if FREEINK_DEVICE_PICCO && CROSSPOINT_VECTOR_FONTS
+  // 16-level text keeps 16 coverage levels in TrueType glyphs. A no-op unless
+  // the setting changed, when the glyph caches are dropped and refilled.
+  TtfEpdFont::setGray16Glyphs(SETTINGS.textGray16 && display.supportsGray16Image());
+#endif
   if (!epub) {
     return;
   }
@@ -3681,6 +3703,125 @@ bool EpubReaderActivity::runAutosyncNow() {
   return true;
 }
 
+#if FREEINK_DEVICE_PICCO
+bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginLeft, const int orientedMarginTop,
+                                           const int viewportBottom, const int viewportWidth) {
+  const uint16_t w = display.getDisplayWidth(), h = display.getDisplayHeight();
+  const size_t levelBytes = static_cast<size_t>(w / 2) * h;  // 192 KB at 800x480
+  const size_t frameBytes = display.getBufferSize();          // 48 KB
+  if (!gray16Buffer) {
+    // Far over internal RAM's budget: PSRAM, which the Picco always has.
+    gray16Buffer = static_cast<uint8_t*>(heap_caps_malloc(levelBytes + frameBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!gray16Buffer) {
+      LOG_ERR("ERS", "16-level text: no PSRAM for %u bytes", static_cast<unsigned>(levelBytes + frameBytes));
+      return false;
+    }
+    // Fast, non-flashing turns between pages, a full clean one every
+    // refresh-frequency pages (the same cadence as the B/W reader's HALF).
+    display.setGray16Turn(static_cast<uint8_t>(std::max(1, SETTINGS.getRefreshFrequency() - 1)));
+    display.setGray16TextSoftPull(gray16::TEXT_SOFT_PULL);
+  }
+  const unsigned long t0 = millis();
+  uint8_t* const levels = gray16Buffer;
+  uint8_t* const bwFrame = gray16Buffer + levelBytes;
+  uint8_t* const fb = renderer.getFrameBuffer();
+  memcpy(bwFrame, fb, frameBytes);  // the B/W page just rendered
+  // Level tables for 2-bit glyphs (UI fonts: 16 entries) and 8-bit TrueType
+  // glyphs (256): the tone, the base (deep levels black) and the soft plane.
+  // Static, 816 bytes: built once from the measured tones, Picco (S3) only.
+  static uint8_t coverage[16], fullInk[16], softInk[16];
+  static uint8_t coverage8[256], fullInk8[256], softInk8[256];
+  static bool coverageReady = false;
+  if (!coverageReady) {
+    gray16::textCoverageLevels(coverage, gray16::TEXT_LSTAR);
+    gray16::textCoverageLevels8(coverage8, gray16::TEXT_LSTAR);
+    for (int c = 0; c < 16; ++c) {
+      fullInk[c] = (gray16::DEEP_LEVELS >> coverage[c]) & 1 ? 15 : 0;
+      softInk[c] = coverage[c] == gray16::SOFT_DEEP_LEVEL ? 15 : 0;
+    }
+    for (int c = 0; c < 256; ++c) {
+      fullInk8[c] = (gray16::DEEP_LEVELS >> coverage8[c]) & 1 ? 15 : 0;
+      softInk8[c] = coverage8[c] == gray16::SOFT_DEEP_LEVEL ? 15 : 0;
+    }
+    coverageReady = true;
+  }
+  const auto setLevels = [&](const uint8_t* table16, const uint8_t* table256) {
+    renderer.setGray16Levels(table16);
+#if CROSSPOINT_VECTOR_FONTS
+    renderer.setGray16Levels8(table256);
+#else
+    (void)table256;
+#endif
+  };
+  // One render of the page in GRAY16_PLANE mode: glyphs ink where their level
+  // has the plane's bit; everything else draws black (level 15).
+  const auto renderPlane = [&](const uint8_t plane) {
+    renderer.clearScreen();
+    renderer.setRenderMode(GfxRenderer::GRAY16_PLANE);
+    renderer.setGray16Plane(plane);
+    page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+    if (ReaderUtils::footnotesOnPage())
+      page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth,
+                           SETTINGS.readerTextLayout());
+    drawClippingHighlights();
+    renderStatusBar();
+    renderer.setRenderMode(GfxRenderer::BW);
+  };
+  // Folds the four plane renders (cleared bit = ink) into the 4 bpp page.
+  const size_t rowBytes = static_cast<size_t>(w / 8);
+  const auto renderLevels = [&](const uint8_t* table, const uint8_t* table8) {
+    memset(levels, 0, levelBytes);
+    setLevels(table, table8);
+    for (uint8_t plane = 0; plane < 4; ++plane) {
+      renderPlane(plane);
+      const uint8_t hi = static_cast<uint8_t>(1u << (plane + 4)), lo = static_cast<uint8_t>(1u << plane);
+      for (uint16_t y = 0; y < h; ++y) {
+        const uint8_t* src = fb + y * rowBytes;
+        uint8_t* dst = levels + static_cast<size_t>(y) * (w / 2);
+        for (size_t xb = 0; xb < rowBytes; ++xb) {
+          const uint8_t ink = static_cast<uint8_t>(~src[xb]);
+          if (!ink) continue;
+          uint8_t* d = dst + xb * 4;
+          if (ink & 0x80) d[0] |= hi;
+          if (ink & 0x40) d[0] |= lo;
+          if (ink & 0x20) d[1] |= hi;
+          if (ink & 0x10) d[1] |= lo;
+          if (ink & 0x08) d[2] |= hi;
+          if (ink & 0x04) d[2] |= lo;
+          if (ink & 0x02) d[3] |= hi;
+          if (ink & 0x01) d[3] |= lo;
+        }
+      }
+    }
+    memcpy(fb, bwFrame, frameBytes);  // menus and overlays draw over the B/W page
+  };
+  // 1. The base: the dark levels (deep-black path) black, about every pixel
+  //    half inked or more, up with the reader's usual B/W turn: the page
+  //    reads at once.
+  //    The lightest deep level's pixels go in a second plane (the start of
+  //    `levels`, not filled yet) so the turn pulls them back to gray itself.
+  uint8_t* const soft = levels;
+  setLevels(softInk, softInk8);
+  renderPlane(3);
+  memcpy(soft, fb, frameBytes);
+  setLevels(fullInk, fullInk8);
+  renderPlane(3);
+  if (!display.beginGray16Text(fb, soft)) {
+    memcpy(fb, bwFrame, frameBytes);
+    LOG_ERR("ERS", "16-level text: base refused; normal page instead");
+    return false;
+  }
+  const unsigned long tBase = millis();
+  // 2. The levels, rendered while the base draws, then the calibrated passes.
+  renderLevels(coverage, coverage8);
+  const unsigned long tPlanes = millis();
+  display.finishGray16Text(levels, true);
+  LOG_INF("ERS", "16-level page: base at %lu ms, planes %lu ms, gray passes %lu ms", tBase - t0, tPlanes - tBase,
+          millis() - tPlanes);
+  return true;
+}
+#endif
+
 void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop, const int orientedMarginRight,
                                         const int orientedMarginBottom, const int orientedMarginLeft) {
   const auto t0 = millis();
@@ -3857,6 +3998,15 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     return;
   }
+
+#if FREEINK_DEVICE_PICCO
+  // 16-level text: text pages (no images: those keep the planes below) in
+  // light mode, through the panel's 16-level path with non-flashing turns.
+  if (SETTINGS.textGray16 && needsTextGrayscale && !pageHasImages && display.supportsGray16Image() &&
+      presentGray16Page(page, orientedMarginLeft, orientedMarginTop, viewportBottom, viewportWidth)) {
+    return;
+  }
+#endif
 
   if (absoluteImageGrayscale) {
     // No blanking dance: the panel takes the B/W frame as an explicit base and

@@ -36,6 +36,8 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/Activity.h"
+#include "platform/Gray16Levels.h"
+#include "activities/boot_sleep/SleepGray16.h"
 #include "platform/Gray16TextDemo.h"
 #include "activities/ActivityManager.h"
 #include "activities/RenderLock.h"  // RenderLock::peek() for the BLE auto-restore render gate
@@ -432,8 +434,15 @@ void drawSleepChargeStrip(const bool charging, const uint16_t percent) {
 // the charger). The sleep frame is kept so unplugging can remove the strip: one
 // framebuffer (48 KB) in PSRAM, freed when the hold ends. Returns true when the
 // power button ended the hold. Ported from upstream CrossPoint (#3947).
+void ignoreChargeStatus(bool, uint16_t) {}
+
 bool holdSleepWhileUsbPowered() {
   if (!gpio.isUsbConnected()) return false;
+  if (SleepGray16::isUp()) {
+    // A 16-level sleep screen is up: a B/W charge strip or redraw would
+    // replace it with its B/W frame, so hold without either.
+    return powerManager.holdWhileUsbPowered(gpio, ignoreChargeStatus);
+  }
   const size_t frameSize = renderer.getBufferSize();
   auto* const sleepFrame = static_cast<uint8_t*>(heap_caps_malloc(frameSize, MALLOC_CAP_SPIRAM));
   if (sleepFrame) memcpy(sleepFrame, renderer.getFrameBuffer(), frameSize);
@@ -1040,7 +1049,7 @@ uint8_t* allocLevels() {
 void showAndHold(uint8_t* levels, bool fast = false) {
   RenderLock lock;  // the activity render task must not draw over it
   const unsigned long t0 = millis();
-  const bool ok = display.displayGray16Image(levels, true, fast);
+  const bool ok = display.displayGray16Image(levels, fast ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH, true);
   free(levels);
   levels = nullptr;
   if (!ok) {
@@ -1106,7 +1115,7 @@ void turn(const String& arg) {
   {
     RenderLock lock;
     const unsigned long t0 = millis();
-    if (!display.displayGray16Image(levels, true, false)) {
+    if (!display.displayGray16Image(levels, HalDisplay::HALF_REFRESH, true)) {
       LOG_ERR("G16", "page A refused");
       free(levels);
       return;
@@ -1125,7 +1134,7 @@ void turn(const String& arg) {
     fill(t % 2 == 1);
     RenderLock lock;
     const unsigned long t0 = millis();
-    display.displayGray16Image(levels, true, true);
+    display.displayGray16Image(levels, HalDisplay::FAST_REFRESH, true);
     LOG_INF("G16", "turn %ld/%ld in %lu ms", t, turns, millis() - t0);
     esp_task_wdt_reset();
   }
@@ -1226,6 +1235,76 @@ void cells(const String& args) {
   }
   LOG_INF("G16", "level table loaded");
   run();
+}
+// `CMD:TEXT16GRID [softPull]`: the level grid (patch i = level i) drawn
+// through the reader's 16-level text turn: a first page with the patches
+// permuted (patch i on level 15 - i), then the grid as a page turn -- one
+// cross-dissolve from that page, then the coarse and pull passes -- held for
+// a photo. softPull, if given, sets the in-turn pull-back on the soft level
+// first (frames; 0 = off). picco-gray-cal measures the post-turn tones.
+void textGrid(const String& arg) {
+  if (!arg.isEmpty()) {
+    const long n = arg.toInt();
+    if (n < 0 || n > 63 || !display.setGray16TextSoftPull(static_cast<uint8_t>(n))) {
+      LOG_ERR("G16", "soft pull %ld refused", n);
+      return;
+    }
+  }
+  uint8_t* levels = allocLevels();
+  if (!levels) return;
+  // Base and soft planes, 2 x 48 KB: PSRAM, freed below.
+  auto* planes = static_cast<uint8_t*>(heap_caps_malloc(2 * (W / 8) * H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!planes) {
+    LOG_ERR("G16", "malloc failed: text planes");
+    free(levels);
+    return;
+  }
+  uint8_t* const base = planes;
+  uint8_t* const soft = planes + (W / 8) * H;
+  display.setGray16Turn(255);  // the second page must be a dissolve turn
+  auto draw = [&](const bool permuted) {
+    memset(planes, 0xFF, 2 * (W / 8) * H);
+    for (int y = 0; y < H; ++y)
+      for (int x = 0; x < W; ++x) {
+        const uint8_t l = permuted ? turnLevelAt(x, y) : levelAt(x, y);
+        uint8_t& b = levels[y * (W / 2) + x / 2];
+        b = (x & 1) ? static_cast<uint8_t>((b & 0xF0) | l) : static_cast<uint8_t>((b & 0x0F) | l << 4);
+        const uint8_t bit = static_cast<uint8_t>(0x80 >> (x & 7));
+        if ((gray16::DEEP_LEVELS >> l) & 1) base[y * (W / 8) + x / 8] &= static_cast<uint8_t>(~bit);
+        if (l == gray16::SOFT_DEEP_LEVEL) soft[y * (W / 8) + x / 8] &= static_cast<uint8_t>(~bit);
+      }
+    const unsigned long t0 = millis();
+    if (!display.beginGray16Text(base, soft)) return false;
+    display.finishGray16Text(levels, true);
+    LOG_INF("G16", "text page in %lu ms", millis() - t0);
+    return true;
+  };
+  RenderLock lock;
+  bool ok = draw(true);
+  if (ok) {
+    delay(1500);
+    esp_task_wdt_reset();
+    ok = draw(false);
+  }
+  free(planes);
+  free(levels);
+  display.setGray16Turn(static_cast<uint8_t>(std::max(1, SETTINGS.getRefreshFrequency() - 1)));
+  if (!ok) {
+    LOG_ERR("G16", "beginGray16Text refused");
+    return;
+  }
+  LOG_INF("G16", "16-level grid shown (text turn); any key, touch or serial line returns (max %lu s)", HOLD_MS / 1000);
+  const unsigned long holdStart = millis();
+  while (millis() - holdStart < HOLD_MS) {
+    esp_task_wdt_reset();
+    delay(20);
+    gpio.update();
+    if (gpio.wasAnyPressed() || gpio.wasTouchActivity() || logSerial.available() > 0) break;
+  }
+  while (logSerial.available() > 0) logSerial.read();
+  lock.unlock();
+  activityManager.requestUpdate();
+  LOG_INF("G16", "returned after %lu s", (millis() - holdStart) / 1000);
 }
 }  // namespace gray16test
 #endif
@@ -1424,7 +1503,15 @@ void loop() {
       // Dev-only: `CMD:GRAY16TEST` shows the 16-level test grid (see gray16test).
       else if (cmd == "GRAY16TEST") {
         gray16test::run();
-      } else if (cmd.startsWith("GRAY16CELLS ")) {
+      } else if (cmd == "TEXT16GRID" || cmd.startsWith("TEXT16GRID ")) {
+        gray16test::textGrid(cmd.length() > 10 ? cmd.substring(11) : String());
+      } else if (cmd.startsWith("TEXT16SOFT ")) {
+        // Dev tuning: frames of the 16-level text turn's in-waveform pull-back
+        // (0 = off: the pull pass does it, with the brief black flash).
+        const long n = cmd.substring(11).toInt();
+        RenderLock lock;
+        const bool ok = n >= 0 && n <= 63 && display.setGray16TextSoftPull(static_cast<uint8_t>(n));
+        LOG_INF("G16", "text soft pull %ld frames: %s", n, ok ? "set" : "refused");
         gray16test::cells(cmd.substring(12));
       } else if (cmd.startsWith("GRAY16PASSES ")) {
         gray16test::passes(cmd.substring(13));

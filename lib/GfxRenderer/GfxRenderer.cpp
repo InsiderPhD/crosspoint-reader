@@ -164,6 +164,10 @@ static inline void rotateCoordinates(const GfxRenderer::Orientation orientation,
   }
 }
 
+void GfxRenderer::logicalToPanel(const int x, const int y, int* panelX, int* panelY) const {
+  rotateCoordinates(orientation, x, y, panelX, panelY, panelWidth, panelHeight);
+}
+
 enum class TextRotation { None, Rotated90CW };
 
 // Shared glyph rendering logic for normal and rotated text.
@@ -175,6 +179,18 @@ enum class TextRotation { None, Rotated90CW };
 //
 // The advance width is scaled the same way in drawText() so layout reserves exactly the
 // right horizontal space for the scaled glyph.
+namespace {
+// Bits per glyph pixel: 4 for TrueType glyphs kept for the 16-level path,
+// otherwise the font's 2-bit or 1-bit format.
+uint8_t glyphBits(const EpdFontData* data) {
+#if CROSSPOINT_VECTOR_FONTS
+  if (data->is8Bit) return 8;
+  if (data->is4Bit) return 4;
+#endif
+  return data->is2Bit ? 2 : 1;
+}
+}  // namespace
+
 static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
                              const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
                              const bool pixelState, const EpdFontFamily::Style style, const int num = 1,
@@ -198,9 +214,11 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
   const auto blockStart = [num, den](const int d) { return d * den / num; };
   const auto blockSize = [num, den](const int d) { return std::max(1, (d + 1) * den / num - d * den / num); };
 
-  if (fontData->is2Bit) {
+  const uint8_t bits = glyphBits(fontData);
+  if (bits >= 2) {
     // 2-bit packed format: 4 pixels per byte, MSB first, 2 bits per pixel.
-    // raw value: 0=white, 1=light-gray, 2=dark-gray, 3=black.
+    // raw value: 0=white, 1=light-gray, 2=dark-gray, 3=black. 4-bit TrueType
+    // glyphs (16-level path) fold their coverage 0..15 onto the same scale.
     for (int dstY = 0; dstY < dstH; dstY++) {
       const int srcY = blockStart(dstY);
       const int rowsY = blockSize(dstY);
@@ -212,8 +230,15 @@ static void renderCharScaled(const GfxRenderer& renderer, GfxRenderer::RenderMod
         for (int sampleY = 0; sampleY < rowsY && srcY + sampleY < srcH; sampleY++) {
           for (int sampleX = 0; sampleX < colsX && srcX + sampleX < srcW; sampleX++) {
             const int pos = (srcY + sampleY) * srcW + srcX + sampleX;
-            const uint8_t byte = bitmap[pos >> 2];
-            const uint8_t raw = (byte >> ((3 - (pos & 3)) * 2)) & 0x3;
+            uint8_t raw;
+            if (bits == 8) {
+              const uint8_t alpha = bitmap[pos];  // the 2-bit converter's 25/50/75% thresholds
+              raw = alpha < 64 ? 0 : alpha < 128 ? 1 : alpha < 192 ? 2 : 3;
+            } else if (bits == 4) {
+              raw = static_cast<uint8_t>((glyphBitmap::valueAt(bitmap, pos, 4) + 2) / 5);
+            } else {
+              raw = static_cast<uint8_t>((bitmap[pos >> 2] >> ((3 - (pos & 3)) * 2)) & 0x3);
+            }
             coverage += raw;
             if (raw > maxRaw) maxRaw = raw;
           }
@@ -261,7 +286,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   }
 
   const EpdFontData* fontData = fontFamily.getData(style);
-  const bool is2Bit = fontData->is2Bit;
+  const uint8_t bits = glyphBits(fontData);
   const uint8_t width = glyph->width;
   const uint8_t height = glyph->height;
   const int left = glyph->left;
@@ -297,7 +322,7 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   } else {
     frame = {cursorX + left, cursorY - top, 1, 0, 0, 1};
   }
-  renderer.drawGlyphBitmap(bitmap, width, height, frame, is2Bit, renderMode, pixelState);
+  renderer.drawGlyphBitmap(bitmap, width, height, frame, bits, renderMode, pixelState);
 }
 
 static constexpr uint32_t MAX_LOGGED_OUT_OF_RANGE = 4;
@@ -307,10 +332,31 @@ namespace {
 // Derived from the same predicates the per-pixel loop used, so the two cannot
 // drift: BW paints every non-white value with `state`; the gray planes ask
 // grayPlanePixel(), which owns the overlay-mask vs absolute-plane difference.
-glyphBitmap::Levels glyphLevels(const bool twoBit, const GfxRenderer::RenderMode mode, const bool state,
-                                const bool absolutePlanes) {
+glyphBitmap::Levels glyphLevels(const uint8_t bits, const GfxRenderer::RenderMode mode, const bool state,
+                                const bool absolutePlanes, const uint8_t plane, const uint8_t* gray16Level) {
   glyphBitmap::Levels levels{0, 0};
-  if (!twoBit) {
+  if (mode == GfxRenderer::GRAY16_PLANE && state) {
+    // Ink where the pixel's level has this plane's bit; white stays untouched.
+    const int values = 1 << bits;
+    for (int v = 1; v < values; v++) {
+      const uint8_t level = bits == 4 ? gray16Level[v] : bits == 2 ? gray16Level[v * 5] : 15;
+      if ((level >> plane) & 1) levels.clearBits |= static_cast<uint16_t>(1u << v);
+    }
+    return levels;
+  }
+  if (bits == 4) {
+    // Outside the 16-level planes a 4-bit glyph behaves like a 2-bit one:
+    // fold coverage 0..15 onto white / light / dark / black.
+    const glyphBitmap::Levels two = glyphLevels(2, mode, state, absolutePlanes, plane, gray16Level);
+    for (int v = 1; v < 16; v++) {
+      const uint16_t from = static_cast<uint16_t>(1u << ((v + 2) / 5));  // 0..15 -> 0..3
+      const uint16_t to = static_cast<uint16_t>(1u << v);
+      if (two.setBits & from) levels.setBits |= to;
+      if (two.clearBits & from) levels.clearBits |= to;
+    }
+    return levels;
+  }
+  if (bits == 1) {
     // 1bpp: value 1 is ink, drawn with `state` in every render mode.
     (state ? levels.clearBits : levels.setBits) = 0x02;
     return levels;
@@ -334,12 +380,47 @@ glyphBitmap::Levels glyphLevels(const bool twoBit, const GfxRenderer::RenderMode
 }
 }  // namespace
 
+#if CROSSPOINT_VECTOR_FONTS
+// What each 8-bit coverage value does in `mode` (draw8's action table). In the
+// 16-level planes it follows gray16Level8; everywhere else it folds onto the
+// 2-bit format with the converter's 25/50/75% thresholds, so B/W frames and
+// the 4-shade planes draw these glyphs at the 2-bit stroke weight.
+const uint8_t* GfxRenderer::glyphActions8(const RenderMode mode, const bool state) const {
+  const uint32_t key = static_cast<uint32_t>(mode) | (state ? 0x10u : 0u) | (absoluteGrayPlanes ? 0x20u : 0u) |
+                       (static_cast<uint32_t>(gray16Plane) << 6) | (static_cast<uint32_t>(gray16Level8Gen) << 8);
+  if (key == glyphAction8Key) return glyphAction8;
+  glyphAction8Key = key;
+  if (mode == GRAY16_PLANE && state) {
+    glyphAction8[0] = 0;
+    for (int v = 1; v < 256; v++) glyphAction8[v] = ((gray16Level8[v] >> gray16Plane) & 1) ? 2 : 0;
+    return glyphAction8;
+  }
+  const glyphBitmap::Levels two = glyphLevels(2, mode, state, absoluteGrayPlanes, gray16Plane, gray16Level);
+  for (int v = 0; v < 256; v++) {
+    const uint16_t bit = static_cast<uint16_t>(1u << (v < 64 ? 0 : v < 128 ? 1 : v < 192 ? 2 : 3));
+    glyphAction8[v] = (two.clearBits & bit) ? 2 : (two.setBits & bit) ? 1 : 0;
+  }
+  return glyphAction8;
+}
+
+void GfxRenderer::setGray16Levels8(const uint8_t levels[256]) {
+  for (int i = 0; i < 256; i++) gray16Level8[i] = levels[i] & 15;
+  if (++gray16Level8Gen == 0) gray16Level8Gen = 1;
+}
+#endif
+
 void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const int height,
-                                  const glyphBitmap::Frame& frame, const bool twoBit, const RenderMode mode,
+                                  const glyphBitmap::Frame& frame, const uint8_t bits, const RenderMode mode,
                                   const bool state) const {
   if (bitmap == nullptr || width <= 0 || height <= 0) return;
 
-  const glyphBitmap::Levels levels = glyphLevels(twoBit, mode, state, absoluteGrayPlanes);
+#if CROSSPOINT_VECTOR_FONTS
+  const uint8_t* const action8 = bits == 8 ? glyphActions8(mode, state) : nullptr;
+#else
+  const uint8_t* const action8 = nullptr;
+#endif
+  const glyphBitmap::Levels levels = action8 ? glyphBitmap::Levels{0, 0}
+                                             : glyphLevels(bits, mode, state, absoluteGrayPlanes, gray16Plane, gray16Level);
 
   // Rotate the glyph origin once, then derive the two physical axes by
   // rotating its neighbours along each logical axis. rotateCoordinates() is an
@@ -366,13 +447,18 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
     // The glyph overhangs the panel. Rare (a misplaced string), and drawPixel()
     // both clips it and feeds the off-panel diagnostics in displayBuffer(), so
     // take the per-pixel route rather than clip silently.
-    const uint8_t painted = levels.setBits | levels.clearBits;
+    const uint16_t painted = levels.setBits | levels.clearBits;
     int pixelPosition = 0;
     for (int glyphY = 0; glyphY < height; glyphY++) {
       for (int glyphX = 0; glyphX < width; glyphX++, pixelPosition++) {
-        const uint8_t value = twoBit ? ((bitmap[pixelPosition >> 2] >> ((3 - (pixelPosition & 3)) * 2)) & 0x3)
-                                     : ((bitmap[pixelPosition >> 3] >> (7 - (pixelPosition & 7))) & 0x1);
-        const uint8_t bit = static_cast<uint8_t>(1u << value);
+        const uint8_t value = glyphBitmap::valueAt(bitmap, pixelPosition, bits);
+        if (action8) {
+          if (action8[value])
+            drawPixel(frame.x + glyphX * frame.dxX + glyphY * frame.dyX,
+                      frame.y + glyphX * frame.dxY + glyphY * frame.dyY, action8[value] == 2);
+          continue;
+        }
+        const uint16_t bit = static_cast<uint16_t>(1u << value);
         if ((painted & bit) == 0) continue;
         drawPixel(frame.x + glyphX * frame.dxX + glyphY * frame.dyX, frame.y + glyphX * frame.dxY + glyphY * frame.dyY,
                   (levels.clearBits & bit) != 0);
@@ -384,7 +470,15 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
   // Fully on the panel: the only clipping left is the strip band, which
   // glyphBitmap::draw() applies from target.originY/rows -- the same rows
   // drawPixel() would have dropped.
-  glyphBitmap::draw(bitmap, width, height, twoBit, levels, target, glyphBitmap::Clip{0, 0, width, height});
+  if (action8) {
+    glyphBitmap::draw8(bitmap, width, height, action8, target, glyphBitmap::Clip{0, 0, width, height});
+    return;
+  }
+  glyphBitmap::draw(bitmap, width, height, bits, levels, target, glyphBitmap::Clip{0, 0, width, height});
+}
+
+void GfxRenderer::setGray16Levels(const uint8_t levels[16]) {
+  for (int i = 0; i < 16; i++) gray16Level[i] = levels[i] & 15;
 }
 
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and

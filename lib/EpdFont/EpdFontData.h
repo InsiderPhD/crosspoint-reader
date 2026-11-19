@@ -155,5 +155,12 @@ typedef struct {
   /// Compiled out on boards without PSRAM so the flash-resident built-in font
   /// tables do not grow there.
   int8_t (*kernHandler)(void* ctx, uint32_t leftCp, uint32_t rightCp);
+  /// TtfEpdFont only: glyph bitmaps are 4 bits per pixel (coverage 0..15) for
+  /// the 16-level display path, instead of the 2-bit format. Zero (false) for
+  /// every built-in and SD font.
+  bool is4Bit;
+  /// TtfEpdFont only: glyph bitmaps are 8 bits per pixel (the rasteriser's
+  /// coverage 0..255) for the 16-level display path. Zero for every other font.
+  bool is8Bit;
 #endif
 } EpdFontData;

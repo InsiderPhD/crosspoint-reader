@@ -23,7 +23,12 @@ enum Color : uint8_t { Clear = 0x00, White = 0x01, LightGray = 0x05, DarkGray = 
 
 class GfxRenderer {
  public:
-  enum RenderMode { BW, GRAYSCALE_LSB, GRAYSCALE_MSB };
+  // GRAY16_PLANE: one bit-plane of a 16-level page (setGray16Plane). Glyph
+  // pixels map to a level (setGray16Levels) and ink where that level's bit for
+  // the plane is set; everything else draws as in BW, i.e. black in every
+  // plane = level 15. Four planes fold into a 4 bpp page for
+  // HalDisplay::displayGray16Image.
+  enum RenderMode { BW, GRAYSCALE_LSB, GRAYSCALE_MSB, GRAY16_PLANE };
 
   // Logical screen orientation from the perspective of callers
   enum Orientation {
@@ -45,6 +50,19 @@ class GfxRenderer {
   // displayGrayBuffer() that commits it. Mutable because the whole render path
   // is const, like the strip-target state below.
   mutable bool absoluteGrayPlanes = false;
+  // GRAY16_PLANE: which bit of the level this pass draws, and the level for
+  // each 4-bit glyph coverage value (0 = white .. 15 = full coverage).
+  uint8_t gray16Plane = 0;
+  uint8_t gray16Level[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+#if CROSSPOINT_VECTOR_FONTS
+  // 8-bit TrueType glyphs (16-level path): level per coverage 0..255, and the
+  // per-value action table drawGlyphBitmap() last built, keyed by what it
+  // depends on so it is rebuilt only when the mode, plane or table changes.
+  uint8_t gray16Level8[256] = {};
+  uint16_t gray16Level8Gen = 1;
+  mutable uint8_t glyphAction8[256] = {};
+  mutable uint32_t glyphAction8Key = 0;
+#endif
   // Off-panel drawPixel calls since the last displayBuffer(). Only the first few
   // are logged: one misplaced string is hundreds of pixels, and logging each
   // one floods serial and stalls the render.
@@ -257,7 +275,10 @@ class GfxRenderer {
   // as calling drawPixel() for every pixel the glyph writes in `mode` (B/W ink,
   // overlay gray masks or absolute gray planes), but orientation, strip band and
   // address math are resolved once per glyph instead of once per pixel.
-  void drawGlyphBitmap(const uint8_t* bitmap, int width, int height, const glyphBitmap::Frame& frame, bool twoBit,
+#if CROSSPOINT_VECTOR_FONTS
+  const uint8_t* glyphActions8(RenderMode mode, bool state) const;
+#endif
+  void drawGlyphBitmap(const uint8_t* bitmap, int width, int height, const glyphBitmap::Frame& frame, uint8_t bits,
                        RenderMode mode, bool state) const;
   void drawLine(int x1, int y1, int x2, int y2, bool state = true) const;
   void drawLine(int x1, int y1, int x2, int y2, int lineWidth, bool state) const;
@@ -371,6 +392,18 @@ class GfxRenderer {
   // Out-of-line: switching back to BW mid-pass has to cancel an armed absolute
   // pass, or the panel keeps waiting for planes that are never coming.
   void setRenderMode(RenderMode mode);
+  void setGray16Plane(uint8_t plane) { gray16Plane = plane & 3; }
+  // Level (0..15) for each 4-bit glyph coverage value; 2-bit glyphs use
+  // entries 0/5/10/15, 1-bit glyphs 15.
+  void setGray16Levels(const uint8_t levels[16]);
+#if CROSSPOINT_VECTOR_FONTS
+  // Level (0..15) for each 8-bit glyph coverage value (TrueType glyphs kept at
+  // 8 bpp, TtfEpdFont::setGray16Glyphs).
+  void setGray16Levels8(const uint8_t levels[256]);
+#endif
+  // Panel (physical framebuffer) coordinates of logical pixel (x, y) in the
+  // current orientation, as drawPixel() maps it.
+  void logicalToPanel(int x, int y, int* panelX, int* panelY) const;
   RenderMode getRenderMode() const { return renderMode; }
 
   // What the panel can do for `mode`. fadingFix forces a synchronous base, so

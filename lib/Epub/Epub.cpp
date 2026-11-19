@@ -779,13 +779,13 @@ std::string Epub::getAsinPath() const { return cachePath + "/asin.txt"; }
 
 bool Epub::hasDescription() const { return Storage.exists(getDescriptionPath().c_str()); }
 
-std::string Epub::getCoverBmpPath(bool cropped) const {
-  const auto coverFileName = std::string("cover") + (cropped ? "_crop" : "");
+std::string Epub::getCoverBmpPath(bool cropped, bool gray) const {
+  const auto coverFileName = std::string("cover") + (cropped ? "_crop" : "") + (gray ? "_gray" : "");
   return cachePath + "/" + coverFileName + ".bmp";
 }
 
-bool Epub::generateCoverBmp(bool cropped) const {
-  const auto coverBmpPath = getCoverBmpPath(cropped);
+bool Epub::generateCoverBmp(bool cropped, bool gray) const {
+  const auto coverBmpPath = getCoverBmpPath(cropped, gray);
 
   // Already generated, return true
   if (Storage.exists(coverBmpPath.c_str())) {
@@ -828,7 +828,8 @@ bool Epub::generateCoverBmp(bool cropped) const {
     if (!Storage.openFileForWrite("EBP", coverBmpPath, coverBmp)) {
       return false;
     }
-    const bool success = JpegToBmpConverter::jpegFileToBmpStream(coverJpg, coverBmp, cropped);
+    const bool success = gray ? JpegToBmpConverter::jpegFileToGrayBmpStream(coverJpg, coverBmp, cropped)
+                              : JpegToBmpConverter::jpegFileToBmpStream(coverJpg, coverBmp, cropped);
     // Explicitly close() files before calling Storage.remove()
     coverJpg.close();
     coverBmp.flush();
@@ -871,7 +872,8 @@ bool Epub::generateCoverBmp(bool cropped) const {
     if (!Storage.openFileForWrite("EBP", coverBmpPath, coverBmp)) {
       return false;
     }
-    const bool success = PngToBmpConverter::pngFileToBmpStream(coverPng, coverBmp, cropped);
+    const bool success = gray ? PngToBmpConverter::pngFileToGrayBmpStream(coverPng, coverBmp, cropped)
+                              : PngToBmpConverter::pngFileToBmpStream(coverPng, coverBmp, cropped);
     // Explicitly close() files before calling Storage.remove()
     coverPng.close();
     coverBmp.flush();
@@ -892,6 +894,11 @@ bool Epub::generateCoverBmp(bool cropped) const {
 
     LOG_DBG("EBP", "Generated BMP from PNG cover image, success: yes");
     return true;
+  }
+
+  if (gray) {
+    LOG_DBG("EBP", "No 8-bit cover for this image type: %s", coverImageHref.c_str());
+    return false;  // callers fall back to the 2-bit cover
   }
 
   if (FsHelpers::hasGifExtension(coverImageHref)) {

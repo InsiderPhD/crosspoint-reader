@@ -87,6 +87,13 @@ class TtfEpdFont {
   // before large downloads).
   static void releaseAllCaches();
 
+  // Keep the rasteriser's full coverage (8 bpp, 0..255) per glyph pixel for
+  // the 16-level display path instead of the 2-bit format. Every live font
+  // drops its glyph caches and re-rasterises on demand; metrics and kerning do
+  // not change, so laid out sections stay valid. Applies to fonts loaded later.
+  static void setGray16Glyphs(bool on);
+  static bool gray16Glyphs();
+
  private:
   TtfEpdFont() = default;
   ~TtfEpdFont() = default;

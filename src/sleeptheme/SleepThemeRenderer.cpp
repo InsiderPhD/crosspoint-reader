@@ -772,7 +772,7 @@ bool blitBackground(const GfxRenderer& renderer, FsFile& file, const Bitmap& bit
       }
       const int fileRow = first + r;
       const int y = bitmap.isTopDown() ? fileRow : height - 1 - fileRow;
-      renderer.drawGlyphBitmap(row, width, 1, glyphBitmap::Frame{0, y, 1, 0, 0, 1}, /*twoBit=*/false, GfxRenderer::BW,
+      renderer.drawGlyphBitmap(row, width, 1, glyphBitmap::Frame{0, y, 1, 0, 0, 1}, /*bits=*/1, GfxRenderer::BW,
                                /*state=*/true);
     }
   }

@@ -77,6 +77,10 @@ void HalDisplay::applyRefreshPolicy(HalDisplay::RefreshMode mode) {
   }
 }
 
+bool HalDisplay::displayGray16Image(const uint8_t* levels, HalDisplay::RefreshMode mode, bool turnOffScreen) {
+  return einkDisplay.displayGray16Image(levels, convertRefreshMode(mode), turnOffScreen);
+}
+
 void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
   applyRefreshPolicy(mode);
   einkDisplay.displayBuffer(convertRefreshMode(mode), turnOffScreen);

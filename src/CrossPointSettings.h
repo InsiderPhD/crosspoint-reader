@@ -633,6 +633,10 @@ class CrossPointSettings {
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
   uint8_t textAntiAliasing = 1;
+  // Picco SE0400NQW47: book pages through the panel's 16-level path (TrueType
+  // fonts keep 16 coverage levels). Present on every build so settings.json
+  // round-trips; only the Picco lists it.
+  uint8_t textGray16 = 0;
   // Short power button click behaviour (reader scope only)
   uint8_t shortPwrBtn = PAGE_TURN;
   // Last-chosen sort order in list activities (Library / Recents / FileBrowser).

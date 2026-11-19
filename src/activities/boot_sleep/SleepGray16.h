@@ -1,0 +1,32 @@
+#pragma once
+
+#if FREEINK_DEVICE_PICCO
+
+class GfxRenderer;
+namespace SleepThemeRenderer {
+struct GreyPlan;
+}
+
+// Picco SE0400NQW47: a greyscale sleep theme's images at the panel's 16 levels
+// instead of the 4-shade plane passes. The theme's B/W frame (already in the
+// framebuffer) supplies black and white; each grey image is placed exactly as
+// GfxRenderer::drawBitmap places it and dithered to the measured levels. The
+// open book's cover comes from its 8-bit cached twin when it has one, so the
+// full range of tones reaches the panel. One clean 16-level draw, ~2.4 s.
+namespace SleepGray16 {
+
+// Shows the sleep screen through the 16-level path. On return the framebuffer
+// holds the B/W frame again (the USB charge-strip redraw starts from it).
+// False, with nothing shown, when the path is unavailable (other panels, a
+// theme with art in front of its images, no PSRAM): the caller then runs the
+// 4-shade passes.
+bool present(GfxRenderer& renderer, const SleepThemeRenderer::GreyPlan& plan);
+
+// True once present() has put the 16-level screen up (until the next boot):
+// anything that would refresh over it in B/W -- the USB charge strip -- must
+// leave it alone.
+bool isUp();
+
+}  // namespace SleepGray16
+
+#endif

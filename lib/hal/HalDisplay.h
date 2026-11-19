@@ -117,10 +117,19 @@ class HalDisplay {
   // The framebuffer is untouched; the next display call clears the image.
   bool supportsGray16Image() const { return einkDisplay.supportsGray16Image(); }
   // fast: turn from a 16-level image already up without the full clears.
-  bool displayGray16Image(const uint8_t* levels, bool turnOffScreen = true, bool fast = false) {
-    return einkDisplay.displayGray16Image(levels, turnOffScreen, fast);
-  }
+  // mode: FAST_REFRESH = the panel's fast turn (Picco: dissolve from a 16-level
+  // image already up), HALF_REFRESH = clean draw.
+  bool displayGray16Image(const uint8_t* levels, RefreshMode mode = HALF_REFRESH, bool turnOffScreen = true);
   bool setGray16Turn(uint8_t scrubEvery) { return einkDisplay.setGray16Turn(scrubEvery); }
+  // 16-level text: a readable B/W base (the dark levels) with the reader's
+  // B/W turn, then the calibrated 16-level passes.
+  bool beginGray16Text(const uint8_t* base, const uint8_t* soft = nullptr) {
+    return einkDisplay.beginGray16Text(base, soft);
+  }
+  bool setGray16TextSoftPull(uint8_t frames) { return einkDisplay.setGray16TextSoftPull(frames); }
+  bool finishGray16Text(const uint8_t* levels, bool turnOffScreen = true) {
+    return einkDisplay.finishGray16Text(levels, turnOffScreen);
+  }
   // Calibration: coarse-black and pull-back doses and the fast-turn erase, in frames.
   bool setGray16Passes(const uint8_t black[3], const uint8_t white[3], uint8_t erase) {
     return einkDisplay.setGray16Passes(black, white, erase);

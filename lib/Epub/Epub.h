@@ -98,8 +98,10 @@ class Epub {
   // ASIN sidecar, same lifecycle as the ISBN one.
   std::string getAsinPath() const;
   bool hasDescription() const;
-  std::string getCoverBmpPath(bool cropped = false) const;
-  bool generateCoverBmp(bool cropped = false) const;
+  // gray: the 8-bit grayscale cover kept for the Picco's 16-level sleep screen.
+  std::string getCoverBmpPath(bool cropped = false, bool gray = false) const;
+  // gray: 8-bit grayscale (every tone, no dithering), JPEG and PNG covers only.
+  bool generateCoverBmp(bool cropped = false, bool gray = false) const;
   std::string getThumbBmpPath() const;
   std::string getThumbBmpPath(int height) const;
   bool generateThumbBmp(int height) const;

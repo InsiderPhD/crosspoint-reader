@@ -231,6 +231,7 @@ struct BmpConvertCtx {
   int outWidth;
   int outHeight;
   bool oneBit;
+  bool eightBit;  // 8-bit grayscale output (full tones, no dithering): jpegFileToGrayBmpStream
   int bytesPerRow;
   bool needsScaling;
   uint32_t scaleX_fp;  // source pixels per output pixel, 16.16 fixed-point
@@ -270,7 +271,7 @@ static int scaledDecodeDimension(const int value, const int scaleShift) {
 static void writeOutputRow(BmpConvertCtx* ctx, const uint8_t* srcRow, int outY) {
   memset(ctx->bmpRow, 0, ctx->bytesPerRow);
 
-  if (USE_8BIT_OUTPUT && !ctx->oneBit) {
+  if ((USE_8BIT_OUTPUT || ctx->eightBit) && !ctx->oneBit) {
     for (int x = 0; x < ctx->outWidth; x++) {
       ctx->bmpRow[x] = adjustPixel(ctx->toneLut[srcRow[x]]);
     }
@@ -321,7 +322,7 @@ static inline uint8_t scaledGray(const BmpConvertCtx* ctx, const int x) {
 static void flushScaledRow(BmpConvertCtx* ctx) {
   memset(ctx->bmpRow, 0, ctx->bytesPerRow);
 
-  if (USE_8BIT_OUTPUT && !ctx->oneBit) {
+  if ((USE_8BIT_OUTPUT || ctx->eightBit) && !ctx->oneBit) {
     for (int x = 0; x < ctx->outWidth; x++) {
       ctx->bmpRow[x] = adjustPixel(scaledGray(ctx, x));
     }
@@ -493,8 +494,9 @@ JpegScratchLease::~JpegScratchLease() {
 
 // Internal implementation with configurable target size and bit depth
 bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& sink, int targetWidth, int targetHeight,
-                                                     bool oneBit, bool crop) {
-  LOG_DBG("JPG", "Converting JPEG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : "2-bit", targetWidth, targetHeight);
+                                                     bool oneBit, bool crop, bool eightBit) {
+  LOG_DBG("JPG", "Converting JPEG to %s BMP (target: %dx%d)", oneBit ? "1-bit" : eightBit ? "8-bit" : "2-bit",
+          targetWidth, targetHeight);
 
   // The decoder object (and, below, the MCU buffer) comes from the scratch
   // lease when one is active, so the heap only has to cover the small buffers.
@@ -655,7 +657,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
 
   // Write BMP header with output dimensions
   int bytesPerRow;
-  if (USE_8BIT_OUTPUT && !oneBit) {
+  if ((USE_8BIT_OUTPUT || eightBit) && !oneBit) {
     writeBmpHeader8bit(bmpOut, outWidth, outHeight);
     bytesPerRow = (outWidth + 3) / 4 * 4;
   } else if (oneBit) {
@@ -681,6 +683,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
   ctx.outWidth = outWidth;
   ctx.outHeight = outHeight;
   ctx.oneBit = oneBit;
+  ctx.eightBit = eightBit && !oneBit;
   ctx.bytesPerRow = bytesPerRow;
   ctx.needsScaling = needsScaling;
   ctx.scaleX_fp = scaleX_fp;
@@ -750,7 +753,7 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& si
       LOG_ERR("JPG", "OOM: Atkinson1BitDitherer or row buffers");
       return false;
     }
-  } else if (!USE_8BIT_OUTPUT) {
+  } else if (!USE_8BIT_OUTPUT && !eightBit) {
     if (USE_ATKINSON) {
       ctx.atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(outWidth);
       if (!ctx.atkinsonDitherer || !ctx.atkinsonDitherer->isValid()) {
@@ -798,6 +801,12 @@ bool JpegToBmpConverter::jpegFileToBmpStream(FsFile& jpegFile, Print& bmpOut, bo
   const int targetWidth = display.getDisplayHeight();
   const int targetHeight = display.getDisplayWidth();
   return jpegFileToBmpStreamInternal(jpegFile, bmpOut, targetWidth, targetHeight, false, crop);
+}
+
+bool JpegToBmpConverter::jpegFileToGrayBmpStream(FsFile& jpegFile, Print& bmpOut, bool crop) {
+  const int targetWidth = display.getDisplayHeight();
+  const int targetHeight = display.getDisplayWidth();
+  return jpegFileToBmpStreamInternal(jpegFile, bmpOut, targetWidth, targetHeight, false, crop, /*eightBit=*/true);
 }
 
 // Convert with custom target size (for thumbnails, 2-bit)
