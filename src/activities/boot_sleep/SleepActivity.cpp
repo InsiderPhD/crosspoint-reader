@@ -1,5 +1,7 @@
 #include "SleepActivity.h"
 
+#include "SleepGray16.h"
+
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <I18n.h>
@@ -115,6 +117,12 @@ void SleepActivity::renderThemeSleepScreen(const bool greyscale) const {
     LOG_INF("SLP", "Sleep screen refreshed in %lu ms", millis() - refreshStart);
     return;
   }
+
+#if FREEINK_DEVICE_PICCO
+  // Picco SE0400NQW47: the theme's images (the book cover in full tones) at
+  // the panel's 16 levels, in place of the 4-shade passes below.
+  if (SleepGray16::present(renderer, grey)) return;
+#endif
 
   // The BW paint is the base; the grey passes then hold only the grey images,
   // so displayGrayBuffer leaves every other pixel as the base drew it.

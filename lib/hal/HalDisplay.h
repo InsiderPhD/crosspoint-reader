@@ -112,6 +112,31 @@ class HalDisplay {
   // fall back to an ordinary display and skip the grayscale pass entirely.
   bool displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback = HALF_REFRESH, bool turnOffScreen = false);
 
+  // Absolute 16-level image on panels that have it (Picco SE0400NQW47): 4 bpp,
+  // 0 = white .. 15 = darkest, panel-native rows of getDisplayWidth()/2 bytes.
+  // The framebuffer is untouched; the next display call clears the image.
+  bool supportsGray16Image() const { return einkDisplay.supportsGray16Image(); }
+  // fast: turn from a 16-level image already up without the full clears.
+  // mode: FAST_REFRESH = the panel's fast turn (Picco: dissolve from a 16-level
+  // image already up), HALF_REFRESH = clean draw.
+  bool displayGray16Image(const uint8_t* levels, RefreshMode mode = HALF_REFRESH, bool turnOffScreen = true);
+  bool setGray16Turn(uint8_t scrubEvery) { return einkDisplay.setGray16Turn(scrubEvery); }
+  // 16-level text: a readable B/W base (the dark levels) with the reader's
+  // B/W turn, then the calibrated 16-level passes.
+  bool beginGray16Text(const uint8_t* base, const uint8_t* soft = nullptr) {
+    return einkDisplay.beginGray16Text(base, soft);
+  }
+  bool setGray16TextSoftPull(uint8_t frames) { return einkDisplay.setGray16TextSoftPull(frames); }
+  bool finishGray16Text(const uint8_t* levels, bool turnOffScreen = true) {
+    return einkDisplay.finishGray16Text(levels, turnOffScreen);
+  }
+  // Calibration: coarse-black and pull-back doses and the fast-turn erase, in frames.
+  bool setGray16Passes(const uint8_t black[3], const uint8_t white[3], uint8_t erase) {
+    return einkDisplay.setGray16Passes(black, white, erase);
+  }
+  // Calibration: paths[l] = {black dose index 0..3, white dose index 0..3, deep 0/1}.
+  bool setGray16Levels(const uint8_t (*paths)[3]) { return einkDisplay.setGray16Levels(paths); }
+
   // Tiled grayscale: stream one band of a plane (lsbPlane selects LSB/MSB RAM)
   // straight to the controller; supportsStripGrayscale() gates the path. See
   // EInkDisplay::writeGrayscalePlaneStrip.

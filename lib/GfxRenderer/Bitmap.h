@@ -68,6 +68,11 @@ class Bitmap {
   ~Bitmap();
   BmpReaderError parseHeaders();
   BmpReaderError readNextRow(uint8_t* data, uint8_t* rowBuffer) const;
+  // Next row as one luminance byte per pixel (0 = black .. 255 = white), as
+  // stored in the file: no tone curve, adjustment or dithering. For the
+  // Picco's 16-level sleep screen, which quantizes to its own levels; an 8-bit
+  // cover BMP already carries the cover tone curve from its conversion.
+  BmpReaderError readNextRowLum(uint8_t* lum, uint8_t* rowBuffer) const;
   BmpReaderError rewindToData() const;
   // Measures the image's tonal range and, when it is worth it, stretches the
   // 1st-99th percentile towards the panel's full black-to-white span before

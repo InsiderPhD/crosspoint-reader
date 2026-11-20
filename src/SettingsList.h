@@ -250,6 +250,14 @@ inline void appendReaderBehaviourSettings(SettingSink& v) {
                                   "extraParagraphSpacing", StrId::STR_CAT_READER));
   v.push_back(SettingInfo::Toggle(StrId::STR_TEXT_AA, &CrossPointSettings::textAntiAliasing, "textAntiAliasing",
                                   StrId::STR_CAT_READER));
+  v.push_back(SettingInfo::Toggle(StrId::STR_TEXT_GRAY16, &CrossPointSettings::textGray16, "textGray16"
+#if FREEINK_DEVICE_PICCO
+                                  // Picco only: keep the JSON key round-tripping elsewhere, hidden
+                                  // (no category = hidden from UI).
+                                  ,
+                                  StrId::STR_CAT_READER
+#endif
+                                  ));
   v.push_back(SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                                 {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
                                 "imageRendering", StrId::STR_CAT_READER));
@@ -685,7 +693,7 @@ inline void appendStatusBarSettings(SettingSink& v) {
 // more (the list is visited, never stored); forEachSetting() logs a mismatch so a
 // helper that stops emitting an entry (and so stops persisting it) shows up on
 // the serial log. Recount when adding or removing an entry.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 107;  // includes tiltPageTurn, tiltNextPageOnly, pluginsEnabled, opdsDownloadFolder
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 108;  // includes tiltPageTurn, tiltNextPageOnly, pluginsEnabled, opdsDownloadFolder, textGray16
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

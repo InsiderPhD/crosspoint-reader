@@ -22,7 +22,8 @@ struct Frame {
 
 // What each source pixel value does to the destination bit. Bit n of a mask
 // refers to source value n (2bpp: 0=white, 1=light gray, 2=dark gray, 3=black;
-// 1bpp: 1=ink). A value in neither mask leaves the destination untouched, so
+// 1bpp: 1=ink; 4bpp: 0=white .. 15=full coverage, TrueType glyphs kept for the
+// 16-level path). A value in neither mask leaves the destination untouched, so
 // this covers both the sparse cases (B/W ink, overlay gray masks: one mask
 // populated) and the absolute gray planes, where every value writes and some
 // set while others clear. setBits and clearBits must be disjoint.
@@ -30,8 +31,8 @@ struct Frame {
 // Framebuffer polarity matches GfxRenderer::drawPixel(): clearing a bit is
 // "black" (state == true), setting it is "white".
 struct Levels {
-  uint8_t setBits;
-  uint8_t clearBits;
+  uint16_t setBits;
+  uint16_t clearBits;
 };
 
 // Where a glyph lands in physical framebuffer space.
@@ -83,9 +84,9 @@ __attribute__((always_inline)) inline void clipToRect(const Frame& frame, int le
 // destination is a flat bit index: (row * stride * 8 + physical x). stride * 8
 // is a multiple of 8, so destination >> 3 is the byte and destination & 7 is
 // physical x & 7 -- MSB first, the same bit drawPixel() addresses.
-__attribute__((always_inline)) inline void paint(uint8_t* buffer, int destination, uint8_t value, uint8_t painted,
-                                                 uint8_t clearBits) {
-  const uint8_t bit = static_cast<uint8_t>(1u << value);
+__attribute__((always_inline)) inline void paint(uint8_t* buffer, int destination, uint8_t value, uint16_t painted,
+                                                 uint16_t clearBits) {
+  const uint16_t bit = static_cast<uint16_t>(1u << value);
   if ((painted & bit) == 0) return;
   const uint8_t mask = static_cast<uint8_t>(0x80u >> (destination & 7));
   if (clearBits & bit)
@@ -96,14 +97,23 @@ __attribute__((always_inline)) inline void paint(uint8_t* buffer, int destinatio
 
 // Paint a packed glyph into target.
 //
-// bitmap: rows are contiguous, MSB first, 1 or 2 bits per pixel; widths need
-//   not be byte-aligned.
+// bitmap: rows are contiguous, MSB first, 1, 2 or 4 bits per pixel; widths
+//   need not be byte-aligned.
 // levels: what each source value does, see Levels.
 // Clipping happens before pixel decoding, so fully hidden glyphs cost nothing.
-inline void draw(const uint8_t* bitmap, int width, int height, bool twoBit, Levels levels, const Target& target,
+// Source value of glyph pixel `source` at `bits` per pixel.
+__attribute__((always_inline)) inline uint8_t valueAt(const uint8_t* bitmap, int source, uint8_t bits) {
+  if (bits == 8) return bitmap[source];
+  if (bits == 4) return (bitmap[source >> 1] >> ((source & 1) ? 0 : 4)) & 0x0F;
+  if (bits == 2) return (bitmap[source >> 2] >> (6 - (source & 3) * 2)) & 3;
+  return (bitmap[source >> 3] >> (7 - (source & 7))) & 1;
+}
+
+inline void draw(const uint8_t* bitmap, int width, int height, uint8_t bits, Levels levels, const Target& target,
                  Clip clip) {
-  const uint8_t painted = levels.setBits | levels.clearBits;
-  const uint8_t clearBits = levels.clearBits;
+  const bool twoBit = bits == 2;
+  const uint16_t painted = levels.setBits | levels.clearBits;
+  const uint16_t clearBits = levels.clearBits;
   if (painted == 0) return;
 
   // Intersect with the glyph bounds, then with the panel width and the
@@ -150,13 +160,42 @@ inline void draw(const uint8_t* bitmap, int width, int height, bool twoBit, Leve
         remaining -= 4;
       }
     }
-    // One-bit glyphs and the clipped tail use scalar decoding.
+    // One- and four-bit glyphs and the clipped tail use scalar decoding.
     while (remaining--) {
-      const uint8_t value = twoBit ? ((bitmap[source >> 2] >> (6 - (source & 3) * 2)) & 3)
-                                   : ((bitmap[source >> 3] >> (7 - (source & 7))) & 1);
-      paint(target.buffer, destination, value, painted, clearBits);
+      paint(target.buffer, destination, valueAt(bitmap, source, bits), painted, clearBits);
       ++source;
       destination += stepX;
+    }
+  }
+}
+
+// Paint an 8-bit glyph (one coverage byte per pixel, rows contiguous): 256
+// values do not fit Levels' masks, so `action[v]` says what value v does --
+// 0 untouched, 1 set (white), 2 clear (ink). Same clipping and axes as draw().
+inline void draw8(const uint8_t* bitmap, int width, int height, const uint8_t* action, const Target& target,
+                  Clip clip) {
+  clip.left = std::max(clip.left, 0);
+  clip.top = std::max(clip.top, 0);
+  clip.right = std::min(clip.right, width);
+  clip.bottom = std::min(clip.bottom, height);
+  clipToRect(target.frame, 0, target.originY, target.width, target.originY + target.rows, clip);
+  if (clip.left >= clip.right || clip.top >= clip.bottom) return;
+  const Frame& frame = target.frame;
+  const int strideBits = target.stride * 8;
+  const int stepX = frame.dxY * strideBits + frame.dxX;
+  const int stepY = frame.dyY * strideBits + frame.dyX;
+  int rowBit = (frame.y - target.originY) * strideBits + frame.x + clip.left * stepX + clip.top * stepY;
+  for (int y = clip.top; y < clip.bottom; ++y, rowBit += stepY) {
+    const uint8_t* source = bitmap + y * width + clip.left;
+    int destination = rowBit;
+    for (int x = clip.left; x < clip.right; ++x, ++source, destination += stepX) {
+      const uint8_t a = action[*source];
+      if (!a) continue;
+      const uint8_t mask = static_cast<uint8_t>(0x80u >> (destination & 7));
+      if (a == 2)
+        target.buffer[destination >> 3] &= static_cast<uint8_t>(~mask);
+      else
+        target.buffer[destination >> 3] |= mask;
     }
   }
 }

@@ -40,10 +40,13 @@ class JpegScratchLease {
 
 class JpegToBmpConverter {
   static bool jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bmpOut, int targetWidth, int targetHeight,
-                                          bool oneBit, bool crop = true);
+                                          bool oneBit, bool crop = true, bool eightBit = false);
 
  public:
   static bool jpegFileToBmpStream(FsFile& jpegFile, Print& bmpOut, bool crop = true);
+  // Same size as jpegFileToBmpStream, but 8-bit grayscale: every tone kept, no
+  // dithering (the 16-level sleep cover on the Picco quantizes it to its levels).
+  static bool jpegFileToGrayBmpStream(FsFile& jpegFile, Print& bmpOut, bool crop = true);
   // Convert with custom target size (for thumbnails)
   static bool jpegFileToBmpStreamWithSize(FsFile& jpegFile, Print& bmpOut, int targetMaxWidth, int targetMaxHeight);
   // Convert to 1-bit BMP (black and white only, no grays) for fast home screen rendering

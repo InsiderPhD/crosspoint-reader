@@ -30,6 +30,16 @@ class EpubReaderActivity final : public Activity {
   // Cleared on the next render after the new section loads and resolves it to a page.
   std::string pendingAnchor;
   int pagesUntilFullRefresh = 0;
+#if FREEINK_DEVICE_PICCO
+  // 16-level text (SETTINGS.textGray16): the page's 4 bpp levels followed by a
+  // copy of its B/W frame (what menus and overlays draw over afterwards).
+  // PSRAM, allocated on the first 16-level page, freed in onExit.
+  uint8_t* gray16Buffer = nullptr;
+  // Shows the page through the 16-level path; false = not taken, the caller
+  // carries on with the normal display.
+  bool presentGray16Page(Page& page, int orientedMarginLeft, int orientedMarginTop, int viewportBottom,
+                         int viewportWidth);
+#endif
   // Late "Loading" popup for a cached open that turns out slow (see the class).
   // Checked between onEnter()'s stages and the first render()'s; finished by
   // whatever that first render() puts on the panel.

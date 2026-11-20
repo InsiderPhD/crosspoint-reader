@@ -86,4 +86,30 @@ bool resolveBmpPath(const GfxRenderer& renderer, const bool cropped, std::string
   return false;
 }
 
+bool grayVersionOf(const GfxRenderer& renderer, const std::string& coverPath, std::string& grayPath) {
+  if (APP_STATE.openEpubPath.empty() || !FsHelpers::hasEpubExtension(APP_STATE.openEpubPath)) return false;
+  Epub epub(APP_STATE.openEpubPath, "/.crosspoint");
+  bool cropped;
+  if (coverPath == epub.getCoverBmpPath(false))
+    cropped = false;
+  else if (coverPath == epub.getCoverBmpPath(true))
+    cropped = true;
+  else
+    return false;
+  const std::string path = epub.getCoverBmpPath(cropped, /*gray=*/true);
+  if (!Storage.exists(path.c_str())) {
+    bool loaded;
+    {
+      InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
+      loaded = epub.load(true, true);
+    }
+    if (!loaded || !epub.generateCoverBmp(cropped, /*gray=*/true)) {
+      LOG_DBG("SLP", "No 8-bit cover for %s", APP_STATE.openEpubPath.c_str());
+      return false;
+    }
+  }
+  grayPath = path;
+  return true;
+}
+
 }  // namespace SleepCover

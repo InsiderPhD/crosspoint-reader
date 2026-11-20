@@ -36,6 +36,9 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/Activity.h"
+#include "platform/Gray16Levels.h"
+#include "activities/boot_sleep/SleepGray16.h"
+#include "platform/Gray16TextDemo.h"
 #include "activities/ActivityManager.h"
 #include "activities/RenderLock.h"  // RenderLock::peek() for the BLE auto-restore render gate
 #include "activities/settings/SdFirmwareUpdateActivity.h"
@@ -431,8 +434,15 @@ void drawSleepChargeStrip(const bool charging, const uint16_t percent) {
 // the charger). The sleep frame is kept so unplugging can remove the strip: one
 // framebuffer (48 KB) in PSRAM, freed when the hold ends. Returns true when the
 // power button ended the hold. Ported from upstream CrossPoint (#3947).
+void ignoreChargeStatus(bool, uint16_t) {}
+
 bool holdSleepWhileUsbPowered() {
   if (!gpio.isUsbConnected()) return false;
+  if (SleepGray16::isUp()) {
+    // A 16-level sleep screen is up: a B/W charge strip or redraw would
+    // replace it with its B/W frame, so hold without either.
+    return powerManager.holdWhileUsbPowered(gpio, ignoreChargeStatus);
+  }
   const size_t frameSize = renderer.getBufferSize();
   auto* const sleepFrame = static_cast<uint8_t*>(heap_caps_malloc(frameSize, MALLOC_CAP_SPIRAM));
   if (sleepFrame) memcpy(sleepFrame, renderer.getFrameBuffer(), frameSize);
@@ -990,6 +1000,315 @@ void setup() {
   HeapReport::logBrief("boot.done");
 }
 
+#if FREEINK_DEVICE_PICCO && defined(ENABLE_SERIAL_LOG)
+// Dev-only (`CMD:GRAY16TEST`): the picco-gray-cal patch grid -- levels 0..15 in
+// a 4x4 grid, level-15 corner markers -- through the panel's 16-level path, so
+// a photo of the reader can be measured with picco-gray-cal/host/analyze.py.
+// The geometry must match that tool's (its firmware's GEOM reply).
+namespace gray16test {
+constexpr uint16_t W = 800, H = 480;
+constexpr int GRID_X0 = 70, GRID_Y0 = 55, PATCH_W = 150, PATCH_H = 85, GAP_X = 20, GAP_Y = 10;
+constexpr int FID_X = 17, FID_Y = 10, FID_SIZE = 36;
+// Long enough to fetch a camera; the wait loop feeds the loop watchdog itself.
+constexpr unsigned long HOLD_MS = 10UL * 60 * 1000;
+
+uint8_t levelAt(int x, int y) {
+  const bool fx = (x >= FID_X && x < FID_X + FID_SIZE) || (x >= W - FID_X - FID_SIZE && x < W - FID_X);
+  const bool fy = (y >= FID_Y && y < FID_Y + FID_SIZE) || (y >= H - FID_Y - FID_SIZE && y < H - FID_Y);
+  if (fx && fy) return 15;
+  const int gx = x - GRID_X0, gy = y - GRID_Y0;
+  if (gx < 0 || gy < 0) return 0;
+  const int col = gx / (PATCH_W + GAP_X), row = gy / (PATCH_H + GAP_Y);
+  if (col >= 4 || row >= 4) return 0;
+  if (gx - col * (PATCH_W + GAP_X) >= PATCH_W || gy - row * (PATCH_H + GAP_Y) >= PATCH_H) return 0;
+  return static_cast<uint8_t>(row * 4 + col);
+}
+
+// The levels buffer for a test page, or nullptr (logged) when the 16-level path
+// or the expected panel is missing. 192 KB: too big for internal RAM, so PSRAM;
+// showAndHold() frees it right after the refresh (the driver keeps its own copy
+// for the exit balance).
+uint8_t* allocLevels() {
+  if (!display.supportsGray16Image()) {
+    LOG_ERR("G16", "16-level path unavailable (panel, or inverted output)");
+    return nullptr;
+  }
+  if (display.getDisplayWidth() != W || display.getDisplayHeight() != H) {
+    LOG_ERR("G16", "test pages are for %ux%u, panel is %ux%u", W, H, display.getDisplayWidth(),
+            display.getDisplayHeight());
+    return nullptr;
+  }
+  constexpr size_t bytes = static_cast<size_t>(W / 2) * H;
+  auto* levels = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!levels) LOG_ERR("G16", "malloc failed: %u bytes", static_cast<unsigned>(bytes));
+  return levels;
+}
+
+// Show `levels` (freed here), then hold it for a photo: nothing else may refresh
+// the panel until a key, touch or serial line, or HOLD_MS.
+void showAndHold(uint8_t* levels, bool fast = false) {
+  RenderLock lock;  // the activity render task must not draw over it
+  const unsigned long t0 = millis();
+  const bool ok = display.displayGray16Image(levels, fast ? HalDisplay::FAST_REFRESH : HalDisplay::HALF_REFRESH, true);
+  free(levels);
+  levels = nullptr;
+  if (!ok) {
+    LOG_ERR("G16", "displayGray16Image refused");
+    return;
+  }
+  LOG_INF("G16", "16-level grid shown in %lu ms; any key, touch or serial line returns (max %lu s)", millis() - t0,
+          HOLD_MS / 1000);
+  const unsigned long holdStart = millis();
+  while (millis() - holdStart < HOLD_MS) {
+    esp_task_wdt_reset();
+    delay(20);
+    gpio.update();
+    if (gpio.wasAnyPressed() || gpio.wasTouchActivity() || logSerial.available() > 0) break;
+  }
+  while (logSerial.available() > 0) logSerial.read();
+  lock.unlock();
+  activityManager.requestUpdate();  // the redraw gives the drive back and clears (Ssd2677Driver::exitGray16)
+  LOG_INF("G16", "returned after %lu s", (millis() - holdStart) / 1000);
+}
+
+// Page B of the turn test: patch i shows level 15 - i; page and markers as on A.
+uint8_t turnLevelAt(int x, int y) {
+  const int gx = x - GRID_X0, gy = y - GRID_Y0;
+  if (gx >= 0 && gy >= 0) {
+    const int col = gx / (PATCH_W + GAP_X), row = gy / (PATCH_H + GAP_Y);
+    if (col < 4 && row < 4 && gx - col * (PATCH_W + GAP_X) < PATCH_W && gy - row * (PATCH_H + GAP_Y) < PATCH_H)
+      return static_cast<uint8_t>(15 - (row * 4 + col));
+  }
+  return levelAt(x, y);
+}
+
+void run() {
+  uint8_t* levels = allocLevels();
+  if (!levels) return;
+  for (int y = 0; y < H; ++y) {
+    for (int x = 0; x < W; x += 2) {
+      levels[y * (W / 2) + x / 2] = static_cast<uint8_t>(levelAt(x, y) << 4 | levelAt(x + 1, y));
+    }
+  }
+  showAndHold(levels);
+}
+
+// `CMD:GRAY16TURN [turns]`: page A (the grid, patch i = level i) drawn clean,
+// then `turns` fast turns -- one dissolve each, no full clears -- alternating B
+// (patch i = level 15 - i) and A, the last one held for a photo. Every B patch
+// sits on a different A level, so drift and ghosting show per patch; an odd
+// count ends on B. The erase dose comes from GRAY16PASSES.
+void turn(const String& arg) {
+  const long turns = arg.isEmpty() ? 1 : arg.toInt();
+  if (turns < 1 || turns > 30) {
+    LOG_ERR("G16", "turns must be 1..30");
+    return;
+  }
+  if (!display.setGray16Turn(255)) {
+    LOG_ERR("G16", "setGray16Turn refused");
+    return;
+  }
+  uint8_t* levels = allocLevels();
+  if (!levels) return;
+  for (int y = 0; y < H; ++y)
+    for (int x = 0; x < W; x += 2) levels[y * (W / 2) + x / 2] = static_cast<uint8_t>(levelAt(x, y) << 4 | levelAt(x + 1, y));
+  {
+    RenderLock lock;
+    const unsigned long t0 = millis();
+    if (!display.displayGray16Image(levels, HalDisplay::HALF_REFRESH, true)) {
+      LOG_ERR("G16", "page A refused");
+      free(levels);
+      return;
+    }
+    LOG_INF("G16", "turn test: page A shown in %lu ms", millis() - t0);
+  }
+  auto fill = [&](bool pageB) {
+    for (int y = 0; y < H; ++y)
+      for (int x = 0; x < W; x += 2)
+        levels[y * (W / 2) + x / 2] = pageB ? static_cast<uint8_t>(turnLevelAt(x, y) << 4 | turnLevelAt(x + 1, y))
+                                            : static_cast<uint8_t>(levelAt(x, y) << 4 | levelAt(x + 1, y));
+  };
+  // All but the last turn, about a page-reading pause apart (shortened).
+  for (long t = 1; t < turns; ++t) {
+    delay(1500);
+    fill(t % 2 == 1);
+    RenderLock lock;
+    const unsigned long t0 = millis();
+    display.displayGray16Image(levels, HalDisplay::FAST_REFRESH, true);
+    LOG_INF("G16", "turn %ld/%ld in %lu ms", t, turns, millis() - t0);
+    esp_task_wdt_reset();
+  }
+  delay(1500);
+  fill(turns % 2 == 1);
+  showAndHold(levels, true);
+  display.setGray16Turn(0);
+}
+
+// `CMD:GRAY16PASSES b1,b2,b3 w1,w2,w3 erase`: coarse-black and pull-back doses
+// and the fast-turn erase, in frames.
+void passes(const String& args) {
+  long v[7];
+  int n = 0, pos = 0;
+  while (n < 7 && pos <= static_cast<int>(args.length())) {
+    int end = pos;
+    while (end < static_cast<int>(args.length()) && args[end] != ',' && args[end] != ' ') ++end;
+    if (end == pos) {
+      ++pos;
+      continue;
+    }
+    v[n++] = args.substring(pos, end).toInt();
+    pos = end + 1;
+  }
+  if (n != 7) {
+    LOG_ERR("G16", "want b1,b2,b3 w1,w2,w3 erase");
+    return;
+  }
+  const uint8_t black[3] = {static_cast<uint8_t>(v[0]), static_cast<uint8_t>(v[1]), static_cast<uint8_t>(v[2])};
+  const uint8_t white[3] = {static_cast<uint8_t>(v[3]), static_cast<uint8_t>(v[4]), static_cast<uint8_t>(v[5])};
+  RenderLock lock;
+  // New doses are checked against the loaded level paths; an all-white table
+  // is valid with any doses, and the GRAY16CELLS that follows replaces it.
+  static constexpr uint8_t allWhite[16][3] = {};
+  display.setGray16Levels(allWhite);
+  if (!display.setGray16Passes(black, white, static_cast<uint8_t>(v[6]))) {
+    LOG_ERR("G16", "setGray16Passes refused (doses 1..63, erase 0..63, and every level path must still net 0..39)");
+    return;
+  }
+  LOG_INF("G16", "passes: black %ld/%ld/%ld white %ld/%ld/%ld erase %ld", v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
+}
+
+// Measured L* of the driver's default levels (photos of this reader,
+// picco-gray-cal design-reader-final.json), for mapping glyph coverage.
+constexpr float LEVEL_LSTAR[16] = {101.2f, 98.0f, 94.0f, 89.5f, 84.3f, 79.5f, 74.6f, 68.5f, 64.3f, 59.2f, 54.6f, 50.6f, 47.3f, 42.0f, 37.7f, 31.8f};
+
+// `CMD:GRAY16TEXT [path]`: the same paragraph anti-aliased with 16, 4 and 2
+// levels, from a .ttf/.otf (default: the first in /fonts). See Gray16TextDemo.
+void text(const String& path) {
+  uint8_t* levels = allocLevels();
+  if (!levels) return;
+  if (!gray16demo::render(levels, W, H, path.isEmpty() ? nullptr : path.c_str(), LEVEL_LSTAR)) {
+    free(levels);
+    return;
+  }
+  showAndHold(levels);
+}
+
+// `CMD:GRAY16CELLS bi,wi,d ...`: 15 paths for patches 1..15 (patch 0 and the
+// page stay white) as dose indices -- black 0..3, white 0..3 into the doses set
+// by GRAY16PASSES, deep 0/1 -- loaded into the driver's level table and shown,
+// so picco-gray-cal can measure the reader's own refresh form.
+void cells(const String& args) {
+  uint8_t paths[16][3] = {{0, 0, 0}};
+  int n = 0;
+  int pos = 0;
+  while (pos < static_cast<int>(args.length()) && n < 15) {
+    while (pos < static_cast<int>(args.length()) && args[pos] == ' ') ++pos;
+    const int end = args.indexOf(' ', pos);
+    const String tok = args.substring(pos, end < 0 ? args.length() : end);
+    pos = end < 0 ? args.length() : end;
+    if (tok.isEmpty()) break;
+    const int c1 = tok.indexOf(','), c2 = c1 < 0 ? -1 : tok.indexOf(',', c1 + 1);
+    if (c1 < 0 || c2 < 0) {
+      LOG_ERR("G16", "bad cell '%s' (want bi,wi,d)", tok.c_str());
+      return;
+    }
+    const long bi = tok.substring(0, c1).toInt(), wi = tok.substring(c1 + 1, c2).toInt(), d = tok.substring(c2 + 1).toInt();
+    if (bi < 0 || bi > 3 || wi < 0 || wi > 3 || d < 0 || d > 1) {
+      LOG_ERR("G16", "cell %d out of range: %ld,%ld,%ld (indices 0..3, 0..3, 0/1)", n + 1, bi, wi, d);
+      return;
+    }
+    paths[n + 1][0] = static_cast<uint8_t>(bi);
+    paths[n + 1][1] = static_cast<uint8_t>(wi);
+    paths[n + 1][2] = static_cast<uint8_t>(d);
+    ++n;
+  }
+  if (n != 15) {
+    LOG_ERR("G16", "need 15 cells, got %d", n);
+    return;
+  }
+  {
+    RenderLock lock;
+    if (!display.setGray16Levels(paths)) {
+      LOG_ERR("G16", "setGray16Levels refused (a path nets outside 0..39 frames with the current doses)");
+      return;
+    }
+  }
+  LOG_INF("G16", "level table loaded");
+  run();
+}
+// `CMD:TEXT16GRID [softPull]`: the level grid (patch i = level i) drawn
+// through the reader's 16-level text turn: a first page with the patches
+// permuted (patch i on level 15 - i), then the grid as a page turn -- one
+// cross-dissolve from that page, then the coarse and pull passes -- held for
+// a photo. softPull, if given, sets the in-turn pull-back on the soft level
+// first (frames; 0 = off). picco-gray-cal measures the post-turn tones.
+void textGrid(const String& arg) {
+  if (!arg.isEmpty()) {
+    const long n = arg.toInt();
+    if (n < 0 || n > 63 || !display.setGray16TextSoftPull(static_cast<uint8_t>(n))) {
+      LOG_ERR("G16", "soft pull %ld refused", n);
+      return;
+    }
+  }
+  uint8_t* levels = allocLevels();
+  if (!levels) return;
+  // Base and soft planes, 2 x 48 KB: PSRAM, freed below.
+  auto* planes = static_cast<uint8_t*>(heap_caps_malloc(2 * (W / 8) * H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!planes) {
+    LOG_ERR("G16", "malloc failed: text planes");
+    free(levels);
+    return;
+  }
+  uint8_t* const base = planes;
+  uint8_t* const soft = planes + (W / 8) * H;
+  display.setGray16Turn(255);  // the second page must be a dissolve turn
+  auto draw = [&](const bool permuted) {
+    memset(planes, 0xFF, 2 * (W / 8) * H);
+    for (int y = 0; y < H; ++y)
+      for (int x = 0; x < W; ++x) {
+        const uint8_t l = permuted ? turnLevelAt(x, y) : levelAt(x, y);
+        uint8_t& b = levels[y * (W / 2) + x / 2];
+        b = (x & 1) ? static_cast<uint8_t>((b & 0xF0) | l) : static_cast<uint8_t>((b & 0x0F) | l << 4);
+        const uint8_t bit = static_cast<uint8_t>(0x80 >> (x & 7));
+        if ((gray16::DEEP_LEVELS >> l) & 1) base[y * (W / 8) + x / 8] &= static_cast<uint8_t>(~bit);
+        if (l == gray16::SOFT_DEEP_LEVEL) soft[y * (W / 8) + x / 8] &= static_cast<uint8_t>(~bit);
+      }
+    const unsigned long t0 = millis();
+    if (!display.beginGray16Text(base, soft)) return false;
+    display.finishGray16Text(levels, true);
+    LOG_INF("G16", "text page in %lu ms", millis() - t0);
+    return true;
+  };
+  RenderLock lock;
+  bool ok = draw(true);
+  if (ok) {
+    delay(1500);
+    esp_task_wdt_reset();
+    ok = draw(false);
+  }
+  free(planes);
+  free(levels);
+  display.setGray16Turn(static_cast<uint8_t>(std::max(1, SETTINGS.getRefreshFrequency() - 1)));
+  if (!ok) {
+    LOG_ERR("G16", "beginGray16Text refused");
+    return;
+  }
+  LOG_INF("G16", "16-level grid shown (text turn); any key, touch or serial line returns (max %lu s)", HOLD_MS / 1000);
+  const unsigned long holdStart = millis();
+  while (millis() - holdStart < HOLD_MS) {
+    esp_task_wdt_reset();
+    delay(20);
+    gpio.update();
+    if (gpio.wasAnyPressed() || gpio.wasTouchActivity() || logSerial.available() > 0) break;
+  }
+  while (logSerial.available() > 0) logSerial.read();
+  lock.unlock();
+  activityManager.requestUpdate();
+  LOG_INF("G16", "returned after %lu s", (millis() - holdStart) / 1000);
+}
+}  // namespace gray16test
+#endif
+
 void loop() {
   static unsigned long maxLoopDuration = 0;
   const unsigned long loopStartTime = millis();
@@ -1180,6 +1499,32 @@ void loop() {
           LOG_ERR("CMD", "Unknown button: %s", name.c_str());
         }
       }
+#if FREEINK_DEVICE_PICCO
+      // Dev-only: `CMD:GRAY16TEST` shows the 16-level test grid (see gray16test).
+      else if (cmd == "GRAY16TEST") {
+        gray16test::run();
+      } else if (cmd == "TEXT16GRID" || cmd.startsWith("TEXT16GRID ")) {
+        gray16test::textGrid(cmd.length() > 10 ? cmd.substring(11) : String());
+      } else if (cmd.startsWith("TEXT16SOFT ")) {
+        // Dev tuning: frames of the 16-level text turn's in-waveform pull-back
+        // (0 = off: the pull pass does it, with the brief black flash).
+        const long n = cmd.substring(11).toInt();
+        RenderLock lock;
+        const bool ok = n >= 0 && n <= 63 && display.setGray16TextSoftPull(static_cast<uint8_t>(n));
+        LOG_INF("G16", "text soft pull %ld frames: %s", n, ok ? "set" : "refused");
+        gray16test::cells(cmd.substring(12));
+      } else if (cmd.startsWith("GRAY16PASSES ")) {
+        gray16test::passes(cmd.substring(13));
+      } else if (cmd == "GRAY16TURN" || cmd.startsWith("GRAY16TURN ")) {
+        String arg = cmd.length() > 10 ? cmd.substring(11) : String();
+        arg.trim();
+        gray16test::turn(arg);
+      } else if (cmd == "GRAY16TEXT" || cmd.startsWith("GRAY16TEXT ")) {
+        String path = cmd.length() > 10 ? cmd.substring(11) : String();
+        path.trim();
+        gray16test::text(path);
+      }
+#endif
 #endif
     }
   }

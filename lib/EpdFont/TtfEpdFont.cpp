@@ -191,6 +191,10 @@ struct TtfEpdFont::Impl {
 
 TtfEpdFont* TtfEpdFont::liveHead_ = nullptr;
 
+namespace {
+bool s_gray16Glyphs = false;  // setGray16Glyphs()
+}  // namespace
+
 TtfEpdFont* TtfEpdFont::create() {
   void* fontBlock = ttfAlloc(sizeof(TtfEpdFont));
   void* implBlock = ttfAlloc(sizeof(Impl));
@@ -360,6 +364,7 @@ void TtfEpdFont::Impl::setupFace(Face& face) {
   face.data.ascender = static_cast<int>(ceilf(static_cast<float>(ascent) * face.scale));
   face.data.descender = static_cast<int>(floorf(static_cast<float>(descent) * face.scale));  // negative, as built-ins
   face.data.is2Bit = true;
+  face.data.is8Bit = s_gray16Glyphs;
   face.data.glyphMissHandler = &Impl::missThunk;
   face.data.glyphMissCtx = &face;
   face.data.kernHandler = &Impl::kernThunk;
@@ -474,6 +479,18 @@ void TtfEpdFont::releaseCaches() {
   impl_->scratch = nullptr;
 }
 
+void TtfEpdFont::setGray16Glyphs(const bool on) {
+  if (s_gray16Glyphs == on) return;
+  s_gray16Glyphs = on;
+  for (TtfEpdFont* font = liveHead_; font; font = font->nextLive_) {
+    font->releaseCaches();  // glyphs packed the old way must not be drawn the new way
+    if (font->impl_)
+      for (auto& face : font->impl_->faces) face.data.is8Bit = on;
+  }
+}
+
+bool TtfEpdFont::gray16Glyphs() { return s_gray16Glyphs; }
+
 void TtfEpdFont::releaseAllCaches() {
   for (TtfEpdFont* font = liveHead_; font; font = font->nextLive_) font->releaseCaches();
 }
@@ -550,7 +567,8 @@ bool TtfEpdFont::Impl::rasterise(Face& face, const int glyphIndex, EpdGlyph& out
   }
 
   const uint32_t pixelCount = static_cast<uint32_t>(width) * static_cast<uint32_t>(height);
-  const uint32_t packedBytes = (pixelCount + 3) / 4;
+  const bool eightBit = face.data.is8Bit;
+  const uint32_t packedBytes = eightBit ? pixelCount : (pixelCount + 3) / 4;
   if (face.arenaUsed + packedBytes > ARENA_BYTES) {
     stbtt_FreeShape(&info, vertices);
     return false;  // caller flushes and retries
@@ -583,10 +601,16 @@ bool TtfEpdFont::Impl::rasterise(Face& face, const int glyphIndex, EpdGlyph& out
   // the stroke weight of the same face converted offline.
   uint8_t* packed = face.arena + face.arenaUsed;
   memset(packed, 0, packedBytes);
-  for (uint32_t i = 0; i < pixelCount; i++) {
-    const uint8_t alpha = scratch[i];
-    const uint8_t level = alpha < 64 ? 0 : alpha < 128 ? 1 : alpha < 192 ? 2 : 3;
-    packed[i >> 2] |= static_cast<uint8_t>(level << ((3 - (i & 3)) * 2));
+  if (eightBit) {
+    // 16-level display path: the coverage as rasterised, one byte per pixel.
+    // The renderer maps each value to a panel level.
+    memcpy(packed, scratch, pixelCount);
+  } else {
+    for (uint32_t i = 0; i < pixelCount; i++) {
+      const uint8_t alpha = scratch[i];
+      const uint8_t level = alpha < 64 ? 0 : alpha < 128 ? 1 : alpha < 192 ? 2 : 3;
+      packed[i >> 2] |= static_cast<uint8_t>(level << ((3 - (i & 3)) * 2));
+    }
   }
 
   out.width = static_cast<uint8_t>(width);
