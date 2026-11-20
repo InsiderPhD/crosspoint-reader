@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CrossPoint Reader - BookFusion</title>
+    <style>
+      :root {
+        --font-color: #333;
+        --bg: #f5f5f5;
+        --title-color: #2c3e50;
+        --card-bg: #FFF;
+        --label-color: #7f8c8d;
+        --border-color: #eee;
+        --accent-color: rgb(110, 154, 130);
+        --accent-hover-color: #5a8c73;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --font-color: #f5f5f5;
+          --bg: #333;
+          --title-color: #ecf0f1;
+          --card-bg: #444;
+          --label-color: #bdc3c7;
+          --border-color: #555;
+          color-scheme: dark;
+        }
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: var(--bg);
+        color: var(--font-color);
+      }
+      h1 {
+        color: var(--title-color);
+        border-bottom: 2px solid var(--accent-color);
+        padding-bottom: 10px;
+      }
+      h2 { color: var(--title-color); margin-top: 0; }
+      .card {
+        background: var(--card-bg);
+        border-radius: 8px;
+        padding: 20px;
+        margin: 15px 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      .nav-links {
+        margin: 20px 0;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .nav-links a {
+        padding: 10px 20px;
+        color: var(--font-color);
+        text-decoration: none;
+        border-radius: 4px;
+      }
+      .nav-links a.active {
+        background-color: var(--accent-color);
+        color: white;
+      }
+      .nav-links a:not(.active):hover {
+        background-color: var(--accent-hover-color);
+        color: white;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .controls select,
+      .controls input[type="search"] {
+        padding: 6px 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg);
+        color: var(--font-color);
+        font-size: 0.95em;
+      }
+      .controls input[type="search"] { flex: 1; min-width: 160px; }
+      .btn {
+        padding: 6px 16px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9em;
+        background: var(--accent-color);
+        color: white;
+      }
+      .btn:hover:not(:disabled) { background: var(--accent-hover-color); }
+      .btn:disabled { opacity: 0.5; cursor: default; }
+      .btn-secondary {
+        background: transparent;
+        color: var(--font-color);
+        border: 1px solid var(--border-color);
+      }
+      .btn-secondary:hover:not(:disabled) { background: var(--border-color); color: var(--font-color); }
+      .book-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+      .picker {
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 10px;
+        margin: 0 0 12px 62px;
+      }
+      .picker input[type="search"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background: var(--bg);
+        color: var(--font-color);
+        margin-bottom: 8px;
+      }
+      .picker-list { max-height: 260px; overflow-y: auto; }
+      .picker-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 0.9em;
+      }
+      .picker-item:last-child { border-bottom: none; }
+      .picker-path { overflow-wrap: anywhere; }
+      .picker-path small { color: var(--label-color); }
+      .picker-hint { color: var(--label-color); font-size: 0.85em; margin: 0 0 8px 0; }
+      .book {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border-color);
+      }
+      .book:last-child { border-bottom: none; }
+      .book img, .book .nocover {
+        width: 48px;
+        height: 72px;
+        object-fit: cover;
+        border-radius: 3px;
+        background: var(--border-color);
+        flex-shrink: 0;
+      }
+      .book-info { flex: 1; min-width: 0; }
+      .book-title { font-weight: 600; overflow-wrap: anywhere; }
+      .book-meta { color: var(--label-color); font-size: 0.85em; margin-top: 3px; }
+      .book.unsupported .book-title { text-decoration: line-through; }
+      .badge.muted { background: var(--label-color); }
+      .badge {
+        display: inline-block;
+        font-size: 0.75em;
+        padding: 1px 6px;
+        border-radius: 3px;
+        background: var(--accent-color);
+        color: white;
+        margin-left: 6px;
+        vertical-align: middle;
+      }
+      .pager {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 12px;
+        color: var(--label-color);
+        font-size: 0.9em;
+      }
+      #status {
+        margin-top: 10px;
+        padding: 8px;
+        border-radius: 4px;
+        display: none;
+      }
+      .status-ok { background: #d4edda; color: #155724; display: block !important; }
+      .status-err { background: #f8d7da; color: #721c24; display: block !important; }
+      .status-busy { background: #fff3cd; color: #856404; display: block !important; }
+      .empty { color: var(--label-color); text-align: center; padding: 20px; }
+      .queue-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+      .queue-head h2 { margin: 0; }
+      #queueList { margin-top: 10px; }
+      #settingsCard summary { cursor: pointer; font-weight: 600; }
+      .setting-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
+      .setting-row label { min-width: 160px; }
+      .setting-hint { color: var(--label-color); font-size: 0.85rem; margin: 4px 0 0; }
+<!--#include file="shared/TransferQueue.css.inc" -->
+    </style>
+  </head>
+  <body>
+    <h1>📚 CrossPoint Reader</h1>
+
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a href="/files">File Manager</a>
+      <a href="/fonts">Fonts</a>
+      <a href="/sleep-themes">Sleep Themes</a>
+      <a href="/bookfusion" class="active">BookFusion</a>
+      <a href="/settings">Settings</a>
+      <a href="/plugins">Plugins</a>
+    </div>
+
+    <div class="card" id="notice" style="display: none"></div>
+
+    <div class="card" id="queueCard" style="display: none">
+      <div class="queue-head">
+        <h2>Downloads</h2>
+        <button class="btn btn-secondary" id="clearQueue" type="button">Clear finished</button>
+      </div>
+      <div id="queueList"></div>
+    </div>
+
+    <details class="card" id="settingsCard" style="display: none">
+      <summary>Settings</summary>
+      <div class="setting-row" id="layoutRow" style="display: none">
+        <label for="layout">Save downloads as</label>
+        <select id="layout"></select>
+        <span id="layoutSaved" class="setting-hint"></span>
+      </div>
+      <p class="setting-hint" id="layoutHint" style="display: none">
+        Applies to new downloads, here and on the reader. Books already on the card keep their names.
+      </p>
+      <div class="setting-row">
+        <label for="browse">Browse by</label>
+        <select id="browse">
+          <option value="lists">Lists and shelves</option>
+          <option value="author">Author</option>
+        </select>
+        <button class="btn btn-secondary" id="rescan" type="button" style="display: none">Rescan library</button>
+      </div>
+      <p class="setting-hint">
+        BookFusion can't list authors directly, so Author reads your whole library once (a page at a time) and
+        remembers it until you close this tab.
+      </p>
+    </details>
+
+    <div class="card" id="library" style="display: none">
+      <h2>BookFusion Library</h2>
+      <form class="controls" id="searchForm">
+        <select id="source" aria-label="Show"></select>
+        <input type="search" id="query" placeholder="Search your library" maxlength="63" />
+        <button class="btn" type="submit">Search</button>
+      </form>
+      <div id="status"></div>
+      <div id="books"><p class="empty">Loading...</p></div>
+      <div class="pager">
+        <button class="btn" id="prev" type="button">‹ Previous</button>
+        <span id="pageInfo"></span>
+        <button class="btn" id="next" type="button">Next ›</button>
+      </div>
+    </div>
+
+    <script>
+<!--#include file="shared/TransferQueue.js.inc" -->
+
+      // Same threshold as the device (BookFusionDownload::LARGE_BOOK_WARN_BYTES):
+      // image-heavy books strain the reader's memory.
+      const LARGE_BOOK_BYTES = 10 * 1024 * 1024;
+
+      const state = {
+        page: 1, source: "all", query: "", busy: false, books: [], localBooks: null,
+        browse: "lists", shelves: [], allBooks: null, authors: null, scanToken: 0,
+      };
+      const LISTS = [
+        ["list:currently_reading", "Currently Reading"],
+        ["list:favorites", "Favorites"],
+        ["list:planned_to_read", "Plan to Read"],
+        ["list:completed", "Completed"],
+        ["all", "All Books"],
+      ];
+      const AUTHOR_PAGE_SIZE = 20;
+      const LIBRARY_CACHE_KEY = "bfLibrary";
+      const ALL_AUTHORS = "author:*";
+      const $ = (id) => document.getElementById(id);
+
+      function showStatus(kind, text) {
+        const el = $("status");
+        el.className = kind ? "status-" + kind : "";
+        el.textContent = text || "";
+      }
+
+      function formatSize(bytes) {
+        if (!bytes) return "";
+        if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        return Math.max(1, Math.round(bytes / 1024)) + " KB";
+      }
+
+      function setBusy(busy) {
+        state.busy = busy;
+        document.querySelectorAll("#library button, #library select, #library input").forEach((el) => {
+          el.disabled = busy;
+        });
+        if (!busy) updatePager();
+      }
+
+      function updatePager(hasMore) {
+        if (hasMore !== undefined) state.hasMore = hasMore;
+        $("prev").disabled = state.busy || state.page <= 1;
+        $("next").disabled = state.busy || !state.hasMore;
+        $("pageInfo").textContent = "Page " + state.page;
+      }
+
+      // Every request waits its turn behind a running download (withReader).
+      async function getJson(url) {
+        const res = await withReader(() => fetch(url));
+        let body;
+        try {
+          body = await res.json();
+        } catch (e) {
+          // A malformed body is an error, never an empty result.
+          throw new Error(res.ok ? "the reader sent an unreadable response" : "HTTP " + res.status);
+        }
+        if (!res.ok) throw new Error((body && body.error) || "HTTP " + res.status);
+        return body;
+      }
+
+      function renderBooks(books) {
+        const box = $("books");
+        box.textContent = "";
+        if (!books.length) {
+          box.innerHTML = '<p class="empty">No books found.</p>';
+          return;
+        }
+        books.forEach((book, index) => {
+          const row = document.createElement("div");
+          row.className = "book" + (book.epub ? "" : " unsupported");
+
+          if (book.cover) {
+            const img = document.createElement("img");
+            img.loading = "lazy";
+            img.referrerPolicy = "no-referrer";
+            img.alt = "";
+            img.src = book.cover;
+            row.appendChild(img);
+          } else {
+            const ph = document.createElement("div");
+            ph.className = "nocover";
+            row.appendChild(ph);
+          }
+
+          const info = document.createElement("div");
+          info.className = "book-info";
+          const title = document.createElement("div");
+          title.className = "book-title";
+          title.textContent = book.title;
+          if (book.onCard) {
+            const badge = document.createElement("span");
+            badge.className = book.linked ? "badge" : "badge muted";
+            badge.textContent = book.linked ? "On device" : "On device, not linked";
+            title.appendChild(badge);
+          }
+          const meta = document.createElement("div");
+          meta.className = "book-meta";
+          meta.textContent = [book.authors, (book.format || "EPUB").toUpperCase(), formatSize(book.size)]
+            .filter(Boolean)
+            .join(" · ");
+          info.appendChild(title);
+          info.appendChild(meta);
+          row.appendChild(info);
+
+          row.appendChild(bookActions(book, index, row));
+          box.appendChild(row);
+        });
+        // setBusy re-enables every control; keep non-EPUB rows locked.
+        lockUnsupported();
+      }
+
+      function actionButton(label, secondary, onClick) {
+        const btn = document.createElement("button");
+        btn.className = secondary ? "btn btn-secondary" : "btn";
+        btn.type = "button";
+        btn.textContent = label;
+        btn.addEventListener("click", onClick);
+        return btn;
+      }
+
+      // Download is always offered for EPUBs. Next to it: Unlink for a linked
+      // copy, a one-click Link for a file already under the download name, or
+      // a file picker for a book the reader got from somewhere else.
+      function bookActions(book, index, row) {
+        const actions = document.createElement("div");
+        actions.className = "book-actions";
+        if (!book.epub) {
+          const btn = actionButton("Not EPUB", false, () => {});
+          btn.dataset.locked = "1";
+          actions.appendChild(btn);
+          return actions;
+        }
+        const job = downloads.find(book.id);
+        if (job && job.state === "active") {
+          const btn = actionButton("Downloading…", false, () => {});
+          btn.dataset.locked = "1";
+          actions.appendChild(btn);
+        } else if (job && job.state === "queued") {
+          actions.appendChild(actionButton("Queued ×", false, () => downloads.remove(book.id)));
+        } else {
+          actions.appendChild(actionButton(book.onCard ? "Download again" : "Download", false, () => download(index)));
+        }
+        if (book.onCard && book.linked) {
+          actions.appendChild(actionButton("Unlink", true, () => unlinkBook(book)));
+        } else if (book.onCard) {
+          actions.appendChild(actionButton("Link", true, () => linkBook(book, book.path)));
+        } else {
+          actions.appendChild(actionButton("Link file…", true, () => togglePicker(book, row)));
+        }
+        return actions;
+      }
+
+      function basename(path) {
+        return path.slice(path.lastIndexOf("/") + 1);
+      }
+
+      function words(text) {
+        return (text || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+          .split(/[^a-z0-9]+/).filter((w) => w.length > 1);
+      }
+
+      // How many of the book's title and author words appear in the file name.
+      function matchScore(bookWords, path) {
+        const name = new Set(words(basename(path)));
+        let score = 0;
+        bookWords.forEach((w) => {
+          if (name.has(w)) score++;
+        });
+        return score;
+      }
+
+      async function loadLocalBooks() {
+        if (!state.localBooks) state.localBooks = await getJson("/api/bookfusion/local-books");
+        return state.localBooks;
+      }
+
+      async function togglePicker(book, row) {
+        const existing = row.nextElementSibling;
+        if (existing && existing.classList.contains("picker")) {
+          existing.remove();
+          return;
+        }
+        document.querySelectorAll(".picker").forEach((el) => el.remove());
+
+        const picker = document.createElement("div");
+        picker.className = "picker";
+        picker.innerHTML = '<p class="empty">Loading books on the reader...</p>';
+        row.after(picker);
+
+        let local;
+        try {
+          local = await loadLocalBooks();
+        } catch (e) {
+          picker.innerHTML = "";
+          showStatus("err", "Could not list books on the reader: " + e.message);
+          return;
+        }
+        picker.textContent = "";
+        const hint = document.createElement("p");
+        hint.className = "picker-hint";
+        hint.textContent = "Pick the file on the reader that is this book. Its reading position will then sync " +
+          "with BookFusion.";
+        const filter = document.createElement("input");
+        filter.type = "search";
+        filter.placeholder = "Filter files";
+        const list = document.createElement("div");
+        list.className = "picker-list";
+        picker.append(hint, filter, list);
+
+        const bookWords = words(book.title + " " + book.authors);
+        const ranked = local
+          .map((entry) => ({ entry, score: matchScore(bookWords, entry.path) }))
+          .sort((a, b) => b.score - a.score || basename(a.entry.path).localeCompare(basename(b.entry.path)));
+
+        const MAX_SHOWN = 50;
+        const draw = () => {
+          const needle = filter.value.trim().toLowerCase();
+          list.textContent = "";
+          const shown = ranked.filter(({ entry }) => !needle || entry.path.toLowerCase().includes(needle));
+          if (!shown.length) {
+            list.innerHTML = '<p class="empty">No EPUB files match.</p>';
+            return;
+          }
+          shown.slice(0, MAX_SHOWN).forEach(({ entry }) => {
+            const item = document.createElement("div");
+            item.className = "picker-item";
+            const label = document.createElement("div");
+            label.className = "picker-path";
+            label.textContent = basename(entry.path) + " ";
+            const where = document.createElement("small");
+            where.textContent = entry.path + (entry.linked ? " · already linked" : "");
+            label.appendChild(document.createElement("br"));
+            label.appendChild(where);
+            item.appendChild(label);
+            item.appendChild(actionButton("Link", false, () => linkBook(book, entry.path, entry)));
+            list.appendChild(item);
+          });
+          if (shown.length > MAX_SHOWN) {
+            const more = document.createElement("p");
+            more.className = "picker-hint";
+            more.textContent = (shown.length - MAX_SHOWN) + " more; type to filter.";
+            list.appendChild(more);
+          }
+        };
+        filter.addEventListener("input", draw);
+        draw();
+        filter.focus();
+      }
+
+      async function postForm(url, fields) {
+        const res = await withReader(() => fetch(url, { method: "POST", body: new URLSearchParams(fields) }));
+        let body = {};
+        try {
+          body = await res.json();
+        } catch (e) {}
+        if (!body.ok) throw new Error(body.error || "HTTP " + res.status);
+        return body;
+      }
+
+      async function linkBook(book, path, localEntry) {
+        if (state.busy) return;
+        if (localEntry && localEntry.linked &&
+            !confirm(basename(path) + " is already linked to a BookFusion book. Link it to “" + book.title +
+              "” instead?")) {
+          return;
+        }
+        setBusy(true);
+        try {
+          await postForm("/api/bookfusion/link", { path, id: String(book.id), cover: book.cover || "" });
+          book.onCard = true;
+          book.linked = true;
+          book.path = path;
+          if (localEntry) localEntry.linked = true;
+          saveLibraryCache();
+          renderBooks(state.books);
+          showStatus("ok", "Linked " + path + " to “" + book.title + "”. Its reading position syncs with " +
+            "BookFusion from the next time you open it.");
+        } catch (e) {
+          showStatus("err", "Could not link: " + e.message);
+        }
+        setBusy(false);
+        lockUnsupported();
+      }
+
+      async function unlinkBook(book) {
+        if (state.busy || !book.path) return;
+        if (!confirm("Stop syncing " + basename(book.path) + " with BookFusion? The file stays on the reader.")) {
+          return;
+        }
+        setBusy(true);
+        try {
+          await postForm("/api/bookfusion/unlink", { path: book.path });
+          book.linked = false;
+          if (state.localBooks) {
+            const entry = state.localBooks.find((e) => e.path === book.path);
+            if (entry) entry.linked = false;
+          }
+          saveLibraryCache();
+          renderBooks(state.books);
+          showStatus("ok", "Unlinked " + book.path + ".");
+        } catch (e) {
+          showStatus("err", "Could not unlink: " + e.message);
+        }
+        setBusy(false);
+        lockUnsupported();
+      }
+
+      function lockUnsupported() {
+        document.querySelectorAll("button[data-locked]").forEach((el) => {
+          el.disabled = true;
+        });
+      }
+
+      function listUrl() {
+        const params = new URLSearchParams({ page: state.page });
+        if (state.query) params.set("q", state.query);
+        else if (state.source.startsWith("list:")) params.set("list", state.source.slice(5));
+        else if (state.source.startsWith("shelf:")) params.set("shelf", state.source.slice(6));
+        return "/api/bookfusion/books?" + params.toString();
+      }
+
+      function loadPage() {
+        if (state.browse === "author" && !state.query) return loadAuthorPage();
+        return loadServerPage();
+      }
+
+      async function loadServerPage() {
+        state.loading = true;
+        setBusy(true);
+        showStatus("", "");
+        $("books").innerHTML = downloads.busy
+          ? '<p class="empty">Loading after the current download finishes...</p>'
+          : '<p class="empty">Loading...</p>';
+        try {
+          const data = await getJson(listUrl());
+          state.loading = false;
+          state.books = data.books || [];
+          renderBooks(state.books);
+          setBusy(false);
+          updatePager(!!data.hasMore);
+          lockUnsupported();
+        } catch (e) {
+          state.loading = false;
+          $("books").innerHTML = "";
+          setBusy(false);
+          updatePager(false);
+          showStatus("err", "Could not load books: " + e.message);
+        }
+      }
+
+      async function loadShelves() {
+        try {
+          state.shelves = await getJson("/api/bookfusion/shelves");
+        } catch (e) {
+          // Shelves are optional; the lists still work without them.
+          state.shelves = [];
+        }
+      }
+
+      function addOption(parent, value, text) {
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = text;
+        parent.appendChild(opt);
+      }
+
+      // The "Show" dropdown: lists + shelves, or one entry per author.
+      function fillSource() {
+        const select = $("source");
+        select.textContent = "";
+        if (state.browse === "author") {
+          addOption(select, ALL_AUTHORS, "All authors (A–Z)");
+          (state.authors || []).forEach(([name, books]) => addOption(select, "author:" + name,
+            name + " (" + books.length + ")"));
+        } else {
+          LISTS.forEach(([value, text]) => addOption(select, value, text));
+          if (state.shelves.length) {
+            const group = document.createElement("optgroup");
+            group.label = "Shelves";
+            state.shelves.forEach((shelf) => addOption(group, "shelf:" + shelf.id, shelf.name));
+            select.appendChild(group);
+          }
+        }
+        if (![...select.options].some((o) => o.value === state.source)) state.source = select.options[0].value;
+        select.value = state.source;
+      }
+
+      // ---- Browse by author ----
+      // BookFusion has no author list or author filter, so the whole library is
+      // read once, page by page, and grouped here.
+      function authorNames(book) {
+        const names = (book.authors || "").split(", ").map((n) => n.trim()).filter(Boolean);
+        return names.length ? names : ["Unknown author"];
+      }
+
+      function buildAuthorIndex() {
+        const byAuthor = new Map();
+        state.allBooks.forEach((book) => {
+          authorNames(book).forEach((name) => {
+            if (!byAuthor.has(name)) byAuthor.set(name, []);
+            byAuthor.get(name).push(book);
+          });
+        });
+        const byTitle = (a, b) => a.title.localeCompare(b.title);
+        byAuthor.forEach((books) => books.sort(byTitle));
+        state.authors = [...byAuthor.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      }
+
+      function saveLibraryCache() {
+        if (!state.allBooks) return;
+        try {
+          sessionStorage.setItem(LIBRARY_CACHE_KEY, JSON.stringify(state.allBooks));
+        } catch (e) {}
+      }
+
+      function loadLibraryCache() {
+        try {
+          const cached = JSON.parse(sessionStorage.getItem(LIBRARY_CACHE_KEY) || "null");
+          if (Array.isArray(cached)) return cached;
+        } catch (e) {}
+        return null;
+      }
+
+      // Resolves false when the scan was abandoned (browse mode switched back).
+      async function scanLibrary() {
+        if (state.allBooks) return true;
+        const cached = loadLibraryCache();
+        if (cached) {
+          state.allBooks = cached;
+          buildAuthorIndex();
+          return true;
+        }
+        const token = ++state.scanToken;
+        const books = [];
+        const seen = new Set();
+        const MAX_PAGES = 500;  // A runaway guard, far past any real library.
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          showStatus("busy", "Reading your BookFusion library to group it by author… " + books.length +
+            " books so far (page " + page + ")");
+          const data = await getJson("/api/bookfusion/books?page=" + page);
+          if (token !== state.scanToken) return false;
+          (data.books || []).forEach((b) => {
+            if (!seen.has(b.id)) {
+              seen.add(b.id);
+              books.push(b);
+            }
+          });
+          if (!data.hasMore || !(data.books || []).length) break;
+        }
+        state.allBooks = books;
+        saveLibraryCache();
+        buildAuthorIndex();
+        return true;
+      }
+
+      async function loadAuthorPage() {
+        state.loading = true;
+        setBusy(true);
+        $("books").innerHTML = '<p class="empty">Loading...</p>';
+        try {
+          const firstScan = !state.allBooks;
+          if (!(await scanLibrary())) return;
+          if (firstScan) fillSource();
+          showStatus("", "");
+          let books;
+          if (state.source === ALL_AUTHORS) {
+            // Each book once, ordered by its first author.
+            books = state.allBooks.slice().sort((a, b) =>
+              authorNames(a)[0].localeCompare(authorNames(b)[0]) || a.title.localeCompare(b.title));
+          } else {
+            const entry = state.authors.find(([name]) => "author:" + name === state.source);
+            books = entry ? entry[1] : [];
+          }
+          const start = (state.page - 1) * AUTHOR_PAGE_SIZE;
+          state.books = books.slice(start, start + AUTHOR_PAGE_SIZE);
+          state.loading = false;
+          renderBooks(state.books);
+          setBusy(false);
+          updatePager(start + AUTHOR_PAGE_SIZE < books.length);
+          lockUnsupported();
+        } catch (e) {
+          $("books").innerHTML = "";
+          setBusy(false);
+          updatePager(false);
+          showStatus("err", "Could not read the library: " + e.message);
+        } finally {
+          state.loading = false;
+        }
+      }
+
+      function setBrowse(mode) {
+        state.browse = mode;
+        try {
+          localStorage.setItem("bfBrowse", mode);
+        } catch (e) {}
+        $("browse").value = mode;
+        $("rescan").style.display = mode === "author" ? "" : "none";
+        state.scanToken++;  // Abandon a scan in progress when leaving Author.
+        state.source = mode === "author" ? ALL_AUTHORS : "all";
+        state.query = "";
+        $("query").value = "";
+        state.page = 1;
+        fillSource();
+        loadPage();
+      }
+
+      // ---- Save-as layout (a device setting, shared with the reader's own browser) ----
+      async function loadLayoutSetting() {
+        try {
+          const settings = await getJson("/api/settings");
+          const setting = settings.find((s) => s.key === "bookfusionFileLayout");
+          if (!setting) return;
+          const select = $("layout");
+          setting.options.forEach((text, i) => addOption(select, String(i), text));
+          select.value = String(setting.value);
+          select.dataset.saved = select.value;
+          $("layoutRow").style.display = "";
+          $("layoutHint").style.display = "";
+        } catch (e) {
+          // The row stays hidden; downloads use whatever the reader has set.
+        }
+      }
+
+      async function saveLayoutSetting() {
+        const select = $("layout");
+        const value = select.value;
+        $("layoutSaved").textContent = "Saving…";
+        try {
+          const res = await withReader(() => fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ bookfusionFileLayout: Number(value) }),
+          }));
+          if (!res.ok) throw new Error((await res.text()) || "HTTP " + res.status);
+          select.dataset.saved = value;
+          $("layoutSaved").textContent = "Saved";
+          // On-card paths depend on the layout.
+          if (state.browse !== "author") loadPage();
+        } catch (e) {
+          select.value = select.dataset.saved || value;
+          $("layoutSaved").textContent = "Could not save: " + e.message;
+        }
+      }
+
+      // ---- Download queue ----
+      const BOOK_FIELDS = ["id", "title", "authors", "format", "size", "cover", "categories", "bookshelves", "lists"];
+      const STAGES = {
+        cover: "Fetching cover…",
+        downloading: "Downloading…",
+        retrying: "Retrying…",
+        saving: "Saving…",
+      };
+
+      const downloads = new TransferQueue($("queueList"), {
+        onChange: (job) => {
+          const visible = downloads.jobs.length > 0;
+          $("queueCard").style.display = visible ? "block" : "none";
+          if (!state.loading && state.books.some((b) => b.id === job.key)) {
+            renderBooks(state.books);
+            if (state.busy) setBusy(true);
+          }
+        },
+      });
+      $("clearQueue").addEventListener("click", () => downloads.clearFinished());
+      window.addEventListener("beforeunload", (e) => {
+        if (downloads.pending > 0) {
+          e.preventDefault();
+          e.returnValue = "";
+        }
+      });
+
+      // Mark every copy of the book we hold (current page, local file list) as on the card.
+      function markDownloaded(id, path) {
+        state.books.filter((b) => b.id === id).forEach((b) => {
+          b.onCard = true;
+          b.linked = true;
+          b.path = path;
+        });
+        if (state.allBooks) {
+          state.allBooks.filter((b) => b.id === id).forEach((b) => {
+            b.onCard = true;
+            b.linked = true;
+            b.path = path;
+          });
+          saveLibraryCache();
+        }
+        if (state.localBooks && !state.localBooks.some((e) => e.path === path)) {
+          state.localBooks.push({ path, linked: true });
+        }
+      }
+
+      async function downloadJob(book, ctl) {
+        ctl.step("Starting…");
+        const form = new URLSearchParams();
+        BOOK_FIELDS.forEach((key) => {
+          form.set(key, book[key] === undefined || book[key] === null ? "" : String(book[key]));
+        });
+        const res = await fetch("/api/bookfusion/download", { method: "POST", body: form });
+        if (!(res.headers.get("Content-Type") || "").includes("ndjson")) {
+          // Refused before the transfer started: a plain JSON error.
+          let body = {};
+          try {
+            body = await res.json();
+          } catch (e) {}
+          throw new Error(body.error || "HTTP " + res.status);
+        }
+        let result = null;
+        await tqReadNdjson(res, (msg) => {
+          if (msg.stage) {
+            ctl.step(msg.stage === "downloading" && msg.resuming ? "Resuming…" : STAGES[msg.stage] || msg.stage);
+          } else if (msg.p !== undefined) {
+            ctl.progress(msg.p, msg.t || book.size);
+          } else if (msg.ok !== undefined) {
+            result = msg;
+          }
+        });
+        if (!result) throw new Error("the reader stopped responding before it finished");
+        if (!result.ok) throw new Error(result.error || "download failed");
+        markDownloaded(book.id, result.path);
+        return "Saved to " + result.path + (result.cover ? "" : " (no cover)");
+      }
+
+      function download(index) {
+        const book = state.books[index];
+        if (!book) return;
+        if (book.size >= LARGE_BOOK_BYTES &&
+            !confirm(book.title + " is " + formatSize(book.size) +
+              ". Large, image-heavy books can be slow on the reader. Download anyway?")) {
+          return;
+        }
+        // A snapshot: the job outlives the page of results it was queued from.
+        const snapshot = {};
+        BOOK_FIELDS.forEach((key) => {
+          snapshot[key] = book[key];
+        });
+        downloads.add({ key: book.id, label: book.title, run: (ctl) => downloadJob(snapshot, ctl) });
+      }
+
+      async function init() {
+        let status;
+        try {
+          status = await getJson("/api/bookfusion/status");
+        } catch (e) {
+          status = { linked: false, online: false };
+        }
+        const notice = $("notice");
+        if (!status.linked) {
+          notice.innerHTML = "<h2>BookFusion</h2><p>No BookFusion account is linked. On the reader, open " +
+            "<b>Settings → BookFusion</b> to link one, then reload this page.</p>";
+          notice.style.display = "block";
+          return;
+        }
+        if (!status.online) {
+          notice.innerHTML = "<h2>BookFusion</h2><p>The reader is in hotspot mode, so it can't reach " +
+            "BookFusion. Connect it to a Wi-Fi network with internet access to browse your library.</p>";
+          notice.style.display = "block";
+          return;
+        }
+        $("library").style.display = "block";
+        $("settingsCard").style.display = "block";
+        let browse = "lists";
+        try {
+          browse = localStorage.getItem("bfBrowse") === "author" ? "author" : "lists";
+        } catch (e) {}
+        await loadShelves();
+        await loadLayoutSetting();
+        setBrowse(browse);
+      }
+
+      $("browse").addEventListener("change", () => setBrowse($("browse").value));
+      $("layout").addEventListener("change", saveLayoutSetting);
+      $("rescan").addEventListener("click", () => {
+        if (state.busy) return;
+        state.allBooks = null;
+        state.authors = null;
+        try {
+          sessionStorage.removeItem(LIBRARY_CACHE_KEY);
+        } catch (e) {}
+        state.source = ALL_AUTHORS;
+        state.page = 1;
+        loadPage();
+      });
+
+      $("searchForm").addEventListener("submit", (e) => {
+        e.preventDefault();
+        state.query = $("query").value.trim();
+        state.page = 1;
+        loadPage();
+      });
+      $("source").addEventListener("change", () => {
+        state.source = $("source").value;
+        state.query = "";
+        $("query").value = "";
+        state.page = 1;
+        loadPage();
+      });
+      $("prev").addEventListener("click", () => {
+        if (state.page > 1) {
+          state.page--;
+          loadPage();
+        }
+      });
+      $("next").addEventListener("click", () => {
+        state.page++;
+        loadPage();
+      });
+
+      init();
+    </script>
+  </body>
+</html>

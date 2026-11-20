@@ -147,38 +147,9 @@
     .optimize-action-btn:hover {
       background-color: #7d3c98;
     }
-    /* Optimize-on-the-card modal */
-    .optimize-list {
-      max-height: 260px;
-      overflow: auto;
-      margin: 4px 0 12px;
-    }
-    .optimize-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 7px 0;
-      border-top: 1px solid var(--border-color);
-      font-size: 0.9rem;
-    }
-    .optimize-name {
-      min-width: 0;
-      overflow-wrap: anywhere;
-    }
-    .optimize-state {
-      flex: none;
-      max-width: 55%;
-      text-align: right;
-      opacity: 0.8;
-    }
-    .optimize-state.done {
-      color: #27ae60;
-      opacity: 1;
-    }
-    .optimize-state.failed {
-      color: #e74c3c;
-      opacity: 1;
-    }
+    /* Optimize-on-the-card modal: rows come from the shared TransferQueue */
+<!--#include file="shared/TransferQueue.css.inc" -->
+    .optimize-list { margin: 4px 0 12px; }
     /* Upload modal */
     .modal-overlay {
       display: none;
@@ -1519,6 +1490,7 @@
   <a href="/files" class="active">File Manager</a>
   <a href="/fonts">Fonts</a>
   <a href="/sleep-themes">Sleep Themes</a>
+  <a href="/bookfusion">BookFusion</a>
   <a href="/settings">Settings</a>
   <a href="/plugins">Plugins</a>
 </div>
@@ -3029,14 +3001,16 @@
     return items;
   }
 
+<!--#include file="shared/TransferQueue.js.inc" -->
+
   // ---- Optimize books already on the card ------------------------------------------------------
   //
   // Each selected EPUB is downloaded, run through convertEpubFile() with the upload dialog's
   // options, and sent to /api/book/replace, which swaps it in and keeps the original as .bak.
   // keep=1 when the chapter list stayed as it was: the reading position still fits.
-  // One book at a time - the reader serves one connection at a time.
-  let optimizeItems = [];
-  let optimizeRunning = false;
+  // The books run through a TransferQueue (shared with the BookFusion page): one at a time, since
+  // the reader serves one connection at a time, each with a progress bar for every step.
+  let optimizeQueue = null;
   let optimizeFinished = false;  // the run is over: the start button reads Done and closes
   let optimizeChanged = false;
 
@@ -3045,28 +3019,21 @@
   }
 
   function openOptimizeSelectedModal() {
-    optimizeItems = optimizeCandidates(getSelectedItems());
-    if (optimizeItems.length === 0) {
+    const items = optimizeCandidates(getSelectedItems());
+    if (items.length === 0) {
       alert('Please select at least one EPUB to optimize.');
       return;
     }
     const list = document.getElementById('optimizeList');
-    list.replaceChildren(...optimizeItems.map((it, i) => {
-      const row = document.createElement('div');
-      row.className = 'optimize-row';
-      const name = document.createElement('span');
-      name.className = 'optimize-name';
-      name.textContent = it.name;
-      const state = document.createElement('span');
-      state.className = 'optimize-state';
-      state.id = 'optimizeState' + i;
-      state.textContent = 'Waiting';
-      row.append(name, state);
-      return row;
-    }));
+    list.replaceChildren();
+    optimizeQueue = new TransferQueue(list, { autoStart: false, onIdle: optimizeIdle });
+    items.forEach(it => {
+      const path = it.path.startsWith('/') ? it.path : '/' + it.path;
+      optimizeQueue.add({ key: path, label: it.name, run: (ctl) => optimizeOne(path, it.name, ctl) });
+    });
     const start = document.getElementById('optimizeStartBtn');
     start.disabled = false;
-    start.textContent = optimizeItems.length === 1 ? 'Optimize' : `Optimize ${optimizeItems.length} books`;
+    start.textContent = items.length === 1 ? 'Optimize' : `Optimize ${items.length} books`;
     const cancel = document.getElementById('optimizeCancelBtn');
     cancel.textContent = 'Cancel';
     cancel.hidden = false;
@@ -3076,65 +3043,57 @@
   }
 
   function closeOptimizeModal() {
-    if (optimizeRunning) {
+    if (optimizeQueue && optimizeQueue.busy) {
       operationCancelled = true;  // the current book stops at its next step
+      optimizeQueue.stop();
       return;
     }
     document.getElementById('optimizeModal').classList.remove('open');
     if (optimizeChanged) window.location.reload();
   }
 
-  async function optimizeSelected() {
+  function optimizeSelected() {
     if (optimizeFinished) return closeOptimizeModal();
-    if (optimizeRunning) return;
-    optimizeRunning = true;
+    if (!optimizeQueue || optimizeQueue.busy || optimizeQueue.pending === 0) return;
     operationCancelled = false;
     document.getElementById('optimizeStartBtn').disabled = true;
     document.getElementById('optimizeCancelBtn').textContent = 'Stop';
-    for (let i = 0; i < optimizeItems.length; i++) {
-      const it = optimizeItems[i];
-      const state = document.getElementById('optimizeState' + i);
-      if (operationCancelled) {
-        state.textContent = 'Not started';
-        continue;
-      }
-      const path = it.path.startsWith('/') ? it.path : '/' + it.path;
-      try {
-        state.textContent = 'Downloading…';
-        const got = await fetch('/download?path=' + encodeURIComponent(path));
-        if (!got.ok) throw new Error('could not download it (' + got.status + ')');
-        const original = new File([await got.blob()], it.name, { type: 'application/epub+zip' });
-        const report = {};
-        const optimized = await convertEpubFile(original, (percent) => {
-          state.textContent = `Optimizing ${Math.round(percent)}%`;
-        }, report);
-        if (operationCancelled) throw new Error('Cancelled by user');
-        state.textContent = 'Saving…';
-        const formData = new FormData();
-        formData.append('file', optimized, it.name);
-        const put = await fetch('/api/book/replace?path=' + encodeURIComponent(path) +
-          '&keep=' + (report.spineChanged ? '0' : '1'), { method: 'POST', body: formData });
-        if (!put.ok) {
-          let message = 'the reader answered ' + put.status;
-          try { message = (await put.json()).error || message; } catch (e) { /* not JSON */ }
-          throw new Error(message);
-        }
-        optimizeChanged = true;
-        state.textContent = `${formatBytes(original.size)} → ${formatBytes(optimized.size)}` +
-          (report.splitChapters ? `, ${report.splitChapters} chapter${report.splitChapters === 1 ? '' : 's'} split, reading position reset` : '');
-        state.classList.add('done');
-      } catch (e) {
-        state.textContent = e.message === 'Cancelled by user' ? 'Stopped' : 'Failed: ' + e.message;
-        state.classList.add('failed');
-      }
-    }
-    optimizeRunning = false;
+    optimizeQueue.start();
+  }
+
+  function optimizeIdle() {
     optimizeFinished = true;
     operationCancelled = false;
     const done = document.getElementById('optimizeStartBtn');
     done.textContent = 'Done';
     done.disabled = false;
     document.getElementById('optimizeCancelBtn').hidden = true;
+  }
+
+  async function optimizeOne(path, name, ctl) {
+    ctl.step('Downloading…');
+    const blob = await tqFetchBlob('/download?path=' + encodeURIComponent(path), (d, t) => ctl.progress(d, t));
+    if (ctl.cancelled) throw new Error('Cancelled by user');
+    const original = new File([blob], name, { type: 'application/epub+zip' });
+
+    ctl.step('Optimizing…');
+    const report = {};
+    const optimized = await convertEpubFile(original, (percent) => ctl.progress(percent, 100), report);
+    if (ctl.cancelled) throw new Error('Cancelled by user');
+
+    ctl.step('Saving…');
+    const formData = new FormData();
+    formData.append('file', optimized, name);
+    const put = await tqUpload('/api/book/replace?path=' + encodeURIComponent(path) +
+      '&keep=' + (report.spineChanged ? '0' : '1'), formData, (d, t) => ctl.progress(d, t));
+    if (put.status < 200 || put.status >= 300) {
+      let message = 'the reader answered ' + put.status;
+      try { message = JSON.parse(put.text).error || message; } catch (e) { /* not JSON */ }
+      throw new Error(message);
+    }
+    optimizeChanged = true;
+    return `${formatBytes(original.size)} → ${formatBytes(optimized.size)}` +
+      (report.splitChapters ? `, ${report.splitChapters} chapter${report.splitChapters === 1 ? '' : 's'} split, reading position reset` : '');
   }
 
   // Open delete modal for currently selected checkboxes

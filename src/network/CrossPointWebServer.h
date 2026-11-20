@@ -122,6 +122,12 @@ class CrossPointWebServer {
   // whole POST body for a JSON request). Called after every handleClient() and
   // by handlers that want that memory back before an outbound TLS call.
   void releaseRequestArguments() const;
+  // An outbound transfer blocks the serving task for its whole duration, so
+  // the WebSocket server and discovery UDP cannot answer anyone until it
+  // finishes; their buffers are worth more as TLS headroom. Used by plugin
+  // fetches and the BookFusion download.
+  void suspendTransferServices();
+  void resumeTransferServices();
   void handleUpload(UploadState& state) const;
   void handleUploadPost(UploadState& state) const;
   // POST /api/book/replace?path=<book.epub>&keep=0|1 (multipart: the new book). The
@@ -158,6 +164,17 @@ class CrossPointWebServer {
   void handleFontUpload();
   void handleFontUploadData();
   void handleFontDelete();
+
+  // BookFusion library (CrossPointWebServerBookFusion.cpp). Uses the account
+  // already linked on the device; the web UI has no login of its own.
+  void handleBookFusionPage() const;        // GET  /bookfusion
+  void handleBookFusionStatus() const;      // GET  /api/bookfusion/status
+  void handleBookFusionShelves();           // GET  /api/bookfusion/shelves
+  void handleBookFusionBooks();             // GET  /api/bookfusion/books?page&list&shelf&q
+  void handleBookFusionDownload();          // POST /api/bookfusion/download (form: the book's fields)
+  void handleBookFusionLocalBooks() const;  // GET  /api/bookfusion/local-books -> EPUBs on the card
+  void handleBookFusionLink() const;        // POST /api/bookfusion/link   (form: path, id, cover)
+  void handleBookFusionUnlink() const;      // POST /api/bookfusion/unlink (form: path)
 
   // Sleep themes (CrossPointWebServerSleepThemes.cpp)
   void handleSleepThemesPage() const;  // GET /sleep-themes
@@ -222,11 +239,6 @@ class CrossPointWebServer {
   void handlePluginJobComplete();  // POST /api/plugin-jobs/complete -> executor posts the outcome
   void handlePluginJobStatus();    // GET  /api/plugin-jobs/status   -> caller polls
 
-  // An outbound transfer blocks the serving task for its whole duration, so
-  // the WebSocket server and discovery UDP cannot answer anyone until it
-  // finishes; their buffers are worth more as TLS headroom.
-  void suspendTransferServices();
-  void resumeTransferServices();
 #endif
 
   // Font upload state

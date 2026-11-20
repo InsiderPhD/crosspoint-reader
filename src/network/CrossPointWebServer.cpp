@@ -283,6 +283,16 @@ void CrossPointWebServer::begin() {
   server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
   server->on("/api/wifi/delete", HTTP_POST, [this] { handleDeleteWifiNetwork(); });
 
+  // BookFusion library (CrossPointWebServerBookFusion.cpp)
+  server->on("/bookfusion", HTTP_GET, [this] { handleBookFusionPage(); });
+  server->on("/api/bookfusion/status", HTTP_GET, [this] { handleBookFusionStatus(); });
+  server->on("/api/bookfusion/shelves", HTTP_GET, [this] { handleBookFusionShelves(); });
+  server->on("/api/bookfusion/books", HTTP_GET, [this] { handleBookFusionBooks(); });
+  server->on("/api/bookfusion/download", HTTP_POST, [this] { handleBookFusionDownload(); });
+  server->on("/api/bookfusion/local-books", HTTP_GET, [this] { handleBookFusionLocalBooks(); });
+  server->on("/api/bookfusion/link", HTTP_POST, [this] { handleBookFusionLink(); });
+  server->on("/api/bookfusion/unlink", HTTP_POST, [this] { handleBookFusionUnlink(); });
+
   // Sleep themes (CrossPointWebServerSleepThemes.cpp)
   server->on("/sleep-themes", HTTP_GET, [this] { handleSleepThemesPage(); });
   server->on("/api/sleep-theme/vars", HTTP_GET, [this] { handleSleepThemeVars(); });
@@ -351,7 +361,6 @@ void CrossPointWebServer::releaseRequestArguments() const {
   if (server) static_cast<CrossPointHttpServer*>(server.get())->releaseRequestArguments();
 }
 
-#if CROSSPOINT_SD_PLUGINS
 void CrossPointWebServer::suspendTransferServices() {
   // Leave the WebSocket server alone mid-upload; killing it would abort the
   // transfer. The fetch just stalls that upload until it completes.
@@ -380,7 +389,6 @@ void CrossPointWebServer::resumeTransferServices() {
   LOG_DBG("WEB", "Transfer services resumed, heap %u, max block %u", (unsigned)ESP.getFreeHeap(),
           (unsigned)ESP.getMaxAllocHeap());
 }
-#endif
 
 void CrossPointWebServer::abortWsUpload(const char* tag) {
   // Explicit close() required: file-scope global persists beyond function scope

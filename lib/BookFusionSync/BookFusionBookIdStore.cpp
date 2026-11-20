@@ -151,6 +151,44 @@ bool BookFusionBookIdStore::saveBookId(const char* epubPath, uint32_t bookId) {
   return ok;
 }
 
+bool BookFusionBookIdStore::link(const char* epubPath, const uint32_t bookId, const char* coverUrl) {
+  if (bookId == 0) {
+    LOG_ERR("BFS", "Refusing to link book_id=0 to %s", epubPath);
+    return false;
+  }
+
+  char sidecarPath[64];
+  buildSidecarPath(epubPath, sidecarPath, sizeof(sidecarPath));
+  Storage.mkdir("/.crosspoint");
+
+  JsonDocument doc;  // fresh: nothing carried over from a previous link
+  doc["book_id"] = bookId;
+  if (coverUrl != nullptr && coverUrl[0] != '\0') doc["cover_url"] = coverUrl;
+  String json;
+  serializeJson(doc, json);
+  if (!Storage.writeFile(sidecarPath, json)) {
+    LOG_ERR("BFS", "Failed to write link sidecar: %s", sidecarPath);
+    return false;
+  }
+  if (!saveMovedPath(bookId, epubPath)) {
+    LOG_ERR("BFS", "Failed to record linked book_id=%lu", static_cast<unsigned long>(bookId));
+  }
+  LOG_INF("BFS", "Linked %s to book_id=%lu", epubPath, static_cast<unsigned long>(bookId));
+  return true;
+}
+
+bool BookFusionBookIdStore::unlink(const char* epubPath) {
+  char sidecarPath[64];
+  buildSidecarPath(epubPath, sidecarPath, sizeof(sidecarPath));
+  if (!Storage.exists(sidecarPath)) return true;
+  if (!Storage.remove(sidecarPath)) {
+    LOG_ERR("BFS", "Failed to remove link sidecar: %s", sidecarPath);
+    return false;
+  }
+  LOG_INF("BFS", "Unlinked %s", epubPath);
+  return true;
+}
+
 bool BookFusionBookIdStore::loadCoverUrl(const char* epubPath, char* out, const size_t maxLen) {
   if (out == nullptr || maxLen == 0) return false;
   out[0] = '\0';

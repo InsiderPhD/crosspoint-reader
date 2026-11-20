@@ -5,8 +5,6 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
-#include <InflateReader.h>
-#include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <WiFi.h>
 
@@ -16,24 +14,18 @@
 #include <cstring>
 #include <string>
 
-#include "BookFusionBookIdStore.h"
-#include "BookFusionMetaStore.h"
 #include "BookFusionTokenStore.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
-#include "RecentBooksStore.h"
-#include "activities/home/LibraryActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/reader/TlsFramebufferBorrow.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "network/BookFusionCoverCache.h"
+#include "network/BookFusionDownload.h"
 #include "network/DownloadFailureLog.h"
 #include "network/HttpDownloader.h"
-#include "util/StringUtils.h"
 #include "util/TouchListNav.h"
-#include "util/ZipFileCheck.h"
 
 namespace {
 struct Category {
@@ -74,116 +66,6 @@ constexpr size_t MAX_SEARCH_QUERY_LEN = 63;
 // (BaseTheme::pageIndicatorRect): drawList reserves it out of the rect it is
 // handed and paints the count, so neither render() nor the page maths in
 // loop() reserves anything of its own for it.
-
-// The device only has an EPUB reader (the file browser allow-list is
-// EPUB/XTC/TXT/MD/BMP — see FileBrowserActivity.cpp). Other BookFusion
-// formats (PDF, audio, etc.) appear in the API responses but can't be opened
-// here, so we render them with a strike-through and refuse the download.
-bool bookFusionFormatIsEpub(const BookFusionBook& book) {
-  if (book.format[0] == '\0') return true;  // Default in the parser is "epub".
-  return strcasecmp(book.format, "epub") == 0;
-}
-
-// Image-heavy EPUBs strain the C3's ~380 KB RAM and slow / crash the renderer.
-// Above this size we ask the user to confirm before downloading. File size is a
-// good-enough proxy for "lots of pictures" — text-only EPUBs rarely approach it.
-constexpr uint32_t LARGE_BOOK_WARN_BYTES = 10u * 1024 * 1024;  // 10 MB
-
-bool bookFusionBookIsLarge(const BookFusionBook& book) { return book.downloadSize >= LARGE_BOOK_WARN_BYTES; }
-
-// Turn a download failure into the sentence the ERROR screen shows. The
-// downloader already knows the cause; this only picks the wording, so the
-// user can tell a dead Wi-Fi link from a full SD card from a rejected
-// pre-signed URL. `partialKept` adds the resume hint when a .part file
-// survived the failure.
-void describeDownloadFailure(HttpDownloader::DownloadError err, int httpStatus, bool partialKept, char* out,
-                             size_t outLen) {
-  char reason[128];
-  switch (err) {
-    case HttpDownloader::CONNECT_ERROR:
-      strlcpy(reason, tr(STR_DL_REASON_CONNECT), sizeof(reason));
-      break;
-    case HttpDownloader::HTTP_STATUS_ERROR:
-      if (httpStatus == 401 || httpStatus == 403 || httpStatus == 416) {
-        snprintf(reason, sizeof(reason), tr(STR_DL_REASON_REJECTED_FORMAT), httpStatus);
-      } else if (httpStatus == 404) {
-        strlcpy(reason, tr(STR_DL_REASON_NOT_FOUND), sizeof(reason));
-      } else if (httpStatus >= 500) {
-        snprintf(reason, sizeof(reason), tr(STR_DL_REASON_SERVER_FORMAT), httpStatus);
-      } else {
-        snprintf(reason, sizeof(reason), tr(STR_DL_REASON_HTTP_FORMAT), httpStatus);
-      }
-      break;
-    case HttpDownloader::NO_DATA_ERROR:
-      strlcpy(reason, tr(STR_DL_REASON_NO_DATA), sizeof(reason));
-      break;
-    case HttpDownloader::TRUNCATED_ERROR:
-      strlcpy(reason, tr(STR_DL_REASON_TRUNCATED), sizeof(reason));
-      break;
-    case HttpDownloader::FILE_ERROR:
-      strlcpy(reason, tr(STR_DL_REASON_SD), sizeof(reason));
-      break;
-    case HttpDownloader::ABORTED:
-    case HttpDownloader::HTTP_ERROR:
-    case HttpDownloader::OK:
-    default:
-      reason[0] = '\0';
-      break;
-  }
-  if (reason[0] == '\0') {
-    strlcpy(out, tr(STR_DOWNLOAD_FAILED), outLen);
-  } else {
-    snprintf(out, outLen, "%s: %s", tr(STR_DOWNLOAD_FAILED), reason);
-  }
-  if (partialKept) {
-    const size_t used = strlen(out);
-    if (used + 1 < outLen) {
-      snprintf(out + used, outLen - used, " %s", tr(STR_DL_RESUME_HINT));
-    }
-  }
-  const size_t used = strlen(out);
-  if (used + 1 < outLen) {
-    snprintf(out + used, outLen - used, " %s", tr(STR_DL_LOG_HINT));
-  }
-}
-
-std::string bookFusionExpectedFilename(const BookFusionBook& book) {
-  std::string baseName = book.title;
-  if (book.authors[0] != '\0') {
-    baseName += " - ";
-    baseName += book.authors;
-  }
-  char ext[8] = "epub";
-  if (book.format[0] != '\0') {
-    size_t i = 0;
-    for (; i < sizeof(ext) - 1 && book.format[i] != '\0'; i++) {
-      ext[i] = static_cast<char>(tolower(static_cast<unsigned char>(book.format[i])));
-    }
-    ext[i] = '\0';
-  }
-  return "/" + StringUtils::sanitizeFilename(baseName) + "." + ext;
-}
-
-// Where this book is on the card, or where a download will put it. A book that
-// was renamed or moved on the device is not at the expected name any more, so
-// it is found by its BookFusion id instead (BookFusionBookIdStore's moved-book
-// list); without that it would show as not downloaded and a second copy would
-// land beside the first. `present` reports whether the file exists.
-std::string bookFusionLocalFilename(const BookFusionBook& book, bool& present) {
-  std::string path = bookFusionExpectedFilename(book);
-  present = Storage.exists(path.c_str());
-  if (present) return path;
-
-  std::string moved;
-  // The id check guards against a stale entry: the moved copy deleted and some
-  // other file since given its name.
-  if (BookFusionBookIdStore::loadMovedPath(book.id, moved) && Storage.exists(moved.c_str()) &&
-      BookFusionBookIdStore::loadBookId(moved.c_str()) == book.id) {
-    present = true;
-    return moved;
-  }
-  return path;
-}
 
 }  // namespace
 
@@ -382,7 +264,7 @@ void BookFusionBrowserActivity::loadPage(int page) {
   }
 
   for (int i = 0; i < searchResult.count; ++i) {
-    bookFusionLocalFilename(searchResult.books[i], downloadedFlags[i]);
+    BookFusionDownload::localFilename(searchResult.books[i], downloadedFlags[i]);
   }
 
   {
@@ -400,7 +282,7 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   // browse list renders the non-EPUB rows with a strike-through; pressing
   // Confirm on one of them lands here. Bail with a clear message rather than
   // burning bandwidth on a file the device can't open.
-  if (!bookFusionFormatIsEpub(book)) {
+  if (!BookFusionDownload::formatIsEpub(book)) {
     {
       RenderLock lock(*this);
       state = ERROR;
@@ -425,12 +307,12 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   // serialise a full ~1 s e-ink refresh in front of every other step.
   requestUpdate(true);
 
-  // Destination: "/Title - Author.ext" (sanitized), built from the search result
+  // Destination: per the BookFusion save-as setting (sanitized), built from the search result
   // with no network call. Downloading a book again replaces the copy already on
   // the card wherever it has been renamed or moved to, rather than adding a
   // second one under the original name.
   bool alreadyOnCard = false;
-  const std::string filename = bookFusionLocalFilename(book, alreadyOnCard);
+  const std::string filename = BookFusionDownload::localFilename(book, alreadyOnCard);
   // The transfer lands in a .part scratch file and is renamed on success. The
   // library browsers filter by extension, so a half-downloaded book never
   // shows up as an openable (and broken) EPUB, and a later attempt — this
@@ -440,202 +322,77 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   const bool resumingPartial = Storage.exists(partPath.c_str());
   LOG_DBG("BFB", "Downloading book_id=%lu -> %s%s%s", static_cast<unsigned long>(book.id), filename.c_str(),
           alreadyOnCard ? " (replacing)" : "", resumingPartial ? " (resuming partial)" : "");
-  // Every download opens a section in the SD failure log; a success leaves
-  // only these few lines behind, a failure gets the transport report from
-  // HttpDownloader appended under it.
-  DownloadFailureLog::section("BookFusion download start");
-  DownloadFailureLog::line("book_id=%lu title=\"%s\" format=\"%s\" download_size=%lu file=%s resuming=%d",
-                           static_cast<unsigned long>(book.id), book.title, book.format,
-                           static_cast<unsigned long>(book.downloadSize), filename.c_str(), resumingPartial ? 1 : 0);
-  DownloadFailureLog::environment("start");
+  BookFusionDownload::logStart(book, filename, resumingPartial);
 
-  // Pre-fetch the cover before the pre-signed-URL round trip. `book.coverUrl`
-  // is already in memory from the search response. The cover is tiny (~30 KB)
-  // relative to the EPUB; landing it on disk first lets the Downloading card
-  // show it above the title. If the API didn't include a cover URL we fall
-  // back to extracting one from the EPUB after the download finishes (below).
-  Epub epub(filename, "/.crosspoint");
-  epub.clearCache();
-  epub.setupCacheDir();
-  const int coverHeight = UITheme::getInstance().getMetrics().homeCoverHeight;
-  bool apiCoverOk = false;
-  // The API cover is the ONLY cover this flow trusts (the EPUB-derived
-  // fallback is deliberately disabled below — BookFusion EPUBs carry broken
-  // covers), so try hard, in two phases that each lend the idle framebuffer to
-  // the subsystem that needs it: TlsFramebufferBorrow for the CDN fetch (an
-  // un-borrowed fetch OOMs silently — the original no-cover bug), then a
-  // JpegScratchLease for the JPEG→BMP conversions (the ~20KB decoder + MCU
-  // buffer OOM on this heap otherwise — observed on-device). The two leases
-  // never alias: the fetch's TLS client is destroyed before its borrow ends,
-  // and the convert phase re-registers the buffer fresh. Transient CDN
-  // failures get retried; the queued "Connecting…" frame just paints after a
-  // lease releases (downloadScreenPainted stays false → full paint).
-  constexpr int kMaxCoverAttempts = 3;
-  for (int attempt = 1; attempt <= kMaxCoverAttempts && !apiCoverOk; attempt++) {
-    bool fetched = false;
+  // Every borrow and lease in the pipeline overwrites the framebuffer, so the
+  // next paint after one must be a full one, not the dynamic-band shortcut.
+  BookFusionDownload::Hooks hooks;
+  hooks.ctx = this;
+  hooks.renderer = &renderer;
+  hooks.framebufferScrambled = [](void* ctx) {
+    static_cast<BookFusionBrowserActivity*>(ctx)->downloadScreenPainted = false;
+  };
+  hooks.transferStarting = [](void* ctx, const bool resuming) {
+    auto* self = static_cast<BookFusionBrowserActivity*>(ctx);
     {
-      TlsFramebufferBorrow borrow(renderer);
-      fetched = BookFusionCoverCache::download(book.coverUrl, epub, BookFusionCoverCache::kCoverFetchWidth,
-                                               BookFusionCoverCache::kCoverFetchHeight);
-    }
-    if (!fetched) {
-      LOG_ERR("BFB", "API cover fetch attempt %d/%d failed for book_id=%lu", attempt, kMaxCoverAttempts,
-              static_cast<unsigned long>(book.id));
-      continue;
-    }
-    {
-      RenderLock lock(*this);
-      JpegScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
-      apiCoverOk = BookFusionCoverCache::convert(epub, coverHeight, downloadedCoverPath, sizeof(downloadedCoverPath));
-      downloadScreenPainted = false;  // lease scrambled the framebuffer
-    }
-    if (!apiCoverOk) {
-      LOG_ERR("BFB", "API cover convert attempt %d/%d failed for book_id=%lu", attempt, kMaxCoverAttempts,
-              static_cast<unsigned long>(book.id));
-    }
-  }
-  if (apiCoverOk) {
-    LOG_DBG("BFB", "Pre-fetched BookFusion API cover before EPUB download");
-  }
-  DownloadFailureLog::line("cover: ok=%d url_present=%d", apiCoverOk ? 1 : 0, book.coverUrl[0] != '\0' ? 1 : 0);
-
-  // Retry the fetch a couple of times: BookFusion's pre-signed URLs sometimes
-  // drop mid-transfer and hand back a truncated EPUB (caught by the
-  // expectedSize cross-check in downloadToFile). The pre-signed URL is fetched
-  // fresh each attempt because it can expire between tries.
-  constexpr int kMaxDownloadAttempts = 3;
-  HttpDownloader::DownloadError dlResult = HttpDownloader::HTTP_ERROR;
-  for (int attempt = 1; attempt <= kMaxDownloadAttempts; attempt++) {
-    // Fetch the pre-signed download URL from BookFusion. Borrow the framebuffer
-    // for this TLS session (the guard's render lock briefly defers the parallel
-    // cover frame, which is harmless); its dtor closes the API connection — the
-    // download itself goes to a different host (CDN).
-    auto urlErr = BookFusionSyncClient::NETWORK_ERROR;
-    {
-      TlsFramebufferBorrow borrow(renderer);
-      urlErr = BookFusionSyncClient::getDownloadUrl(book.id, downloadUrl, sizeof(downloadUrl));
-    }
-    DownloadFailureLog::line("attempt %d/%d: getDownloadUrl -> %s(%d)", attempt, kMaxDownloadAttempts,
-                             BookFusionSyncClient::errorString(urlErr), static_cast<int>(urlErr));
-    if (urlErr != BookFusionSyncClient::OK) {
-      DownloadFailureLog::environment("after getDownloadUrl failure");
-      {
-        RenderLock lock(*this);
-        state = ERROR;
-        if (urlErr == BookFusionSyncClient::NOT_FOUND) {
-          strlcpy(errorMsg, tr(STR_BF_BOOK_UNAVAILABLE), sizeof(errorMsg));
-        } else {
-          strlcpy(errorMsg, BookFusionSyncClient::errorString(urlErr), sizeof(errorMsg));
-        }
-      }
-      requestUpdate();
-      return;
-    }
-
-    {
-      RenderLock lock(*this);
-      // The getDownloadUrl borrow above left TLS garbage in the framebuffer:
-      // the next paint must be a full one, not the dynamic-band shortcut.
-      downloadScreenPainted = false;
-      strlcpy(downloadStatus, Storage.exists(partPath.c_str()) ? tr(STR_DOWNLOAD_RESUMING) : tr(STR_DOWNLOAD_WAIT),
-              sizeof(downloadStatus));
+      RenderLock lock(*self);
+      strlcpy(self->downloadStatus, resuming ? tr(STR_DOWNLOAD_RESUMING) : tr(STR_DOWNLOAD_WAIT),
+              sizeof(self->downloadStatus));
     }
     // Paint the static info card (title / author / filesize+estimate) NOW and
     // wait for it: the e-ink holds it with no RAM, and the screen stays frozen
     // on it for the whole transfer. No progress bar — the framebuffer is lent
-    // to TLS below, so nothing can render until the download finishes. That
+    // to TLS for the transfer, so nothing can render until it finishes. That
     // trade buys the CDN session the framebuffer arena for its handshake and
     // ~17KB record buffers instead of squeezing them into the browser's ~25KB
     // largest block, which is what dropped transfers mid-book.
-    requestUpdateAndWait();
+    self->requestUpdateAndWait();
+  };
+  hooks.retrying = [](void* ctx) {
+    auto* self = static_cast<BookFusionBrowserActivity*>(ctx);
+    RenderLock lock(*self);
+    strlcpy(self->downloadStatus, tr(STR_DOWNLOAD_RETRYING), sizeof(self->downloadStatus));
+    self->requestUpdate(true);
+  };
 
-    {
-      TlsFramebufferBorrow borrow(renderer);
-      // Serial-only heartbeat so a long transfer is observable while the
-      // screen is frozen. (The downloader's own client is destroyed — and its
-      // arena memory freed — inside downloadToFile, before the borrow ends.)
-      size_t lastLoggedMB = 0;
-      dlResult = HttpDownloader::downloadToFile(
-          downloadUrl, partPath,
-          [&lastLoggedMB](const size_t downloaded, const size_t total) {
-            const size_t mb = downloaded >> 20;
-            if (mb > lastLoggedMB) {
-              lastLoggedMB = mb;
-              if (total > 0) {
-                LOG_DBG("BFB", "Download progress: %u/%u MB", (unsigned)mb, (unsigned)(total >> 20));
-              } else {
-                LOG_DBG("BFB", "Download progress: %u MB", (unsigned)mb);
-              }
-            }
-          },
-          true, static_cast<size_t>(book.downloadSize), /*cancelFlag=*/nullptr, /*username=*/"", /*password=*/"",
-          /*headers=*/{}, /*resumePartial=*/true);
-    }
+  // Pre-fetch the cover before the pre-signed-URL round trip. `book.coverUrl`
+  // is already in memory from the search response. The cover is tiny (~30 KB)
+  // relative to the EPUB; landing it on disk first lets the Downloading card
+  // show it above the title. Transient CDN failures get retried; the queued
+  // "Connecting…" frame just paints after a lease releases.
+  Epub epub(filename, "/.crosspoint");
+  epub.clearCache();
+  epub.setupCacheDir();
+  const int coverHeight = UITheme::getInstance().getMetrics().homeCoverHeight;
+  bool apiCoverOk = BookFusionDownload::prefetchCover(book, epub, coverHeight, downloadedCoverPath,
+                                                      sizeof(downloadedCoverPath), hooks);
 
-    {
-      // The borrow scrambled the framebuffer again — every downstream paint
-      // (retrying / Saving… / error / complete popup) must be a full repaint.
-      RenderLock lock(*this);
-      downloadScreenPainted = false;
-    }
-
-    DownloadFailureLog::line("attempt %d/%d: downloadToFile -> %d (http %d)", attempt, kMaxDownloadAttempts,
-                             static_cast<int>(dlResult), HttpDownloader::lastHttpStatus());
-    if (dlResult == HttpDownloader::OK) {
-      break;
-    }
-
-    LOG_ERR("BFB", "Download attempt %d/%d failed for book_id=%lu (err=%d, http=%d)", attempt, kMaxDownloadAttempts,
-            static_cast<unsigned long>(book.id), static_cast<int>(dlResult), HttpDownloader::lastHttpStatus());
-
-    // An SD write failure (card full or pulled) will not fix itself in the
-    // next ten seconds; retrying would just burn the same bandwidth twice more.
-    if (dlResult == HttpDownloader::FILE_ERROR) {
-      break;
-    }
-
-    // More attempts left — surface a brief "retrying" notice on the download
-    // screen and loop. A dropped transfer leaves its bytes in the .part file,
-    // so the next attempt (with a fresh pre-signed URL) continues from there.
-    if (attempt < kMaxDownloadAttempts) {
-      RenderLock lock(*this);
-      strlcpy(downloadStatus, tr(STR_DOWNLOAD_RETRYING), sizeof(downloadStatus));
-      requestUpdate(true);
-    }
-  }
-
-  // The transport says the body is complete; make sure the FILE is. An EPUB is
-  // a ZIP, and a ZIP without its end-of-central-directory record is truncated
-  // whatever the server claimed. A failed check deletes the .part: BookFusion's
-  // endpoint ignores Range requests, so there is nothing to resume into.
-  if (dlResult == HttpDownloader::OK && !ZipFileCheck::looksComplete(partPath.c_str())) {
-    LOG_ERR("BFB", "%s is not a complete ZIP; discarding", partPath.c_str());
-    DownloadFailureLog::line("zip check: %s has no end-of-central-directory record; discarded", partPath.c_str());
-    Storage.remove(partPath.c_str());
-    dlResult = HttpDownloader::TRUNCATED_ERROR;
-  }
-
-  if (dlResult == HttpDownloader::OK && !Storage.rename(partPath.c_str(), filename.c_str())) {
-    LOG_ERR("BFB", "Rename %s -> %s failed", partPath.c_str(), filename.c_str());
-    DownloadFailureLog::line("rename %s -> %s FAILED", partPath.c_str(), filename.c_str());
-    Storage.remove(partPath.c_str());
-    dlResult = HttpDownloader::FILE_ERROR;
-  }
-
-  if (dlResult != HttpDownloader::OK) {
+  const auto transfer =
+      BookFusionDownload::downloadEpub(book, partPath, filename, downloadUrl, sizeof(downloadUrl), hooks);
+  if (transfer.urlError != BookFusionSyncClient::OK) {
     {
       RenderLock lock(*this);
       state = ERROR;
-      describeDownloadFailure(dlResult, HttpDownloader::lastHttpStatus(), Storage.exists(partPath.c_str()), errorMsg,
-                              sizeof(errorMsg));
+      if (transfer.urlError == BookFusionSyncClient::NOT_FOUND) {
+        strlcpy(errorMsg, tr(STR_BF_BOOK_UNAVAILABLE), sizeof(errorMsg));
+      } else {
+        strlcpy(errorMsg, BookFusionSyncClient::errorString(transfer.urlError), sizeof(errorMsg));
+      }
     }
-    DownloadFailureLog::line("verdict: FAILED result=%d http=%d partialKept=%d shown=\"%s\"",
-                             static_cast<int>(dlResult), HttpDownloader::lastHttpStatus(),
-                             Storage.exists(partPath.c_str()) ? 1 : 0, errorMsg);
     requestUpdate();
     return;
   }
-  DownloadFailureLog::line("verdict: OK file=%s", filename.c_str());
+  if (transfer.dlResult != HttpDownloader::OK) {
+    {
+      RenderLock lock(*this);
+      state = ERROR;
+      BookFusionDownload::describeFailure(transfer.dlResult, HttpDownloader::lastHttpStatus(),
+                                          Storage.exists(partPath.c_str()), errorMsg, sizeof(errorMsg));
+    }
+    DownloadFailureLog::line("shown=\"%s\"", errorMsg);
+    requestUpdate();
+    return;
+  }
 
   // EPUB transfer done — the remaining work (metadata parse, sidecar write,
   // optional cover fallback, progress sync) is silent on the network and SD
@@ -644,127 +401,8 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   strlcpy(downloadStatus, tr(STR_SAVING), sizeof(downloadStatus));
   requestUpdate(true);
 
-  // Save sidecar so BookFusionSyncActivity can find the book_id for this file.
-  BookFusionBookIdStore::saveBookId(filename.c_str(), book.id);
-  // Lets "Regenerate cover" fetch it directly instead of searching the library.
-  BookFusionBookIdStore::saveCoverUrl(filename.c_str(), book.coverUrl);
-
-  // Build metadata. clearCache already ran above so any pre-existing cache for
-  // this filename is gone; epub.load(true) rebuilds it from the freshly-downloaded
-  // EPUB. The pre-fetched cover lives at /thumb_<H>.bmp inside the cache dir,
-  // which load() does not touch, so it survives.
-  LOG_DBG("BFB", "Loading EPUB metadata for recent-books entry");
-  bool loadSuccess = false;
-  {
-    // The metadata build streams the EPUB zip through a 32KB inflate
-    // dictionary — the single contiguous allocation this heap cannot serve
-    // once fragmented (observed on-device: largest block 32756, 12 bytes
-    // short). Lease the framebuffer as the dictionary, same as section builds
-    // do (Section.cpp). The "Saving…" frame is already on the panel and
-    // nothing renders while the lock is held.
-    RenderLock lock(*this);
-    InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
-    loadSuccess = epub.load(true, true);  // buildIfMissing=true, skipLoadingCss=true (we only need metadata)
-    downloadScreenPainted = false;        // lease scrambled the framebuffer
-  }
-  LOG_DBG("BFB", "EPUB load result: %s", loadSuccess ? "SUCCESS" : "FAILED");
-
-  if (loadSuccess) {
-    RECENT_BOOKS.addBook(filename, epub.getTitle(), epub.getAuthor(), epub.getThumbBmpPath());
-
-    // Persist BookFusion's organisational metadata (categories / bookshelves /
-    // lists) — these aren't embedded in the EPUB, so the Book Details view has
-    // no other source for them. Written after load() (which rebuilt the cache
-    // dir) so it survives; an empty meta just clears any stale sidecar.
-    BookFusionMeta bfMeta;
-    bfMeta.categories = book.categories;
-    bfMeta.bookshelves = book.bookshelves;
-    bfMeta.lists = book.lists;
-    BookFusionMetaStore::save(epub.getCachePath(), bfMeta);
-
-    // No EPUB-cover fallback: BookFusion-served EPUBs frequently carry broken or
-    // unreliable cover images, so the only cover we trust is the already-normalised
-    // image from the API (cached above by BookFusionCoverCache::refresh). If the
-    // pre-download attempts all failed, this is the last chance: WiFi is still up,
-    // the heavy transfer is done, and the heap is at its calmest — retry the API
-    // cover now rather than ship the book without one. Only if THIS also fails does
-    // the cover stay unset (DOWNLOAD_COMPLETE popup falls back to text-only and the
-    // library shows a placeholder — never a bad EPUB-derived cover).
-    if (!apiCoverOk) {
-      bool fetched = false;
-      {
-        TlsFramebufferBorrow borrow(renderer);
-        fetched = BookFusionCoverCache::download(book.coverUrl, epub, BookFusionCoverCache::kCoverFetchWidth,
-                                                 BookFusionCoverCache::kCoverFetchHeight);
-        downloadScreenPainted = false;  // borrow scrambled the framebuffer (render task is blocked here)
-      }
-      if (fetched) {
-        RenderLock lock(*this);
-        JpegScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
-        apiCoverOk = BookFusionCoverCache::convert(epub, coverHeight, downloadedCoverPath, sizeof(downloadedCoverPath));
-        downloadScreenPainted = false;  // lease scrambled the framebuffer
-      }
-    }
-    if (!apiCoverOk) {
-      LOG_ERR("BFB", "BookFusion API cover unavailable after all attempts; no EPUB fallback (text-only)");
-    }
-
-    // Pull the user's BookFusion reading position so the book opens where they
-    // left off on another device. Best-effort — failure here doesn't fail the
-    // download. WiFi is still up, the user is already in the "Downloading..."
-    // wait so the extra round trip is invisible. Borrowed like every other TLS
-    // session in this activity; the borrow's dtor closes the API connection.
-    BookFusionPosition remotePos{};
-    auto syncErr = BookFusionSyncClient::NETWORK_ERROR;
-    {
-      TlsFramebufferBorrow borrow(renderer);
-      syncErr = BookFusionSyncClient::getProgress(book.id, remotePos);
-      downloadScreenPainted = false;  // borrow scrambled the framebuffer
-    }
-    if (syncErr == BookFusionSyncClient::OK && remotePos.percentage > 0.0f) {
-      const int spineCount = epub.getSpineItemsCount();
-      if (remotePos.chapterIndex >= 0 && remotePos.chapterIndex < spineCount) {
-        // progress.bin format (EpubReaderActivity.cpp:111-128):
-        //   [0..1] spineIndex (LE uint16)
-        //   [2..3] pageNumber (LE uint16)  — 0 = start of chapter; the per-chapter
-        //                                    page count isn't known until the
-        //                                    reader renders the spine item.
-        FsFile progressFile;
-        if (Storage.openFileForWrite("BFB", epub.getCachePath() + "/progress.bin", progressFile)) {
-          const uint16_t spineIndex = static_cast<uint16_t>(remotePos.chapterIndex);
-          uint8_t data[4] = {static_cast<uint8_t>(spineIndex & 0xFF), static_cast<uint8_t>((spineIndex >> 8) & 0xFF), 0,
-                             0};
-          progressFile.write(data, sizeof(data));
-          progressFile.flush();
-          progressFile.close();
-          if (remotePos.updatedAt[0] != '\0') {
-            BookFusionBookIdStore::saveLastSyncAt(filename.c_str(), remotePos.updatedAt);
-          }
-          // The library row reads its displayed % straight from RECENT_BOOKS, which
-          // addBook() seeded as "unknown" (-1). Nothing else updates it until the
-          // reader renders a page and calls saveProgress(), so without this the synced
-          // progress is invisible in the library until the book is opened. BookFusion
-          // is authoritative for reading position, so display its book-level percentage
-          // directly rather than recomputing from chapterIndex (which is unreliable —
-          // it defaults to 0 whenever the API omits chapter_index, hiding real progress).
-          const auto progressPercent = static_cast<int8_t>(std::clamp(remotePos.percentage, 0.0f, 100.0f) + 0.5f);
-          RECENT_BOOKS.updateProgress(filename, progressPercent);
-          LOG_DBG("BFB", "Synced BookFusion position: chapter %d, %d%% (BookFusion authoritative)",
-                  remotePos.chapterIndex, progressPercent);
-        }
-      }
-    } else if (syncErr != BookFusionSyncClient::OK && syncErr != BookFusionSyncClient::NOT_FOUND) {
-      LOG_DBG("BFB", "BookFusion position sync skipped: %s", BookFusionSyncClient::errorString(syncErr));
-    }
-  }
-
-  LOG_DBG("BFB", "Download complete, cache cleared and cover regenerated for book_id=%lu",
-          static_cast<unsigned long>(book.id));
-
-  // Force the library to re-scan on its next open. The new file lands in the SD
-  // root, whose FAT mtime doesn't change on a child add, so the library index's
-  // mtime-based validation can't detect it on its own.
-  LibraryActivity::invalidateIndexCache();
+  BookFusionDownload::finishDownload(book, filename, epub, coverHeight, apiCoverOk, downloadedCoverPath,
+                                     sizeof(downloadedCoverPath), hooks);
 
   downloadedFlags[bookIndex] = true;
 
@@ -1034,7 +672,7 @@ void BookFusionBrowserActivity::activateSelectedBook() {
     // download_size up front, so we can ask before spending the transfer. PDFs
     // and other formats are rejected inside startDownload regardless.
     const auto& book = searchResult.books[selectedIndex];
-    if (bookFusionFormatIsEpub(book) && bookFusionBookIsLarge(book)) {
+    if (BookFusionDownload::formatIsEpub(book) && BookFusionDownload::isLarge(book)) {
       pendingDownloadIndex = selectedIndex;
       {
         RenderLock lock(*this);
@@ -1348,7 +986,7 @@ void BookFusionBrowserActivity::render(RenderLock&&) {
     const int strikeLeft = metrics.contentSidePadding + 8;
     const int strikeRight = pageWidth - metrics.contentSidePadding - 8;
     for (int i = geo.pageStart; i < searchResult.count && i < geo.pageStart + geo.pageItems; ++i) {
-      if (bookFusionFormatIsEpub(searchResult.books[i])) continue;
+      if (BookFusionDownload::formatIsEpub(searchResult.books[i])) continue;
       const int itemY = contentRect.y + (i % geo.pageItems) * geo.rowHeight;
       renderer.drawLine(strikeLeft, itemY + titleStrikeY, strikeRight, itemY + titleStrikeY, true);
       renderer.drawLine(strikeLeft, itemY + subtitleStrikeY, strikeRight, itemY + subtitleStrikeY, true);

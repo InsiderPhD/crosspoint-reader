@@ -380,6 +380,10 @@ inline void appendSystemSettings(SettingSink& v) {
   v.push_back(SettingInfo::Enum(StrId::STR_MOVE_FINISHED_BOOKS, &CrossPointSettings::finishedBookFolder,
                                 {StrId::STR_NEVER, StrId::STR_TO_READ_FOLDER, StrId::STR_TO_COMPLETED_FOLDER},
                                 "finishedBookFolder", StrId::STR_CAT_SYSTEM));
+  v.push_back(SettingInfo::Enum(StrId::STR_BF_SAVE_AS, &CrossPointSettings::bookfusionFileLayout,
+                                {StrId::STR_BF_LAYOUT_TITLE_AUTHOR, StrId::STR_BF_LAYOUT_TITLE,
+                                 StrId::STR_BF_LAYOUT_AUTHOR_FOLDER},
+                                "bookfusionFileLayout", StrId::STR_CAT_SYSTEM));
   v.push_back(SettingInfo::Enum(StrId::STR_FOLDER_VIEW, &CrossPointSettings::folderView,
                                 {StrId::STR_FOLDERS, StrId::STR_TAGS, StrId::STR_AUTHORS, StrId::STR_SERIES},
                                 "folderView", StrId::STR_CAT_DISPLAY));

@@ -35,6 +35,20 @@ class BookFusionBookIdStore {
   // Save book_id for an epub path. Returns false on I/O error or if id == 0.
   static bool saveBookId(const char* epubPath, uint32_t bookId);
 
+  // Link an EPUB that was not downloaded from BookFusion (sideloaded, or from
+  // another store) to BookFusion book bookId. Unlike saveBookId this replaces
+  // the sidecar outright: sync state from an earlier link (last_sync_at, the
+  // last synced position) belongs to a different book and would make the first
+  // sync skip or misread the server position. The path is also recorded in the
+  // moved-book list, since a sideloaded file rarely has the name a download
+  // would give it, so the BookFusion browser finds it by id. coverUrl may be
+  // empty. False on I/O error or if bookId == 0.
+  static bool link(const char* epubPath, uint32_t bookId, const char* coverUrl);
+  // Remove the link (the whole sidecar). The moved-book entry is left: lookups
+  // check the path still carries the id, which it no longer does. True when
+  // there was no link.
+  static bool unlink(const char* epubPath);
+
   // Load/save the API cover URL seen when the book was downloaded or last
   // found in a search. The API has no get-by-id endpoint, so without this a
   // cover refresh has to search the whole library for the book. loadCoverUrl

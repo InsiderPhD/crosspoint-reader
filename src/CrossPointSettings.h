@@ -337,6 +337,14 @@ class CrossPointSettings {
     FINISHED_BOOK_FOLDER_COUNT
   };
 
+  // Where a BookFusion download is saved on the card (BookFusionDownload::expectedFilename).
+  enum BOOKFUSION_FILE_LAYOUT : uint8_t {
+    BF_LAYOUT_TITLE_AUTHOR = 0,   // "/Title - Author.epub"
+    BF_LAYOUT_TITLE = 1,          // "/Title.epub"
+    BF_LAYOUT_AUTHOR_FOLDER = 2,  // "/Author/Title.epub"
+    BOOKFUSION_FILE_LAYOUT_COUNT
+  };
+
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
 
   // Silent progress push while reading (BookFusion or KOReader). Percent modes
@@ -727,6 +735,8 @@ class CrossPointSettings {
   uint8_t showHiddenFiles = 0;
   // Move a book to /Read or /Completed when a reading session finishes it (FINISHED_BOOK_FOLDER)
   uint8_t finishedBookFolder = FINISHED_FOLDER_OFF;
+  // File name / folder for BookFusion downloads (BOOKFUSION_FILE_LAYOUT)
+  uint8_t bookfusionFileLayout = BF_LAYOUT_TITLE_AUTHOR;
   // BLE bonded remote identity, so the firmware can auto-reconnect after reboot
   char bleBondedDeviceAddr[18] = "";
   char bleBondedDeviceName[32] = "";
