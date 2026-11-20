@@ -8,14 +8,18 @@
 #include "BookFusionSyncClient.h"
 #include "activities/Activity.h"
 
+class Epub;
+
 // Single-book "Regenerate Cover" for a BookFusion book. BookFusion EPUBs carry
 // unreliable embedded covers, so instead of re-extracting from the EPUB this
 // re-downloads the API cover at BookFusionCoverCache's fetch size and rebuilds
 // every thumbnail height plus the sleep-screen covers from it.
 //
-// The cover URL isn't stored locally and the API has no get-by-id endpoint, so
-// the book is located via the library search: first a title query (usually one
-// request), then a full library walk matched by book_id if the query misses.
+// The API has no get-by-id endpoint, so the cover URL saved in the book's
+// sidecar (at download, metadata refresh, or a previous search) is tried first.
+// Only if there is none, or it no longer works, is the book located via the
+// library search: a title query, then a full library walk matched by book_id.
+// A URL found by search is saved so the next refresh skips it.
 //
 // Flow mirrors RefreshBookFusionMetadataActivity: WifiSelectionActivity hand-off
 // when offline → blocking RUNNING pass → SUCCESS/ERROR screen closed with Back.
@@ -53,4 +57,6 @@ class BookFusionCoverRefreshActivity final : public Activity {
   void fail(const char* message);
   // Finds the book's API cover URL. Returns false with errorMsg set on failure.
   bool findCoverUrl(uint32_t bookId, char* outUrl, size_t outUrlLen);
+  // Downloads coverUrl and rebuilds the thumbnails and sleep covers, retrying.
+  bool fetchAndConvert(Epub& epub, int coverHeight, char* thumbPath, size_t thumbPathLen);
 };

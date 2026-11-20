@@ -100,6 +100,7 @@ void RefreshBookFusionMetadataActivity::refreshOneBook(const BookFusionBook& boo
   // decoder (JpegScratchLease). The leases never overlap. Same dance as
   // BookFusionCoverRefreshActivity::run().
   if (book.coverUrl[0] != '\0') {
+    BookFusionBookIdStore::saveCoverUrl(path.c_str(), book.coverUrl);
     bool fetched = false;
     {
       TlsFramebufferBorrow borrow(renderer);

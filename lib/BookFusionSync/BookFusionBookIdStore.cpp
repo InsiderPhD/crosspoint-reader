@@ -151,6 +151,55 @@ bool BookFusionBookIdStore::saveBookId(const char* epubPath, uint32_t bookId) {
   return ok;
 }
 
+bool BookFusionBookIdStore::loadCoverUrl(const char* epubPath, char* out, const size_t maxLen) {
+  if (out == nullptr || maxLen == 0) return false;
+  out[0] = '\0';
+
+  char sidecarPath[64];
+  buildSidecarPath(epubPath, sidecarPath, sizeof(sidecarPath));
+  if (!Storage.exists(sidecarPath)) return false;
+
+  String json = Storage.readFile(sidecarPath);
+  if (json.isEmpty()) return false;
+
+  JsonDocument doc;
+  if (deserializeJson(doc, json) != DeserializationError::Ok) {
+    LOG_ERR("BFS", "Sidecar JSON parse error: %s", sidecarPath);
+    return false;
+  }
+  const char* url = doc["cover_url"] | "";
+  if (url[0] == '\0') return false;
+  strlcpy(out, url, maxLen);
+  return true;
+}
+
+bool BookFusionBookIdStore::saveCoverUrl(const char* epubPath, const char* coverUrl) {
+  if (coverUrl == nullptr || coverUrl[0] == '\0') return false;
+
+  char sidecarPath[64];
+  buildSidecarPath(epubPath, sidecarPath, sizeof(sidecarPath));
+
+  Storage.mkdir("/.crosspoint");
+
+  JsonDocument doc;
+  if (Storage.exists(sidecarPath)) {
+    String existing = Storage.readFile(sidecarPath);
+    if (!existing.isEmpty()) {
+      deserializeJson(doc, existing);
+    }
+  }
+  const char* current = doc["cover_url"] | "";
+  if (strcmp(current, coverUrl) == 0) return true;  // unchanged: no SD write
+  doc["cover_url"] = coverUrl;
+
+  String json;
+  serializeJson(doc, json);
+
+  const bool ok = Storage.writeFile(sidecarPath, json);
+  if (!ok) LOG_ERR("BFS", "Failed to save cover_url: %s", sidecarPath);
+  return ok;
+}
+
 bool BookFusionBookIdStore::saveLastSyncAt(const char* epubPath, const char* updatedAt, const bool pushedByThisDevice) {
   if (updatedAt == nullptr || updatedAt[0] == '\0') {
     return false;

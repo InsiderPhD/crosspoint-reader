@@ -138,37 +138,28 @@ void BookFusionCoverRefreshActivity::run() {
   if (loaded && !epub.getTitle().empty()) title = epub.getTitle();
   epub.setupCacheDir();
 
-  if (!findCoverUrl(bookId, coverUrl, sizeof(coverUrl))) {
-    {
-      RenderLock lock(*this);
-      state = ERROR;
-    }
-    requestUpdate();
-    return;
-  }
-
-  // Same two-phase lease dance as BookFusionBrowserActivity::startDownload:
-  // borrow the framebuffer for the TLS fetch, then lease it to the JPEG decoder
-  // for the conversions. The leases never overlap. Download first, so a failed
-  // fetch leaves the existing thumbnails untouched.
   const int coverHeight = UITheme::getInstance().getMetrics().homeCoverHeight;
   char thumbPath[128] = {};
   bool ok = false;
-  for (int attempt = 1; attempt <= kMaxCoverAttempts && !ok; ++attempt) {
-    bool fetched = false;
-    {
-      TlsFramebufferBorrow borrow(renderer);
-      fetched = BookFusionCoverCache::download(coverUrl, epub, BookFusionCoverCache::kCoverFetchWidth,
-                                               BookFusionCoverCache::kCoverFetchHeight);
+
+  // Saved URL first: no library search at all when it still works.
+  if (BookFusionBookIdStore::loadCoverUrl(path.c_str(), coverUrl, sizeof(coverUrl))) {
+    LOG_DBG("BFCR", "Using saved cover URL for book_id=%lu", static_cast<unsigned long>(bookId));
+    ok = fetchAndConvert(epub, coverHeight, thumbPath, sizeof(thumbPath));
+    if (!ok) LOG_ERR("BFCR", "Saved cover URL failed; searching the library for a fresh one");
+  }
+
+  if (!ok) {
+    if (!findCoverUrl(bookId, coverUrl, sizeof(coverUrl))) {
+      {
+        RenderLock lock(*this);
+        state = ERROR;
+      }
+      requestUpdate();
+      return;
     }
-    if (!fetched) {
-      LOG_ERR("BFCR", "Cover fetch attempt %d/%d failed", attempt, kMaxCoverAttempts);
-      continue;
-    }
-    RenderLock lock(*this);
-    JpegScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
-    ok = BookFusionCoverCache::convert(epub, coverHeight, thumbPath, sizeof(thumbPath));
-    if (!ok) LOG_ERR("BFCR", "Cover convert attempt %d/%d failed", attempt, kMaxCoverAttempts);
+    BookFusionBookIdStore::saveCoverUrl(path.c_str(), coverUrl);
+    ok = fetchAndConvert(epub, coverHeight, thumbPath, sizeof(thumbPath));
   }
 
   if (!ok) {
@@ -185,6 +176,32 @@ void BookFusionCoverRefreshActivity::run() {
     state = SUCCESS;
   }
   requestUpdate();
+}
+
+bool BookFusionCoverRefreshActivity::fetchAndConvert(Epub& epub, const int coverHeight, char* thumbPath,
+                                                     const size_t thumbPathLen) {
+  // Same two-phase lease dance as BookFusionBrowserActivity::startDownload:
+  // borrow the framebuffer for the TLS fetch, then lease it to the JPEG decoder
+  // for the conversions. The leases never overlap. Download first, so a failed
+  // fetch leaves the existing thumbnails untouched.
+  bool ok = false;
+  for (int attempt = 1; attempt <= kMaxCoverAttempts && !ok; ++attempt) {
+    bool fetched = false;
+    {
+      TlsFramebufferBorrow borrow(renderer);
+      fetched = BookFusionCoverCache::download(coverUrl, epub, BookFusionCoverCache::kCoverFetchWidth,
+                                               BookFusionCoverCache::kCoverFetchHeight);
+    }
+    if (!fetched) {
+      LOG_ERR("BFCR", "Cover fetch attempt %d/%d failed", attempt, kMaxCoverAttempts);
+      continue;
+    }
+    RenderLock lock(*this);
+    JpegScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
+    ok = BookFusionCoverCache::convert(epub, coverHeight, thumbPath, thumbPathLen);
+    if (!ok) LOG_ERR("BFCR", "Cover convert attempt %d/%d failed", attempt, kMaxCoverAttempts);
+  }
+  return ok;
 }
 
 void BookFusionCoverRefreshActivity::loop() {

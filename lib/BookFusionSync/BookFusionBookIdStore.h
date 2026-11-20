@@ -35,6 +35,14 @@ class BookFusionBookIdStore {
   // Save book_id for an epub path. Returns false on I/O error or if id == 0.
   static bool saveBookId(const char* epubPath, uint32_t bookId);
 
+  // Load/save the API cover URL seen when the book was downloaded or last
+  // found in a search. The API has no get-by-id endpoint, so without this a
+  // cover refresh has to search the whole library for the book. loadCoverUrl
+  // returns false (out left empty) when none is stored. saveCoverUrl skips the
+  // write when the stored URL is already the same.
+  static bool loadCoverUrl(const char* epubPath, char* out, size_t maxLen);
+  static bool saveCoverUrl(const char* epubPath, const char* coverUrl);
+
   // Load/save the last server reading_position updated_at seen for this EPUB.
   // pushedByThisDevice records whether that server position was written by an
   // upload from this device (true) or merely read from the server (false); the

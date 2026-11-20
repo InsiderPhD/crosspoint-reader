@@ -646,6 +646,8 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
 
   // Save sidecar so BookFusionSyncActivity can find the book_id for this file.
   BookFusionBookIdStore::saveBookId(filename.c_str(), book.id);
+  // Lets "Regenerate cover" fetch it directly instead of searching the library.
+  BookFusionBookIdStore::saveCoverUrl(filename.c_str(), book.coverUrl);
 
   // Build metadata. clearCache already ran above so any pre-existing cache for
   // this filename is gone; epub.load(true) rebuilds it from the freshly-downloaded
