@@ -2,6 +2,7 @@
 
 #include <Bitmap.h>
 #include <Epub.h>
+#include <HalDisplay.h>
 #include <HalStorage.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
@@ -62,7 +63,7 @@ bool validateCoverBmp(const std::string& path) {
 }
 
 bool convertBookFusionCoverImage(const std::string& srcPath, const std::string& destPath, bool thumbnail,
-                                 int thumbTargetWidth, int thumbTargetHeight, bool crop) {
+                                 int thumbTargetWidth, int thumbTargetHeight, bool crop, bool gray = false) {
   FsFile src;
   if (!Storage.openFileForRead("BFC", srcPath, src)) return false;
 
@@ -92,6 +93,13 @@ bool convertBookFusionCoverImage(const std::string& srcPath, const std::string& 
       success = JpegToBmpConverter::jpegFileToBmpStreamWithSize(src, dest, thumbTargetWidth, thumbTargetHeight);
     } else {
       success = PngToBmpConverter::pngFileToBmpStreamWithSize(src, dest, thumbTargetWidth, thumbTargetHeight);
+    }
+  } else if (gray) {
+    // 8-bit, every tone kept: the Picco's 16-level sleep screen (SleepGray16).
+    if (type == CoverImageType::Jpeg) {
+      success = JpegToBmpConverter::jpegFileToGrayBmpStream(src, dest, crop);
+    } else {
+      success = PngToBmpConverter::pngFileToGrayBmpStream(src, dest, crop);
     }
   } else {
     if (type == CoverImageType::Jpeg) {
@@ -194,6 +202,19 @@ bool convert(const Epub& epub, int coverHeight, char* outThumbPath, size_t outTh
   // will later pick the one matching the user's cover mode.
   const bool fitOk = convertBookFusionCoverImage(tempCoverPath, epub.getCoverBmpPath(false), false, 0, 0, false);
   const bool cropOk = convertBookFusionCoverImage(tempCoverPath, epub.getCoverBmpPath(true), false, 0, 0, true);
+
+  // The 16-level sleep screen draws the 8-bit gray variants, not the two
+  // above, so they must come from this image too: left alone they would keep
+  // the previous cover (SleepCover never builds them from the EPUB for a
+  // BookFusion book, whose own art is often a tiny progressive JPEG).
+  // Only panels that can show them get them; elsewhere stale ones are dropped.
+  for (const bool crop : {false, true}) {
+    const std::string grayPath = epub.getCoverBmpPath(crop, /*gray=*/true);
+    if (!display.supportsGray16Image() ||
+        !convertBookFusionCoverImage(tempCoverPath, grayPath, false, 0, 0, crop, /*gray=*/true)) {
+      Storage.remove(grayPath.c_str());
+    }
+  }
 
   Storage.remove(tempCoverPath.c_str());
 

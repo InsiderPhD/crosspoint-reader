@@ -1,5 +1,6 @@
 #include "SleepCover.h"
 
+#include <BookFusionBookIdStore.h>
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -98,6 +99,16 @@ bool grayVersionOf(const GfxRenderer& renderer, const std::string& coverPath, st
     return false;
   const std::string path = epub.getCoverBmpPath(cropped, /*gray=*/true);
   if (!Storage.exists(path.c_str())) {
+    // A BookFusion book's 2-bit covers come from the image BookFusion serves;
+    // the EPUB's own cover is often a small progressive JPEG that decodes at
+    // 1/8 (a few dozen pixels wide). Building the gray cover from it would
+    // swap the good art for a blurry one, so only BookFusion's cover refresh
+    // writes it (BookFusionCoverCache); until then the 4-shade path draws
+    // BookFusion's cover.
+    if (BookFusionBookIdStore::hasBookId(APP_STATE.openEpubPath.c_str())) {
+      LOG_DBG("SLP", "BookFusion book without a gray cover; using the 4-shade cover");
+      return false;
+    }
     bool loaded;
     {
       InflateScratchLease scratch(renderer.getFrameBuffer(), renderer.getBufferSize());
