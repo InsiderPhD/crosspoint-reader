@@ -16,7 +16,8 @@ class MappedInputManager;
 
 /**
  * Light panel: a card hanging from the top of the screen with a brightness and a
- * warmth slider, -/+ steppers, an on/off button and a dark mode switch. Mirrors the layout of upstream
+ * warmth slider, -/+ steppers, an on/off button and a row of quick-action tiles
+ * (dark mode, full refresh, rotate, touch page turns, Bluetooth). Mirrors the layout of upstream
  * CrossPoint's control center so people moving between firmwares find the light
  * where they expect it, but drawn with our own renderer/GUI calls and our
  * brightness model (0 = off, frontlightLastBrightness = the level to come back to).
@@ -29,11 +30,18 @@ class MappedInputManager;
  *
  * The light follows every change live; settings are written once, on exit, and
  * only if something changed.
+ *
+ * Rotate and Bluetooth need the EPUB reader (a re-layout; the heap release BLE
+ * needs), so when it opens the panel with readerActions set those tiles close
+ * the panel and hand the action back as a ReaderActionResult for its
+ * executeReaderAction(). Everywhere else (Home, the browsers, Settings, XTC)
+ * Rotate only changes the saved reading orientation and the Bluetooth tile is
+ * not shown, since BLE runs only inside the reader.
  */
 class FrontlightPanelActivity final : public Activity {
  public:
-  FrontlightPanelActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("FrontlightPanel", renderer, mappedInput) {}
+  FrontlightPanelActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const bool readerActions = false)
+      : Activity("FrontlightPanel", renderer, mappedInput), readerActions(readerActions) {}
 
   void onEnter() override;
   void onExit() override;
@@ -49,6 +57,9 @@ class FrontlightPanelActivity final : public Activity {
 
  private:
   enum Row : int8_t { ROW_BRIGHTNESS = 0, ROW_WARMTH = 1 };
+  // Quick-action tiles, left to right. TILE_BLUETOOTH is last so dropping it
+  // outside the reader just shortens the row.
+  enum Tile : int8_t { TILE_DARK = 0, TILE_REFRESH, TILE_ROTATE, TILE_TOUCH, TILE_BLUETOOTH, TILE_MAX };
 
   // One slider row's geometry, laid out once in onEnter() (orientation cannot
   // change while the panel is up) and shared by render() and hit-testing.
@@ -61,9 +72,9 @@ class FrontlightPanelActivity final : public Activity {
   };
 
   void layout();
-  // Slider rows; the dark mode row comes after them, at index sliderCount().
+  // Slider rows; the tile row comes after them, at index sliderCount().
   int sliderCount() const { return hasWarmthRow ? 2 : 1; }
-  int darkRow() const { return sliderCount(); }
+  int tileRow() const { return sliderCount(); }
   int rowCount() const { return sliderCount() + 1; }
   uint8_t rowValue(int row) const { return row == ROW_BRIGHTNESS ? brightness : warmth; }
   void setRowValue(int row, int value);
@@ -71,14 +82,17 @@ class FrontlightPanelActivity final : public Activity {
   void applyLight() const;
   void toggleLight();
   void toggleDarkMode();
+  void runTile(int tile);
+  bool tileOn(int tile) const;
   void close();
   void drawRow(int row) const;
-  void drawDarkRow() const;
+  void drawTiles() const;
 
   ButtonNavigator buttonNavigator;
-  RowLayout rows[2];  // filled by layout()
-  Rect darkToggle;
-  int darkCaptionY = 0;
+  RowLayout rows[2];     // filled by layout()
+  Rect tiles[TILE_MAX];  // filled by layout()
+  int tileCount = 0;     // TILE_MAX with readerActions, one fewer (no Bluetooth) without
+  const bool readerActions;
   int panelBottom = 0;
   bool hasWarmthRow = false;
 
@@ -91,6 +105,7 @@ class FrontlightPanelActivity final : public Activity {
   bool invertBeneath = false;
 
   int focusedRow = ROW_BRIGHTNESS;  // button navigation only
+  int focusedTile = TILE_DARK;      // button navigation only, on the tile row
   int dragRow = -1;
 };
 

@@ -4713,8 +4713,14 @@ bool EpubReaderActivity::executeReaderAction(CrossPointSettings::READER_ACTION a
     case A::READER_ACTION_LIGHT_PANEL:
 #if FREEINK_CAP_FRONTLIGHT
       if (CrossPointSettings::isUnavailableReaderAction(action)) return false;
-      startActivityForResult(std::make_unique<FrontlightPanelActivity>(renderer, mappedInput),
-                             [this](const ActivityResult&) { requestUpdate(); });
+      // Its Rotate and Bluetooth tiles hand the action back to run here.
+      startActivityForResult(std::make_unique<FrontlightPanelActivity>(renderer, mappedInput, /*readerActions=*/true),
+                             [this](const ActivityResult& result) {
+                               if (const auto* picked = std::get_if<ReaderActionResult>(&result.data)) {
+                                 executeReaderAction(static_cast<CrossPointSettings::READER_ACTION>(picked->action));
+                               }
+                               requestUpdate();
+                             });
 #endif
       return false;
 

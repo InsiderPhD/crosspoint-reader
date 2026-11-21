@@ -2,7 +2,10 @@
 
 #if FREEINK_CAP_FRONTLIGHT
 
+#include <BluetoothHIDManager.h>
+#include <HalDisplay.h>
 #include <I18n.h>
+#include <Logging.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -11,6 +14,7 @@
 #include "MappedInputManager.h"
 #include "activities/ActivityManager.h"
 #include "components/UITheme.h"
+#include "components/icons/quickPanelIcons.h"
 #include "fontIds.h"
 #include "util/FrontlightScheduler.h"
 #include "util/FrontlightToggle.h"
@@ -37,8 +41,45 @@ constexpr int STEP = 1;
 // level would only be a second way to reach the same place.
 constexpr int MIN_BRIGHTNESS = 1;
 
+// Quick-action tiles: a 32px glyph centred in the CONTROL_SIZE square.
+constexpr int TILE_ICON = 32;
+constexpr int TILE_FOCUS_GAP = 4;  // buttons-only focus ring, outside the tile
+
 bool contains(const Rect& r, const int x, const int y) {
   return r.width > 0 && x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+}
+
+// Blits one of the upright quickPanelIcons (clear bit = ink) at (x, y) in
+// either ink colour, turned by quarter turns clockwise. drawPixel() applies the
+// screen orientation, so this works in all four; the icons are at most 32x32,
+// so the per-pixel path costs nothing noticeable.
+void drawQuickIcon(const GfxRenderer& renderer, const uint8_t* bits, const int size, const int x, const int y,
+                   const bool black, const int quarterTurnsCw = 0) {
+  const int rowBytes = (size + 7) / 8;
+  for (int r = 0; r < size; r++) {
+    for (int c = 0; c < size; c++) {
+      if (bits[r * rowBytes + (c >> 3)] & (0x80 >> (c & 7))) continue;
+      int dx = c;
+      int dy = r;
+      switch (quarterTurnsCw & 3) {
+        case 1:
+          dx = size - 1 - r;
+          dy = c;
+          break;
+        case 2:
+          dx = size - 1 - c;
+          dy = size - 1 - r;
+          break;
+        case 3:
+          dx = r;
+          dy = size - 1 - c;
+          break;
+        default:
+          break;
+      }
+      renderer.drawPixel(x + dx, y + dy, black);
+    }
+  }
 }
 }  // namespace
 
@@ -56,7 +97,9 @@ void FrontlightPanelActivity::onEnter() {
   dirty = false;
   invertBeneath = false;
   focusedRow = ROW_BRIGHTNESS;
+  focusedTile = TILE_DARK;
   dragRow = -1;
+  tileCount = readerActions ? TILE_MAX : TILE_BLUETOOTH;
 
   layout();
   requestUpdate();
@@ -104,9 +147,17 @@ void FrontlightPanelActivity::layout() {
     r.track = Rect{trackX, controlY, r.plus.x - CONTROL_GAP - trackX, CONTROL_SIZE};
     y = controlY + CONTROL_SIZE + ROW_GAP;
   }
-  // Dark mode: caption on the left, an On/Off button lined up under the light's.
-  darkToggle = Rect{right - CONTROL_SIZE, y, CONTROL_SIZE, CONTROL_SIZE};
-  darkCaptionY = y + (CONTROL_SIZE - captionHeight) / 2;
+  // Quick-action tiles: equal slots across the card, a CONTROL_SIZE square
+  // centred in each. The whole slot is the touch target.
+  for (int i = 0; i < TILE_MAX; i++) {
+    if (i >= tileCount) {
+      tiles[i] = Rect{};
+      continue;
+    }
+    const int slotLeft = left + (right - left) * i / tileCount;
+    const int slotRight = left + (right - left) * (i + 1) / tileCount;
+    tiles[i] = Rect{slotLeft + (slotRight - slotLeft - CONTROL_SIZE) / 2, y, CONTROL_SIZE, CONTROL_SIZE};
+  }
   y += CONTROL_SIZE;
   panelBottom = y + GRABBER_MARGIN + GRABBER_HEIGHT + GRABBER_MARGIN + BOTTOM_RULE;
 }
@@ -160,6 +211,77 @@ void FrontlightPanelActivity::toggleDarkMode() {
   requestUpdate();
 }
 
+bool FrontlightPanelActivity::tileOn(const int tile) const {
+  switch (tile) {
+    case TILE_DARK:
+      return SETTINGS.darkMode != 0;
+    case TILE_TOUCH:
+      return SETTINGS.disablePageTurnGestures == 0;
+    case TILE_BLUETOOTH: {
+      // Wanted counts as on: the stack is torn down for section builds and
+      // syncs, and the reader's auto-restore brings it back.
+      const auto& bt = BluetoothHIDManager::getInstance();
+      return bt.isEnabled() || bt.isBluetoothWanted();
+    }
+    case TILE_REFRESH:
+    case TILE_ROTATE:
+    default:
+      return false;
+  }
+}
+
+void FrontlightPanelActivity::runTile(const int tile) {
+  if (tile < 0 || tile >= tileCount) return;
+  switch (tile) {
+    case TILE_DARK:
+      toggleDarkMode();
+      return;
+
+    case TILE_REFRESH:
+      // Cleaning the frame with the panel still on it would clean a frame
+      // about to be dismissed: drop the panel and let the screen beneath take
+      // the full refresh when it repaints on pop.
+      display.requestResync(1);
+      close();
+      return;
+
+    case TILE_ROTATE:
+      if (readerActions) {
+        // The reader re-lays out the chapter (applyOrientation); the panel was
+        // laid out for the old orientation, so it closes first.
+        setResult(ReaderActionResult{CrossPointSettings::READER_ACTION_ROTATE_SCREEN});
+        close();
+        return;
+      }
+      // Not over the EPUB reader: only the saved reading orientation changes,
+      // picked up the next time a book opens. Written on exit with the rest.
+      SETTINGS.orientation = static_cast<uint8_t>((SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT);
+      dirty = true;
+      requestUpdate();
+      return;
+
+    case TILE_TOUCH:
+      // Pauses only the page-turn taps and swipes (ReaderUtils::pageTurnTapPaused):
+      // a tap zone bound to this panel, the status-bar tap and the home key keep
+      // working, so it can always be switched back on from here. Written on exit.
+      SETTINGS.disablePageTurnGestures = SETTINGS.disablePageTurnGestures ? 0 : 1;
+      LOG_INF("FLPANEL", "Page-turn gestures %s", SETTINGS.disablePageTurnGestures ? "paused" : "resumed");
+      dirty = true;
+      requestUpdate();
+      return;
+
+    case TILE_BLUETOOTH:
+      // Only offered with readerActions: enabling BLE needs the reader's heap
+      // release (toggleBluetoothFromReader), so the reader runs it.
+      setResult(ReaderActionResult{CrossPointSettings::READER_ACTION_TOGGLE_BLUETOOTH});
+      close();
+      return;
+
+    default:
+      return;
+  }
+}
+
 void FrontlightPanelActivity::close() { finish(); }
 
 void FrontlightPanelActivity::loop() {
@@ -198,9 +320,15 @@ void FrontlightPanelActivity::loop() {
       close();
       return;
     }
-    if (contains(darkToggle, x, y)) {
-      toggleDarkMode();
-      return;
+    // Hit-test the whole slot a tile sits in, not just its square.
+    for (int i = 0; i < tileCount; i++) {
+      const Rect& t = tiles[i];
+      const int slotLeft = i == 0 ? 0 : (tiles[i - 1].x + tiles[i - 1].width + t.x) / 2;
+      const int slotRight = i == tileCount - 1 ? renderer.getScreenWidth() : (t.x + t.width + tiles[i + 1].x) / 2;
+      if (y >= t.y && y < t.y + t.height && x >= slotLeft && x < slotRight) {
+        runTile(i);
+        return;
+      }
     }
     for (int row = 0; row < sliderCount(); row++) {
       const RowLayout& r = rows[row];
@@ -226,8 +354,8 @@ void FrontlightPanelActivity::loop() {
     return;
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (focusedRow == darkRow()) {
-      toggleDarkMode();
+    if (focusedRow == tileRow()) {
+      runTile(focusedTile);
     } else {
       toggleLight();
     }
@@ -244,8 +372,18 @@ void FrontlightPanelActivity::loop() {
     focusedRow = ButtonNavigator::previousIndex(focusedRow, rowCount());
     requestUpdate();
   });
-  // The dark row has no level: Confirm switches it.
-  if (focusedRow == darkRow()) return;
+  // On the tile row Left/Right pick a tile and Confirm runs it.
+  if (focusedRow == tileRow()) {
+    buttonNavigator.onRelease({MappedInputManager::Button::Left}, [this] {
+      focusedTile = ButtonNavigator::previousIndex(focusedTile, tileCount);
+      requestUpdate();
+    });
+    buttonNavigator.onRelease({MappedInputManager::Button::Right}, [this] {
+      focusedTile = ButtonNavigator::nextIndex(focusedTile, tileCount);
+      requestUpdate();
+    });
+    return;
+  }
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left},
                                        [this] { setRowValue(focusedRow, rowValue(focusedRow) - STEP); });
   buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right},
@@ -307,24 +445,67 @@ void FrontlightPanelActivity::drawRow(const int row) const {
   }
 }
 
-void FrontlightPanelActivity::drawDarkRow() const {
-  const bool focused = !mappedInput.hasTouch() && focusedRow == darkRow();
-  const auto style = focused ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  renderer.drawText(UI_12_FONT_ID, metrics.contentSidePadding, darkCaptionY, tr(STR_READER_DARK_MODE), true, style);
+void FrontlightPanelActivity::drawTiles() const {
+  // Buttons-only boards need a visible target; on a touch board there is no focus.
+  const bool showFocus = !mappedInput.hasTouch() && focusedRow == tileRow();
+  for (int i = 0; i < tileCount; i++) {
+    const Rect& b = tiles[i];
+    const bool on = tileOn(i);
+    // Filled while on (dark mode, touch page turns, Bluetooth), outlined
+    // otherwise; Refresh and Rotate are actions, so always outlined.
+    if (on) {
+      renderer.fillRoundedRect(b.x, b.y, b.width, b.height, BUTTON_RADIUS, Color::Black);
+    } else {
+      renderer.drawRoundedRect(b.x, b.y, b.width, b.height, OUTLINE, BUTTON_RADIUS, true);
+    }
+    if (showFocus && i == focusedTile) {
+      renderer.drawRoundedRect(b.x - TILE_FOCUS_GAP, b.y - TILE_FOCUS_GAP, b.width + 2 * TILE_FOCUS_GAP,
+                               b.height + 2 * TILE_FOCUS_GAP, OUTLINE, BUTTON_RADIUS + TILE_FOCUS_GAP, true);
+    }
 
-  // Same filled-while-on button as the light's On/Off.
-  const bool on = SETTINGS.darkMode != 0;
-  const Rect& b = darkToggle;
-  const char* state = on ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
-  if (on) {
-    renderer.fillRoundedRect(b.x, b.y, b.width, b.height, BUTTON_RADIUS, Color::Black);
-  } else {
-    renderer.drawRoundedRect(b.x, b.y, b.width, b.height, OUTLINE, BUTTON_RADIUS, true);
+    const int ix = b.x + (b.width - TILE_ICON) / 2;
+    const int iy = b.y + (b.height - TILE_ICON) / 2;
+    const bool ink = !on;
+    switch (i) {
+      case TILE_DARK:
+        drawQuickIcon(renderer, QuickMoon32, TILE_ICON, ix, iy, ink);
+        break;
+      case TILE_REFRESH:
+        drawQuickIcon(renderer, QuickRefresh32, TILE_ICON, ix, iy, ink);
+        break;
+      case TILE_ROTATE: {
+        // An underlined T turned to the saved reading orientation relative to
+        // the screen right now, so the tile previews where the next tap lands
+        // (outside the reader the panel sits in the UI's orientation). The
+        // ORIENTATION values and GfxRenderer::Orientation share their order:
+        // each step is a quarter turn clockwise.
+        constexpr int count = CrossPointSettings::ORIENTATION_COUNT;
+        const int turns = (SETTINGS.orientation + count - static_cast<int>(renderer.getOrientation())) % count;
+        // Same mapping as upstream: a step clockwise in orientation shows the T
+        // a quarter turn counter-clockwise.
+        const int iconTurns = (count - turns) % count;
+        constexpr int glyph = 24;
+        constexpr int inset = (TILE_ICON - glyph) / 2;
+        drawQuickIcon(renderer, QuickText24, glyph, ix + inset, iy + inset, ink, iconTurns);
+        // Underline under the glyph's baseline, turned with it (32px box).
+        struct Bar {
+          int8_t x, y, w, h;
+        };
+        static constexpr Bar underlines[] = {{4, 29, 24, 3}, {0, 4, 3, 24}, {4, 0, 24, 3}, {29, 4, 3, 24}};
+        const Bar& u = underlines[iconTurns];
+        renderer.fillRect(ix + u.x, iy + u.y, u.w, u.h, ink);
+        break;
+      }
+      case TILE_TOUCH:
+        drawQuickIcon(renderer, QuickPointer32, TILE_ICON, ix, iy, ink);
+        break;
+      case TILE_BLUETOOTH:
+        drawQuickIcon(renderer, on ? QuickBluetooth32 : QuickBluetoothOff32, TILE_ICON, ix, iy, ink);
+        break;
+      default:
+        break;
+    }
   }
-  const int textX = b.x + (b.width - renderer.getTextWidth(SMALL_FONT_ID, state, EpdFontFamily::BOLD)) / 2;
-  const int textY = b.y + (b.height - renderer.getLineHeight(SMALL_FONT_ID)) / 2;
-  renderer.drawText(SMALL_FONT_ID, textX, textY, state, !on, EpdFontFamily::BOLD);
 }
 
 void FrontlightPanelActivity::render(RenderLock&&) {
@@ -336,7 +517,7 @@ void FrontlightPanelActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, width, metrics.homeTopPadding - metrics.topPadding}, nullptr);
 
   for (int row = 0; row < sliderCount(); row++) drawRow(row);
-  drawDarkRow();
+  drawTiles();
 
   renderer.fillRect(0, panelBottom - BOTTOM_RULE, width, BOTTOM_RULE, true);
   renderer.fillRoundedRect((width - GRABBER_WIDTH) / 2, panelBottom - BOTTOM_RULE - GRABBER_MARGIN - GRABBER_HEIGHT,
