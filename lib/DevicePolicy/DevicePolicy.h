@@ -100,6 +100,26 @@
 #define CROSSPOINT_HARDCOVER_AUTO_SYNC (!CROSSPOINT_TIGHT_HEAP)
 #endif
 
+// --- Stack for tasks that run a TLS session -----------------------------------
+//
+// Every task that can run a wolfSSL handshake: the Arduino loop task (all
+// foreground network flows: font/dictionary/OPDS/BookFusion downloads, sync,
+// OTA, plugins) and the background Hardcover / boot-NTP workers. The C3 build
+// uses the WOLFSSL_SP_RISCV32 assembly backend and has run TLS on the default
+// 8KB loop task for its whole life. The S3 build unsets it (generic C SP math),
+// adds 4096-bit RSA (CROSSPOINT_WOLFSSL_SP_4096), and the Xtensa windowed ABI
+// spends more stack per frame — so the same call chain runs deeper on the X4
+// Pro. 16KB comes out of internal SRAM (task stacks are not placed in PSRAM),
+// which the S3's 512KB affords; the C3 keeps the stock 8KB loop task, where an
+// extra 8KB of permanent DRAM is not free.
+#ifndef CROSSPOINT_TLS_TASK_STACK_BYTES
+#if CROSSPOINT_TIGHT_HEAP
+#define CROSSPOINT_TLS_TASK_STACK_BYTES (12 * 1024)
+#else
+#define CROSSPOINT_TLS_TASK_STACK_BYTES (16 * 1024)
+#endif
+#endif
+
 // --- SD-card plugins ---------------------------------------------------------
 //
 // The plugin surfaces (src/activities/plugins, src/util/Plugin*, the web

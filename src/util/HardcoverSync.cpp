@@ -193,10 +193,10 @@ volatile bool sActive = false;          // written under sMutex; preempt() polls
 volatile bool sStopRequested = false;   // preempt(): abandon the work
 volatile bool sSleepRequested = false;  // finishBeforeSleep(): skip the settle delay
 
-// Worker stack. The TLS transport is sized for the 8KB loop task (its receive
-// buffer is 2KB on the stack); the headroom covers ArduinoJson and wolfSSL's
-// handshake frames. Internal SRAM on the S3 is not the constraint the C3 has.
-constexpr uint32_t kWorkerStackBytes = 12 * 1024;
+// Worker stack: runs a wolfSSL handshake plus ArduinoJson. See
+// CROSSPOINT_TLS_TASK_STACK_BYTES (DevicePolicy.h). This worker only exists on
+// PSRAM boards (CROSSPOINT_HARDCOVER_AUTO_SYNC).
+constexpr uint32_t kWorkerStackBytes = CROSSPOINT_TLS_TASK_STACK_BYTES;
 
 // Let the activity that follows the reader (Home, or the sleep screen) paint
 // before WiFi and SD work start competing with it.

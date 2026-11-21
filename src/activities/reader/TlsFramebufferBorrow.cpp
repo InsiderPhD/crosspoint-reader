@@ -4,6 +4,8 @@
 #include <GfxRenderer.h>
 #include <Logging.h>
 #ifndef SIMULATOR
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <multi_heap.h>
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfcrypt/memory.h>
@@ -179,6 +181,13 @@ TlsFramebufferBorrow::~TlsFramebufferBorrow() {
   // resumes, so the WOLFSSL object becomes pixel data, and the next request's
   // stale-socket retry frees it -- a load fault inside wolfSSL_free().
   BookFusionSyncClient::closeConnection();
+  // Stack headroom after the TLS session: the lowest free stack this task has
+  // seen. Under ~1KB means CROSSPOINT_TLS_TASK_STACK_BYTES is too small for it.
+  // ESP-IDF reports this in bytes (StackType_t is uint8_t).
+#ifndef SIMULATOR
+  LOG_DBG("BFB", "TLS done on %s: stack min free=%u bytes", pcTaskGetName(nullptr),
+          (unsigned)uxTaskGetStackHighWaterMark(nullptr));
+#endif
 #if CROSSPOINT_FB_SCRATCH_BORROW
   if (installed_) {
     g_fbHeap = nullptr;

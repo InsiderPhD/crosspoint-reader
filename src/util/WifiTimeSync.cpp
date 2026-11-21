@@ -31,7 +31,7 @@ constexpr uint32_t kHardcoverSyncBudgetMs = 45000;
 // 512-byte SdFat send buffer (USE_SPI_ARRAY_TRANSFER=1) that APP_STATE.saveToFile()
 // puts on this stack after a successful sync. The task is transient (<=~10s).
 #if CROSSPOINT_HARDCOVER_AUTO_SYNC
-constexpr uint32_t kBootTaskStackBytes = 12 * 1024;
+constexpr uint32_t kBootTaskStackBytes = CROSSPOINT_TLS_TASK_STACK_BYTES;
 #else
 constexpr uint32_t kBootTaskStackBytes = 5 * 1024;
 #endif

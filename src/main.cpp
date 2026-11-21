@@ -65,6 +65,13 @@
 #include "util/TimeUtils.h"
 #include "util/WifiTimeSync.h"
 
+#if !CROSSPOINT_TIGHT_HEAP
+// Every foreground TLS session (downloads, syncs, OTA, plugins) runs on the
+// loop task; the S3 build's handshake needs more than the stock 8KB. See
+// CROSSPOINT_TLS_TASK_STACK_BYTES in DevicePolicy.h. The C3 keeps 8KB.
+SET_LOOP_TASK_STACK_SIZE(CROSSPOINT_TLS_TASK_STACK_BYTES);
+#endif
+
 // Loop-task watchdog budget. Must exceed the longest legitimate single pass of
 // loop(): worst-case renders (~30s), a big chapter's section build (~1-2 min).
 // Chunked long-runners (HTTP downloads, firmware flashing) feed mid-pass.
