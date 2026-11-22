@@ -98,6 +98,9 @@ class HalDisplay {
   // under a static screen develops image drift, so the main loop powers it
   // off once no refresh has happened for a few seconds — independent of the
   // activity/sleep timers, which preventAutoSleep() activities suppress.
+  // Every call that drives the glass must reset this: main.cpp's static-screen
+  // maintenance (S3) flashes the screen once it passes 5 minutes, so a refresh
+  // path that forgets it gets a full flash mid-reading.
   unsigned long msSinceLastRefresh() const { return millis() - _lastRefreshMs; }
 
   void copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer);
@@ -124,6 +127,10 @@ class HalDisplay {
   // Measured L* x10 per level (0 = white .. 15 = darkest) of a clean 16-level
   // draw on this panel, or nullptr when the driver has none.
   const int16_t* gray16LevelLstar() const { return einkDisplay.gray16LevelLstar(); }
+  // 16-level text: the levels its base draws black, and the deep level pulled
+  // back inside the turn (-1: none). Both follow the driver's paths.
+  uint16_t gray16DeepLevels() const { return einkDisplay.gray16DeepLevels(); }
+  int gray16TextSoftLevel() const { return einkDisplay.gray16TextSoftLevel(); }
   // A 16-level image's owed drive across deep sleep: export before sleeping,
   // import after begin() on wake; the next display call gives it back.
   size_t gray16StateSize() const { return einkDisplay.gray16StateSize(); }
@@ -132,11 +139,15 @@ class HalDisplay {
   // 16-level text: a readable B/W base (the dark levels) with the reader's
   // B/W turn, then the calibrated 16-level passes.
   bool beginGray16Text(const uint8_t* base, const uint8_t* soft = nullptr) {
-    return einkDisplay.beginGray16Text(base, soft);
+    const bool ok = einkDisplay.beginGray16Text(base, soft);
+    if (ok) _lastRefreshMs = millis();
+    return ok;
   }
   bool setGray16TextSoftPull(uint8_t frames) { return einkDisplay.setGray16TextSoftPull(frames); }
   bool finishGray16Text(const uint8_t* levels, bool turnOffScreen = true) {
-    return einkDisplay.finishGray16Text(levels, turnOffScreen);
+    const bool ok = einkDisplay.finishGray16Text(levels, turnOffScreen);
+    if (ok) _lastRefreshMs = millis();
+    return ok;
   }
   // Calibration: coarse-black and pull-back doses and the fast-turn erase, in frames.
   bool setGray16Passes(const uint8_t black[3], const uint8_t white[3], uint8_t erase) {

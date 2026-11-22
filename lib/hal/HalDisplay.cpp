@@ -78,7 +78,9 @@ void HalDisplay::applyRefreshPolicy(HalDisplay::RefreshMode mode) {
 }
 
 bool HalDisplay::displayGray16Image(const uint8_t* levels, HalDisplay::RefreshMode mode, bool turnOffScreen) {
-  return einkDisplay.displayGray16Image(levels, convertRefreshMode(mode), turnOffScreen);
+  const bool ok = einkDisplay.displayGray16Image(levels, convertRefreshMode(mode), turnOffScreen);
+  if (ok) _lastRefreshMs = millis();
+  return ok;
 }
 
 void HalDisplay::displayBuffer(HalDisplay::RefreshMode mode, bool turnOffScreen) {
@@ -134,7 +136,10 @@ bool HalDisplay::displayGrayscaleBase(const GrayscaleMode mode, const RefreshMod
   // HALF so the differential baseline is rebuilt rather than diffed against
   // stale controller RAM.
   if (gpio.deviceIsX3() && fallback == HALF_REFRESH) einkDisplay.requestResync();
-  return einkDisplay.displayGrayscaleBase(mode, static_cast<EInkDisplay::RefreshMode>(fallback), turnOffScreen);
+  const bool ok =
+      einkDisplay.displayGrayscaleBase(mode, static_cast<EInkDisplay::RefreshMode>(fallback), turnOffScreen);
+  if (ok) _lastRefreshMs = millis();
+  return ok;
 }
 
 bool HalDisplay::supportsStripGrayscale() const { return grayscaleCapabilities().stripUploads; }
