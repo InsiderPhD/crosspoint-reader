@@ -424,6 +424,10 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // Layout already reserved this space at build time, so the page is unchanged
   // apart from the image itself being blank.
   if (renderer.areImagesSuppressed()) return;
+  // 16-level plane passes: the picture is painted afterwards in 8 bits
+  // (renderGray16); a 2-bit draw here would only be overwritten, and an
+  // uncached one would cost a decode per plane.
+  if (renderer.getRenderMode() == GfxRenderer::GRAY16_PLANE) return;
 
   LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d)", x, y, imagePath.c_str(), width, height);
 
@@ -529,6 +533,29 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
 
   renderer.preserveImagePolarity(x, y, width, height);
   LOG_DBG("IMG", "Decode successful");
+}
+
+bool ImageBlock::renderGray16(GfxRenderer& renderer, const int x, const int y, const Gray16Sink& sink) const {
+  if (renderer.areImagesSuppressed() || width <= 0 || height <= 0 || imageFailedThisRender(imagePath)) return false;
+  const int screenWidth = renderer.getScreenWidth();
+  const int screenHeight = renderer.getScreenHeight();
+  if (x >= screenWidth || y >= screenHeight || x + width <= 0 || y + height <= 0) return false;
+  ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);
+  if (!decoder) return false;
+  RenderConfig config;
+  config.x = x;
+  config.y = y;
+  config.maxWidth = width;
+  config.maxHeight = height;
+  config.useGrayscale = true;
+  config.useDithering = false;
+  config.useExactDimensions = true;  // the size the page was laid out with
+  config.gray16 = &sink;             // no framebuffer writes, no cache
+  if (!decoder->decodeToFramebuffer(imagePath, renderer, config)) {
+    LOG_ERR("IMG", "16-level decode failed: %s", imagePath.c_str());
+    return false;
+  }
+  return true;
 }
 
 bool ImageBlock::serialize(Print& file) {

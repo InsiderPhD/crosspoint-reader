@@ -1,6 +1,8 @@
 #include "ImageToFramebufferDecoder.h"
 
 #include <Arduino.h>
+#include <GfxRenderer.h>
+#include <GrayLevelQuantizer.h>
 #include <Logging.h>
 
 bool ImageToFramebufferDecoder::validateAndStoreDimensions(const int64_t width, const int64_t height,
@@ -43,4 +45,13 @@ void ImageToFramebufferDecoder::yieldDuringDecode(uint32_t& lastYieldMs) {
 void ImageToFramebufferDecoder::warnUnsupportedFeature(const std::string& feature, const std::string& imagePath) {
   LOG_ERR("IMG", "Warning: Unsupported feature '%s' in image '%s'. Image may not display correctly.", feature.c_str(),
           imagePath.c_str());
+}
+
+void Gray16Sink::write(const int logicalX, const int logicalY, const uint8_t gray) const {
+  int px, py;
+  renderer->logicalToPanel(logicalX, logicalY, &px, &py);
+  if (px < 0 || py < 0 || px >= panelWidth || py >= panelHeight) return;
+  const uint8_t level = quantizer->ink(gray, static_cast<unsigned>(px), static_cast<unsigned>(py));
+  uint8_t& b = levels[static_cast<size_t>(py) * (panelWidth / 2) + px / 2];
+  b = (px & 1) ? static_cast<uint8_t>((b & 0xF0) | level) : static_cast<uint8_t>((b & 0x0F) | level << 4);
 }

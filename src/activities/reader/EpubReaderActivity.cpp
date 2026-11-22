@@ -12,9 +12,11 @@
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #if FREEINK_DEVICE_PICCO
+#include <GrayLevelQuantizer.h>
 #include <TtfEpdFont.h>
 #include <esp_heap_caps.h>
 
+#include "Epub/converters/ImageToFramebufferDecoder.h"
 #include "platform/Gray16Levels.h"
 #endif
 #include <I18n.h>
@@ -3718,7 +3720,7 @@ bool EpubReaderActivity::runAutosyncNow() {
 
 #if FREEINK_DEVICE_PICCO
 bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginLeft, const int orientedMarginTop,
-                                           const int viewportBottom, const int viewportWidth) {
+                                           const int viewportBottom, const int viewportWidth, const bool withPictures) {
   const uint16_t w = display.getDisplayWidth(), h = display.getDisplayHeight();
   const size_t levelBytes = static_cast<size_t>(w / 2) * h;  // 192 KB at 800x480
   const size_t frameBytes = display.getBufferSize();          // 48 KB
@@ -3745,6 +3747,9 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
   // Picco (S3) only.
   static uint8_t coverage[16], fullInk[16], softInk[16];
   static uint8_t coverage8[256], fullInk8[256], softInk8[256];
+  // Picture pages draw clean in one go, no base: every level is open to glyphs.
+  static uint8_t plain[16], plain8[256];
+  static GrayLevelQuantizer quantizer;  // 512 B of tables, Picco only
   static bool coverageReady = false;
   if (!coverageReady) {
     const int16_t* lstarX10 = display.gray16LevelLstar();
@@ -3758,6 +3763,11 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
     const int softLevel = display.gray16TextSoftLevel();  // -1: these paths pull every deep level back in the passes
     gray16::textCoverageLevels(coverage, lstar, deep);
     gray16::textCoverageLevels8(coverage8, lstar, deep);
+    gray16::coverageLevels(plain, lstar);
+    gray16::coverageLevels8(plain8, lstar);
+    uint8_t lightness[16];  // whole L*, as GrayLevelQuantizer takes them
+    for (int l = 0; l < 16; ++l) lightness[l] = static_cast<uint8_t>((lstarX10[l] + 5) / 10);
+    if (!quantizer.init(lightness, 16)) LOG_ERR("ERS", "16-level pictures: measured tones do not fall; disabled");
     for (int c = 0; c < 16; ++c) {
       fullInk[c] = (deep >> coverage[c]) & 1 ? 15 : 0;
       softInk[c] = coverage[c] == softLevel ? 15 : 0;
@@ -3818,6 +3828,25 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
     }
     memcpy(fb, bwFrame, frameBytes);  // menus and overlays draw over the B/W page
   };
+  if (withPictures) {
+    // The page's own levels with every level open (no text base to keep), then
+    // each picture decoded again in 8 bits over its box. A picture that fails
+    // keeps the box the page drew; none painted and the page goes out as usual.
+    if (quantizer.levels() != 16) return false;
+    renderLevels(plain, plain8);
+    const Gray16Sink sink{levels, w, h, &quantizer, &renderer};
+    const int painted = page.renderImagesGray16(renderer, orientedMarginLeft, orientedMarginTop, sink);
+    const unsigned long tComposed = millis();
+    if (painted == 0) {
+      LOG_DBG("ERS", "16-level pictures: none decoded, the page goes out as usual");
+      return false;
+    }
+    if (!display.displayGray16Image(levels, HalDisplay::HALF_REFRESH, true)) return false;
+    LOG_INF("ERS", "16-level picture page: %d picture(s), composed %lu ms, display %lu ms", painted, tComposed - t0,
+            millis() - tComposed);
+    return true;
+  }
+
   // 1. The base: the dark levels (deep-black path) black, about every pixel
   //    half inked or more, up with the reader's usual B/W turn: the page
   //    reads at once.
@@ -4027,6 +4056,14 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   // light mode, through the panel's 16-level path with non-flashing turns.
   if (SETTINGS.textGray16 && needsTextGrayscale && !pageHasImages && display.supportsGray16Image() &&
       presentGray16Page(page, orientedMarginLeft, orientedMarginTop, viewportBottom, viewportWidth)) {
+    return;
+  }
+  // Pictures at the panel's 16 levels (Image Grayscale on, light mode). The
+  // next page's first frame gives the drive back and clears.
+  if (needsImageGrayscale && display.supportsGray16Image() &&
+      presentGray16Page(page, orientedMarginLeft, orientedMarginTop, viewportBottom, viewportWidth,
+                        /*withPictures=*/true)) {
+    pagesUntilFullRefresh = 1;
     return;
   }
 #endif

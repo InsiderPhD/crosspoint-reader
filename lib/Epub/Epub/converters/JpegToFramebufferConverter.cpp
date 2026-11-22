@@ -137,6 +137,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
   const bool useDithering = ctx->config->useDithering;
   bool caching = ctx->caching;
+  const Gray16Sink* const gray16 = ctx->config->gray16;  // 8-bit gray to the 16-level buffer only
   const int32_t fineScaleFPX = ctx->fineScaleFPX;
   const int32_t invScaleFPX = ctx->invScaleFPX;
   const int32_t fineScaleFPY = ctx->fineScaleFPY;
@@ -200,6 +201,10 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       for (int dstX = dstXStart; dstX < dstXEnd; dstX++) {
         const int outX = cfgX + dstX;
         uint8_t gray = row[dstX - blockX];
+        if (gray16) {
+          gray16->write(outX, outY, gray);
+          continue;
+        }
         uint8_t dithered;
         if (useDithering) {
           dithered = applyBayerDither4Level(gray, outX, outY);
@@ -263,6 +268,11 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
 
+        if (gray16) {
+          gray16->write(outX, outY, gray);
+          continue;
+        }
+
         uint8_t dithered;
         if (useDithering) {
           dithered = applyBayerDither4Level(gray, outX, outY);
@@ -285,6 +295,11 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int top = ((int)row0[lx0] * fxInv + (int)row0[lx0 + 1] * fx) >> FP_SHIFT;
         int bot = ((int)row1[lx0] * fxInv + (int)row1[lx0 + 1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
+
+        if (gray16) {
+          gray16->write(outX, outY, gray);
+          continue;
+        }
 
         uint8_t dithered;
         if (useDithering) {
@@ -311,6 +326,11 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         int top = ((int)row0[lx0] * fxInv + (int)row0[lx1] * fx) >> FP_SHIFT;
         int bot = ((int)row1[lx0] * fxInv + (int)row1[lx1] * fx) >> FP_SHIFT;
         uint8_t gray = (uint8_t)((top * fyInv + bot * fy) >> FP_SHIFT);
+
+        if (gray16) {
+          gray16->write(outX, outY, gray);
+          continue;
+        }
 
         uint8_t dithered;
         if (useDithering) {
@@ -344,6 +364,11 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       if (lx < 0) lx = 0;
       if (lx >= validW) lx = validW - 1;
       uint8_t gray = row[lx];
+
+      if (gray16) {
+        gray16->write(outX, outY, gray);
+        continue;
+      }
 
       uint8_t dithered;
       if (useDithering) {
@@ -486,7 +511,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   // Start streaming the pixel cache to disk. The band only needs to hold the
   // tallest single decode block: a JPEGDEC MCU cell is at most 16 scaled-source
   // rows tall, which our fine scale maps to this many output rows.
-  ctx.caching = !config.cachePath.empty();
+  ctx.caching = !config.cachePath.empty() && !config.gray16;
   if (ctx.caching) {
     const int maxBlockDstRows = (int)(((int64_t)16 * ctx.fineScaleFPY) >> FP_SHIFT) + 2;
     if (!ctx.cache.begin(config.cachePath, destWidth, destHeight, config.x, config.y, maxBlockDstRows)) {

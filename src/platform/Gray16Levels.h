@@ -45,6 +45,19 @@ inline void coverageLevels(uint8_t out[16], const float lstar[16]) {
   }
 }
 
+// The same for 8-bit coverage (TrueType glyphs kept at 8 bpp), c = 0..255.
+inline void coverageLevels8(uint8_t out[256], const float lstar[16]) {
+  const float yWhite = lstarToY(lstar[0]);
+  const float yInk = lstarToY(lstar[15]);
+  for (int c = 0; c < 256; ++c) {
+    const float target = yToLstar(yWhite - (yWhite - yInk) * (c / 255.0f));
+    uint8_t best = 0;
+    for (uint8_t l = 1; l < 16; ++l)
+      if (std::fabs(lstar[l] - target) < std::fabs(lstar[best] - target)) best = l;
+    out[c] = best;
+  }
+}
+
 // Coverage at or above this starts black in the 16-level text base, as on a
 // B/W page.
 constexpr int TEXT_BASE_COVERAGE = 8;

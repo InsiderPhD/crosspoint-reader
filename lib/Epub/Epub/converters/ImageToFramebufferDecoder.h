@@ -6,6 +6,21 @@
 #include <string>
 
 class GfxRenderer;
+class GrayLevelQuantizer;
+
+// A picture's 8-bit gray straight into a 4 bpp level buffer (two pixels per
+// byte, high nibble = left, panel-native rows), for panels that draw 16 levels
+// (the Picco). Each logical pixel is mapped to the panel and given its level by
+// an ordered dither, so a pixel written twice by a scaled decode keeps one
+// level. Set as RenderConfig::gray16: the decoders then write only here (no
+// framebuffer, no pixel cache, no 2-bit dither).
+struct Gray16Sink {
+  uint8_t* levels = nullptr;
+  uint16_t panelWidth = 0, panelHeight = 0;
+  const GrayLevelQuantizer* quantizer = nullptr;
+  const GfxRenderer* renderer = nullptr;
+  void write(int logicalX, int logicalY, uint8_t gray) const;
+};
 
 struct ImageDimensions {
   int16_t width;
@@ -18,8 +33,9 @@ struct RenderConfig {
   bool useGrayscale = true;
   bool useDithering = true;
   bool performanceMode = false;
-  bool useExactDimensions = false;  // If true, use maxWidth/maxHeight as exact output size (no recalculation)
-  std::string cachePath;            // If non-empty, decoder will write pixel cache to this path
+  bool useExactDimensions = false;     // If true, use maxWidth/maxHeight as exact output size (no recalculation)
+  std::string cachePath;               // If non-empty, decoder will write pixel cache to this path
+  const Gray16Sink* gray16 = nullptr;  // Non-null: 8-bit gray to this sink only (cachePath ignored)
 };
 
 class ImageToFramebufferDecoder {

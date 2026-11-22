@@ -6,6 +6,8 @@
 
 #include "Block.h"
 
+struct Gray16Sink;
+
 class ImageBlock final : public Block {
  public:
   ImageBlock(const std::string& imagePath, int16_t width, int16_t height);
@@ -49,6 +51,10 @@ class ImageBlock final : public Block {
   bool isEmpty() override { return false; }
 
   void render(GfxRenderer& renderer, const int x, const int y);
+  // The picture in 8-bit gray into a 16-level buffer (Gray16Sink), decoded from
+  // the source file every time: the pixel cache holds 2 bits. False (nothing
+  // written) when it cannot be decoded; the caller keeps what it drew.
+  bool renderGray16(GfxRenderer& renderer, int x, int y, const Gray16Sink& sink) const;
   bool serialize(Print& file);
   static std::unique_ptr<ImageBlock> deserialize(FsFile& file);
 

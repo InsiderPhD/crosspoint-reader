@@ -10,6 +10,7 @@
 #include <cstring>
 #include <new>
 
+#include "Epub/converters/ImageToFramebufferDecoder.h"
 #include "SpacedText.h"
 
 void PageLine::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
@@ -366,6 +367,17 @@ void Page::renderImages(GfxRenderer& renderer, const int fontId, const int xOffs
       element->render(renderer, fontId, xOffset, yOffset);
     }
   }
+}
+
+int Page::renderImagesGray16(GfxRenderer& renderer, const int xOffset, const int yOffset,
+                             const Gray16Sink& sink) const {
+  int painted = 0;
+  for (const auto& element : elements) {
+    if (element->getTag() != TAG_PageImage) continue;
+    const auto& pi = static_cast<const PageImage&>(*element);
+    if (pi.getImageBlock().renderGray16(renderer, pi.xPos + xOffset, pi.yPos + yOffset, sink)) ++painted;
+  }
+  return painted;
 }
 
 void Page::renderWithImagePlaceholders(GfxRenderer& renderer, const int fontId, const int xOffset,

@@ -11,6 +11,8 @@
 
 #include "FootnoteEntry.h"
 #include "TextLayoutOptions.h"
+
+struct Gray16Sink;
 #include "blocks/ImageBlock.h"
 #include "blocks/TextBlock.h"
 
@@ -192,6 +194,9 @@ class Page {
   // the page still needs its images composed into both planes, but re-rendering
   // every glyph per band would cost the full AA price for no AA.
   void renderImages(GfxRenderer& renderer, int fontId, int xOffset, int yOffset) const;
+  // Every picture in 8-bit gray into a 16-level buffer (ImageBlock::renderGray16).
+  // Returns how many were painted; one that fails keeps what the page drew there.
+  int renderImagesGray16(GfxRenderer& renderer, int xOffset, int yOffset, const Gray16Sink& sink) const;
   // Text as usual, outline boxes where the images will land. Displayed once
   // before a decode so the reader sees the page instead of the previous one
   // while a multi-second decode runs.
