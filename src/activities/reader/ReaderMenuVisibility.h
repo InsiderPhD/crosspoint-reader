@@ -51,6 +51,7 @@ inline constexpr Row kRows[] = {
     {6, MenuAction::FRONTLIGHT_WARMTH, StrId::STR_FRONTLIGHT_WARMTH, Availability::Warmth},
     {7, MenuAction::FONT_LAYOUT, StrId::STR_FONT_LAYOUT_PREVIEW, Availability::Always},
     {26, MenuAction::BOOK_SETTINGS, StrId::STR_BOOK_SETTINGS, Availability::Always},
+    {28, MenuAction::STATUS_BAR, StrId::STR_CUSTOMISE_STATUS_BAR, Availability::Always},
     {8, MenuAction::READER_CONTROLS, StrId::STR_READER_CONTROLS, Availability::Always},
     {9, MenuAction::CUSTOMISE_MENU, StrId::STR_CUSTOMISE_READER_MENU, Availability::Always},
     {10, MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN, Availability::Always},

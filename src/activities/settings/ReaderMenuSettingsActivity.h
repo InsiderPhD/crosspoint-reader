@@ -10,7 +10,8 @@ struct Rect;
 
 // Show/hide picker for every row of the reader's in-book menu.
 //
-// One row per entry the menu can build (ReaderMenuVisibility::kRows), Confirm
+// Info-line toggles first (what the menu shows under its title), then one row
+// per entry the menu can build (ReaderMenuVisibility::kRows), Confirm
 // toggles it, plus a "Show All" row at the bottom to undo an over-enthusiastic
 // trim. Rows this device could never show -- the frontlight pair on a board
 // without a light, the Dev Mode aids -- are left out entirely.
@@ -35,9 +36,14 @@ class ReaderMenuSettingsActivity final : public Activity {
   int selectedIndex = 0;
   bool isDirty = false;
 
-  // Row count including the trailing "Show All" row.
-  int rowCount() const { return static_cast<int>(visibleRows.size()) + 1; }
-  bool isShowAllRow(int index) const { return index == static_cast<int>(visibleRows.size()); }
+  // The menu's info lines (SETTINGS.readerMenuInfo) come first, then the menu
+  // rows, then "Show All".
+  static constexpr int INFO_ROWS = 4;
+  int rowCount() const { return INFO_ROWS + static_cast<int>(visibleRows.size()) + 1; }
+  bool isInfoRow(int index) const { return index < INFO_ROWS; }
+  bool isShowAllRow(int index) const { return index == rowCount() - 1; }
+  // kRows index of a menu row (callers check isInfoRow / isShowAllRow first).
+  uint8_t menuRowAt(int index) const { return visibleRows[index - INFO_ROWS]; }
 
   void handleSelection();
   Rect listRect() const;

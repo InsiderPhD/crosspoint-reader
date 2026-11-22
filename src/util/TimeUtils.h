@@ -34,6 +34,10 @@ bool getSecondsSinceLocalMidnight(uint32_t epochSeconds, uint32_t& secondsOut);
 // False when the clock is not trustworthy, in which case minuteOut is untouched.
 bool getLocalMinuteOfDay(uint16_t& minuteOut);
 uint32_t getDayOrdinalForDate(int year, unsigned month, unsigned day);
+// A UTC ISO 8601 timestamp ("2026-10-12T21:49:27.000Z", as BookFusion sends)
+// as epoch seconds. False (epochOut untouched) when it doesn't parse or is
+// before 2024.
+bool parseIsoUtc(const char* iso, uint32_t& epochOut);
 bool getDateFromDayOrdinal(uint32_t dayOrdinal, int& year, unsigned& month, unsigned& day);
 bool wasTimeSyncedThisBoot();
 // Seed the system clock from the board's RTC at boot. This is the only source

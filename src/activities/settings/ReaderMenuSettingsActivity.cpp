@@ -3,12 +3,24 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <iterator>
+
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "activities/reader/ReaderMenuVisibility.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/TouchListNav.h"
+
+namespace {
+// Info lines, in the order the menu draws them.
+constexpr uint8_t kInfoBits[] = {CrossPointSettings::READER_MENU_INFO_PROGRESS,
+                                 CrossPointSettings::READER_MENU_INFO_LAST_SYNC,
+                                 CrossPointSettings::READER_MENU_INFO_CLOCK, CrossPointSettings::READER_MENU_INFO_GOAL};
+constexpr StrId kInfoLabels[] = {StrId::STR_MENU_INFO_PROGRESS, StrId::STR_MENU_INFO_LAST_SYNC,
+                                 StrId::STR_MENU_INFO_CLOCK, StrId::STR_MENU_INFO_GOAL};
+static_assert(std::size(kInfoBits) == std::size(kInfoLabels), "one label per info line");
+}  // namespace
 
 void ReaderMenuSettingsActivity::onEnter() {
   Activity::onEnter();
@@ -86,13 +98,18 @@ void ReaderMenuSettingsActivity::loop() {
 }
 
 void ReaderMenuSettingsActivity::handleSelection() {
+  if (isInfoRow(selectedIndex)) {
+    SETTINGS.readerMenuInfo ^= kInfoBits[selectedIndex];
+    isDirty = true;
+    return;
+  }
   if (isShowAllRow(selectedIndex)) {
     ReaderMenuVisibility::showAll();
     isDirty = true;
     return;
   }
 
-  const auto& row = ReaderMenuVisibility::kRows[visibleRows[selectedIndex]];
+  const auto& row = ReaderMenuVisibility::kRows[menuRowAt(selectedIndex)];
   ReaderMenuVisibility::setVisible(row.action, !ReaderMenuVisibility::isVisible(row.action));
   isDirty = true;
 }
@@ -118,13 +135,15 @@ void ReaderMenuSettingsActivity::render(RenderLock&&) {
   GUI.drawList(
       renderer, listRect(), rowCount(), selectedIndex,
       [this](int index) -> std::string {
+        if (isInfoRow(index)) return I18N.get(kInfoLabels[index]);
         if (isShowAllRow(index)) return tr(STR_SHOW_ALL);
-        return I18N.get(ReaderMenuVisibility::kRows[visibleRows[index]].label);
+        return I18N.get(ReaderMenuVisibility::kRows[menuRowAt(index)].label);
       },
       nullptr, nullptr,
       [this](int index) -> std::string {
+        if (isInfoRow(index)) return (SETTINGS.readerMenuInfo & kInfoBits[index]) ? tr(STR_SHOW) : tr(STR_HIDE);
         if (isShowAllRow(index)) return "";
-        const auto& row = ReaderMenuVisibility::kRows[visibleRows[index]];
+        const auto& row = ReaderMenuVisibility::kRows[menuRowAt(index)];
         return ReaderMenuVisibility::isVisible(row.action) ? tr(STR_SHOW) : tr(STR_HIDE);
       },
       true);

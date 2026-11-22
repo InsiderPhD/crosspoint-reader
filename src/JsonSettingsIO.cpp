@@ -266,6 +266,7 @@ void JsonSettingsIO::serializeSettings(const CrossPointSettings& s, JsonDocument
   // Reader-menu row visibility bitmask — managed by ReaderMenuSettingsActivity,
   // not SettingsList (one entry per row would put 25 toggles back in Settings).
   doc["readerMenuVisible"] = s.readerMenuVisible;
+  doc["readerMenuInfo"] = s.readerMenuInfo;
 
   // Bluetooth bonded remote metadata is not represented in SettingsList, but it
   // must survive reboot so the firmware can reconnect to the remembered device.
@@ -599,6 +600,8 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
   } else {
     s.readerMenuVisible = doc["readerMenuVisible"].as<uint32_t>();
   }
+  // Reader-menu info lines; absent (an older file) keeps the default.
+  s.readerMenuInfo = doc["readerMenuInfo"] | CrossPointSettings::READER_MENU_INFO_DEFAULT;
 
   // Sleep screens are themes now. A file from before carries the retired mode
   // ("sleepScreen", no longer in the settings list): switch to the store theme

@@ -36,7 +36,8 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(GfxRenderer& renderer, MappedInpu
       totalPages(totalPages),
       bookProgressPercent(bookProgressPercent),
       timeLeftChapterSeconds(timeLeftChapterSeconds),
-      timeLeftBookSeconds(timeLeftBookSeconds) {}
+      timeLeftBookSeconds(timeLeftBookSeconds),
+      syncProvider(syncProvider) {}
 
 std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuItems(
     bool hasFootnotes, ProgressAutoSync::Provider syncProvider, bool hasPageList) {
@@ -70,6 +71,8 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   add(MenuAction::FONT_LAYOUT, StrId::STR_FONT_LAYOUT_PREVIEW);
   // The same editor, but for this book only (BookSettings).
   add(MenuAction::BOOK_SETTINGS, StrId::STR_BOOK_SETTINGS);
+  // Customise Status Bar, including showing or hiding it in the reader.
+  add(MenuAction::STATUS_BAR, StrId::STR_CUSTOMISE_STATUS_BAR);
   add(MenuAction::READER_CONTROLS, StrId::STR_READER_CONTROLS);
   // The row that trims this menu. Hideable like the rest once the user is done
   // with it -- the same screen is always reachable from Settings > Reader.
@@ -140,6 +143,7 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
 
 void EpubReaderMenuActivity::onEnter() {
   Activity::onEnter();
+  buildInfoLines();
   requestUpdate();
 }
 
@@ -284,10 +288,9 @@ int EpubReaderMenuActivity::menuTopY() const {
   // change to those offsets in render() must be reflected here or taps land on
   // the wrong row.
   const int contentY = hintReserve().top;
-  const int summaryLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const int summaryY = 45 + contentY + chapterLineHeight();
-  const int statusY = summaryY + summaryLineHeight + 2;
-  return statusY + summaryLineHeight + 10;
+  const int lineStep = renderer.getLineHeight(UI_10_FONT_ID) + 2;
+  const int infoY = 45 + contentY + chapterLineHeight();
+  return infoY + static_cast<int>(infoLines.size()) * lineStep + 8;
 }
 
 Rect EpubReaderMenuActivity::menuRect() const {
@@ -304,6 +307,105 @@ int EpubReaderMenuActivity::visibleMenuRows() const {
   // top reserve is already inside menuTopY() and the side ones cost no rows.
   const int usable = GUI.contentHeightWithoutIndicator(menuRect());
   return usable >= MENU_ROW_H ? usable / MENU_ROW_H : 1;
+}
+
+std::string EpubReaderMenuActivity::lastSyncLine() const {
+  if (lastSyncEpoch == 0) return tr(STR_BF_NEVER_SYNCED);
+  const uint32_t now = TimeUtils::getCurrentValidTimestamp();
+  char buf[64];
+  if (now == 0 || now < lastSyncEpoch) {
+    // No trustworthy clock (or the sync is stamped ahead of it): the date itself.
+    snprintf(buf, sizeof(buf), tr(STR_SYNC_LAST_SYNCED_FORMAT), TimeUtils::formatDateTime(lastSyncEpoch).c_str());
+    return buf;
+  }
+  const uint32_t ago = now - lastSyncEpoch;
+  if (ago < 60) return tr(STR_LAST_SYNC_JUST_NOW);
+  char span[16];
+  if (ago < 3600) {
+    snprintf(span, sizeof(span), "%um", static_cast<unsigned>(ago / 60));
+  } else if (ago < 86400) {
+    snprintf(span, sizeof(span), "%uh", static_cast<unsigned>(ago / 3600));
+  } else {
+    snprintf(span, sizeof(span), "%ud", static_cast<unsigned>(ago / 86400));
+  }
+  snprintf(buf, sizeof(buf), tr(STR_LAST_SYNC_AGO_FORMAT), span);
+  return buf;
+}
+
+void EpubReaderMenuActivity::buildInfoLines() {
+  infoLines.clear();
+  infoLines.reserve(3);
+  const uint8_t info = SETTINGS.readerMenuInfo;
+
+  if (info & CrossPointSettings::READER_MENU_INFO_PROGRESS) {
+    auto formatMins = [](uint32_t secs) -> std::string {
+      const uint32_t mins = (secs + 30) / 60;
+      char buf[12];
+      if (mins < 60) {
+        snprintf(buf, sizeof(buf), "~%um", static_cast<unsigned>(mins < 1 ? 1 : mins));
+      } else {
+        const uint32_t h = mins / 60;
+        const uint32_t m = mins % 60;
+        if (m == 0) {
+          snprintf(buf, sizeof(buf), "~%uh", static_cast<unsigned>(h));
+        } else {
+          snprintf(buf, sizeof(buf), "~%uh%um", static_cast<unsigned>(h), static_cast<unsigned>(m));
+        }
+      }
+      return std::string(buf);
+    };
+    std::string progressLine;
+    if (SETTINGS.readingSpeedSecondsPerPage > 0) {
+      char speedBuf[16];
+      const unsigned spp = SETTINGS.readingSpeedSecondsPerPage;
+      if (spp < 60) {
+        snprintf(speedBuf, sizeof(speedBuf), "%us/pg", spp);
+      } else {
+        snprintf(speedBuf, sizeof(speedBuf), "%um%us/pg", spp / 60, spp % 60);
+      }
+      progressLine += speedBuf;
+      progressLine += " | ";
+    }
+    if (totalPages > 0) {
+      progressLine += "Ch " + std::to_string(currentPage) + "/" + std::to_string(totalPages);
+      if (timeLeftChapterSeconds > 0) progressLine += " " + formatMins(timeLeftChapterSeconds);
+      progressLine += " | ";
+    }
+    progressLine += "Book " + std::to_string(bookProgressPercent) + "%";
+    if (timeLeftBookSeconds > 0) progressLine += " " + formatMins(timeLeftBookSeconds);
+    infoLines.push_back(std::move(progressLine));
+  }
+
+  // Last sync: only for a book with a sync backend (a "never" line on every
+  // unlinked book would be noise). Autosync's inactive notice rides along: it is
+  // about the same thing.
+  if ((info & CrossPointSettings::READER_MENU_INFO_LAST_SYNC) && syncProvider != ProgressAutoSync::Provider::None) {
+    std::string syncLine = lastSyncLine();
+    // Autosync needs the boot NTP check to have succeeded (that's how the
+    // firmware knows WiFi works this session). When it didn't, autosync is
+    // silently inactive -- say so rather than leaving the user to wonder.
+    if (SETTINGS.autosyncMode != CrossPointSettings::AUTOSYNC_OFF && !TimeUtils::wasTimeSyncedThisBoot()) {
+      syncLine += " | ";
+      syncLine += tr(STR_AUTOSYNC_OFF_NOTICE);
+    }
+    infoLines.push_back(std::move(syncLine));
+  }
+
+  // Time & date and the reading goal share a line, as they always have.
+  std::string statusLine;
+  if (info & CrossPointSettings::READER_MENU_INFO_CLOCK) {
+    // Hidden while the clock has never been set (the timestamp is 0 then).
+    const uint32_t nowTs = TimeUtils::getCurrentValidTimestamp();
+    const std::string clockText = TimeUtils::formatTime(nowTs);
+    if (!clockText.empty()) statusLine = clockText + " " + TimeUtils::formatShortDate(nowTs);
+  }
+  if ((info & CrossPointSettings::READER_MENU_INFO_GOAL) && SETTINGS.trackReadingStats) {
+    // Past the goal it keeps showing actual/goal (e.g. "17m / 15m").
+    if (!statusLine.empty()) statusLine += " | ";
+    statusLine += ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTodayReadingMs()) + " / " +
+                  ReadingStatsAnalytics::formatDurationHm(SETTINGS.getDailyGoalMs());
+  }
+  if (!statusLine.empty()) infoLines.push_back(std::move(statusLine));
 }
 
 void EpubReaderMenuActivity::render(RenderLock&&) {
@@ -333,80 +435,17 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, chapterX, 45 + contentY, truncChapter.c_str(), true);
   }
 
-  // Progress summary
-  auto formatMins = [](uint32_t secs) -> std::string {
-    const uint32_t mins = (secs + 30) / 60;
-    char buf[12];
-    if (mins < 60) {
-      snprintf(buf, sizeof(buf), "~%um", static_cast<unsigned>(mins < 1 ? 1 : mins));
-    } else {
-      const uint32_t h = mins / 60;
-      const uint32_t m = mins % 60;
-      if (m == 0) {
-        snprintf(buf, sizeof(buf), "~%uh", static_cast<unsigned>(h));
-      } else {
-        snprintf(buf, sizeof(buf), "~%uh%um", static_cast<unsigned>(h), static_cast<unsigned>(m));
-      }
-    }
-    return std::string(buf);
-  };
-
-  std::string progressLine;
-  if (SETTINGS.readingSpeedSecondsPerPage > 0) {
-    char speedBuf[16];
-    const unsigned spp = SETTINGS.readingSpeedSecondsPerPage;
-    if (spp < 60) {
-      snprintf(speedBuf, sizeof(speedBuf), "%us/pg", spp);
-    } else {
-      snprintf(speedBuf, sizeof(speedBuf), "%um%us/pg", spp / 60, spp % 60);
-    }
-    progressLine += speedBuf;
-    progressLine += " | ";
-  }
-  if (totalPages > 0) {
-    progressLine += "Ch " + std::to_string(currentPage) + "/" + std::to_string(totalPages);
-    if (timeLeftChapterSeconds > 0) {
-      progressLine += " " + formatMins(timeLeftChapterSeconds);
-    }
-    progressLine += " | ";
-  }
-  progressLine += "Book " + std::to_string(bookProgressPercent) + "%";
-  if (timeLeftBookSeconds > 0) {
-    progressLine += " " + formatMins(timeLeftBookSeconds);
+  // Info lines (SETTINGS.readerMenuInfo), built in onEnter().
+  const int lineStep = renderer.getLineHeight(UI_10_FONT_ID) + 2;
+  int infoY = 45 + contentY + chapterLineHeight();
+  for (const auto& line : infoLines) {
+    const std::string trunc = renderer.truncatedText(UI_10_FONT_ID, line.c_str(), contentWidth - 20);
+    const int lineX = contentX + (contentWidth - renderer.getTextWidth(UI_10_FONT_ID, trunc.c_str())) / 2;
+    renderer.drawText(UI_10_FONT_ID, lineX, infoY, trunc.c_str(), true);
+    infoY += lineStep;
   }
 
-  const int summaryY = 45 + contentY + chapterLineHeight();
-  renderer.drawCenteredText(UI_10_FONT_ID, summaryY, progressLine.c_str());
-
-  // Status line: clock + date (hidden while the clock has never been set —
-  // getCurrentValidTimestamp() returns 0 then) and today's reading vs the
-  // daily goal. Past the goal it keeps showing actual/goal (e.g. "17m / 15m").
-  std::string statusLine;
-  const uint32_t nowTs = TimeUtils::getCurrentValidTimestamp();
-  const std::string clockText = TimeUtils::formatTime(nowTs);
-  if (!clockText.empty()) {
-    statusLine += clockText + " " + TimeUtils::formatShortDate(nowTs) + " | ";
-  }
-  // Autosync needs the boot NTP check to have succeeded (that's how the
-  // firmware knows WiFi works this session). When it didn't, autosync is
-  // silently inactive — say so rather than leaving the user to wonder.
-  if (SETTINGS.autosyncMode != CrossPointSettings::AUTOSYNC_OFF && !TimeUtils::wasTimeSyncedThisBoot()) {
-    statusLine += tr(STR_AUTOSYNC_OFF_NOTICE);
-    statusLine += " | ";
-  }
-  if (SETTINGS.trackReadingStats) {
-    statusLine += ReadingStatsAnalytics::formatDurationHm(READING_STATS.getTodayReadingMs()) + " / " +
-                  ReadingStatsAnalytics::formatDurationHm(SETTINGS.getDailyGoalMs());
-  } else if (statusLine.size() >= 3) {
-    // Nothing follows the clock / autosync notice: drop its trailing " | ".
-    statusLine.erase(statusLine.size() - 3);
-  }
-
-  const int summaryLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-  const int statusY = summaryY + summaryLineHeight + 2;
-  renderer.drawCenteredText(UI_10_FONT_ID, statusY, statusLine.c_str());
-
-  // Menu Items (menuTopY() == statusY + summaryLineHeight + 10; shared with
+  // Menu Items (menuTopY() == below the info lines; shared with
   // the tap hit-testing so paint and touch can never disagree). The list pages
   // by visibleMenuRows(): the window containing the selection is drawn, and
   // Up/Down wrap (or a Full Touch vertical swipe) walks through the pages.

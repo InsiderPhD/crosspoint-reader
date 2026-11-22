@@ -613,6 +613,15 @@ class CrossPointSettings {
 
   // Every reader-menu row visible, including bits no row has claimed yet.
   static constexpr uint32_t READER_MENU_VISIBLE_ALL = 0xFFFFFFFFu;
+  // Info lines under the reader menu's title and chapter (readerMenuInfo bits).
+  enum READER_MENU_INFO : uint8_t {
+    READER_MENU_INFO_PROGRESS = 1u << 0,   // pages, time left, book %
+    READER_MENU_INFO_LAST_SYNC = 1u << 1,  // this book's last BookFusion / KOReader sync
+    READER_MENU_INFO_CLOCK = 1u << 2,      // time and date
+    READER_MENU_INFO_GOAL = 1u << 3,       // today's reading against the daily goal
+  };
+  static constexpr uint8_t READER_MENU_INFO_DEFAULT =
+      READER_MENU_INFO_PROGRESS | READER_MENU_INFO_LAST_SYNC | READER_MENU_INFO_GOAL;
   uint8_t statusBarTopMargin = 0;
   // Clock display in status bar (X3 only, requires DS3231 RTC)
   uint8_t statusBarClock = 0;
@@ -822,6 +831,9 @@ class CrossPointSettings {
   // them. Defaulting every bit (not just the assigned ones) means a row added in
   // a later firmware shows up without a migration.
   uint32_t readerMenuVisible = READER_MENU_VISIBLE_ALL;
+  // Which info lines the reader menu shows (READER_MENU_INFO bits). Managed by
+  // ReaderMenuSettingsActivity alongside the row visibility.
+  uint8_t readerMenuInfo = READER_MENU_INFO_DEFAULT;
   // Silent background progress sync while reading (AUTOSYNC enum).
   uint8_t autosyncMode = AUTOSYNC_OFF;
   // Long press confirm button action (0 = refresh, 1 = sync, 2 = none, 3 = bookmark)

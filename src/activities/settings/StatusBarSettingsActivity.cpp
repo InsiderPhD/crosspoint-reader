@@ -23,7 +23,8 @@ using CPS = CrossPointSettings;
 
 // --- Hub rows: the three bars, then everything they share, clock rows last.
 enum HubItem {
-  HUB_OUTSIDE_READER = 0,  // The strip along the top of every non-reader screen
+  HUB_SHOW_IN_READER = 0,  // SETTINGS.statusBarHidden, inverted: the same flag the Hide Status Bar action flips
+  HUB_OUTSIDE_READER,      // The strip along the top of every non-reader screen
   HUB_TOP_BAR,
   HUB_BOTTOM_BAR,
   HUB_PERCENTAGE_FORMAT,
@@ -37,10 +38,18 @@ enum HubItem {
   HUB_COUNT
 };
 const StrId hubNames[HUB_COUNT] = {
-    StrId::STR_SB_OUTSIDE_READER, StrId::STR_SB_READER_TOP,        StrId::STR_SB_READER_BOTTOM,
-    StrId::STR_PERCENTAGE_FORMAT, StrId::STR_STATUS_BAR_TEXT_SIZE, StrId::STR_STATUS_BAR_TOP_MARGIN,
-    StrId::STR_XTC_STATUS_BAR,    StrId::STR_CLOCK_FORMAT,         StrId::STR_TIME_ZONE,
-    StrId::STR_CLOCK_DST,         StrId::STR_CLOCK_SYNC_NOW,
+    StrId::STR_SB_SHOW_IN_READER,
+    StrId::STR_SB_OUTSIDE_READER,
+    StrId::STR_SB_READER_TOP,
+    StrId::STR_SB_READER_BOTTOM,
+    StrId::STR_PERCENTAGE_FORMAT,
+    StrId::STR_STATUS_BAR_TEXT_SIZE,
+    StrId::STR_STATUS_BAR_TOP_MARGIN,
+    StrId::STR_XTC_STATUS_BAR,
+    StrId::STR_CLOCK_FORMAT,
+    StrId::STR_TIME_ZONE,
+    StrId::STR_CLOCK_DST,
+    StrId::STR_CLOCK_SYNC_NOW,
 };
 
 // --- Bar rows: the positionable elements in display order, then the bar's own
@@ -290,6 +299,9 @@ void StatusBarSettingsActivity::loop() {
 void StatusBarSettingsActivity::handleSelection() {
   if (page == Page::Hub) {
     switch (selectedIndex) {
+      case HUB_SHOW_IN_READER:
+        SETTINGS.statusBarHidden = SETTINGS.statusBarHidden ? 0 : 1;
+        break;
       case HUB_OUTSIDE_READER:
         startActivityForResult(std::make_unique<StatusBarSettingsActivity>(renderer, mappedInput, Page::OutsideReader),
                                nullptr);
@@ -382,6 +394,8 @@ void StatusBarSettingsActivity::handleSelection() {
 std::string StatusBarSettingsActivity::valueText(const int index) const {
   if (page == Page::Hub) {
     switch (index) {
+      case HUB_SHOW_IN_READER:
+        return SETTINGS.statusBarHidden ? tr(STR_STATE_OFF) : tr(STR_STATE_ON);
       case HUB_OUTSIDE_READER:
       case HUB_BOTTOM_BAR:
       case HUB_TOP_BAR:

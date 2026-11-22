@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstdio>
 #include <ctime>
 
 #include "CrossPointSettings.h"
@@ -277,6 +278,20 @@ bool TimeUtils::getSecondsSinceLocalMidnight(const uint32_t epochSeconds, uint32
 
 uint32_t TimeUtils::getDayOrdinalForDate(const int year, const unsigned month, const unsigned day) {
   return static_cast<uint32_t>(daysFromCivil(year, month, day));
+}
+
+bool TimeUtils::parseIsoUtc(const char* iso, uint32_t& epochOut) {
+  int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+  if (iso == nullptr || sscanf(iso, "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) {
+    return false;
+  }
+  if (year < 2024 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 ||
+      minute > 59 || second < 0 || second > 60) {
+    return false;
+  }
+  epochOut = getDayOrdinalForDate(year, static_cast<unsigned>(month), static_cast<unsigned>(day)) * 86400u +
+             static_cast<uint32_t>(hour * 3600 + minute * 60 + second);
+  return true;
 }
 
 bool TimeUtils::getDateFromDayOrdinal(const uint32_t dayOrdinal, int& year, unsigned& month, unsigned& day) {

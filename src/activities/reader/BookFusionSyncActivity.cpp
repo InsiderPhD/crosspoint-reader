@@ -55,15 +55,8 @@ long displayedTenths(const float percentage) { return std::lround(percentage * 1
 // BookFusion's updated_at ("2026-10-12T21:49:27.000Z", always UTC) as local
 // date + time. Empty when it doesn't parse.
 std::string formatServerTimestamp(const char* iso) {
-  int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-  if (iso == nullptr || sscanf(iso, "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) {
-    return "";
-  }
-  if (year < 2024 || month < 1 || month > 12 || day < 1 || day > 31) return "";
-  const uint32_t epoch =
-      TimeUtils::getDayOrdinalForDate(year, static_cast<unsigned>(month), static_cast<unsigned>(day)) * 86400u +
-      static_cast<uint32_t>(hour * 3600 + minute * 60 + second);
-  return TimeUtils::formatDateTime(epoch);
+  uint32_t epoch = 0;
+  return TimeUtils::parseIsoUtc(iso, epoch) ? TimeUtils::formatDateTime(epoch) : std::string();
 }
 
 // Draws `text` in `fontId` so it shares a baseline with a row set in `rowFontId`.

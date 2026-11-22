@@ -40,7 +40,8 @@ class EpubReaderMenuActivity final : public Activity {
     NEARBY_POSITION_SYNC,
     DELETE_CACHE,
     BOOK_SETTINGS,
-    GO_TO_PAGE
+    GO_TO_PAGE,
+    STATUS_BAR
   };
 
   // syncProvider is the backend that would actually handle a Push/Pull for THIS
@@ -57,6 +58,9 @@ class EpubReaderMenuActivity final : public Activity {
   // Set before the menu is started; a setter rather than one more defaulted
   // constructor argument.
   void setChapterTitle(std::string chapter) { chapterTitle = std::move(chapter); }
+  // This book's last successful sync (epoch seconds, 0 = never), for the
+  // "Last sync" info line. Only shown when the book has a sync backend.
+  void setLastSync(uint32_t epoch) { lastSyncEpoch = epoch; }
 
   void onEnter() override;
   void onExit() override;
@@ -89,6 +93,11 @@ class EpubReaderMenuActivity final : public Activity {
   // Height of the chapter-title line under the book title (0 without one);
   // pushes the summary, status line and rows down by that much.
   int chapterLineHeight() const;
+  // The info lines under the title (SETTINGS.readerMenuInfo), built once in
+  // onEnter() so render() and menuTopY() lay out the same number of lines.
+  void buildInfoLines();
+  std::string lastSyncLine() const;
+  std::vector<std::string> infoLines;
   // Rows that fit between menuTopY() and the bottom of the usable area. The
   // list pages by this window (render, tap hit-testing, and swipe paging all
   // derive from it, so they can never disagree).
@@ -132,4 +141,6 @@ class EpubReaderMenuActivity final : public Activity {
   int bookProgressPercent = 0;
   uint32_t timeLeftChapterSeconds = 0;
   uint32_t timeLeftBookSeconds = 0;
+  ProgressAutoSync::Provider syncProvider = ProgressAutoSync::Provider::None;
+  uint32_t lastSyncEpoch = 0;
 };
