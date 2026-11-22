@@ -121,6 +121,14 @@ class HalDisplay {
   // image already up), HALF_REFRESH = clean draw.
   bool displayGray16Image(const uint8_t* levels, RefreshMode mode = HALF_REFRESH, bool turnOffScreen = true);
   bool setGray16Turn(uint8_t scrubEvery) { return einkDisplay.setGray16Turn(scrubEvery); }
+  // Measured L* x10 per level (0 = white .. 15 = darkest) of a clean 16-level
+  // draw on this panel, or nullptr when the driver has none.
+  const int16_t* gray16LevelLstar() const { return einkDisplay.gray16LevelLstar(); }
+  // A 16-level image's owed drive across deep sleep: export before sleeping,
+  // import after begin() on wake; the next display call gives it back.
+  size_t gray16StateSize() const { return einkDisplay.gray16StateSize(); }
+  size_t exportGray16State(uint8_t* out, size_t len) const { return einkDisplay.exportGray16State(out, len); }
+  bool importGray16State(const uint8_t* in, size_t len) { return einkDisplay.importGray16State(in, len); }
   // 16-level text: a readable B/W base (the dark levels) with the reader's
   // B/W turn, then the calibrated 16-level passes.
   bool beginGray16Text(const uint8_t* base, const uint8_t* soft = nullptr) {

@@ -27,6 +27,15 @@ bool present(GfxRenderer& renderer, const SleepThemeRenderer::GreyPlan& plan);
 // leave it alone.
 bool isUp();
 
+// Deep sleep (and a restart) loses the display driver's copy of the 16-level
+// screen, so the drive it put into the ink would never be given back and would
+// build up sleep after sleep. saveOwedDrive() writes that state to the SD card
+// just before sleeping (no-op when no 16-level screen is up);
+// restoreOwedDrive() hands it back to the driver on the next boot, after
+// display.begin() and before the first frame, which then gives the drive back.
+void saveOwedDrive();
+void restoreOwedDrive();
+
 }  // namespace SleepGray16
 
 #endif

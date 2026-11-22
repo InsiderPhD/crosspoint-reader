@@ -19,11 +19,11 @@
 namespace SleepGray16 {
 namespace {
 
-// L* of the driver's default levels (0 = white .. 15 = darkest) drawn on a
-// clean page, from photos of the reader (picco-gray-cal design-turn.json). A
-// sleep screen always draws clean, so these are the tones it shows.
-constexpr float LEVEL_LSTAR[16] = {99.9f, 90.3f, 82.4f, 80.1f, 75.3f, 69.7f, 64.6f, 62.1f,
-                                   55.5f, 52.9f, 44.6f, 42.0f, 41.6f, 36.9f, 30.1f, 26.5f};
+// L* of each level (0 = white .. 15 = darkest) as a clean 16-level draw shows
+// it, from the display driver (HalDisplay::gray16LevelLstar, L* x10). A sleep
+// screen always draws clean, so these are the tones it shows. Filled by
+// present() before any image is dithered.
+float levelLstar[16] = {};
 
 void* psram(size_t bytes) { return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); }
 
@@ -100,7 +100,7 @@ void drawImage(const GfxRenderer& renderer, const Levels& out, const std::string
   float* errNext = errors + (bw + 2);
   memset(errors, 0, 2 * (bw + 2) * sizeof(float));
 
-  const float white = LEVEL_LSTAR[0], black = LEVEL_LSTAR[15];
+  const float white = levelLstar[0], black = levelLstar[15];
   const int screenW = renderer.getScreenWidth(), screenH = renderer.getScreenHeight();
   for (int bmpY = 0; bmpY < bh - cropPixY; bmpY++) {
     int screenY = -cropPixY + (bitmap.isTopDown() ? bmpY : bh - 1 - bmpY);
@@ -119,8 +119,8 @@ void drawImage(const GfxRenderer& renderer, const Levels& out, const std::string
       const float want = black + (white - black) * (lumToLstar(lum[bmpX]) / 100.0f) + errCur[bmpX + 1];
       uint8_t best = 0;
       for (uint8_t l = 1; l < 16; ++l)
-        if (fabsf(LEVEL_LSTAR[l] - want) < fabsf(LEVEL_LSTAR[best] - want)) best = l;
-      const float e = want - LEVEL_LSTAR[best];
+        if (fabsf(levelLstar[l] - want) < fabsf(levelLstar[best] - want)) best = l;
+      const float e = want - levelLstar[best];
       errCur[bmpX + 2] += e * 7.0f / 16.0f;
       errNext[bmpX] += e * 3.0f / 16.0f;
       errNext[bmpX + 1] += e * 5.0f / 16.0f;
@@ -144,6 +144,12 @@ void drawImage(const GfxRenderer& renderer, const Levels& out, const std::string
 bool present(GfxRenderer& renderer, const SleepThemeRenderer::GreyPlan& plan) {
   if (!display.supportsGray16Image()) return false;
   if (!plan.frontDir.empty()) return false;  // art in front of the images: keep the 4-shade passes
+  const int16_t* lstar = display.gray16LevelLstar();
+  if (!lstar) {  // no measured tones (a calibration hook replaced the paths): keep the 4-shade passes
+    LOG_ERR("SG16", "no measured 16-level tones");
+    return false;
+  }
+  for (int l = 0; l < 16; ++l) levelLstar[l] = lstar[l] / 10.0f;
   const uint16_t w = display.getDisplayWidth(), h = display.getDisplayHeight();
   const size_t levelBytes = static_cast<size_t>(w / 2) * h;  // 192 KB
   const size_t frameBytes = renderer.getBufferSize();          // 48 KB
@@ -193,6 +199,56 @@ bool present(GfxRenderer& renderer, const SleepThemeRenderer::GreyPlan& plan) {
 }
 
 bool isUp() { return shown; }
+
+namespace {
+constexpr char OWED_DRIVE_FILE[] = "/.crosspoint/gray16_owed.bin";
+}
+
+void saveOwedDrive() {
+  if (!shown) return;
+  const size_t size = display.gray16StateSize();
+  // ~192 KB (the screen's levels plus a 58-byte header): PSRAM, freed below.
+  auto* state = size ? static_cast<uint8_t*>(psram(size)) : nullptr;
+  if (!state) {
+    LOG_ERR("SG16", "no PSRAM to save the 16-level screen's drive (%u bytes)", static_cast<unsigned>(size));
+    return;
+  }
+  const size_t len = display.exportGray16State(state, size);
+  bool ok = false;
+  if (len) {
+    FsFile file;
+    if (Storage.openFileForWrite("SG16", OWED_DRIVE_FILE, file)) {
+      ok = file.write(state, len) == len;
+      file.close();
+    }
+    if (!ok) Storage.remove(OWED_DRIVE_FILE);  // never leave a partial state for the next boot
+  }
+  heap_caps_free(state);
+  LOG_INF("SG16", "16-level screen drive %s", ok ? "saved for the next boot" : "not saved");
+}
+
+void restoreOwedDrive() {
+  if (!Storage.exists(OWED_DRIVE_FILE)) return;
+  const size_t size = display.gray16StateSize();
+  auto* state = size ? static_cast<uint8_t*>(psram(size)) : nullptr;
+  bool ok = false;
+  if (state) {
+    FsFile file;
+    if (Storage.openFileForRead("SG16", OWED_DRIVE_FILE, file)) {
+      ok = file.fileSize() == size && file.read(state, size) == static_cast<int>(size);
+      file.close();
+    }
+    ok = ok && display.importGray16State(state, size);
+    heap_caps_free(state);
+  }
+  // One boot only: once imported the driver owns it, and a state it refused is stale.
+  Storage.remove(OWED_DRIVE_FILE);
+  if (ok) {
+    LOG_INF("SG16", "16-level screen drive restored; the first frame gives it back");
+  } else {
+    LOG_ERR("SG16", "16-level screen drive not restored (%u bytes expected)", static_cast<unsigned>(size));
+  }
+}
 
 }  // namespace SleepGray16
 

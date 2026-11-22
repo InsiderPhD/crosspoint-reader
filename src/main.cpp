@@ -525,6 +525,9 @@ void enterDeepSleep(bool fromTimeout) {
 
   halFrontlight.off();
 #if FREEINK_DEVICE_PICCO
+  // Before the USB hold, whose button exit restarts: a restart loses the
+  // driver's copy of a 16-level sleep screen just as deep sleep does.
+  SleepGray16::saveOwedDrive();
   if (holdSleepWhileUsbPowered()) {
     // The power button ended the plugged-in hold: that press is a wake. Boot
     // straight back up (the reader/home routing after a reset is the same as
@@ -908,6 +911,11 @@ void setup() {
   LOG_DBG("MAIN", "Starting CrossPoint version " CROSSPOINT_VERSION);
 
   setupDisplayAndFonts(/*seamless=*/!APP_STATE.showBootScreen);
+#if FREEINK_DEVICE_PICCO
+  // Before the first frame: a 16-level sleep screen's drive, carried across
+  // the sleep, is given back by that frame.
+  SleepGray16::restoreOwedDrive();
+#endif
   // setupDisplayAndFonts() keeps its own phase clock; re-base ours so the boot
   // screen below is measured from where it actually returned.
   phaseStartMs = millis();
