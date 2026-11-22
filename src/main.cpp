@@ -323,6 +323,22 @@ static void saveSleepFrameBuffer() {
   file.close();
 }
 
+#if FREEINK_DEVICE_PICCO
+// The sleep frame back into the framebuffer without consuming the file (the
+// charge-only wake may run again before the next real boot).
+static bool peekSleepFrameBuffer() {
+  FsFile file;
+  if (!Storage.openFileForRead("SLP", SLEEP_FRAME_FILE, file)) return false;
+  const size_t bufferSize = display.getBufferSize();
+  const size_t bytesRead = file.read(display.getFrameBuffer(), bufferSize);
+  file.close();
+  return bytesRead == bufferSize;
+}
+
+// Set at the top of setup(): the power button was down when the chip came up.
+static bool powerHeldAtBoot = false;
+#endif
+
 static bool loadSleepFrameBuffer() {
   FsFile file;
   if (!Storage.openFileForRead("SLP", SLEEP_FRAME_FILE, file)) return false;
@@ -464,6 +480,49 @@ bool holdSleepWhileUsbPowered() {
   }
   return buttonPressed;
 }
+
+// Plugging a sleeping Picco in must not boot it. Nothing in deep sleep watches
+// the charger (the SGM41562 is I2C-only and no pin is armed for it), so
+// whatever wakes the chip -- a cold POWERON with USB, or an EXT1 wake on the
+// power-key line without a press -- lands here. Deliberate wakes keep booting:
+// a press latched at the top of setup(), a restart (ESP_RST_SW, which is also
+// how a press during the hold below comes back), a flash or a USB-serial reset.
+bool isChargerWake() {
+  const auto reset = esp_reset_reason();
+  const auto cause = esp_sleep_get_wakeup_cause();
+  LOG_INF("MAIN", "Wake: reset=%d cause=%d usb=%d button=%d", static_cast<int>(reset), static_cast<int>(cause),
+          gpio.isUsbConnected() ? 1 : 0, powerHeldAtBoot ? 1 : 0);
+  if (powerHeldAtBoot || !gpio.isUsbConnected()) return false;
+  if (reset == ESP_RST_POWERON) return true;
+  return reset == ESP_RST_DEEPSLEEP && cause == ESP_SLEEP_WAKEUP_EXT1;
+}
+
+// The charge-only path: the sleep screen stays up with the charge strip (the
+// same light-sleep hold enterDeepSleep() runs when sleeping while plugged in),
+// then back to deep sleep on unplug, or a full boot on a power press. Never
+// returns.
+void chargeWhileAsleepIfPluggedIn() {
+  if (!isChargerWake()) return;
+  LOG_INF("MAIN", "Plugged in while asleep: charging with the sleep screen up");
+  // A 16-level sleep screen cannot take a B/W strip: hold without one (and
+  // without touching the glass), leaving its owed-drive file for the next boot.
+  // Otherwise the sleep frame saved before sleeping redraws under the strip.
+  const bool gray16Up = Storage.exists(SleepGray16::OWED_DRIVE_FILE);
+  bool buttonPressed;
+  if (gray16Up || !peekSleepFrameBuffer()) {
+    buttonPressed = powerManager.holdWhileUsbPowered(gpio, ignoreChargeStatus);
+  } else {
+    buttonPressed = holdSleepWhileUsbPowered();
+  }
+  if (buttonPressed) {
+    LOG_INF("MAIN", "Power pressed while charging: booting");
+    esp_restart();
+  }
+  halFrontlight.off();
+  gpio.prepareForDeepSleep();
+  display.deepSleep();
+  powerManager.startDeepSleep(gpio);
+}
 #endif
 }  // namespace
 
@@ -514,7 +573,9 @@ void enterDeepSleep(bool fromTimeout) {
   // (bounded) rather than cutting power mid-request.
   HardcoverSync::finishBeforeSleep();
 
-  if (isSeamless) {
+  // The Picco keeps it on every sleep: plugging in while asleep redraws it under
+  // the charge strip (chargeWhileAsleepIfPluggedIn).
+  if (isSeamless || FREEINK_DEVICE_PICCO) {
     saveSleepFrameBuffer();
   }
 
@@ -646,6 +707,13 @@ void setup() {
   // and asserting it early would change boot on shipping hardware to fix a bug
   // they do not have.
   BoardConfig::holdPowerRails();
+#endif
+#if FREEINK_DEVICE_PICCO
+  // Latched before anything slow: a deliberate power-button wake is a short
+  // press that is long released by the time bring-up reaches the charge-only
+  // check below, and a press is what tells it apart from plugging in.
+  pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
+  powerHeldAtBoot = digitalRead(InputManager::POWER_BUTTON_PIN) == LOW;
 #endif
 
 #ifdef ENABLE_SERIAL_LOG
@@ -866,7 +934,11 @@ void setup() {
     case HalGPIO::WakeupReason::AfterUSBPower:
       // If USB power caused a cold boot, go back to sleep
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
+#if !FREEINK_DEVICE_PICCO
       powerManager.startDeepSleep(gpio);
+#endif
+      // Picco: chargeWhileAsleepIfPluggedIn() below, once the display is up,
+      // keeps the sleep screen with a charge strip instead.
       break;
     case HalGPIO::WakeupReason::AfterFlash:
       // After flashing, just proceed to boot
@@ -912,6 +984,9 @@ void setup() {
 
   setupDisplayAndFonts(/*seamless=*/!APP_STATE.showBootScreen);
 #if FREEINK_DEVICE_PICCO
+  // Plugged in while asleep: charge with the sleep screen up instead of booting.
+  // Before the owed-drive restore, so a 16-level sleep screen stays untouched.
+  chargeWhileAsleepIfPluggedIn();
   // Before the first frame: a 16-level sleep screen's drive, carried across
   // the sleep, is given back by that frame.
   SleepGray16::restoreOwedDrive();
@@ -1277,6 +1352,8 @@ void textGrid(const String& arg) {
   uint8_t* const base = planes;
   uint8_t* const soft = planes + (W / 8) * H;
   display.setGray16Turn(255);  // the second page must be a dissolve turn
+  const uint16_t deepLevels = display.gray16DeepLevels();
+  const int softLevel = display.gray16TextSoftLevel();
   auto draw = [&](const bool permuted) {
     memset(planes, 0xFF, 2 * (W / 8) * H);
     for (int y = 0; y < H; ++y)
@@ -1285,8 +1362,8 @@ void textGrid(const String& arg) {
         uint8_t& b = levels[y * (W / 2) + x / 2];
         b = (x & 1) ? static_cast<uint8_t>((b & 0xF0) | l) : static_cast<uint8_t>((b & 0x0F) | l << 4);
         const uint8_t bit = static_cast<uint8_t>(0x80 >> (x & 7));
-        if ((gray16::DEEP_LEVELS >> l) & 1) base[y * (W / 8) + x / 8] &= static_cast<uint8_t>(~bit);
-        if (l == gray16::SOFT_DEEP_LEVEL) soft[y * (W / 8) + x / 8] &= static_cast<uint8_t>(~bit);
+        if ((deepLevels >> l) & 1) base[y * (W / 8) + x / 8] &= static_cast<uint8_t>(~bit);
+        if (l == softLevel) soft[y * (W / 8) + x / 8] &= static_cast<uint8_t>(~bit);
       }
     const unsigned long t0 = millis();
     if (!display.beginGray16Text(base, soft)) return false;

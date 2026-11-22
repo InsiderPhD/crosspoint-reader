@@ -9,6 +9,7 @@
 #include <Logging.h>
 #include <esp_heap_caps.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -141,15 +142,39 @@ void drawImage(const GfxRenderer& renderer, const Levels& out, const std::string
 
 }  // namespace
 
-bool present(GfxRenderer& renderer, const SleepThemeRenderer::GreyPlan& plan) {
-  if (!display.supportsGray16Image()) return false;
-  if (!plan.frontDir.empty()) return false;  // art in front of the images: keep the 4-shade passes
+// The B/W frame (panel-native, 1 bpp, cleared bit = black) as levels 15 / 0.
+void stampFrame(uint8_t* levels, const uint8_t* frame, const uint16_t w, const uint16_t h) {
+  const size_t rowBytes = w / 8;
+  for (uint16_t y = 0; y < h; ++y) {
+    const uint8_t* src = frame + y * rowBytes;
+    uint8_t* dst = levels + static_cast<size_t>(y) * (w / 2);
+    for (size_t xb = 0; xb < rowBytes; ++xb) {
+      const uint8_t ink = static_cast<uint8_t>(~src[xb]);
+      uint8_t* d = dst + xb * 4;
+      d[0] = static_cast<uint8_t>(((ink & 0x80) ? 0xF0 : 0) | ((ink & 0x40) ? 0x0F : 0));
+      d[1] = static_cast<uint8_t>(((ink & 0x20) ? 0xF0 : 0) | ((ink & 0x10) ? 0x0F : 0));
+      d[2] = static_cast<uint8_t>(((ink & 0x08) ? 0xF0 : 0) | ((ink & 0x04) ? 0x0F : 0));
+      d[3] = static_cast<uint8_t>(((ink & 0x02) ? 0xF0 : 0) | ((ink & 0x01) ? 0x0F : 0));
+    }
+  }
+}
+
+// levelLstar from the driver. False when it has no measured tones (a
+// calibration hook replaced the paths): the caller keeps its 4-shade path.
+bool loadLevelLstar() {
   const int16_t* lstar = display.gray16LevelLstar();
-  if (!lstar) {  // no measured tones (a calibration hook replaced the paths): keep the 4-shade passes
+  if (!lstar) {
     LOG_ERR("SG16", "no measured 16-level tones");
     return false;
   }
   for (int l = 0; l < 16; ++l) levelLstar[l] = lstar[l] / 10.0f;
+  return true;
+}
+
+bool present(GfxRenderer& renderer, const SleepThemeRenderer::GreyPlan& plan) {
+  if (!display.supportsGray16Image()) return false;
+  if (!plan.frontDir.empty()) return false;  // art in front of the images: keep the 4-shade passes
+  if (!loadLevelLstar()) return false;       // keep the 4-shade passes
   const uint16_t w = display.getDisplayWidth(), h = display.getDisplayHeight();
   const size_t levelBytes = static_cast<size_t>(w / 2) * h;  // 192 KB
   const size_t frameBytes = renderer.getBufferSize();          // 48 KB
@@ -171,20 +196,8 @@ bool present(GfxRenderer& renderer, const SleepThemeRenderer::GreyPlan& plan) {
     paths[i] = SleepCover::grayVersionOf(renderer, plan.images[i].path, gray) ? gray : plan.images[i].path;
   }
 
-  // Black and white from the frame (panel-native, 1 bpp, cleared bit = black).
-  const size_t rowBytes = w / 8;
-  for (uint16_t y = 0; y < h; ++y) {
-    const uint8_t* src = frame + y * rowBytes;
-    uint8_t* dst = levels + static_cast<size_t>(y) * (w / 2);
-    for (size_t xb = 0; xb < rowBytes; ++xb) {
-      const uint8_t ink = static_cast<uint8_t>(~src[xb]);
-      uint8_t* d = dst + xb * 4;
-      d[0] = static_cast<uint8_t>(((ink & 0x80) ? 0xF0 : 0) | ((ink & 0x40) ? 0x0F : 0));
-      d[1] = static_cast<uint8_t>(((ink & 0x20) ? 0xF0 : 0) | ((ink & 0x10) ? 0x0F : 0));
-      d[2] = static_cast<uint8_t>(((ink & 0x08) ? 0xF0 : 0) | ((ink & 0x04) ? 0x0F : 0));
-      d[3] = static_cast<uint8_t>(((ink & 0x02) ? 0xF0 : 0) | ((ink & 0x01) ? 0x0F : 0));
-    }
-  }
+  // Black and white from the frame.
+  stampFrame(levels, frame, w, h);
   const Levels out{levels, w, h};
   for (uint8_t i = 0; i < plan.count; i++) drawImage(renderer, out, paths[i], plan.images[i]);
 
@@ -200,8 +213,45 @@ bool present(GfxRenderer& renderer, const SleepThemeRenderer::GreyPlan& plan) {
 
 bool isUp() { return shown; }
 
-namespace {
-constexpr char OWED_DRIVE_FILE[] = "/.crosspoint/gray16_owed.bin";
+bool showImage(GfxRenderer& renderer, const std::string& bmpPath) {
+  if (!display.supportsGray16Image() || !loadLevelLstar()) return false;
+  // Fit the picture inside the screen (never up) and centre it, as the viewer's
+  // B/W path does.
+  int imgW = 0, imgH = 0;
+  {
+    FsFile file;
+    if (!Storage.openFileForRead("SG16", bmpPath, file)) return false;
+    Bitmap bitmap(file, false);
+    if (bitmap.parseHeaders() != BmpReaderError::Ok) return false;
+    imgW = bitmap.getWidth();
+    imgH = bitmap.getHeight();
+  }
+  if (imgW <= 0 || imgH <= 0) return false;
+  const int screenW = renderer.getScreenWidth(), screenH = renderer.getScreenHeight();
+  const float scale = std::min(1.0f, std::min(static_cast<float>(screenW) / imgW, static_cast<float>(screenH) / imgH));
+  SleepThemeRenderer::GreyImage g;
+  g.path = bmpPath;
+  g.width = static_cast<int16_t>(screenW);
+  g.height = static_cast<int16_t>(screenH);
+  g.x = static_cast<int16_t>((screenW - static_cast<int>(imgW * scale)) / 2);
+  g.y = static_cast<int16_t>((screenH - static_cast<int>(imgH * scale)) / 2);
+
+  const uint16_t w = display.getDisplayWidth(), h = display.getDisplayHeight();
+  const size_t levelBytes = static_cast<size_t>(w / 2) * h;  // 192 KB: PSRAM, freed below
+  auto* levels = static_cast<uint8_t*>(psram(levelBytes));
+  if (!levels) {
+    LOG_ERR("SG16", "no PSRAM for a 16-level image");
+    return false;
+  }
+  // Whatever the caller drew (button hints) in black and white, the picture over it.
+  stampFrame(levels, renderer.getFrameBuffer(), w, h);
+  const Levels out{levels, w, h};
+  drawImage(renderer, out, bmpPath, g);
+  const unsigned long t0 = millis();
+  const bool ok = display.displayGray16Image(levels, HalDisplay::HALF_REFRESH, false);
+  heap_caps_free(levels);
+  LOG_INF("SG16", "16-level image %s in %lu ms", ok ? "shown" : "refused", millis() - t0);
+  return ok;
 }
 
 void saveOwedDrive() {

@@ -11,6 +11,7 @@
 #include <I18n.h>
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
+#include <PngToBmpConverter.h>
 
 #include <algorithm>
 
@@ -21,6 +22,9 @@
 #include "fontIds.h"
 #include "sleeptheme/SleepThemeRenderer.h"
 #include "util/SleepBootImages.h"
+#if FREEINK_DEVICE_PICCO
+#include "activities/boot_sleep/SleepGray16.h"
+#endif
 
 namespace {
 constexpr char SLEEP_COVER_PATH[] = "/sleep.bmp";
@@ -124,6 +128,43 @@ void BmpViewerActivity::showLoadError(const char* message) {
   if (SETTINGS.darkMode) renderer.invertScreen();
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
+
+#if FREEINK_DEVICE_PICCO
+namespace {
+constexpr char GRAY16_VIEW_TMP[] = "/.crosspoint/viewer_gray.bmp";
+}
+
+bool BmpViewerActivity::showGray16(const bool hasPrevious, const bool hasNext) {
+  if (!display.supportsGray16Image()) return false;
+  std::string bmpPath = filePath;
+  if (!FsHelpers::hasBmpExtension(filePath)) {
+    // JPEG/PNG: an 8-bit gray BMP keeps every tone for the 16-level dither (the
+    // streamed 2-bit conversions keep four). Scratch file, replaced per picture.
+    FsFile src, out;
+    if (!Storage.openFileForRead("BMP", filePath, src)) return false;
+    if (!Storage.openFileForWrite("BMP", GRAY16_VIEW_TMP, out)) {
+      src.close();
+      return false;
+    }
+    const bool converted = FsHelpers::hasJpgExtension(filePath)
+                               ? JpegToBmpConverter::jpegFileToGrayBmpStream(src, out, /*crop=*/false)
+                               : PngToBmpConverter::pngFileToGrayBmpStream(src, out, /*crop=*/false);
+    src.close();
+    out.close();
+    if (!converted) {
+      LOG_ERR("BMP", "16-level: gray conversion failed for %s", filePath.c_str());
+      Storage.remove(GRAY16_VIEW_TMP);
+      return false;
+    }
+    bmpPath = GRAY16_VIEW_TMP;
+  }
+  // Button hints in B/W under the picture.
+  renderer.clearScreen();
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel(), hasPrevious ? "<" : "", hasNext ? ">" : "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  return SleepGray16::showImage(renderer, bmpPath);
+}
+#endif
 
 bool BmpViewerActivity::renderDecodedImage() {
   // Both decoders stream: JPEG in MCU bands through JPEGDEC's built-in 1/2..1/8
@@ -232,6 +273,16 @@ void BmpViewerActivity::onEnter() {
   const auto pageHeight = renderer.getScreenHeight();
   Rect popupRect = GUI.drawPopup(renderer, tr(STR_LOADING));
   GUI.fillPopupProgress(renderer, popupRect, 20);  // Initial 20% progress
+
+#if FREEINK_DEVICE_PICCO
+  // The panel's 16 levels when it has them; the 4-shade paths below otherwise.
+  {
+    const bool hasPrevious = siblingImages.size() > 1 && currentImageIndex > 0;
+    const bool hasNext = siblingImages.size() > 1 && currentImageIndex != -1 &&
+                         currentImageIndex < static_cast<int>(siblingImages.size()) - 1;
+    if (showGray16(hasPrevious, hasNext)) return;
+  }
+#endif
 
   if (FsHelpers::hasJpgExtension(filePath) || FsHelpers::hasPngExtension(filePath)) {
     // Not inverted in dark mode, like the BMP path below: a picture is shown in

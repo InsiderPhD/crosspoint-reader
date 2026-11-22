@@ -75,6 +75,7 @@
 #include "activities/settings/FontLayoutPreviewActivity.h"
 #include "activities/settings/ReaderControlsActivity.h"  // for ReaderControlsActivity::actionName()
 #include "activities/settings/ReaderMenuSettingsActivity.h"
+#include "activities/settings/StatusBarSettingsActivity.h"
 #include "activities/util/FrontlightPanelActivity.h"
 #include "clippings/ClippingsManager.h"
 #include "clippings/HighlightOffsetFinder.h"
@@ -1704,6 +1705,18 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResult(std::make_unique<ReaderControlsActivity>(renderer, mappedInput),
                              [this](const ActivityResult&) {
                                requestUpdate();  // button mappings may have changed — refresh hint labels
+                             });
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::STATUS_BAR: {
+      // The status bar's text size and top margin change the page area, so drop
+      // the laid-out chapter first, as Font & Layout does: the reader repaginates
+      // on return (a cache hit when the page area came back unchanged).
+      reflowCurrentChapter();
+      startActivityForResult(std::make_unique<StatusBarSettingsActivity>(renderer, mappedInput),
+                             [this](const ActivityResult&) {
+                               pagesUntilFullRefresh = 1;  // the bar area changed under a fast turn
+                               requestUpdate();
                              });
       break;
     }
@@ -3719,7 +3732,7 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
     // Fast, non-flashing turns between pages, a full clean one every
     // refresh-frequency pages (the same cadence as the B/W reader's HALF).
     display.setGray16Turn(static_cast<uint8_t>(std::max(1, SETTINGS.getRefreshFrequency() - 1)));
-    display.setGray16TextSoftPull(gray16::TEXT_SOFT_PULL);
+    if (display.gray16TextSoftLevel() >= 0) display.setGray16TextSoftPull(gray16::TEXT_SOFT_PULL);
   }
   const unsigned long t0 = millis();
   uint8_t* const levels = gray16Buffer;
@@ -3728,20 +3741,30 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
   memcpy(bwFrame, fb, frameBytes);  // the B/W page just rendered
   // Level tables for 2-bit glyphs (UI fonts: 16 entries) and 8-bit TrueType
   // glyphs (256): the tone, the base (deep levels black) and the soft plane.
-  // Static, 816 bytes: built once from the measured tones, Picco (S3) only.
+  // Static, 816 bytes: built once from the driver's measured tones and paths,
+  // Picco (S3) only.
   static uint8_t coverage[16], fullInk[16], softInk[16];
   static uint8_t coverage8[256], fullInk8[256], softInk8[256];
   static bool coverageReady = false;
   if (!coverageReady) {
-    gray16::textCoverageLevels(coverage, gray16::TEXT_LSTAR);
-    gray16::textCoverageLevels8(coverage8, gray16::TEXT_LSTAR);
+    const int16_t* lstarX10 = display.gray16LevelLstar();
+    const uint16_t deep = display.gray16DeepLevels();
+    if (!lstarX10 || !deep) {
+      LOG_ERR("ERS", "16-level text: no measured tones or deep levels from the driver");
+      return false;
+    }
+    float lstar[16];
+    for (int l = 0; l < 16; ++l) lstar[l] = lstarX10[l] / 10.0f;
+    const int softLevel = display.gray16TextSoftLevel();  // -1: these paths pull every deep level back in the passes
+    gray16::textCoverageLevels(coverage, lstar, deep);
+    gray16::textCoverageLevels8(coverage8, lstar, deep);
     for (int c = 0; c < 16; ++c) {
-      fullInk[c] = (gray16::DEEP_LEVELS >> coverage[c]) & 1 ? 15 : 0;
-      softInk[c] = coverage[c] == gray16::SOFT_DEEP_LEVEL ? 15 : 0;
+      fullInk[c] = (deep >> coverage[c]) & 1 ? 15 : 0;
+      softInk[c] = coverage[c] == softLevel ? 15 : 0;
     }
     for (int c = 0; c < 256; ++c) {
-      fullInk8[c] = (gray16::DEEP_LEVELS >> coverage8[c]) & 1 ? 15 : 0;
-      softInk8[c] = coverage8[c] == gray16::SOFT_DEEP_LEVEL ? 15 : 0;
+      fullInk8[c] = (deep >> coverage8[c]) & 1 ? 15 : 0;
+      softInk8[c] = coverage8[c] == softLevel ? 15 : 0;
     }
     coverageReady = true;
   }
@@ -4476,6 +4499,25 @@ void EpubReaderActivity::openReaderMenu() {
   // One short string, owned by the menu and freed with it.
   if (const int tocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex); tocIndex != -1) {
     menuActivity->setChapterTitle(epub->getTocItem(tocIndex).title);
+  }
+  // This book's last sync, for the menu's "Last sync" line: one small sidecar
+  // read, only when the line is shown and the book has a backend.
+  if ((SETTINGS.readerMenuInfo & CrossPointSettings::READER_MENU_INFO_LAST_SYNC) &&
+      syncProvider != ProgressAutoSync::Provider::None) {
+    uint32_t lastSync = 0;
+    if (syncProvider == ProgressAutoSync::Provider::BookFusion) {
+      char iso[40];
+      if (!BookFusionBookIdStore::loadLastSyncAt(epub->getPath().c_str(), iso, sizeof(iso)) ||
+          !TimeUtils::parseIsoUtc(iso, lastSync)) {
+        lastSync = 0;
+      }
+    } else {
+      int64_t ts = 0;
+      if (KOReaderSyncStateStore::loadLastSyncTimestamp(epub->getPath().c_str(), ts) && ts > 0 && ts < UINT32_MAX) {
+        lastSync = static_cast<uint32_t>(ts);
+      }
+    }
+    menuActivity->setLastSync(lastSync);
   }
   startActivityForResult(std::move(menuActivity), [this](const ActivityResult& result) {
     const auto& menu = std::get<MenuResult>(result.data);

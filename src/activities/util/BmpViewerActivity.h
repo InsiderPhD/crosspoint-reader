@@ -37,6 +37,10 @@ class BmpViewerActivity final : public Activity {
   bool swallowBackRelease = false;
   // JPEG/PNG: streamed decode straight into the framebuffer, scaled to fit.
   bool renderDecodedImage();
+#if FREEINK_DEVICE_PICCO
+  // JPEG, PNG or BMP at the panel's 16 levels. False when unavailable; nothing shown.
+  bool showGray16(bool hasPrevious, bool hasNext);
+#endif
   void showLoadError(const char* message);
 
   std::string filePath;

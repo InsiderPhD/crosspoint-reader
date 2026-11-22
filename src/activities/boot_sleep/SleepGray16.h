@@ -2,6 +2,8 @@
 
 #if FREEINK_DEVICE_PICCO
 
+#include <string>
+
 class GfxRenderer;
 namespace SleepThemeRenderer {
 struct GreyPlan;
@@ -27,12 +29,21 @@ bool present(GfxRenderer& renderer, const SleepThemeRenderer::GreyPlan& plan);
 // leave it alone.
 bool isUp();
 
+// One picture (any BMP; 8-bit gray keeps every tone) at the panel's 16 levels,
+// fitted inside the screen and centred, over whatever the framebuffer holds
+// (button hints), which is left untouched. False, with nothing shown, when the
+// panel or the driver's measured tones are unavailable. The next frame gives
+// the drive back.
+bool showImage(GfxRenderer& renderer, const std::string& bmpPath);
+
 // Deep sleep (and a restart) loses the display driver's copy of the 16-level
 // screen, so the drive it put into the ink would never be given back and would
 // build up sleep after sleep. saveOwedDrive() writes that state to the SD card
 // just before sleeping (no-op when no 16-level screen is up);
 // restoreOwedDrive() hands it back to the driver on the next boot, after
 // display.begin() and before the first frame, which then gives the drive back.
+// Where saveOwedDrive() keeps it; present only between that and the next boot.
+inline constexpr char OWED_DRIVE_FILE[] = "/.crosspoint/gray16_owed.bin";
 void saveOwedDrive();
 void restoreOwedDrive();
 
