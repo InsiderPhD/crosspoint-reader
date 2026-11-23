@@ -34,16 +34,24 @@ void environment(const char* label);
 // and the parameter names.
 void url(const char* label, const char* fullUrl);
 
-// Network reachability of one host, to tell a block from a reader bug: what
-// DNS answers (flagged when it is 0.0.0.0, loopback or a private address, the
-// usual signs of a DNS filter) and whether a TCP connection to port 443 opens,
-// with its time. Costs up to ~4 s per host; only for a transfer that already
-// failed at the transport level.
+// Network reachability of one host, to tell a block from a reader bug, in one
+// report: what this network's DNS answers (flagged when it is 0.0.0.0,
+// loopback or a private address, the usual signs of a DNS filter), what
+// Cloudflare (1.1.1.1) and Google (8.8.8.8) answer when asked directly, whether
+// TCP port 443 opens at each address, and an HTTPS HEAD / (status, Server
+// header, redirect, TLS protocol, or the TLS error and alert). Seconds per host;
+// only after a transfer already failed.
 void hostProbe(const char* host);
 
 // hostProbe() for the hosts every GitHub-backed download goes through (fonts,
-// dictionaries, firmware updates), so one report shows which of them the
-// network refuses.
-void githubProbe();
+// dictionaries, firmware updates) plus `failingHost` when it is another one,
+// then a one-line verdict. Once per boot: a retried download points at the
+// report already written.
+void githubProbe(const char* failingHost = nullptr);
+
+// The first bytes of a downloaded file, printable or hex, for a transfer that
+// "succeeded" but whose content was refused (a filter's block page saved as
+// the font list, firmware or dictionary catalog).
+void fileHead(const char* label, const char* path);
 
 }  // namespace DownloadFailureLog

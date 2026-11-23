@@ -579,21 +579,32 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
                                diag.connected ? 1 : 0, diag.reusedConnection ? 1 : 0);
       // The host this hop dialed (after redirects: the CDN a GitHub release
       // download is sent to) and, for a connect failure, how far it got.
-      DownloadFailureLog::line("transport: host=%s connectStage=%s tlsError=%d", diag.host,
-                               diag.connectStage[0] ? diag.connectStage : "-", diag.tlsError);
+      DownloadFailureLog::line("transport: host=%s connectStage=%s tlsError=%d \"%s\" alert=%d", diag.host,
+                               diag.connectStage[0] ? diag.connectStage : "-", diag.tlsError, diag.tlsErrorString,
+                               diag.tlsAlert);
       LOG_ERR("HTTP", "Download failed at %s (host %s, connect %s, tls %d)", diag.stage[0] ? diag.stage : "?",
               diag.host[0] ? diag.host : "?", diag.connectStage[0] ? diag.connectStage : "-", diag.tlsError);
       if (diag.partialBytes > 0) {
         DownloadFailureLog::line("transport: partial=\"%s\"", diag.partial);
       }
-      // Is it the network? DNS and TCP for the failing host, and for every host
-      // the GitHub-backed downloads use.
-      DownloadFailureLog::hostProbe(diag.host);
-      DownloadFailureLog::githubProbe();
+    }
+    // Every hop the request took (redirects to the CDN included).
+    for (uint8_t i = 0; i < http.hopCount(); ++i) {
+      const auto& hop = http.hops()[i];
+      DownloadFailureLog::line("hop %u: %s -> %d in %ums%s%s", static_cast<unsigned>(i + 1), hop.host, hop.status,
+                               static_cast<unsigned>(hop.ms), hop.tls[0] ? ", tls " : "", hop.tls);
+    }
+    if (httpCode < 0) {
+      // Is it the network? DNS (this network's and public), TCP and HTTPS for
+      // the failing host and every host the GitHub-backed downloads use.
+      DownloadFailureLog::githubProbe(diag.host);
     } else {
       for (const auto& h : http.getHeaders()) {
         DownloadFailureLog::line("hdr: %s: %s", h.first.c_str(), h.second.c_str());
       }
+      // A refusal (403, 451, a filter's own page): probe too, from the host that answered.
+      if (httpCode >= 400)
+        DownloadFailureLog::githubProbe(http.hopCount() ? http.hops()[http.hopCount() - 1].host : nullptr);
     }
     {
       size_t onDiskNow = 0;

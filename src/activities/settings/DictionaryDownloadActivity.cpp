@@ -18,6 +18,7 @@
 #include "activities/reader/TlsFramebufferBorrow.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/DownloadFailureLog.h"
 #include "network/HttpDownloader.h"
 #include "network/WifiPowerSaveGuard.h"
 #include "util/DictionaryRegistry.h"
@@ -325,6 +326,12 @@ bool DictionaryDownloadActivity::fetchAndParseCatalog() {
     stream.write(chunk, static_cast<size_t>(got));
   }
   catalogFile.close();
+
+  if (!stream.ok()) {
+    // Downloaded but not a catalog: a filter's block page shows here.
+    DownloadFailureLog::section("Dictionary catalog downloaded but refused");
+    DownloadFailureLog::fileHead("catalog", CATALOG_TMP);
+  }
   Storage.remove(CATALOG_TMP);
 
   if (!stream.ok()) {
