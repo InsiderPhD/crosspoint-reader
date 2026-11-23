@@ -166,9 +166,9 @@ class EpubReaderActivity final : public Activity {
   unsigned long bookmarkMessageTime = 0UL;
 
   // Transient dictionary popup ("Not found", "No dictionary set", a named
-  // failure), also used by the Sync row on a book with no sync backend. Reuses the bookmark message's expiry timing rather than adding a
-  // second popup lifetime to keep in step.
-  // One-shot "Damaged font file" popup: glyphs of a corrupt .cpfont draw blank.
+  // failure), also used by the Sync row on a book with no sync backend. Reuses the bookmark message's expiry timing
+  // rather than adding a second popup lifetime to keep in step. One-shot "Damaged font file" popup: glyphs of a corrupt
+  // .cpfont draw blank.
   bool showFontDamagedMessage = false;
   unsigned long fontDamagedMessageTime = 0UL;
   bool showDictionaryMessage = false;
