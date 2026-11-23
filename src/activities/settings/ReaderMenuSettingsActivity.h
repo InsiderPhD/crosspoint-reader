@@ -26,6 +26,9 @@ class ReaderMenuSettingsActivity final : public Activity {
   void render(RenderLock&&) override;
   bool handlesDirectTouch() const override { return true; }
 
+  // The info-line toggles at the top (SETTINGS.readerMenuInfo).
+  static constexpr int INFO_ROWS = 7;
+
  private:
   ButtonNavigator buttonNavigator;
 
@@ -38,7 +41,6 @@ class ReaderMenuSettingsActivity final : public Activity {
 
   // The menu's info lines (SETTINGS.readerMenuInfo) come first, then the menu
   // rows, then "Show All".
-  static constexpr int INFO_ROWS = 4;
   int rowCount() const { return INFO_ROWS + static_cast<int>(visibleRows.size()) + 1; }
   bool isInfoRow(int index) const { return index < INFO_ROWS; }
   bool isShowAllRow(int index) const { return index == rowCount() - 1; }

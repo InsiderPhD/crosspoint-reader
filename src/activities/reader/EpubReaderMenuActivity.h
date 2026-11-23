@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../Activity.h"
+#include "CrossPointSettings.h"
 #include "components/UITheme.h"
 #include "util/ButtonNavigator.h"
 #include "util/ProgressAutoSync.h"
@@ -93,6 +94,10 @@ class EpubReaderMenuActivity final : public Activity {
   // Height of the chapter-title line under the book title (0 without one);
   // pushes the summary, status line and rows down by that much.
   int chapterLineHeight() const;
+  // The chapter-title line is on (Info: Chapter) and the reader gave a title.
+  bool showsChapter() const {
+    return !chapterTitle.empty() && (SETTINGS.readerMenuInfo & CrossPointSettings::READER_MENU_INFO_CHAPTER);
+  }
   // The info lines under the title (SETTINGS.readerMenuInfo), built once in
   // onEnter() so render() and menuTopY() lay out the same number of lines.
   void buildInfoLines();

@@ -14,12 +14,17 @@
 
 namespace {
 // Info lines, in the order the menu draws them.
-constexpr uint8_t kInfoBits[] = {CrossPointSettings::READER_MENU_INFO_PROGRESS,
-                                 CrossPointSettings::READER_MENU_INFO_LAST_SYNC,
-                                 CrossPointSettings::READER_MENU_INFO_CLOCK, CrossPointSettings::READER_MENU_INFO_GOAL};
-constexpr StrId kInfoLabels[] = {StrId::STR_MENU_INFO_PROGRESS, StrId::STR_MENU_INFO_LAST_SYNC,
-                                 StrId::STR_MENU_INFO_CLOCK, StrId::STR_MENU_INFO_GOAL};
+constexpr uint8_t kInfoBits[] = {
+    CrossPointSettings::READER_MENU_INFO_CHAPTER,   CrossPointSettings::READER_MENU_INFO_PROGRESS,
+    CrossPointSettings::READER_MENU_INFO_TIME_LEFT, CrossPointSettings::READER_MENU_INFO_SPEED,
+    CrossPointSettings::READER_MENU_INFO_LAST_SYNC, CrossPointSettings::READER_MENU_INFO_CLOCK,
+    CrossPointSettings::READER_MENU_INFO_GOAL};
+constexpr StrId kInfoLabels[] = {StrId::STR_MENU_INFO_CHAPTER,   StrId::STR_MENU_INFO_PROGRESS,
+                                 StrId::STR_MENU_INFO_TIME_LEFT, StrId::STR_MENU_INFO_SPEED,
+                                 StrId::STR_MENU_INFO_LAST_SYNC, StrId::STR_MENU_INFO_CLOCK,
+                                 StrId::STR_MENU_INFO_GOAL};
 static_assert(std::size(kInfoBits) == std::size(kInfoLabels), "one label per info line");
+static_assert(std::size(kInfoBits) == ReaderMenuSettingsActivity::INFO_ROWS, "INFO_ROWS counts the info lines");
 }  // namespace
 
 void ReaderMenuSettingsActivity::onEnter() {

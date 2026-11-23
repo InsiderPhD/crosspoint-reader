@@ -279,7 +279,7 @@ void EpubReaderMenuActivity::loop() {
 }
 
 int EpubReaderMenuActivity::chapterLineHeight() const {
-  return chapterTitle.empty() ? 0 : renderer.getLineHeight(UI_10_FONT_ID);
+  return showsChapter() ? renderer.getLineHeight(UI_10_FONT_ID) : 0;
 }
 
 int EpubReaderMenuActivity::menuTopY() const {
@@ -337,44 +337,61 @@ void EpubReaderMenuActivity::buildInfoLines() {
   infoLines.reserve(3);
   const uint8_t info = SETTINGS.readerMenuInfo;
 
-  if (info & CrossPointSettings::READER_MENU_INFO_PROGRESS) {
-    auto formatMins = [](uint32_t secs) -> std::string {
-      const uint32_t mins = (secs + 30) / 60;
-      char buf[12];
-      if (mins < 60) {
-        snprintf(buf, sizeof(buf), "~%um", static_cast<unsigned>(mins < 1 ? 1 : mins));
+  // One line from whichever of speed, chapter, time left and book progress are
+  // on, e.g. "45s/pg | Ch 3/12 ~5m | Book 40% ~2h".
+  const bool progress = info & CrossPointSettings::READER_MENU_INFO_PROGRESS;
+  const bool timeLeft = info & CrossPointSettings::READER_MENU_INFO_TIME_LEFT;
+  const bool speed = info & CrossPointSettings::READER_MENU_INFO_SPEED;
+  auto formatMins = [](uint32_t secs) -> std::string {
+    const uint32_t mins = (secs + 30) / 60;
+    char buf[12];
+    if (mins < 60) {
+      snprintf(buf, sizeof(buf), "~%um", static_cast<unsigned>(mins < 1 ? 1 : mins));
+    } else {
+      const uint32_t h = mins / 60;
+      const uint32_t m = mins % 60;
+      if (m == 0) {
+        snprintf(buf, sizeof(buf), "~%uh", static_cast<unsigned>(h));
       } else {
-        const uint32_t h = mins / 60;
-        const uint32_t m = mins % 60;
-        if (m == 0) {
-          snprintf(buf, sizeof(buf), "~%uh", static_cast<unsigned>(h));
-        } else {
-          snprintf(buf, sizeof(buf), "~%uh%um", static_cast<unsigned>(h), static_cast<unsigned>(m));
-        }
+        snprintf(buf, sizeof(buf), "~%uh%um", static_cast<unsigned>(h), static_cast<unsigned>(m));
       }
-      return std::string(buf);
-    };
-    std::string progressLine;
-    if (SETTINGS.readingSpeedSecondsPerPage > 0) {
-      char speedBuf[16];
-      const unsigned spp = SETTINGS.readingSpeedSecondsPerPage;
-      if (spp < 60) {
-        snprintf(speedBuf, sizeof(speedBuf), "%us/pg", spp);
-      } else {
-        snprintf(speedBuf, sizeof(speedBuf), "%um%us/pg", spp / 60, spp % 60);
-      }
-      progressLine += speedBuf;
-      progressLine += " | ";
     }
-    if (totalPages > 0) {
-      progressLine += "Ch " + std::to_string(currentPage) + "/" + std::to_string(totalPages);
-      if (timeLeftChapterSeconds > 0) progressLine += " " + formatMins(timeLeftChapterSeconds);
-      progressLine += " | ";
+    return std::string(buf);
+  };
+  std::string progressLine;
+  const auto addPart = [&progressLine](const std::string& part) {
+    if (part.empty()) return;
+    if (!progressLine.empty()) progressLine += " | ";
+    progressLine += part;
+  };
+  if (speed && SETTINGS.readingSpeedSecondsPerPage > 0) {
+    char speedBuf[16];
+    const unsigned spp = SETTINGS.readingSpeedSecondsPerPage;
+    if (spp < 60) {
+      snprintf(speedBuf, sizeof(speedBuf), "%us/pg", spp);
+    } else {
+      snprintf(speedBuf, sizeof(speedBuf), "%um%us/pg", spp / 60, spp % 60);
     }
-    progressLine += "Book " + std::to_string(bookProgressPercent) + "%";
-    if (timeLeftBookSeconds > 0) progressLine += " " + formatMins(timeLeftBookSeconds);
-    infoLines.push_back(std::move(progressLine));
+    addPart(speedBuf);
   }
+  {
+    std::string chapterPart;
+    if (progress && totalPages > 0)
+      chapterPart = "Ch " + std::to_string(currentPage) + "/" + std::to_string(totalPages);
+    if (timeLeft && timeLeftChapterSeconds > 0) {
+      chapterPart += (chapterPart.empty() ? "Ch " : " ") + formatMins(timeLeftChapterSeconds);
+    }
+    addPart(chapterPart);
+  }
+  {
+    std::string bookPart;
+    if (progress) bookPart = "Book " + std::to_string(bookProgressPercent) + "%";
+    if (timeLeft && timeLeftBookSeconds > 0) {
+      bookPart += (bookPart.empty() ? "Book " : " ") + formatMins(timeLeftBookSeconds);
+    }
+    addPart(bookPart);
+  }
+  if (!progressLine.empty()) infoLines.push_back(std::move(progressLine));
 
   // Last sync: only for a book with a sync backend (a "never" line on every
   // unlinked book would be noise). Autosync's inactive notice rides along: it is
@@ -429,7 +446,7 @@ void EpubReaderMenuActivity::render(RenderLock&&) {
 
   // Chapter title, one line under the book title. Costs one row of the list in
   // landscape; the list pages, so nothing is lost.
-  if (!chapterTitle.empty()) {
+  if (showsChapter()) {
     const std::string truncChapter = renderer.truncatedText(UI_10_FONT_ID, chapterTitle.c_str(), contentWidth - 40);
     const int chapterX = contentX + (contentWidth - renderer.getTextWidth(UI_10_FONT_ID, truncChapter.c_str())) / 2;
     renderer.drawText(UI_10_FONT_ID, chapterX, 45 + contentY, truncChapter.c_str(), true);

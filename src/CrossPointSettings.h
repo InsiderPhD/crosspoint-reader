@@ -615,13 +615,18 @@ class CrossPointSettings {
   static constexpr uint32_t READER_MENU_VISIBLE_ALL = 0xFFFFFFFFu;
   // Info lines under the reader menu's title and chapter (readerMenuInfo bits).
   enum READER_MENU_INFO : uint8_t {
-    READER_MENU_INFO_PROGRESS = 1u << 0,   // pages, time left, book %
+    READER_MENU_INFO_PROGRESS = 1u << 0,   // chapter pages and book %
     READER_MENU_INFO_LAST_SYNC = 1u << 1,  // this book's last BookFusion / KOReader sync
     READER_MENU_INFO_CLOCK = 1u << 2,      // time and date
     READER_MENU_INFO_GOAL = 1u << 3,       // today's reading against the daily goal
+    READER_MENU_INFO_CHAPTER = 1u << 4,    // the chapter title
+    READER_MENU_INFO_TIME_LEFT = 1u << 5,  // time left in the chapter and the book
+    READER_MENU_INFO_SPEED = 1u << 6,      // reading speed (seconds per page)
   };
-  static constexpr uint8_t READER_MENU_INFO_DEFAULT =
-      READER_MENU_INFO_PROGRESS | READER_MENU_INFO_LAST_SYNC | READER_MENU_INFO_GOAL;
+  // Everything but the clock: what the menu showed before the lines were optional.
+  static constexpr uint8_t READER_MENU_INFO_DEFAULT = READER_MENU_INFO_CHAPTER | READER_MENU_INFO_PROGRESS |
+                                                      READER_MENU_INFO_TIME_LEFT | READER_MENU_INFO_SPEED |
+                                                      READER_MENU_INFO_LAST_SYNC | READER_MENU_INFO_GOAL;
   uint8_t statusBarTopMargin = 0;
   // Clock display in status bar (X3 only, requires DS3231 RTC)
   uint8_t statusBarClock = 0;
