@@ -632,9 +632,16 @@ void HomeActivity::loop() {
   // Home is the exception: it is the root screen, so Back closes nothing here
   // and its hint label is already blank. The context-menu branch above returns
   // before this point, so the menu keeps its own Back.
+  //
+  // The PRESS edge, not the release: an injected swipe is a one-frame pulse
+  // whose press and release land in consecutive update()s. A screen that
+  // closes on Back's press (Settings, Stats, Clippings, the browsers) is
+  // replaced by Home inside that same loop, so the release half arrives in
+  // the new Home -- which used to read it as "rotate back one" and wrap the
+  // selector from the most recent book to the last slot on every return.
   if (CrossPointSettings::FULL_TOUCH_UI) {
     if (mappedInput.wasSwipe() == MappedInputManager::Swipe::Right && rotateCoverSelection(1)) return;
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back) && rotateCoverSelection(-1)) return;
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back) && rotateCoverSelection(-1)) return;
   }
 
   // Full Touch: first tap on a tile moves the selector, a second tap opens it.
