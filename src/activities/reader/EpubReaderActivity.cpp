@@ -3725,10 +3725,11 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
                                            const int viewportBottom, const int viewportWidth, const bool withPictures) {
   const uint16_t w = display.getDisplayWidth(), h = display.getDisplayHeight();
   const size_t levelBytes = static_cast<size_t>(w / 2) * h;  // 192 KB at 800x480
-  const size_t frameBytes = display.getBufferSize();          // 48 KB
+  const size_t frameBytes = display.getBufferSize();         // 48 KB
   if (!gray16Buffer) {
     // Far over internal RAM's budget: PSRAM, which the Picco always has.
-    gray16Buffer = static_cast<uint8_t*>(heap_caps_malloc(levelBytes + frameBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    gray16Buffer =
+        static_cast<uint8_t*>(heap_caps_malloc(levelBytes + frameBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!gray16Buffer) {
       LOG_ERR("ERS", "16-level text: no PSRAM for %u bytes", static_cast<unsigned>(levelBytes + frameBytes));
       return false;
@@ -5329,7 +5330,7 @@ void EpubReaderActivity::performBookFusionSync() {
     // loaded and before TLS starts. The popups below draw over whatever is in
     // the framebuffer, so wipe the inflate scratch it held; the page is
     // repainted in full when the sync ends.
-    if (resolveBookFusionHighlightOffsets(renderer, epub)) {
+    if (SETTINGS.bookfusionSyncHighlights && resolveBookFusionHighlightOffsets(renderer, epub)) {
       renderer.clearScreen();
     }
     // Bookmarks likewise: read the file and map positions while the book is loaded.
@@ -5556,20 +5557,22 @@ void EpubReaderActivity::performBookFusionSync() {
       renderer.displayBuffer();
     }
     bookmarksPushed = bookmarkPush.push(bookId);
-    highlightsPushed = pushBookFusionHighlights(
-        epub, bookId,
-        [](void* ctx, const int current, const int total) {
-          auto* self = static_cast<EpubReaderActivity*>(ctx);
-          RenderLock lock(*self);
-          char text[56];
-          snprintf(text, sizeof(text), tr(STR_BF_SYNCING_HIGHLIGHT_FORMAT), current, total);
-          char msg[96];
-          formatSyncStep(msg, sizeof(msg), 4, text);
-          UITheme::drawSyncProgressPopup(self->renderer, tr(STR_BF_SYNC), msg);
-          if (SETTINGS.darkMode) self->renderer.invertScreen();
-          self->renderer.displayBuffer();
-        },
-        this);
+    if (SETTINGS.bookfusionSyncHighlights) {
+      highlightsPushed = pushBookFusionHighlights(
+          epub, bookId,
+          [](void* ctx, const int current, const int total) {
+            auto* self = static_cast<EpubReaderActivity*>(ctx);
+            RenderLock lock(*self);
+            char text[56];
+            snprintf(text, sizeof(text), tr(STR_BF_SYNCING_HIGHLIGHT_FORMAT), current, total);
+            char msg[96];
+            formatSyncStep(msg, sizeof(msg), 4, text);
+            UITheme::drawSyncProgressPopup(self->renderer, tr(STR_BF_SYNC), msg);
+            if (SETTINGS.darkMode) self->renderer.invertScreen();
+            self->renderer.displayBuffer();
+          },
+          this);
+    }
   }
   bookmarkPush.commit();
 

@@ -7,15 +7,35 @@
 #include "BookFusionTokenStore.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "RefreshBookFusionMetadataActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/TouchListNav.h"
 
 namespace {
-constexpr int LINK_INDEX = 0;
-constexpr int UNLINK_INDEX = 1;
+// Row order on screen.
+enum Row : int {
+  ROW_LINK = 0,
+  ROW_UNLINK,
+  ROW_FOLDER,
+  ROW_FILE_NAME,
+  ROW_SYNC_HIGHLIGHTS,
+  ROW_SYNC_READING_TIME,
+  ROW_REFRESH_DATA
+};
+static_assert(ROW_REFRESH_DATA + 1 == BookFusionSettingsActivity::MENU_ITEMS, "menuNames must cover every row");
 
-const StrId menuNames[BookFusionSettingsActivity::MENU_ITEMS] = {StrId::STR_BF_LINK_ACCOUNT, StrId::STR_BF_UNLINK};
+constexpr StrId menuNames[BookFusionSettingsActivity::MENU_ITEMS] = {
+    StrId::STR_BF_LINK_ACCOUNT,    StrId::STR_BF_UNLINK,          StrId::STR_BF_FOLDER,
+    StrId::STR_BF_FILE_NAME,       StrId::STR_BF_SYNC_HIGHLIGHTS, StrId::STR_BF_SYNC_READING_TIME,
+    StrId::STR_REFRESH_BF_METADATA};
+
+// Value labels, in enum order (CrossPointSettings::BOOKFUSION_FOLDER / BOOKFUSION_FILE_NAME).
+constexpr StrId folderNames[CrossPointSettings::BOOKFUSION_FOLDER_COUNT] = {
+    StrId::STR_BF_FOLDER_ROOT, StrId::STR_BF_FOLDER_AUTHOR, StrId::STR_BF_FOLDER_BOOKFUSION,
+    StrId::STR_BF_FOLDER_BOOKFUSION_AUTHOR};
+constexpr StrId fileNameNames[CrossPointSettings::BOOKFUSION_FILE_NAME_COUNT] = {StrId::STR_BF_NAME_TITLE_AUTHOR,
+                                                                                 StrId::STR_BF_NAME_TITLE};
 }  // namespace
 
 void BookFusionSettingsActivity::onEnter() {
@@ -79,12 +99,40 @@ void BookFusionSettingsActivity::loop() {
 }
 
 void BookFusionSettingsActivity::handleSelection() {
-  if (selectedIndex == LINK_INDEX) {
-    startActivityForResult(std::make_unique<BookFusionAuthActivity>(renderer, mappedInput),
-                           [this](const ActivityResult&) { requestUpdate(); });
-  } else if (selectedIndex == UNLINK_INDEX) {
-    BF_TOKEN_STORE.clearToken();
-    requestUpdate();
+  switch (static_cast<Row>(selectedIndex)) {
+    case ROW_LINK:
+      startActivityForResult(std::make_unique<BookFusionAuthActivity>(renderer, mappedInput),
+                             [this](const ActivityResult&) { requestUpdate(); });
+      return;
+    case ROW_UNLINK:
+      BF_TOKEN_STORE.clearToken();
+      requestUpdate();
+      return;
+    // Each press cycles to the next value; the parent saves on return.
+    case ROW_FOLDER:
+      SETTINGS.bookfusionFolder =
+          static_cast<uint8_t>((SETTINGS.bookfusionFolder + 1) % CrossPointSettings::BOOKFUSION_FOLDER_COUNT);
+      requestUpdate();
+      return;
+    case ROW_FILE_NAME:
+      SETTINGS.bookfusionFileName =
+          static_cast<uint8_t>((SETTINGS.bookfusionFileName + 1) % CrossPointSettings::BOOKFUSION_FILE_NAME_COUNT);
+      requestUpdate();
+      return;
+    case ROW_SYNC_HIGHLIGHTS:
+      SETTINGS.bookfusionSyncHighlights = SETTINGS.bookfusionSyncHighlights ? 0 : 1;
+      requestUpdate();
+      return;
+    case ROW_SYNC_READING_TIME:
+      SETTINGS.bookfusionSyncReadingTime = SETTINGS.bookfusionSyncReadingTime ? 0 : 1;
+      requestUpdate();
+      return;
+    case ROW_REFRESH_DATA:
+      // Re-downloads covers, shelves and positions for every BookFusion book
+      // on the card. It confirms before touching the network.
+      startActivityForResult(std::make_unique<RefreshBookFusionMetadataActivity>(renderer, mappedInput),
+                             [this](const ActivityResult&) { requestUpdate(); });
+      return;
   }
 }
 
@@ -110,8 +158,21 @@ void BookFusionSettingsActivity::render(RenderLock&&) {
       renderer, listRect(), MENU_ITEMS, static_cast<int>(selectedIndex),
       [](int index) { return std::string(I18N.get(menuNames[index])); }, nullptr, nullptr,
       [](int index) -> std::string {
-        if (index == LINK_INDEX) {
-          return BF_TOKEN_STORE.hasToken() ? std::string(tr(STR_BF_LINKED)) : std::string(tr(STR_BF_NOT_LINKED));
+        switch (static_cast<Row>(index)) {
+          case ROW_LINK:
+            return BF_TOKEN_STORE.hasToken() ? std::string(tr(STR_BF_LINKED)) : std::string(tr(STR_BF_NOT_LINKED));
+          case ROW_UNLINK:
+            return "";
+          case ROW_FOLDER:
+            return std::string(I18N.get(folderNames[SETTINGS.bookfusionFolder]));
+          case ROW_FILE_NAME:
+            return std::string(I18N.get(fileNameNames[SETTINGS.bookfusionFileName]));
+          case ROW_SYNC_HIGHLIGHTS:
+            return std::string(SETTINGS.bookfusionSyncHighlights ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
+          case ROW_SYNC_READING_TIME:
+            return std::string(SETTINGS.bookfusionSyncReadingTime ? tr(STR_STATE_ON) : tr(STR_STATE_OFF));
+          case ROW_REFRESH_DATA:
+            return "";
         }
         return "";
       },

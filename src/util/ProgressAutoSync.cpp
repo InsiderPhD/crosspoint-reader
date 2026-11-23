@@ -151,7 +151,7 @@ bool pushBookFusion(const ProgressAutoSync::Payload& payload) {
   // Reading-time delta is best-effort: a failure here doesn't fail the push,
   // it just means the delta rolls into the next sync. The connection is already
   // up, so this second request has no handshake spike.
-  if (payload.totalReadingMs > 0) {
+  if (SETTINGS.bookfusionSyncReadingTime && payload.totalReadingMs > 0) {
     const uint64_t lastSyncedMs = BookFusionBookIdStore::loadLastSyncedReadingMs(path);
     if (payload.totalReadingMs > lastSyncedMs) {
       const uint32_t durationSeconds = static_cast<uint32_t>((payload.totalReadingMs - lastSyncedMs) / 1000u);

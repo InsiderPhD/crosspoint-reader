@@ -266,7 +266,7 @@ void BookFusionSyncActivity::performPush() {
     // framebuffer. Every render here repaints the whole screen, so the inflate
     // scratch left in the framebuffer needs no cleanup.
     RenderLock lock(*this);
-    resolveBookFusionHighlightOffsets(renderer, epub);
+    if (SETTINGS.bookfusionSyncHighlights) resolveBookFusionHighlightOffsets(renderer, epub);
     // Bookmarks likewise: the file is read and positions mapped before TLS.
     bookmarkPush.prepare(epub);
     hardcoverState = hardcoverPushState(epub);
@@ -278,7 +278,7 @@ void BookFusionSyncActivity::performPush() {
     // No per-highlight progress here: the TLS block below holds the render lock
     // and lends wolfSSL the framebuffer, so nothing can paint until it ends.
     char msg[64];
-    const int pendingHighlights = countBookFusionHighlightsToPush(epub);
+    const int pendingHighlights = SETTINGS.bookfusionSyncHighlights ? countBookFusionHighlightsToPush(epub) : 0;
     // Kept short: drawCenteredText doesn't wrap, and portrait is only 480px.
     if (pendingHighlights == 1) {
       snprintf(msg, sizeof(msg), tr(STR_BF_UPLOADING_ONE_HIGHLIGHT_FORMAT), localBfPos.percentage);
@@ -313,7 +313,8 @@ void BookFusionSyncActivity::performPush() {
     // Reading-time tracking: compute unsent delta and push it to the track endpoint.
     // This is best-effort — a tracking failure doesn't fail the overall push.
     if (result == BookFusionSyncClient::OK) {
-      const ReadingBookStats* bookStats = READING_STATS.findBook(epubPath);
+      const ReadingBookStats* bookStats =
+          SETTINGS.bookfusionSyncReadingTime ? READING_STATS.findBook(epubPath) : nullptr;
       if (bookStats && bookStats->totalReadingMs > 0) {
         const uint64_t currentTotalMs = bookStats->totalReadingMs;
         const uint64_t lastSyncedMs = BookFusionBookIdStore::loadLastSyncedReadingMs(epubPath.c_str());
@@ -335,7 +336,8 @@ void BookFusionSyncActivity::performPush() {
         }
       }
       // Clippings not yet on BookFusion go up as highlights — also best-effort.
-      highlightsPushed = pushBookFusionHighlights(epub, bookId, nullptr, nullptr);
+      if (SETTINGS.bookfusionSyncHighlights)
+        highlightsPushed = pushBookFusionHighlights(epub, bookId, nullptr, nullptr);
       // Bookmarks are separate from the reading position; they only share the connection.
       bookmarkPush.push(bookId);
       BookFusionSyncClient::countBookmarks(bookId, &remoteBookmarks);

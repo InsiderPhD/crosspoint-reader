@@ -307,7 +307,7 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   // serialise a full ~1 s e-ink refresh in front of every other step.
   requestUpdate(true);
 
-  // Destination: per the BookFusion save-as setting (sanitized), built from the search result
+  // Destination: per the BookFusion folder / file name settings (sanitized), built from the search result
   // with no network call. Downloading a book again replaces the copy already on
   // the card wherever it has been renamed or moved to, rather than adding a
   // second one under the original name.

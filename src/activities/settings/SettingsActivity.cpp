@@ -33,7 +33,6 @@
 #include "ReaderControlsActivity.h"
 #include "ReaderMenuSettingsActivity.h"
 #include "RecacheMetadataActivity.h"
-#include "RefreshBookFusionMetadataActivity.h"
 #include "ReleaseNotesActivity.h"
 #include "ResetStatsActivity.h"
 #include "SdCardFontGlobals.h"
@@ -224,10 +223,7 @@ void SettingsActivity::onEnter() {
   // other metadata) exist for books that have never been opened. Needed to make
   // Tag-folder mode complete. Slow (full parse per uncached book).
   devSettings.push_back(SettingInfo::Action(StrId::STR_RECACHE_METADATA, SettingAction::RecacheMetadata));
-  // Refresh BookFusion Data: re-downloads API-sourced metadata (covers,
-  // categories/shelves/lists, reading position) for every locally-downloaded
-  // BookFusion book. Needs WiFi.
-  devSettings.push_back(SettingInfo::Action(StrId::STR_REFRESH_BF_METADATA, SettingAction::RefreshBookFusionMetadata));
+  // Refresh BookFusion Data lives in the BookFusion Sync submenu.
   // Download Update from URL: raw-writes firmware (bypasses image verify) — bricking
   // risk for casual users.
   devSettings.push_back(SettingInfo::Action(StrId::STR_DOWNLOAD_FROM_URL, SettingAction::DownloadFromUrl));
@@ -517,10 +513,6 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::RecacheMetadata:
         startActivityForResult(std::make_unique<RecacheMetadataActivity>(renderer, mappedInput), resultHandler);
-        break;
-      case SettingAction::RefreshBookFusionMetadata:
-        startActivityForResult(std::make_unique<RefreshBookFusionMetadataActivity>(renderer, mappedInput),
-                               resultHandler);
         break;
       case SettingAction::CheckForUpdates:
         startActivityForResult(std::make_unique<OtaUpdateActivity>(renderer, mappedInput), resultHandler);

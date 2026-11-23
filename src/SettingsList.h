@@ -388,10 +388,21 @@ inline void appendSystemSettings(SettingSink& v) {
   v.push_back(SettingInfo::Enum(StrId::STR_MOVE_FINISHED_BOOKS, &CrossPointSettings::finishedBookFolder,
                                 {StrId::STR_NEVER, StrId::STR_TO_READ_FOLDER, StrId::STR_TO_COMPLETED_FOLDER},
                                 "finishedBookFolder", StrId::STR_CAT_SYSTEM));
-  v.push_back(SettingInfo::Enum(StrId::STR_BF_SAVE_AS, &CrossPointSettings::bookfusionFileLayout,
-                                {StrId::STR_BF_LAYOUT_TITLE_AUTHOR, StrId::STR_BF_LAYOUT_TITLE,
-                                 StrId::STR_BF_LAYOUT_AUTHOR_FOLDER},
-                                "bookfusionFileLayout", StrId::STR_CAT_SYSTEM));
+  // BookFusion download destination. Categorised under BookFusion Sync like the
+  // KOReader rows: the device edits them in the BookFusion Sync submenu (the
+  // main Settings list skips this category), the web Settings page shows them
+  // as their own group, and the BookFusion web page edits them via /api/settings.
+  v.push_back(SettingInfo::Enum(StrId::STR_BF_FOLDER, &CrossPointSettings::bookfusionFolder,
+                                {StrId::STR_BF_FOLDER_ROOT, StrId::STR_BF_FOLDER_AUTHOR,
+                                 StrId::STR_BF_FOLDER_BOOKFUSION, StrId::STR_BF_FOLDER_BOOKFUSION_AUTHOR},
+                                "bookfusionFolder", StrId::STR_BF_SYNC));
+  v.push_back(SettingInfo::Enum(StrId::STR_BF_FILE_NAME, &CrossPointSettings::bookfusionFileName,
+                                {StrId::STR_BF_NAME_TITLE_AUTHOR, StrId::STR_BF_NAME_TITLE}, "bookfusionFileName",
+                                StrId::STR_BF_SYNC));
+  v.push_back(SettingInfo::Toggle(StrId::STR_BF_SYNC_HIGHLIGHTS, &CrossPointSettings::bookfusionSyncHighlights,
+                                  "bookfusionSyncHighlights", StrId::STR_BF_SYNC));
+  v.push_back(SettingInfo::Toggle(StrId::STR_BF_SYNC_READING_TIME, &CrossPointSettings::bookfusionSyncReadingTime,
+                                  "bookfusionSyncReadingTime", StrId::STR_BF_SYNC));
   v.push_back(SettingInfo::Enum(StrId::STR_FOLDER_VIEW, &CrossPointSettings::folderView,
                                 {StrId::STR_FOLDERS, StrId::STR_TAGS, StrId::STR_AUTHORS, StrId::STR_SERIES},
                                 "folderView", StrId::STR_CAT_DISPLAY));
@@ -693,7 +704,9 @@ inline void appendStatusBarSettings(SettingSink& v) {
 // more (the list is visited, never stored); forEachSetting() logs a mismatch so a
 // helper that stops emitting an entry (and so stops persisting it) shows up on
 // the serial log. Recount when adding or removing an entry.
-constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 108;  // includes tiltPageTurn, tiltNextPageOnly, pluginsEnabled, opdsDownloadFolder, textGray16
+// includes tiltPageTurn, tiltNextPageOnly, pluginsEnabled, opdsDownloadFolder, textGray16,
+// bookfusionFolder, bookfusionFileName, bookfusionSyncHighlights, bookfusionSyncReadingTime
+constexpr size_t SETTINGS_LIST_UNCONDITIONAL_COUNT = 111;
 #if FREEINK_CAP_FRONTLIGHT && FREEINK_CAP_WARMLIGHT
 constexpr size_t SETTINGS_LIST_FRONTLIGHT_COUNT = 2;  // brightness + warmth
 #elif FREEINK_CAP_FRONTLIGHT

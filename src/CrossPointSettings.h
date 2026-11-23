@@ -337,12 +337,19 @@ class CrossPointSettings {
     FINISHED_BOOK_FOLDER_COUNT
   };
 
-  // Where a BookFusion download is saved on the card (BookFusionDownload::expectedFilename).
-  enum BOOKFUSION_FILE_LAYOUT : uint8_t {
-    BF_LAYOUT_TITLE_AUTHOR = 0,   // "/Title - Author.epub"
-    BF_LAYOUT_TITLE = 1,          // "/Title.epub"
-    BF_LAYOUT_AUTHOR_FOLDER = 2,  // "/Author/Title.epub"
-    BOOKFUSION_FILE_LAYOUT_COUNT
+  // Where a BookFusion download is saved on the card: the folder and the file
+  // name are chosen separately (BookFusionDownload::expectedFilename).
+  enum BOOKFUSION_FOLDER : uint8_t {
+    BF_FOLDER_ROOT = 0,               // "/"
+    BF_FOLDER_AUTHOR = 1,             // "/Author/" (first author)
+    BF_FOLDER_BOOKFUSION = 2,         // "/BookFusion/"
+    BF_FOLDER_BOOKFUSION_AUTHOR = 3,  // "/BookFusion/Author/"
+    BOOKFUSION_FOLDER_COUNT
+  };
+  enum BOOKFUSION_FILE_NAME : uint8_t {
+    BF_NAME_TITLE_AUTHOR = 0,  // "Title - Author.epub"
+    BF_NAME_TITLE = 1,         // "Title.epub"
+    BOOKFUSION_FILE_NAME_COUNT
   };
 
   enum TILT_PAGE_TURN { TILT_OFF = 0, TILT_NORMAL = 1, TILT_NVERTED = 2, TILT_PAGE_TURN_COUNT };
@@ -753,8 +760,13 @@ class CrossPointSettings {
   uint8_t showHiddenFiles = 0;
   // Move a book to /Read or /Completed when a reading session finishes it (FINISHED_BOOK_FOLDER)
   uint8_t finishedBookFolder = FINISHED_FOLDER_OFF;
-  // File name / folder for BookFusion downloads (BOOKFUSION_FILE_LAYOUT)
-  uint8_t bookfusionFileLayout = BF_LAYOUT_TITLE_AUTHOR;
+  // Folder and file name for BookFusion downloads (BOOKFUSION_FOLDER / BOOKFUSION_FILE_NAME)
+  uint8_t bookfusionFolder = BF_FOLDER_ROOT;
+  uint8_t bookfusionFileName = BF_NAME_TITLE_AUTHOR;
+  // BookFusion push extras: clippings go up as highlights, and the unsent
+  // reading-time delta is tracked. Off keeps either on the device only.
+  uint8_t bookfusionSyncHighlights = 1;
+  uint8_t bookfusionSyncReadingTime = 1;
   // BLE bonded remote identity, so the firmware can auto-reconnect after reboot
   char bleBondedDeviceAddr[18] = "";
   char bleBondedDeviceName[32] = "";

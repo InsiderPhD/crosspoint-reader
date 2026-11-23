@@ -433,6 +433,16 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const JsonDocument& doc
     if (needsResave) *needsResave = true;
   }
 
+  // Files from before the folder / file name split carry one "bookfusionFileLayout":
+  // 0 Title - Author, 1 Title, 2 Author/Title.
+  if (doc["bookfusionFolder"].isNull() && doc["bookfusionFileName"].isNull() &&
+      doc["bookfusionFileLayout"].is<uint8_t>()) {
+    const uint8_t layout = doc["bookfusionFileLayout"].as<uint8_t>();
+    s.bookfusionFolder = layout == 2 ? CrossPointSettings::BF_FOLDER_AUTHOR : CrossPointSettings::BF_FOLDER_ROOT;
+    s.bookfusionFileName = layout == 0 ? CrossPointSettings::BF_NAME_TITLE_AUTHOR : CrossPointSettings::BF_NAME_TITLE;
+    if (needsResave) *needsResave = true;
+  }
+
   // Files from before the percentage table carry Tight / Normal / Wide as "lineSpacing".
   if (doc["lineHeight"].isNull() && doc["lineSpacing"].is<uint8_t>()) {
     s.lineSpacing = CrossPointSettings::lineSpacingFromLegacy(doc["lineSpacing"].as<uint8_t>());

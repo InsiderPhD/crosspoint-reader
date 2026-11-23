@@ -39,8 +39,8 @@ constexpr int MAX_COVER_ATTEMPTS = 3;
 bool formatIsEpub(const BookFusionBook& book);
 inline bool isLarge(const BookFusionBook& book) { return book.downloadSize >= LARGE_BOOK_WARN_BYTES; }
 
-// Laid out by SETTINGS.bookfusionFileLayout ("/Title - Author.ext", "/Title.ext"
-// or "/Author/Title.ext"), sanitized.
+// Laid out by SETTINGS.bookfusionFolder ("/", "/Author/", "/BookFusion/" or "/BookFusion/Author/") and
+// SETTINGS.bookfusionFileName ("Title - Author.ext" or "Title.ext"), sanitized.
 std::string expectedFilename(const BookFusionBook& book);
 // Where the book is on the card (following a rename or move, found by its
 // BookFusion id), or where a download will put it. `present` reports whether

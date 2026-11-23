@@ -216,13 +216,11 @@
 
     <details class="card" id="settingsCard" style="display: none">
       <summary>Settings</summary>
-      <div class="setting-row" id="layoutRow" style="display: none">
-        <label for="layout">Save downloads as</label>
-        <select id="layout"></select>
-        <span id="layoutSaved" class="setting-hint"></span>
-      </div>
-      <p class="setting-hint" id="layoutHint" style="display: none">
-        Applies to new downloads, here and on the reader. Books already on the card keep their names.
+      <!-- Device settings (the reader's BookFusion Sync submenu), filled from /api/settings. -->
+      <div id="deviceSettings"></div>
+      <p class="setting-hint" id="deviceSettingsHint" style="display: none">
+        Folder and file name apply to new downloads, here and on the reader. Books already on the card keep
+        their names. Highlights and reading time are sent on every push and autosync.
       </p>
       <div class="setting-row">
         <label for="browse">Browse by</label>
@@ -764,41 +762,81 @@
         loadPage();
       }
 
-      // ---- Save-as layout (a device setting, shared with the reader's own browser) ----
-      async function loadLayoutSetting() {
+      // ---- Device settings (the reader's BookFusion Sync submenu, via /api/settings) ----
+      // Same keys and labels as the device; enum rows become a select, toggles a checkbox.
+      const DEVICE_SETTING_KEYS = [
+        "bookfusionFolder",
+        "bookfusionFileName",
+        "bookfusionSyncHighlights",
+        "bookfusionSyncReadingTime",
+      ];
+      // Changing either of these changes where a book is expected on the card.
+      const PATH_SETTING_KEYS = ["bookfusionFolder", "bookfusionFileName"];
+
+      async function loadDeviceSettings() {
+        const host = $("deviceSettings");
+        host.innerHTML = "";
         try {
           const settings = await getJson("/api/settings");
-          const setting = settings.find((s) => s.key === "bookfusionFileLayout");
-          if (!setting) return;
-          const select = $("layout");
-          setting.options.forEach((text, i) => addOption(select, String(i), text));
-          select.value = String(setting.value);
-          select.dataset.saved = select.value;
-          $("layoutRow").style.display = "";
-          $("layoutHint").style.display = "";
+          DEVICE_SETTING_KEYS.forEach((key) => {
+            const setting = settings.find((s) => s.key === key);
+            if (!setting || (setting.type !== "enum" && setting.type !== "toggle")) return;
+            const row = document.createElement("div");
+            row.className = "setting-row";
+            const id = "setting-" + key;
+            const label = document.createElement("label");
+            label.htmlFor = id;
+            label.textContent = setting.name;
+            row.appendChild(label);
+            let control;
+            if (setting.type === "enum") {
+              control = document.createElement("select");
+              setting.options.forEach((text, i) => addOption(control, String(i), text));
+              control.value = String(setting.value);
+            } else {
+              control = document.createElement("input");
+              control.type = "checkbox";
+              control.checked = Number(setting.value) !== 0;
+            }
+            control.id = id;
+            control.dataset.saved = settingValue(control);
+            row.appendChild(control);
+            const saved = document.createElement("span");
+            saved.className = "setting-hint";
+            row.appendChild(saved);
+            control.addEventListener("change", () => saveDeviceSetting(key, control, saved));
+            host.appendChild(row);
+          });
+          $("deviceSettingsHint").style.display = host.childElementCount ? "" : "none";
         } catch (e) {
-          // The row stays hidden; downloads use whatever the reader has set.
+          // No rows; downloads and pushes use whatever the reader has set.
         }
       }
 
-      async function saveLayoutSetting() {
-        const select = $("layout");
-        const value = select.value;
-        $("layoutSaved").textContent = "Saving…";
+      function settingValue(control) {
+        return control.type === "checkbox" ? (control.checked ? "1" : "0") : control.value;
+      }
+
+      async function saveDeviceSetting(key, control, savedLabel) {
+        const value = settingValue(control);
+        savedLabel.textContent = "Saving…";
         try {
+          const body = {};
+          body[key] = Number(value);
           const res = await withReader(() => fetch("/api/settings", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ bookfusionFileLayout: Number(value) }),
+            body: JSON.stringify(body),
           }));
           if (!res.ok) throw new Error((await res.text()) || "HTTP " + res.status);
-          select.dataset.saved = value;
-          $("layoutSaved").textContent = "Saved";
-          // On-card paths depend on the layout.
-          if (state.browse !== "author") loadPage();
+          control.dataset.saved = value;
+          savedLabel.textContent = "Saved";
+          if (PATH_SETTING_KEYS.includes(key) && state.browse !== "author") loadPage();
         } catch (e) {
-          select.value = select.dataset.saved || value;
-          $("layoutSaved").textContent = "Could not save: " + e.message;
+          const previous = control.dataset.saved || value;
+          if (control.type === "checkbox") control.checked = previous === "1";
+          else control.value = previous;
+          savedLabel.textContent = "Could not save: " + e.message;
         }
       }
 
@@ -923,12 +961,11 @@
           browse = localStorage.getItem("bfBrowse") === "author" ? "author" : "lists";
         } catch (e) {}
         await loadShelves();
-        await loadLayoutSetting();
+        await loadDeviceSettings();
         setBrowse(browse);
       }
 
       $("browse").addEventListener("change", () => setBrowse($("browse").value));
-      $("layout").addEventListener("change", saveLayoutSetting);
       $("rescan").addEventListener("click", () => {
         if (state.busy) return;
         state.allBooks = null;

@@ -28,7 +28,6 @@ enum class SettingAction {
   ClearCache,
   RecacheLibrary,
   RecacheMetadata,
-  RefreshBookFusionMetadata,
   CheckForUpdates,
   SdFirmwareUpdate,
   DownloadFromUrl,

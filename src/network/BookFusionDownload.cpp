@@ -176,26 +176,24 @@ std::string firstAuthor(const BookFusionBook& book) {
   return comma ? std::string(book.authors, comma - book.authors) : std::string(book.authors);
 }
 
-std::string filenameForLayout(const BookFusionBook& book, const uint8_t layout, const char* suffix) {
+std::string filenameForLayout(const BookFusionBook& book, const uint8_t folder, const uint8_t fileName,
+                              const char* suffix) {
   char ext[8];
   formatExtension(book, ext, sizeof(ext));
   const bool hasAuthor = book.authors[0] != '\0';
   std::string dir = "/";
+  if (folder == CrossPointSettings::BF_FOLDER_BOOKFUSION || folder == CrossPointSettings::BF_FOLDER_BOOKFUSION_AUTHOR) {
+    dir += "BookFusion/";
+  }
+  // No author: the book goes one level up rather than into an "Unknown" folder.
+  if ((folder == CrossPointSettings::BF_FOLDER_AUTHOR || folder == CrossPointSettings::BF_FOLDER_BOOKFUSION_AUTHOR) &&
+      hasAuthor) {
+    dir += StringUtils::sanitizeFilename(firstAuthor(book)) + "/";
+  }
   std::string baseName = book.title;
-  switch (layout) {
-    case CrossPointSettings::BF_LAYOUT_TITLE:
-      break;
-    case CrossPointSettings::BF_LAYOUT_AUTHOR_FOLDER:
-      // No author: the book goes in the root rather than an "Unknown" folder.
-      if (hasAuthor) dir += StringUtils::sanitizeFilename(firstAuthor(book)) + "/";
-      break;
-    case CrossPointSettings::BF_LAYOUT_TITLE_AUTHOR:
-    default:
-      if (hasAuthor) {
-        baseName += " - ";
-        baseName += book.authors;
-      }
-      break;
+  if (fileName == CrossPointSettings::BF_NAME_TITLE_AUTHOR && hasAuthor) {
+    baseName += " - ";
+    baseName += book.authors;
   }
   return dir + StringUtils::sanitizeFilename(baseName) + suffix + "." + ext;
 }
@@ -210,29 +208,32 @@ bool linkedToOtherBook(const std::string& path, const uint32_t bookId) {
 }  // namespace
 
 std::string expectedFilename(const BookFusionBook& book) {
-  return filenameForLayout(book, SETTINGS.bookfusionFileLayout, "");
+  return filenameForLayout(book, SETTINGS.bookfusionFolder, SETTINGS.bookfusionFileName, "");
 }
 
 std::string localFilename(const BookFusionBook& book, bool& present) {
-  const uint8_t current = SETTINGS.bookfusionFileLayout;
-  std::string path = filenameForLayout(book, current, "");
+  const uint8_t folder = SETTINGS.bookfusionFolder;
+  const uint8_t fileName = SETTINGS.bookfusionFileName;
+  std::string path = filenameForLayout(book, folder, fileName, "");
   if (linkedToOtherBook(path, book.id)) {
     // Disambiguate with the id: "/Title (12345).epub".
     char suffix[16];
     snprintf(suffix, sizeof(suffix), " (%lu)", static_cast<unsigned long>(book.id));
-    path = filenameForLayout(book, current, suffix);
+    path = filenameForLayout(book, folder, fileName, suffix);
   }
   present = Storage.exists(path.c_str());
   if (present) return path;
 
-  // Downloaded under another layout before the setting changed: keep using
-  // that copy rather than adding a second one under the new name.
-  for (uint8_t layout = 0; layout < CrossPointSettings::BOOKFUSION_FILE_LAYOUT_COUNT; layout++) {
-    if (layout == current) continue;
-    std::string other = filenameForLayout(book, layout, "");
-    if (Storage.exists(other.c_str()) && !linkedToOtherBook(other, book.id)) {
-      present = true;
-      return other;
+  // Downloaded under another folder / file name before the settings changed:
+  // keep using that copy rather than adding a second one under the new name.
+  for (uint8_t f = 0; f < CrossPointSettings::BOOKFUSION_FOLDER_COUNT; f++) {
+    for (uint8_t n = 0; n < CrossPointSettings::BOOKFUSION_FILE_NAME_COUNT; n++) {
+      if (f == folder && n == fileName) continue;
+      std::string other = filenameForLayout(book, f, n, "");
+      if (Storage.exists(other.c_str()) && !linkedToOtherBook(other, book.id)) {
+        present = true;
+        return other;
+      }
     }
   }
 

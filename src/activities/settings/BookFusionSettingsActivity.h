@@ -7,8 +7,11 @@ struct Rect;
 
 /**
  * Settings submenu for BookFusion Sync.
- * Account-only: "Link Account" and "Unlink Account" with linked/not-linked
- * status. Library browsing lives under the Network-mode menu, not here.
+ * "Link Account" and "Unlink Account" with linked/not-linked status, the
+ * download destination (folder, file name), the push extras (highlights,
+ * reading time) and the Refresh BookFusion Data action. Library browsing lives
+ * under the Network-mode menu, not here. The parent Settings screen saves
+ * settings when this submenu returns.
  */
 class BookFusionSettingsActivity final : public Activity {
  public:
@@ -21,7 +24,7 @@ class BookFusionSettingsActivity final : public Activity {
   void render(RenderLock&&) override;
   bool handlesDirectTouch() const override { return true; }
 
-  static constexpr int MENU_ITEMS = 2;
+  static constexpr int MENU_ITEMS = 7;
 
  private:
   ButtonNavigator buttonNavigator;
