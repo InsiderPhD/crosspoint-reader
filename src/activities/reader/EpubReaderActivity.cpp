@@ -3749,9 +3749,11 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
   // Picco (S3) only.
   static uint8_t coverage[16], fullInk[16], softInk[16];
   static uint8_t coverage8[256], fullInk8[256], softInk8[256];
-  // Picture pages draw clean in one go, no base: every level is open to glyphs.
-  static uint8_t plain[16], plain8[256];
+  // Picture pages: the picture's levels (jpirnay's ordered dither), and the
+  // paths' deep levels / soft level, which their text-turn base is taken from.
   static GrayLevelQuantizer quantizer;  // 512 B of tables, Picco only
+  static uint16_t deepLevels = 0;
+  static int textSoftLevel = -1;
   static bool coverageReady = false;
   if (!coverageReady) {
     const int16_t* lstarX10 = display.gray16LevelLstar();
@@ -3765,8 +3767,8 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
     const int softLevel = display.gray16TextSoftLevel();  // -1: these paths pull every deep level back in the passes
     gray16::textCoverageLevels(coverage, lstar, deep);
     gray16::textCoverageLevels8(coverage8, lstar, deep);
-    gray16::coverageLevels(plain, lstar);
-    gray16::coverageLevels8(plain8, lstar);
+    deepLevels = deep;
+    textSoftLevel = softLevel;
     uint8_t lightness[16];  // whole L*, as GrayLevelQuantizer takes them
     for (int l = 0; l < 16; ++l) lightness[l] = static_cast<uint8_t>((lstarX10[l] + 5) / 10);
     if (!quantizer.init(lightness, 16)) LOG_ERR("ERS", "16-level pictures: measured tones do not fall; disabled");
@@ -3831,11 +3833,16 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
     memcpy(fb, bwFrame, frameBytes);  // menus and overlays draw over the B/W page
   };
   if (withPictures) {
-    // The page's own levels with every level open (no text base to keep), then
-    // each picture decoded again in 8 bits over its box. A picture that fails
-    // keeps the box the page drew; none painted and the page goes out as usual.
+    // The text turn, not a clean image draw: no full clears going in, and the
+    // next page clears its grays like any text page's. The page's text levels
+    // (deep split as on a text page), then each picture decoded again in 8 bits
+    // over its box; the base is then taken from the composed levels, since it
+    // must hold exactly the deep-path levels black, pictures included. A picture
+    // that fails keeps the box the page drew; none painted and the page goes out
+    // as usual. The dither still aims at the clean-draw tones: the turn's own
+    // (page history makes them somewhat darker) are not measured for these paths.
     if (quantizer.levels() != 16) return false;
-    renderLevels(plain, plain8);
+    renderLevels(coverage, coverage8);
     const Gray16Sink sink{levels, w, h, &quantizer, &renderer};
     const int painted = page.renderImagesGray16(renderer, orientedMarginLeft, orientedMarginTop, sink);
     const unsigned long tComposed = millis();
@@ -3843,9 +3850,41 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
       LOG_DBG("ERS", "16-level pictures: none decoded, the page goes out as usual");
       return false;
     }
-    if (!display.displayGray16Image(levels, HalDisplay::HALF_REFRESH, true)) return false;
-    LOG_INF("ERS", "16-level picture page: %d picture(s), composed %lu ms, display %lu ms", painted, tComposed - t0,
-            millis() - tComposed);
+    // Base (and soft plane, for paths that have a soft level) from the levels:
+    // 1 bpp panel-native, cleared bit = ink.
+    uint8_t* soft = nullptr;
+    if (textSoftLevel >= 0) {
+      soft = static_cast<uint8_t*>(
+          heap_caps_malloc(frameBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));  // 48 KB, freed below
+      if (!soft) {
+        LOG_ERR("ERS", "16-level pictures: no PSRAM for the soft plane");
+        return false;
+      }
+      memset(soft, 0xFF, frameBytes);
+    }
+    memset(fb, 0xFF, frameBytes);
+    for (uint16_t y = 0; y < h; ++y) {
+      const uint8_t* row = levels + static_cast<size_t>(y) * (w / 2);
+      for (uint16_t x = 0; x < w; ++x) {
+        const uint8_t l = (x & 1) ? (row[x / 2] & 0x0F) : (row[x / 2] >> 4);
+        const size_t byte = static_cast<size_t>(y) * rowBytes + x / 8;
+        const uint8_t bit = static_cast<uint8_t>(0x80 >> (x & 7));
+        if ((deepLevels >> l) & 1) fb[byte] &= static_cast<uint8_t>(~bit);
+        if (soft && l == textSoftLevel) soft[byte] &= static_cast<uint8_t>(~bit);
+      }
+    }
+    const bool based = display.beginGray16Text(fb, soft);
+    if (soft) heap_caps_free(soft);
+    if (!based) {
+      memcpy(fb, bwFrame, frameBytes);
+      LOG_ERR("ERS", "16-level pictures: base refused; normal page instead");
+      return false;
+    }
+    const unsigned long tBase = millis();
+    display.finishGray16Text(levels, true);
+    memcpy(fb, bwFrame, frameBytes);  // menus and overlays draw over the B/W page
+    LOG_INF("ERS", "16-level picture page: %d picture(s), composed %lu ms, base %lu ms, gray passes %lu ms", painted,
+            tComposed - t0, tBase - tComposed, millis() - tBase);
     return true;
   }
 
@@ -4060,12 +4099,11 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
       presentGray16Page(page, orientedMarginLeft, orientedMarginTop, viewportBottom, viewportWidth)) {
     return;
   }
-  // Pictures at the panel's 16 levels (Image Grayscale on, light mode). The
-  // next page's first frame gives the drive back and clears.
+  // Pictures at the panel's 16 levels (Image Grayscale on, light mode), on the
+  // non-flashing 16-level text turn.
   if (needsImageGrayscale && display.supportsGray16Image() &&
       presentGray16Page(page, orientedMarginLeft, orientedMarginTop, viewportBottom, viewportWidth,
                         /*withPictures=*/true)) {
-    pagesUntilFullRefresh = 1;
     return;
   }
 #endif

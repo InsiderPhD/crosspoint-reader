@@ -39,7 +39,7 @@ class EpubReaderActivity final : public Activity {
   // carries on with the normal display.
   // withPictures: a page with pictures (jpirnay's approach, witchhunt-reader
   // ReaderGrayCanvas): the text's levels, each picture's own grays over its box
-  // (decoded again in 8 bits, ordered-dithered), up as one clean 16-level image.
+  // (decoded again in 8 bits, ordered-dithered), up on the 16-level text turn.
   bool presentGray16Page(Page& page, int orientedMarginLeft, int orientedMarginTop, int viewportBottom,
                          int viewportWidth, bool withPictures = false);
 #endif
