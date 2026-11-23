@@ -124,6 +124,9 @@ class ActivityManager {
   void popActivity();
 
   bool preventAutoSleep() const;
+  bool requiresExclusiveStorageLoop() const;
+  // USB Drive (FREEINK_CAP_USB_MSC builds); logs and does nothing elsewhere.
+  void goToUsbDrive();
   // The reader is current or under a child screen (its menu, a picker).
   bool readerOnStack() const;
   bool isReaderActivity() const;

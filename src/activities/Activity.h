@@ -47,6 +47,9 @@ class Activity {
 
   virtual bool skipLoopDelay() { return false; }
   virtual bool preventAutoSleep() { return false; }
+  // True while the activity owns the raw SD card (USB Drive): main.cpp then runs
+  // only its loop() -- no sleep, screenshots, shortcuts or navigation.
+  virtual bool requiresExclusiveStorageLoop() const { return false; }
   virtual bool isReaderActivity() const { return false; }
   // True for activities that read raw touch events themselves (tap-zone and
   // home-key dispatch in the readers, tap hit-testing in the keyboard). The

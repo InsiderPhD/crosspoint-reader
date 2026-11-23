@@ -7,3 +7,6 @@
 void silentRestart();            // home screen
 void silentRestartToReader();    // currently-open EPUB (APP_STATE.openEpubPath)
 void silentRestartToSettings();  // settings screen
+// Reboots straight after an activity hands exclusive raw storage back (USB
+// Drive), without touching the SD card, and lands on Home.
+void restartToHomeAfterStorageHandoff();

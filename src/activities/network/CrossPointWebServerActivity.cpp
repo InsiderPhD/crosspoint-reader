@@ -138,8 +138,20 @@ void CrossPointWebServerActivity::onNetworkModeSelected(const NetworkMode mode) 
     modeName = "Plugins";
   } else if (mode == NetworkMode::SYNC_BOOKS) {
     modeName = "Sync Books";
+  } else if (mode == NetworkMode::USB_DRIVE) {
+    modeName = "USB Drive";
   }
   LOG_DBG("WEBACT", "Network mode selected: %s", modeName);
+
+  if (mode == NetworkMode::USB_DRIVE) {
+    // No Wi-Fi involved; make sure none is left on so onExit does not restart.
+    if (WiFi.getMode() != WIFI_MODE_NULL) {
+      WiFi.disconnect(false);
+      WiFi.mode(WIFI_OFF);
+    }
+    activityManager.goToUsbDrive();
+    return;
+  }
 
   if (mode == NetworkMode::BOOKFUSION || mode == NetworkMode::OPDS || mode == NetworkMode::PLUGINS ||
       mode == NetworkMode::SYNC_BOOKS) {

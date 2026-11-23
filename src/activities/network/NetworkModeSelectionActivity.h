@@ -7,7 +7,16 @@
 
 struct Rect;
 
-enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, BOOKFUSION, OPDS, PLUGINS, SYNC_BOOKS };
+enum class NetworkMode {
+  JOIN_NETWORK,
+  CONNECT_CALIBRE,
+  CREATE_HOTSPOT,
+  BOOKFUSION,
+  OPDS,
+  PLUGINS,
+  SYNC_BOOKS,
+  USB_DRIVE
+};
 
 /**
  * NetworkModeSelectionActivity presents the user with a choice:
@@ -18,6 +27,7 @@ enum class NetworkMode { JOIN_NETWORK, CONNECT_CALIBRE, CREATE_HOTSPOT, BOOKFUSI
  * - "OPDS Browser" - Browse an OPDS catalogue (only once a server URL is set)
  * - "Plugins" - SD-card plugin catalogs (PSRAM boards, only once one is installed)
  * - "Sync Books" - KOReader / CrossPoint Sync progress for every book (only with a sync account)
+ * - "USB Drive" - the SD card as a disk on a computer (S3 boards: FREEINK_CAP_USB_MSC)
  *
  * The onModeSelected callback is called with the user's choice.
  * The onCancel callback is called if the user presses back.

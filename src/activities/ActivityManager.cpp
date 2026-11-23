@@ -1,5 +1,9 @@
 #include "ActivityManager.h"
 
+#if FREEINK_CAP_USB_MSC
+#include "network/UsbDriveActivity.h"
+#endif
+
 #include <BluetoothHIDManager.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
@@ -351,6 +355,18 @@ void ActivityManager::popActivity() {
 }
 
 bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
+
+bool ActivityManager::requiresExclusiveStorageLoop() const {
+  return currentActivity && currentActivity->requiresExclusiveStorageLoop();
+}
+
+void ActivityManager::goToUsbDrive() {
+#if FREEINK_CAP_USB_MSC
+  replaceActivity(std::make_unique<UsbDriveActivity>(renderer, mappedInput));
+#else
+  LOG_ERR("ACT", "USB Drive requested in a build without USB Drive capability");
+#endif
+}
 
 bool ActivityManager::isReaderActivity() const { return currentActivity && currentActivity->isReaderActivity(); }
 

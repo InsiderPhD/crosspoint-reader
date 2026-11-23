@@ -10,11 +10,30 @@
 
 class HalFile;
 
+// USB Drive (FREEINK_CAP_USB_MSC, the S3 boards): what the host is doing with
+// the raw SD card. Unsupported on builds without the capability.
+enum class UsbDriveState : uint8_t {
+  Unsupported,
+  WaitingForHost,
+  Connected,
+  Ejected,
+  Disconnected,
+  IoError,
+};
+
 class HalStorage {
  public:
   HalStorage();
   bool begin();
   bool ready() const;
+  // USB Drive exclusively owns the SD card while active (ported from upstream
+  // CrossPoint). Callers must stop all filesystem work before beginUsbDrive(),
+  // then reboot after endUsbDrive(): the filesystem is not remounted in place.
+  bool beginUsbDrive();
+  bool disconnectUsbDriveHost();
+  void endUsbDrive();
+  UsbDriveState usbDriveState() const;
+  bool usbDriveHostSuspended() const;
   // Unmount and power-quiesce the card for deep sleep (X4 Pro SDMMC: stops the
   // host and floats the bus pads; a no-op on SPI boards). Call only after every
   // file is closed; a deep-sleep wake remounts through begin().

@@ -37,6 +37,7 @@
 #include "SdCardFontSystem.h"
 #include "activities/Activity.h"
 #include "platform/Gray16Levels.h"
+#include "platform/UsbSerialJtagHandoff.h"
 #include "activities/boot_sleep/SleepGray16.h"
 #include "platform/Gray16TextDemo.h"
 #include "activities/ActivityManager.h"
@@ -262,6 +263,18 @@ void silentRestart() { silentRestartTo(SILENT_REBOOT_TARGET_HOME, "home"); }
 void silentRestartToReader() { silentRestartTo(SILENT_REBOOT_TARGET_READER, "reader"); }
 
 void silentRestartToSettings() { silentRestartTo(SILENT_REBOOT_TARGET_SETTINGS, "settings"); }
+
+void restartToHomeAfterStorageHandoff() {
+  if (deepSleepInProgress) return;  // sleeping supersedes the storage handoff reboot
+  // No SD writes here (unlike silentRestartTo): the card was just the host's,
+  // and the reboot is what mounts it again.
+  silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
+  silentRebootMagic = SILENT_REBOOT_MAGIC;
+  LOG_DBG("MAIN", "Restart after storage handoff (target=home)");
+  delay(50);
+  handoffUsbOtgToSerialJtag();  // give the USB PHY back to Serial/JTAG for the next boot
+  ESP.restart();
+}
 
 // Verify power button press duration on wake-up from deep sleep
 // Pre-condition: isWakeupByPowerButton() == true
@@ -1441,6 +1454,16 @@ void loop() {
   // Latches buttons (gpio.update()) and, on X4 Pro, classifies touch swipes
   // into synthesized button presses.
   mappedInputManager.update();
+
+  if (activityManager.requiresExclusiveStorageLoop()) {
+    // USB Drive handed the raw SD card to the host (ported from upstream
+    // CrossPoint). Nothing else may run while its filesystem is detached: no
+    // screenshots, sleep (which writes state to SD), shortcuts or navigation.
+    // The activity times the handoff out and restarts, never sleeping detached.
+    activityManager.loop();
+    delay(activityManager.preventAutoSleep() ? 10 : 50);
+    return;
+  }
 
 #if FREEINK_CAP_TOUCH
   // Home key off the reading screen is Home, on every screen including the

@@ -29,6 +29,8 @@ constexpr MenuRow MENU_ROWS[] = {
     {NetworkMode::BOOKFUSION, StrId::STR_BF_BROWSE_LIBRARY, StrId::STR_BF_LIBRARY_DESC, UIIcon::BookFusion},
     {NetworkMode::OPDS, StrId::STR_OPDS_BROWSER, StrId::STR_OPDS_DESC, UIIcon::Library},
     {NetworkMode::PLUGINS, StrId::STR_PLUGINS, StrId::STR_PLUGINS_DESC, UIIcon::Library},
+    // No Wi-Fi: the SD card as a USB disk (S3 boards only, rowVisible()).
+    {NetworkMode::USB_DRIVE, StrId::STR_USB_DRIVE, StrId::STR_USB_DRIVE_DESC, UIIcon::Transfer},
     // Sync Server section: last, below the transfer modes.
     {NetworkMode::SYNC_BOOKS, StrId::STR_SYNC_BOOKS, StrId::STR_SYNC_BOOKS_DESC, UIIcon::Transfer},
 };
@@ -43,6 +45,8 @@ bool rowVisible(const MenuRow& row) {
   if (row.mode == NetworkMode::OPDS) return OPDS_STORE.hasServers();
   // Sync Books: only once a KOReader / CrossPoint Sync account is set up.
   if (row.mode == NetworkMode::SYNC_BOOKS) return KOREADER_STORE.hasCredentials();
+  // USB Drive: only where the chip has USB OTG and the build enables it.
+  if (row.mode == NetworkMode::USB_DRIVE) return FREEINK_CAP_USB_MSC != 0;
   // Plugins: only on boards that build them, and only once a plugin with an
   // on-device catalog is on the card (rescanned each time this screen opens).
   if (row.mode == NetworkMode::PLUGINS) {

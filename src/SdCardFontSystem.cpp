@@ -88,6 +88,13 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
   LOG_DBG("SDFS", "SD font system ready (%d families discovered)", registry_.getFamilyCount());
 }
 
+void SdCardFontSystem::releaseForStorage(GfxRenderer& renderer) {
+#if CROSSPOINT_VECTOR_FONTS
+  unloadTtf(renderer);
+#endif
+  manager_.unloadAll(renderer);
+}
+
 void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
   // If the web server (or another task) installed/deleted fonts, re-discover.
   // Track whether we just re-discovered so we can force a reload below even
