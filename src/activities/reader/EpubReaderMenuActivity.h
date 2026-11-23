@@ -62,6 +62,9 @@ class EpubReaderMenuActivity final : public Activity {
   // This book's last successful sync (epoch seconds, 0 = never), for the
   // "Last sync" info line. Only shown when the book has a sync backend.
   void setLastSync(uint32_t epoch) { lastSyncEpoch = epoch; }
+  // For a book with no sync backend: why, for the sync line (e.g. "Not linked
+  // to BookFusion"). Unset: "Sync not set up".
+  void setSyncUnavailable(StrId reason) { syncUnavailable = reason; }
 
   void onEnter() override;
   void onExit() override;
@@ -148,4 +151,5 @@ class EpubReaderMenuActivity final : public Activity {
   uint32_t timeLeftBookSeconds = 0;
   ProgressAutoSync::Provider syncProvider = ProgressAutoSync::Provider::None;
   uint32_t lastSyncEpoch = 0;
+  StrId syncUnavailable = StrId::STR_SYNC_NOT_SET_UP_LINE;
 };

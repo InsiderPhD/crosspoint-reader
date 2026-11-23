@@ -119,11 +119,17 @@ std::vector<EpubReaderMenuActivity::MenuItem> EpubReaderMenuActivity::buildMenuI
   // fire for this book either. Its mode is still reachable in Settings > Reader,
   // and pendingAutosyncMode is seeded from SETTINGS regardless of whether the
   // row exists, so hiding it never writes the setting back.
+  //
+  // The Sync row itself shows whenever the user left it on: on a book with no
+  // backend it explains why instead of vanishing (it used to disappear, which
+  // read as the visibility toggle not working). Autosync stays gated: it has
+  // nothing to do for such a book.
   if (syncProvider != ProgressAutoSync::Provider::None) {
-    const bool isBookFusion = (syncProvider == ProgressAutoSync::Provider::BookFusion);
     add(MenuAction::AUTOSYNC, StrId::STR_AUTOSYNC);
-    add(MenuAction::SYNC, isBookFusion ? StrId::STR_SYNC_BOOKFUSION : StrId::STR_SYNC_KOREADER);
   }
+  add(MenuAction::SYNC, syncProvider == ProgressAutoSync::Provider::BookFusion ? StrId::STR_SYNC_BOOKFUSION
+                        : syncProvider == ProgressAutoSync::Provider::KOReader ? StrId::STR_SYNC_KOREADER
+                                                                               : StrId::STR_SYNC_PROGRESS);
   // Delete Book Cache is a testing aid — only surface it in Dev Mode.
   if (SETTINGS.devMode) {
     add(MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE);
@@ -393,10 +399,11 @@ void EpubReaderMenuActivity::buildInfoLines() {
   }
   if (!progressLine.empty()) infoLines.push_back(std::move(progressLine));
 
-  // Last sync: only for a book with a sync backend (a "never" line on every
-  // unlinked book would be noise). Autosync's inactive notice rides along: it is
-  // about the same thing.
-  if ((info & CrossPointSettings::READER_MENU_INFO_LAST_SYNC) && syncProvider != ProgressAutoSync::Provider::None) {
+  // Last sync, or why there is none for this book. Autosync's inactive notice
+  // rides along: it is about the same thing.
+  if ((info & CrossPointSettings::READER_MENU_INFO_LAST_SYNC) && syncProvider == ProgressAutoSync::Provider::None) {
+    infoLines.push_back(I18N.get(syncUnavailable));
+  } else if (info & CrossPointSettings::READER_MENU_INFO_LAST_SYNC) {
     std::string syncLine = lastSyncLine();
     // Autosync needs the boot NTP check to have succeeded (that's how the
     // firmware knows WiFi works this session). When it didn't, autosync is

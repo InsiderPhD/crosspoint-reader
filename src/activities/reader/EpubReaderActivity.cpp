@@ -1838,13 +1838,15 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
               }
             });
       } else {
-        // Unreachable by design: buildMenuItems() only emits SYNC
-        // when ProgressAutoSync::providerFor() resolved a backend, which is this
-        // same predicate. Reaching here means the two have drifted apart — and
-        // the symptom is a menu row that does nothing whatsoever when pressed,
-        // which is invisible without this line.
-        LOG_ERR("BFS", "Sync row shown with no provider (bookId=%lu token=%d koreader=%d)", (unsigned long)bookId,
+        // No backend for this book: the row shows anyway (buildMenuItems), so
+        // say why rather than doing nothing. Reuses the transient reader popup.
+        LOG_INF("BFS", "Sync: no provider for this book (bookId=%lu token=%d koreader=%d)", (unsigned long)bookId,
                 (int)BF_TOKEN_STORE.hasToken(), (int)KOREADER_STORE.hasCredentials());
+        dictionaryMessage =
+            BF_TOKEN_STORE.hasToken() ? StrId::STR_SYNC_NOT_LINKED_POPUP : StrId::STR_SYNC_NOT_SET_UP_POPUP;
+        showDictionaryMessage = true;
+        dictionaryMessageTime = millis();
+        requestUpdate();
       }
       break;
     }
@@ -4555,6 +4557,9 @@ void EpubReaderActivity::openReaderMenu() {
       }
     }
     menuActivity->setLastSync(lastSync);
+  } else if (syncProvider == ProgressAutoSync::Provider::None && BF_TOKEN_STORE.hasToken()) {
+    // A BookFusion account, but this book did not come from it.
+    menuActivity->setSyncUnavailable(StrId::STR_SYNC_NOT_LINKED_LINE);
   }
   startActivityForResult(std::move(menuActivity), [this](const ActivityResult& result) {
     const auto& menu = std::get<MenuResult>(result.data);
