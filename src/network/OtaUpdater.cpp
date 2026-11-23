@@ -6,7 +6,6 @@
 #include <SecureHttpClient.h>
 
 #include "CrossPointSettings.h"
-#include "DownloadFailureLog.h"
 #include "FirmwareFlasher.h"
 #include "HttpDownloader.h"
 #include "WifiPowerSaveGuard.h"
@@ -251,12 +250,6 @@ OtaUpdater::OtaUpdaterError OtaUpdater::flashUpdate(ProgressCallback onProgress,
       },
       this);
 
-  if (flashResult != firmware_flash::Result::OK) {
-    // Downloaded but not a firmware image (a block page) or the wrong board's.
-    DownloadFailureLog::section("Firmware downloaded but refused");
-    DownloadFailureLog::line("flash result: %s", firmware_flash::resultName(flashResult));
-    DownloadFailureLog::fileHead("firmware", kTmpPath);
-  }
   Storage.remove(kTmpPath);
 
   if (flashResult != firmware_flash::Result::OK) {

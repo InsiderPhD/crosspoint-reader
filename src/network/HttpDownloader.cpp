@@ -6,12 +6,10 @@
 #include <SecureHttpClient.h>
 #include <StreamString.h>
 #include <WiFi.h>
-#include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 
 #include <cstring>
 
-#include "DownloadFailureLog.h"
 #include "WifiPowerSaveGuard.h"
 #include "util/UrlUtils.h"
 
@@ -242,10 +240,6 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
       Storage.remove(destPath.c_str());
     }
   }
-  // For the failure log: what was asked for, separately from what the server
-  // did about it (resumeBase itself drops to 0 when a 200 restarts the file).
-  const size_t rangeRequested = resumeBase;
-
   if (progress) {
     // SecureHttpClient reports (downloaded, total-from-Content-Length-or-0)
     // after each delivered chunk — the same shape our callers expect, offset
@@ -256,12 +250,6 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     });
   }
 
-  // Heap snapshot before the transfer: the historical failure mode here was a
-  // *largest-free-block* shortage, not a total-free shortage, so log both.
-  const uint32_t heapFreeBefore = ESP.getFreeHeap();
-  const uint32_t heapLargestBefore = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  LOG_DBG("HTTP", "Heap before transfer: free=%u largest=%u", (unsigned)heapFreeBefore, (unsigned)heapLargestBefore);
-
   // The file is created lazily on the first 200-status body chunk, so an HTTP
   // error (or a redirect chain that never resolves) leaves any existing file
   // at destPath untouched.
@@ -270,13 +258,6 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   bool fileError = false;
   size_t downloaded = 0;
   bool cancelled = false;
-  // Transfer-shape counters for the failure log: a stall shows up as a large
-  // gap between chunks; a slow link as a low chunk rate.
-  const unsigned long requestMs = millis();
-  unsigned long firstChunkMs = 0;
-  unsigned long lastChunkMs = 0;
-  unsigned long maxChunkGapMs = 0;
-  uint32_t chunkCount = 0;
 
 #if CROSSPOINT_DOWNLOAD_WRITE_BUFFER > 0
   // Write coalescing (roomy boards only — see CROSSPOINT_DOWNLOAD_WRITE_BUFFER).
@@ -312,16 +293,6 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     esp_task_wdt_reset();  // download length is network-bound; feed the loop WDT per chunk
     const int status = http.getStatus();
     if (status != 200 && status != 206) return true;  // drain error body
-    {
-      const unsigned long now = millis();
-      if (chunkCount == 0) {
-        firstChunkMs = now;
-      } else if (now - lastChunkMs > maxChunkGapMs) {
-        maxChunkGapMs = now - lastChunkMs;
-      }
-      lastChunkMs = now;
-      chunkCount++;
-    }
     // Polled here rather than in the progress callback: the callback only fires
     // once a chunk has been delivered, and returning false from the sink is the
     // one path the transport already treats as "stop reading the body".
@@ -386,9 +357,6 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     return true;
   };
 
-  // Breadcrumb before the request: if the device dies mid-transfer (a crash
-  // or reboot leaves no failure report), the log ends on this line.
-  DownloadFailureLog::url("attempt", url.c_str());
   int httpCode = http.GET(sink);
   if (scopedAuth) {
     // Redirect bodies were drained by the sink (status not 200/206), so no
@@ -458,8 +426,6 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   const bool chunked = http.getHeader("transfer-encoding").find("chunked") != std::string::npos;
   const bool framed = chunked || http.hasContentLength();
 
-  // Single exit: every failure below lands in `result`, and the failure report
-  // at the bottom sees the same state the decision was made on.
   DownloadError result = OK;
   if (cancelled) {
     LOG_INF("HTTP", "Download cancelled after %zu bytes", downloaded);
@@ -523,104 +489,14 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   if (result == OK) {
     LOG_DBG("HTTP", "Downloaded %zu bytes this session, %zu on disk (Content-Length %zu)", downloaded, totalOnDisk,
             contentLength);
-    // 3. A framed body that disagrees with the caller's expected size is worth a
-    // note in the log (it is what the above used to fail on), not a failure.
+    // A framed body that disagrees with the caller's expected size is worth a
+    // note (it is what the above used to fail on), not a failure.
     if (expectedSize > 0 &&
         (totalOnDisk < expectedSize - expectedSize / 8 || totalOnDisk > expectedSize + expectedSize / 8)) {
       LOG_INF("HTTP", "Size differs from expected: got %zu, caller expected ~%zu (accepted: body was %s)", totalOnDisk,
               expectedSize, chunked ? "chunked and terminated" : "Content-Length complete");
-      DownloadFailureLog::line("warning: served %u bytes but caller expected ~%u (%s); accepted", (unsigned)totalOnDisk,
-                               (unsigned)expectedSize, chunked ? "chunked, terminated" : "content-length matched");
     }
     return OK;
-  }
-
-  // Failure report for the SD log (DownloadFailureLog::kPath). The TLS session
-  // is closed first so its record buffers are back in the heap before the
-  // report's own small allocations (the response-header dump builds a vector
-  // of std::string pairs) and so the "after" heap line shows the activity's
-  // footprint, not the transport's. Diagnostics and headers are plain members
-  // of `http` and survive end().
-  http.end();
-  {
-    static const char* const kNames[] = {"OK",      "HTTP_ERROR",        "FILE_ERROR",    "ABORTED",
-                                         "CONNECT", "HTTP_STATUS_ERROR", "NO_DATA_ERROR", "TRUNCATED_ERROR"};
-    const unsigned long now = millis();
-    const auto& diag = http.lastFailure();
-    DownloadFailureLog::section("HTTP transfer failed");
-    DownloadFailureLog::url("url", url.c_str());
-    DownloadFailureLog::line("dest=%s expectedSize=%u resumePartial=%d", destPath.c_str(), (unsigned)expectedSize,
-                             resumePartial ? 1 : 0);
-    if (rangeRequested > 0) {
-      DownloadFailureLog::line("resume: requested Range from byte %u -> %s", (unsigned)rangeRequested,
-                               httpCode == 206   ? "honoured (206)"
-                               : httpCode == 200 ? "IGNORED (200, restarted from 0)"
-                                                 : "no body");
-    } else {
-      DownloadFailureLog::line("resume: no partial to resume from");
-    }
-    DownloadFailureLog::line("framing: chunked=%d contentLength=%d -> %s", chunked ? 1 : 0,
-                             http.hasContentLength() ? 1 : 0, framed ? "framed" : "UNFRAMED (ends on close)");
-    DownloadFailureLog::line("result=%s(%d) httpCode=%d responseComplete=%d contentLength=%u(hasHeader=%d)",
-                             kNames[result < 8 ? result : 1], (int)result, httpCode, http.responseComplete() ? 1 : 0,
-                             (unsigned)contentLength, http.hasContentLength() ? 1 : 0);
-    DownloadFailureLog::line("bytes: thisSession=%u onDisk=%u chunks=%lu fileOpen=%d fileError=%d cancelled=%d",
-                             (unsigned)downloaded, (unsigned)totalOnDisk, (unsigned long)chunkCount, fileOpen ? 1 : 0,
-                             fileError ? 1 : 0, cancelled ? 1 : 0);
-    DownloadFailureLog::line("timing: request->now=%lums firstChunk=+%lums lastChunk=+%lums maxGap=%lums rate=%luKB/s",
-                             now - requestMs, firstChunkMs ? firstChunkMs - requestMs : 0,
-                             lastChunkMs ? lastChunkMs - requestMs : 0, maxChunkGapMs,
-                             (lastChunkMs > firstChunkMs && downloaded > 0)
-                                 ? (unsigned long)((downloaded >> 10) * 1000UL / (lastChunkMs - firstChunkMs))
-                                 : 0UL);
-    if (httpCode < 0) {
-      DownloadFailureLog::line("transport: stage=%s elapsed=%lums partialBytes=%u available=%d connected=%d reused=%d",
-                               diag.stage, diag.elapsedMs, (unsigned)diag.partialBytes, diag.available,
-                               diag.connected ? 1 : 0, diag.reusedConnection ? 1 : 0);
-      // The host this hop dialed (after redirects: the CDN a GitHub release
-      // download is sent to) and, for a connect failure, how far it got.
-      DownloadFailureLog::line("transport: host=%s connectStage=%s tlsError=%d \"%s\" alert=%d", diag.host,
-                               diag.connectStage[0] ? diag.connectStage : "-", diag.tlsError, diag.tlsErrorString,
-                               diag.tlsAlert);
-      LOG_ERR("HTTP", "Download failed at %s (host %s, connect %s, tls %d)", diag.stage[0] ? diag.stage : "?",
-              diag.host[0] ? diag.host : "?", diag.connectStage[0] ? diag.connectStage : "-", diag.tlsError);
-      if (diag.partialBytes > 0) {
-        DownloadFailureLog::line("transport: partial=\"%s\"", diag.partial);
-      }
-    }
-    // Every hop the request took (redirects to the CDN included).
-    for (uint8_t i = 0; i < http.hopCount(); ++i) {
-      const auto& hop = http.hops()[i];
-      DownloadFailureLog::line("hop %u: %s -> %d in %ums%s%s", static_cast<unsigned>(i + 1), hop.host, hop.status,
-                               static_cast<unsigned>(hop.ms), hop.tls[0] ? ", tls " : "", hop.tls);
-    }
-    if (httpCode < 0) {
-      // Is it the network? DNS (this network's and public), TCP and HTTPS for
-      // the failing host and every host the GitHub-backed downloads use.
-      DownloadFailureLog::githubProbe(diag.host);
-    } else {
-      for (const auto& h : http.getHeaders()) {
-        DownloadFailureLog::line("hdr: %s: %s", h.first.c_str(), h.second.c_str());
-      }
-      // A refusal (403, 451, a filter's own page): probe too, from the host that answered.
-      if (httpCode >= 400)
-        DownloadFailureLog::githubProbe(http.hopCount() ? http.hops()[http.hopCount() - 1].host : nullptr);
-    }
-    {
-      size_t onDiskNow = 0;
-      const bool exists = Storage.exists(destPath.c_str());
-      if (exists) {
-        FsFile f = Storage.open(destPath.c_str(), O_RDONLY);
-        if (f) {
-          onDiskNow = f.fileSize();
-          f.close();
-        }
-      }
-      DownloadFailureLog::line("sd: dest exists=%d size=%u (kept for resume=%d)", exists ? 1 : 0, (unsigned)onDiskNow,
-                               (exists && resumePartial) ? 1 : 0);
-    }
-    DownloadFailureLog::line("before: heap free=%u largest=%u", (unsigned)heapFreeBefore, (unsigned)heapLargestBefore);
-    DownloadFailureLog::environment("after");
   }
   return result;
 }

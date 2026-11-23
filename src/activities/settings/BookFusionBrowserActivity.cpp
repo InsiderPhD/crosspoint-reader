@@ -23,7 +23,6 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/BookFusionDownload.h"
-#include "network/DownloadFailureLog.h"
 #include "network/HttpDownloader.h"
 #include "util/TouchListNav.h"
 
@@ -322,7 +321,6 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
   const bool resumingPartial = Storage.exists(partPath.c_str());
   LOG_DBG("BFB", "Downloading book_id=%lu -> %s%s%s", static_cast<unsigned long>(book.id), filename.c_str(),
           alreadyOnCard ? " (replacing)" : "", resumingPartial ? " (resuming partial)" : "");
-  BookFusionDownload::logStart(book, filename, resumingPartial);
 
   // Every borrow and lease in the pipeline overwrites the framebuffer, so the
   // next paint after one must be a full one, not the dynamic-band shortcut.
@@ -389,7 +387,6 @@ void BookFusionBrowserActivity::startDownload(int bookIndex) {
       BookFusionDownload::describeFailure(transfer.dlResult, HttpDownloader::lastHttpStatus(),
                                           Storage.exists(partPath.c_str()), errorMsg, sizeof(errorMsg));
     }
-    DownloadFailureLog::line("shown=\"%s\"", errorMsg);
     requestUpdate();
     return;
   }

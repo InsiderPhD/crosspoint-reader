@@ -69,9 +69,6 @@ struct Hooks {
   void (*progress)(void* ctx, size_t downloaded, size_t total) = nullptr;
 };
 
-// Opens this download's section in the SD failure log (DownloadFailureLog).
-void logStart(const BookFusionBook& book, const std::string& filename, bool resuming);
-
 // One attempt at the API cover: fetch it into the book's cache dir, then build
 // the thumbnails and sleep covers. outThumbPath receives the thumb at
 // coverHeight. Returns false on either failure.

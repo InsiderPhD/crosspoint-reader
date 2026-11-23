@@ -22,7 +22,6 @@
 #include "activities/home/LibraryActivity.h"
 #include "activities/reader/TlsFramebufferBorrow.h"
 #include "network/BookFusionCoverCache.h"
-#include "network/DownloadFailureLog.h"
 #include "util/StringUtils.h"
 #include "util/ZipFileCheck.h"
 
@@ -292,21 +291,6 @@ void describeFailure(HttpDownloader::DownloadError err, int httpStatus, bool par
       snprintf(out + used, outLen - used, " %s", tr(STR_DL_RESUME_HINT));
     }
   }
-  const size_t used = strlen(out);
-  if (used + 1 < outLen) {
-    snprintf(out + used, outLen - used, " %s", tr(STR_DL_LOG_HINT));
-  }
-}
-
-void logStart(const BookFusionBook& book, const std::string& filename, const bool resuming) {
-  // Every download opens a section in the SD failure log; a success leaves
-  // only these few lines behind, a failure gets the transport report from
-  // HttpDownloader appended under it.
-  DownloadFailureLog::section("BookFusion download start");
-  DownloadFailureLog::line("book_id=%lu title=\"%s\" format=\"%s\" download_size=%lu file=%s resuming=%d",
-                           static_cast<unsigned long>(book.id), book.title, book.format,
-                           static_cast<unsigned long>(book.downloadSize), filename.c_str(), resuming ? 1 : 0);
-  DownloadFailureLog::environment("start");
 }
 
 bool fetchCover(const BookFusionBook& book, const Epub& epub, const int coverHeight, char* outThumbPath,
@@ -345,7 +329,6 @@ bool prefetchCover(const BookFusionBook& book, const Epub& epub, const int cover
     if (!ok) LOG_ERR("BFB", "API cover attempt %d/%d failed", attempt, MAX_COVER_ATTEMPTS);
   }
   if (ok) LOG_DBG("BFB", "Pre-fetched BookFusion API cover before EPUB download");
-  DownloadFailureLog::line("cover: ok=%d url_present=%d", ok ? 1 : 0, book.coverUrl[0] != '\0' ? 1 : 0);
   return ok;
 }
 
@@ -367,12 +350,7 @@ TransferResult downloadEpub(const BookFusionBook& book, const std::string& partP
       TlsScope tls(hooks);
       result.urlError = BookFusionSyncClient::getDownloadUrl(book.id, urlBuf, urlBufLen);
     }
-    DownloadFailureLog::line("attempt %d/%d: getDownloadUrl -> %s(%d)", attempt, MAX_DOWNLOAD_ATTEMPTS,
-                             BookFusionSyncClient::errorString(result.urlError), static_cast<int>(result.urlError));
-    if (result.urlError != BookFusionSyncClient::OK) {
-      DownloadFailureLog::environment("after getDownloadUrl failure");
-      return result;
-    }
+    if (result.urlError != BookFusionSyncClient::OK) return result;
 
     if (hooks.transferStarting) hooks.transferStarting(hooks.ctx, Storage.exists(partPath.c_str()));
 
@@ -402,8 +380,6 @@ TransferResult downloadEpub(const BookFusionBook& book, const std::string& partP
           /*headers=*/{}, /*resumePartial=*/true);
     }
 
-    DownloadFailureLog::line("attempt %d/%d: downloadToFile -> %d (http %d)", attempt, MAX_DOWNLOAD_ATTEMPTS,
-                             static_cast<int>(result.dlResult), HttpDownloader::lastHttpStatus());
     if (result.dlResult == HttpDownloader::OK) break;
 
     LOG_ERR("BFB", "Download attempt %d/%d failed for book_id=%lu (err=%d, http=%d)", attempt, MAX_DOWNLOAD_ATTEMPTS,
@@ -424,24 +400,16 @@ TransferResult downloadEpub(const BookFusionBook& book, const std::string& partP
   // endpoint ignores Range requests, so there is nothing to resume into.
   if (result.dlResult == HttpDownloader::OK && !ZipFileCheck::looksComplete(partPath.c_str())) {
     LOG_ERR("BFB", "%s is not a complete ZIP; discarding", partPath.c_str());
-    DownloadFailureLog::line("zip check: %s has no end-of-central-directory record; discarded", partPath.c_str());
     Storage.remove(partPath.c_str());
     result.dlResult = HttpDownloader::TRUNCATED_ERROR;
   }
 
   if (result.dlResult == HttpDownloader::OK && !Storage.rename(partPath.c_str(), filename.c_str())) {
     LOG_ERR("BFB", "Rename %s -> %s failed", partPath.c_str(), filename.c_str());
-    DownloadFailureLog::line("rename %s -> %s FAILED", partPath.c_str(), filename.c_str());
     Storage.remove(partPath.c_str());
     result.dlResult = HttpDownloader::FILE_ERROR;
   }
 
-  if (result.dlResult == HttpDownloader::OK) {
-    DownloadFailureLog::line("verdict: OK file=%s", filename.c_str());
-  } else {
-    DownloadFailureLog::line("verdict: FAILED result=%d http=%d partialKept=%d", static_cast<int>(result.dlResult),
-                             HttpDownloader::lastHttpStatus(), Storage.exists(partPath.c_str()) ? 1 : 0);
-  }
   return result;
 }
 

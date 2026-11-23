@@ -18,7 +18,6 @@
 #include "activities/reader/TlsFramebufferBorrow.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "network/DownloadFailureLog.h"
 #include "network/HttpDownloader.h"
 #include "network/WifiPowerSaveGuard.h"
 #include "util/HardcoverSync.h"
@@ -350,12 +349,6 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   manifestFile.close();
 
   if (!stream.ok() || stream.version() != FONTS_MANIFEST_VERSION) {
-    // Downloaded but not our manifest: a filter's block page saved as the list
-    // shows here, in the download failure log.
-    DownloadFailureLog::section("Font list downloaded but refused");
-    DownloadFailureLog::line("parse ok=%d version=%d bytes=%u", stream.ok() ? 1 : 0, stream.version(),
-                             (unsigned)stream.bytesRead());
-    DownloadFailureLog::fileHead("font list", MANIFEST_TMP);
     Storage.remove(MANIFEST_TMP);
     if (!stream.ok()) {
       LOG_ERR("FONT", "Manifest streaming parse error after %zu bytes", stream.bytesRead());

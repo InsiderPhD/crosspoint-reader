@@ -31,7 +31,6 @@
 #include "components/UITheme.h"
 #include "html/BookFusionPageHtml.generated.h"
 #include "network/BookFusionDownload.h"
-#include "network/DownloadFailureLog.h"
 
 namespace {
 
@@ -348,7 +347,6 @@ void CrossPointWebServer::handleBookFusionDownload() {
   const std::string partPath = filename + ".part";
   LOG_INF("WEB", "BookFusion download book_id=%lu -> %s%s", static_cast<unsigned long>(book->id), filename.c_str(),
           alreadyOnCard ? " (replacing)" : "");
-  BookFusionDownload::logStart(*book, filename, Storage.exists(partPath.c_str()));
 
   DownloadStream stream;
   stream.server = server.get();
@@ -388,7 +386,6 @@ void CrossPointWebServer::handleBookFusionDownload() {
     char msg[224];
     BookFusionDownload::describeFailure(transfer.dlResult, HttpDownloader::lastHttpStatus(),
                                         Storage.exists(partPath.c_str()), msg, sizeof(msg));
-    DownloadFailureLog::line("shown=\"%s\"", msg);
     doc["ok"] = false;
     doc["error"] = msg;
     stream.finish(doc);

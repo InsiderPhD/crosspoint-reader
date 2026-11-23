@@ -277,7 +277,7 @@ A catalogue's login and headers are only sent to that catalogue's own site: if i
 > [!TIP]
 > Large, image-heavy EPUBs (10 MB+) can be slow to convert and use a lot of memory. When downloading such a book from BookFusion you'll get a size warning first. For faster covers/thumbnails, pre-optimise EPUBs with a converter such as [epub-to-xtc-converter](https://github.com/bigbag/epub-to-xtc-converter).
 
-> If a BookFusion download fails, the screen says why (no connection, a rejected or expired link, a dropped transfer, a full SD card, …). A transfer that was cut off keeps what it got in a `.part` file next to where the book will go; selecting the same book again continues from there when the server allows it (BookFusion's own download endpoint does not, so those restart from the beginning). Every failure also appends a detailed report to `/.crosspoint/download_failure.log` on the SD card — attach that file when reporting a problem.
+> If a BookFusion download fails, the screen says why (no connection, a rejected or expired link, a dropped transfer, a full SD card, …). A transfer that was cut off keeps what it got in a `.part` file next to where the book will go; selecting the same book again continues from there when the server allows it (BookFusion's own download endpoint does not, so those restart from the beginning).
 
 ---
 
