@@ -131,4 +131,45 @@ void url(const char* label, const char* fullUrl) {
   line("%s: %s (len %u%s)", label, buf, (unsigned)strlen(fullUrl), *p != '\0' ? ", redacted+truncated" : "");
 }
 
+void hostProbe(const char* host) {
+  if (!host || !*host) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    line("probe %s: skipped, wifi not connected", host);
+    return;
+  }
+  const unsigned long t0 = millis();
+  IPAddress ip;
+  if (WiFi.hostByName(host, ip) != 1) {
+    line("probe %s: DNS FAILED after %lums (dns server %s)", host, millis() - t0, WiFi.dnsIP().toString().c_str());
+    LOG_ERR("DLLOG", "probe %s: DNS lookup failed", host);
+    return;
+  }
+  const unsigned long dnsMs = millis() - t0;
+  const char* flag = "";
+  if (ip == IPAddress(0, 0, 0, 0)) {
+    flag = " SINKHOLED(0.0.0.0)";
+  } else if (ip[0] == 127) {
+    flag = " SINKHOLED(loopback)";
+  } else if (ip[0] == 10 || (ip[0] == 192 && ip[1] == 168) || (ip[0] == 172 && ip[1] >= 16 && ip[1] <= 31)) {
+    flag = " PRIVATE(filter/block page?)";
+  }
+  WiFiClient tcp;
+  const unsigned long t1 = millis();
+  const bool open = tcp.connect(ip, 443, 4000) == 1;
+  const unsigned long tcpMs = millis() - t1;
+  tcp.stop();
+  line("probe %s: dns %s%s in %lums; tcp:443 %s in %lums", host, ip.toString().c_str(), flag, dnsMs,
+       open ? "open" : "FAILED", tcpMs);
+  if (*flag || !open) {
+    LOG_ERR("DLLOG", "probe %s: %s%s, tcp:443 %s", host, ip.toString().c_str(), flag, open ? "open" : "FAILED");
+  }
+}
+
+void githubProbe() {
+  for (const char* host : {"api.github.com", "github.com", "raw.githubusercontent.com",
+                           "release-assets.githubusercontent.com", "objects.githubusercontent.com"}) {
+    hostProbe(host);
+  }
+}
+
 }  // namespace DownloadFailureLog

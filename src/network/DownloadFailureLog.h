@@ -34,4 +34,16 @@ void environment(const char* label);
 // and the parameter names.
 void url(const char* label, const char* fullUrl);
 
+// Network reachability of one host, to tell a block from a reader bug: what
+// DNS answers (flagged when it is 0.0.0.0, loopback or a private address, the
+// usual signs of a DNS filter) and whether a TCP connection to port 443 opens,
+// with its time. Costs up to ~4 s per host; only for a transfer that already
+// failed at the transport level.
+void hostProbe(const char* host);
+
+// hostProbe() for the hosts every GitHub-backed download goes through (fonts,
+// dictionaries, firmware updates), so one report shows which of them the
+// network refuses.
+void githubProbe();
+
 }  // namespace DownloadFailureLog

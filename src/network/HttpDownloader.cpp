@@ -386,6 +386,9 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     return true;
   };
 
+  // Breadcrumb before the request: if the device dies mid-transfer (a crash
+  // or reboot leaves no failure report), the log ends on this line.
+  DownloadFailureLog::url("attempt", url.c_str());
   int httpCode = http.GET(sink);
   if (scopedAuth) {
     // Redirect bodies were drained by the sink (status not 200/206), so no
@@ -574,9 +577,19 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
       DownloadFailureLog::line("transport: stage=%s elapsed=%lums partialBytes=%u available=%d connected=%d reused=%d",
                                diag.stage, diag.elapsedMs, (unsigned)diag.partialBytes, diag.available,
                                diag.connected ? 1 : 0, diag.reusedConnection ? 1 : 0);
+      // The host this hop dialed (after redirects: the CDN a GitHub release
+      // download is sent to) and, for a connect failure, how far it got.
+      DownloadFailureLog::line("transport: host=%s connectStage=%s tlsError=%d", diag.host,
+                               diag.connectStage[0] ? diag.connectStage : "-", diag.tlsError);
+      LOG_ERR("HTTP", "Download failed at %s (host %s, connect %s, tls %d)", diag.stage[0] ? diag.stage : "?",
+              diag.host[0] ? diag.host : "?", diag.connectStage[0] ? diag.connectStage : "-", diag.tlsError);
       if (diag.partialBytes > 0) {
         DownloadFailureLog::line("transport: partial=\"%s\"", diag.partial);
       }
+      // Is it the network? DNS and TCP for the failing host, and for every host
+      // the GitHub-backed downloads use.
+      DownloadFailureLog::hostProbe(diag.host);
+      DownloadFailureLog::githubProbe();
     } else {
       for (const auto& h : http.getHeaders()) {
         DownloadFailureLog::line("hdr: %s: %s", h.first.c_str(), h.second.c_str());
