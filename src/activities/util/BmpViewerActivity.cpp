@@ -22,7 +22,7 @@
 #include "fontIds.h"
 #include "sleeptheme/SleepThemeRenderer.h"
 #include "util/SleepBootImages.h"
-#if FREEINK_DEVICE_PICCO
+#if CROSSPOINT_GRAY16_IMAGE
 #include "activities/boot_sleep/SleepGray16.h"
 #endif
 
@@ -129,7 +129,7 @@ void BmpViewerActivity::showLoadError(const char* message) {
   renderer.displayBuffer(HalDisplay::HALF_REFRESH);
 }
 
-#if FREEINK_DEVICE_PICCO
+#if CROSSPOINT_GRAY16_IMAGE
 namespace {
 constexpr char GRAY16_VIEW_TMP[] = "/.crosspoint/viewer_gray.bmp";
 }
@@ -274,7 +274,7 @@ void BmpViewerActivity::onEnter() {
   Rect popupRect = GUI.drawPopup(renderer, tr(STR_LOADING));
   GUI.fillPopupProgress(renderer, popupRect, 20);  // Initial 20% progress
 
-#if FREEINK_DEVICE_PICCO
+#if CROSSPOINT_GRAY16_IMAGE
   // The panel's 16 levels when it has them; the 4-shade paths below otherwise.
   {
     const bool hasPrevious = siblingImages.size() > 1 && currentImageIndex > 0;

@@ -156,6 +156,26 @@ class HalDisplay {
   // Calibration: paths[l] = {black dose index 0..3, white dose index 0..3, deep 0/1}.
   bool setGray16Levels(const uint8_t (*paths)[3]) { return einkDisplay.setGray16Levels(paths); }
 
+  // Two-pass 16-level planes (UC8253 X3, freeink-sdk PR #220): a B/W base (the
+  // cross-dissolve on FAST, the single bipolar scrub on HALF), pass 1 and pass 2
+  // each from an LSB (DTM1) and MSB (DTM2) plane put in with copyGrayscale*Buffers,
+  // then a cleanup that leaves DTM1 holding "prior ink" so the next FAST turn
+  // cross-dissolves in one pass. The *Async calls return while the waveform runs;
+  // the next plane copy or display call waits it out, and the X3 driver never
+  // reads the framebuffer again once a base has been triggered, so the planes
+  // can be rendered into it meanwhile. False from supportsGray16Planes() when
+  // inverted (dark mode) or on any other panel.
+  bool supportsGray16Planes() const { return einkDisplay.supportsGray16Planes(); }
+  bool displayGray16BaseAsync(RefreshMode fallback);
+  bool displayGray16Pass1Async();
+  bool displayGray16Pass2Async(bool turnOffScreen = false);
+  void beginGray16Cleanup(const uint8_t* bwBuffer) { einkDisplay.beginGray16Cleanup(bwBuffer); }
+  void finishGray16Cleanup();
+  bool isGray16CleanupActive() const { return einkDisplay.isGray16CleanupActive(); }
+  // Start the HV rails ahead of a page turn (X3: ~70-90 ms boost ramp overlapped
+  // with the render). False when there is nothing to warm or a refresh is pending.
+  bool prewarmPowerOn() { return einkDisplay.prewarmPowerOn(); }
+
   // Tiled grayscale: stream one band of a plane (lsbPlane selects LSB/MSB RAM)
   // straight to the controller; supportsStripGrayscale() gates the path. See
   // EInkDisplay::writeGrayscalePlaneStrip.

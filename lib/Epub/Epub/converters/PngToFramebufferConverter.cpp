@@ -241,10 +241,12 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   const int outXBase = ctx->config->x;
   const int screenWidth = ctx->screenWidth;
   const bool useDithering = ctx->config->useDithering;
+  const bool levels4 = ctx->config->levels4Bit;  // 4-bit ink levels to the writer and the .px4
 
   // Pre-compute orientation and render-mode state once per callback.
   DirectPixelWriter pw;
   pw.init(*ctx->renderer);
+  pw.levels4Bit = levels4;
 
   for (int dstY = firstDstY; dstY < endDstY; dstY++) {
     ctx->lastDstY = dstY;
@@ -268,7 +270,8 @@ int pngDrawCallback(PNGDRAW* pDraw) {
         caching = false;
         ctx->caching = false;
       } else {
-        cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.bandRows, ctx->cache.originX);
+        cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.bandRows, ctx->cache.originX,
+                ctx->cache.bitsPerPixel);
         cw.beginRow(outY, ctx->config->y + ctx->cache.bandStart);
       }
     }
@@ -284,13 +287,7 @@ int pngDrawCallback(PNGDRAW* pDraw) {
         if (ctx->config->gray16) {
           ctx->config->gray16->write(outX, outY, gray);  // 8-bit gray to the 16-level buffer only
         } else {
-          uint8_t ditheredGray;
-          if (useDithering) {
-            ditheredGray = applyBayerDither4Level(gray, outX, outY);
-          } else {
-            ditheredGray = gray / 85;
-            if (ditheredGray > 3) ditheredGray = 3;
-          }
+          const uint8_t ditheredGray = quantizeImagePixel(gray, outX, outY, useDithering, levels4);
           pw.writePixel(outX, ditheredGray);
           if (caching) cw.writePixel(outX, ditheredGray);
         }
@@ -439,7 +436,8 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   // re-decode on every one of an image page's ~14 render passes.
   ctx.caching = !config.cachePath.empty() && !config.gray16;
   if (ctx.caching) {
-    if (!ctx.cache.begin(config.cachePath, ctx.dstWidth, ctx.dstHeight, config.x, config.y, 1)) {
+    if (!ctx.cache.begin(config.cachePath, ctx.dstWidth, ctx.dstHeight, config.x, config.y, 1,
+                         config.levels4Bit ? 4 : 2)) {
       LOG_ERR("PNG", "Failed to start cache stream, continuing without caching");
       ctx.caching = false;
     }

@@ -17,17 +17,22 @@ namespace glyphBitmap {
 struct Frame;
 }
 
+#include "Gray16Planes.h"
+
 // Color representation: uint8_t mapped to 4x4 Bayer matrix dithering levels
 // 0 = transparent, 1-16 = gray levels (white to black)
 enum Color : uint8_t { Clear = 0x00, White = 0x01, LightGray = 0x05, DarkGray = 0x0A, Black = 0x10 };
 
 class GfxRenderer {
  public:
-  // GRAY16_PLANE: one bit-plane of a 16-level page (setGray16Plane). Glyph
-  // pixels map to a level (setGray16Levels) and ink where that level's bit for
-  // the plane is set; everything else draws as in BW, i.e. black in every
-  // plane = level 15. Four planes fold into a 4 bpp page for
-  // HalDisplay::displayGray16Image.
+  // GRAY16_PLANE: one plane of a 16-level page. Every pixel has a 4-bit ink
+  // level (glyph coverage through setGray16Levels; black 15, white 0; 2-bit
+  // images on Gray16Planes.h's anchors) and is drawn as ink (bit cleared) when
+  // the plane's level mask (setGray16LevelMask / setGray16Plane) has that
+  // level, as white otherwise. Glyph pixels whose level the mask misses are
+  // left untouched, like white glyph pixels in BW. Four bit-plane masks fold
+  // into the Picco's 4 bpp page (HalDisplay::displayGray16Image); the X3's
+  // five masks are its two-pass planes (HalDisplay::displayGray16BaseAsync).
   enum RenderMode { BW, GRAYSCALE_LSB, GRAYSCALE_MSB, GRAY16_PLANE };
 
   // Logical screen orientation from the perspective of callers
@@ -50,10 +55,17 @@ class GfxRenderer {
   // displayGrayBuffer() that commits it. Mutable because the whole render path
   // is const, like the strip-target state below.
   mutable bool absoluteGrayPlanes = false;
-  // GRAY16_PLANE: which bit of the level this pass draws, and the level for
-  // each 4-bit glyph coverage value (0 = white .. 15 = full coverage).
-  uint8_t gray16Plane = 0;
+  // GRAY16_PLANE: the levels this plane draws as ink (bit l = level l), and the
+  // level for each 4-bit glyph coverage value (0 = white .. 15 = full coverage).
+  uint16_t gray16Mask = gray16planes::bitPlaneMask(0);
   uint8_t gray16Level[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+  // The level for each 2-bit glyph tone (0 = white .. 3 = black); setGray16Levels
+  // derives it from entries 0/5/10/15 unless setGray16Levels2Bit says otherwise.
+  uint8_t gray16Level2Bit[4] = {0, 5, 10, 15};
+  // GRAY16_PLANE: book pictures are left out of the planes (the Picco paints
+  // them afterwards in 8 bits from the 4 bpp page); false draws their cached
+  // 2-bit pixels into every plane (the X3, which has no page buffer).
+  bool gray16ImagesDeferred_ = false;
 #if CROSSPOINT_VECTOR_FONTS
   // 8-bit TrueType glyphs (16-level path): level per coverage 0..255, and the
   // per-value action table drawGlyphBitmap() last built, keyed by what it
@@ -61,7 +73,7 @@ class GfxRenderer {
   uint8_t gray16Level8[256] = {};
   uint16_t gray16Level8Gen = 1;
   mutable uint8_t glyphAction8[256] = {};
-  mutable uint32_t glyphAction8Key = 0;
+  mutable uint64_t glyphAction8Key = 0;
 #endif
   // Off-panel drawPixel calls since the last displayBuffer(). Only the first few
   // are logged: one misplaced string is hundreds of pixels, and logging each
@@ -119,6 +131,9 @@ class GfxRenderer {
   // target exactly as drawPixel() does.
   template <Color color>
   void fillRectImpl(int x, int y, int width, int height) const;
+  // drawPixel() without the GRAY16_PLANE level remap: for callers that already
+  // resolved a pixel's level to its plane bit.
+  void drawPixelRaw(int x, int y, bool state) const;
 
  public:
   explicit GfxRenderer(HalDisplay& halDisplay)
@@ -392,10 +407,20 @@ class GfxRenderer {
   // Out-of-line: switching back to BW mid-pass has to cancel an armed absolute
   // pass, or the panel keeps waiting for planes that are never coming.
   void setRenderMode(RenderMode mode);
-  void setGray16Plane(uint8_t plane) { gray16Plane = plane & 3; }
-  // Level (0..15) for each 4-bit glyph coverage value; 2-bit glyphs use
-  // entries 0/5/10/15, 1-bit glyphs 15.
+  // Bit-plane `plane` of the level (the Picco's four planes).
+  void setGray16Plane(uint8_t plane) { gray16Mask = gray16planes::bitPlaneMask(plane); }
+  // Any set of levels drawn as ink in this plane (the X3's pass masks).
+  void setGray16LevelMask(uint16_t mask) { gray16Mask = mask; }
+  uint16_t getGray16LevelMask() const { return gray16Mask; }
+  // Whether a pixel of `level` is ink in the current GRAY16_PLANE plane.
+  bool gray16PlaneInk(uint8_t level) const { return (gray16Mask >> (level & 15)) & 1; }
+  void setGray16ImagesDeferred(bool deferred) { gray16ImagesDeferred_ = deferred; }
+  bool gray16ImagesDeferred() const { return gray16ImagesDeferred_; }
+  // Level (0..15) for each 4-bit glyph coverage value; 2-bit glyphs take
+  // entries 0/5/10/15 until setGray16Levels2Bit gives them their own, 1-bit
+  // glyphs 15.
   void setGray16Levels(const uint8_t levels[16]);
+  void setGray16Levels2Bit(const uint8_t levels[4]);
 #if CROSSPOINT_VECTOR_FONTS
   // Level (0..15) for each 8-bit glyph coverage value (TrueType glyphs kept at
   // 8 bpp, TtfEpdFont::setGray16Glyphs).
@@ -433,6 +458,21 @@ class GfxRenderer {
   bool storeBwBuffer();    // Returns true if buffer was stored successfully
   void restoreBwBuffer();  // Restore and free the stored buffer
   void cleanupGrayscaleWithFrameBuffer() const;
+
+  // Two-pass 16-level planes (UC8253 X3, freeink-sdk PR #220), each plane the
+  // framebuffer as rendered in GRAY16_PLANE mode (Gray16Planes.h). The base
+  // starts asynchronously; the plane copies (copyGrayscaleLsb/MsbBuffers) wait
+  // it out. beginGray16Cleanup() sends the framebuffer as the B/W baseline; the
+  // caller then copies the cleanup DTM1 plane and calls finishGray16Cleanup().
+  bool supportsGray16Planes() const;
+  bool displayGray16BaseAsync(HalDisplay::RefreshMode fallback) const;
+  bool displayGray16Pass1Async() const;
+  bool displayGray16Pass2Async() const;
+  void beginGray16Cleanup() const;
+  void finishGray16Cleanup() const;
+  // Start the X3's HV rails on a page-turn press edge so the base does not pay
+  // for the boost ramp. False when the driver has nothing to pre-warm.
+  bool prewarmPowerOn() const;
 
   // Font helpers
   const uint8_t* getGlyphBitmap(const EpdFontData* fontData, const EpdGlyph* glyph) const;

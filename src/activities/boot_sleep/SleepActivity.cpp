@@ -1,7 +1,5 @@
 #include "SleepActivity.h"
 
-#include "SleepGray16.h"
-
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
 #include <I18n.h>
@@ -10,6 +8,7 @@
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include "SleepGray16.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -118,9 +117,9 @@ void SleepActivity::renderThemeSleepScreen(const bool greyscale) const {
     return;
   }
 
-#if FREEINK_DEVICE_PICCO
-  // Picco SE0400NQW47: the theme's images (the book cover in full tones) at
-  // the panel's 16 levels, in place of the 4-shade passes below.
+#if CROSSPOINT_GRAY16_IMAGE
+  // Picco SE0400NQW47, UC8179 X4 Pro: the theme's images (the book cover in
+  // full tones) at the panel's 16 levels, in place of the 4-shade passes below.
   if (SleepGray16::present(renderer, grey)) return;
 #endif
 

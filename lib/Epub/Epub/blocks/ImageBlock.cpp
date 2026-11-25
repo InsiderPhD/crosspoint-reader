@@ -19,7 +19,9 @@
 // Cache file format:
 // - uint16_t width
 // - uint16_t height
-// - uint8_t pixels[...] - 2 bits per pixel, packed (4 pixels per byte), row-major order
+// - uint8_t pixels[...] - row-major, packed: .pxc 2 bits per pixel (4 per byte, MSB first,
+//   0 black .. 3 white); .px4 4 bits per pixel (2 per byte, high nibble first, the ink
+//   level 0 white .. 15 black the 16-level planes draw from)
 
 ImageBlock::ImageBlock(const std::string& imagePath, int16_t width, int16_t height)
     : imagePath(imagePath), width(width), height(height) {}
@@ -111,8 +113,16 @@ CachedImageClip cachedImageClip(const GfxRenderer& renderer, const int x, const 
 // Reads and validates the 4-byte cache header, leaving the file positioned at
 // the pixel payload. Shared by the render path and the cheap hasValidCache()
 // probe so both agree on what counts as usable.
+int cacheBytesPerRow(const int width, const bool levels4) { return levels4 ? (width + 1) / 2 : (width + 3) / 4; }
+
+// One cached pixel of a row: a 2-bit tone or, with levels4, a 4-bit ink level.
+inline uint8_t cachePixelAt(const uint8_t* rowBuffer, const int col, const bool levels4) {
+  if (levels4) return (col & 1) ? (rowBuffer[col >> 1] & 0x0F) : (rowBuffer[col >> 1] >> 4);
+  return (rowBuffer[col >> 2] >> (6 - (col & 3) * 2)) & 0x03;  // MSB first within byte
+}
+
 bool readValidCacheHeader(HalFile& cacheFile, const int expectedWidth, const int expectedHeight, uint16_t& cachedWidth,
-                          uint16_t& cachedHeight) {
+                          uint16_t& cachedHeight, const bool levels4) {
   if (cacheFile.read(&cachedWidth, 2) != 2 || cacheFile.read(&cachedHeight, 2) != 2) {
     return false;
   }
@@ -122,18 +132,19 @@ bool readValidCacheHeader(HalFile& cacheFile, const int expectedWidth, const int
     return false;
   }
 
-  const size_t bytesPerRow = (cachedWidth + 3) / 4;
+  const size_t bytesPerRow = cacheBytesPerRow(cachedWidth, levels4);
   const size_t expectedSize = 4 + bytesPerRow * cachedHeight;
   return cacheFile.size() >= expectedSize;
 }
 
-std::string getCachePath(const std::string& imagePath) {
-  // Replace extension with .pxc (pixel cache)
+// Replace the extension with .pxc (2-bit pixel cache) or .px4 (4-bit, the 16-level planes').
+std::string getCachePath(const std::string& imagePath, const bool levels4) {
+  const char* const ext = levels4 ? ".px4" : ".pxc";
   size_t dotPos = imagePath.rfind('.');
   if (dotPos != std::string::npos) {
-    return imagePath.substr(0, dotPos) + ".pxc";
+    return imagePath.substr(0, dotPos) + ext;
   }
-  return imagePath + ".pxc";
+  return imagePath + ext;
 }
 
 // --- Per-page-render RAM slot for the pixel cache ----------------------------
@@ -159,13 +170,15 @@ constexpr size_t PXC_HEAP_RESERVE = 24 * 1024;
 constexpr size_t PXC_MAX_ALLOC_RESERVE = 8 * 1024;
 // Rows can straddle a chunk boundary and are reassembled into a stack buffer.
 // (800 + 3) / 4 = 201 for the widest panel, so this stays under the 256-byte
-// stack-local limit.
+// stack-local limit. A 4-bit .px4 row is twice as long, so only pictures up to
+// 416 px wide take the slot in the 16-level planes; wider ones stream.
 constexpr int PXC_MAX_BYTES_PER_ROW = 208;
 
 std::unique_ptr<uint8_t[]> pxcChunks[PXC_MAX_CHUNKS];
 uint64_t pxcSlotHash = 0;
 uint16_t pxcSlotWidth = 0;
 uint16_t pxcSlotHeight = 0;
+bool pxcSlot4Bit = false;  // the slot holds a .px4 payload
 // Cleared by the reader on a page that still has an image to decode, so the
 // slot never takes heap the decoder is about to need.
 bool pxcSlotAllowed = true;
@@ -175,6 +188,7 @@ void releasePxcSlot() {
   pxcSlotHash = 0;
   pxcSlotWidth = 0;
   pxcSlotHeight = 0;
+  pxcSlot4Bit = false;
 }
 
 const uint8_t* pxcRowPtr(const size_t rowStart, const int bytesPerRow, uint8_t* tempRow) {
@@ -192,7 +206,7 @@ const uint8_t* pxcRowPtr(const size_t rowStart, const int bytesPerRow, uint8_t* 
 // cacheFile must be positioned just past the header. True when the slot holds
 // the whole pixel payload for this cache path afterwards.
 bool loadPxcSlot(const uint64_t cacheHash, HalFile& cacheFile, const uint16_t cachedWidth, const uint16_t cachedHeight,
-                 const int bytesPerRow) {
+                 const int bytesPerRow, const bool levels4) {
   releasePxcSlot();
   if (bytesPerRow > PXC_MAX_BYTES_PER_ROW) return false;
 
@@ -216,32 +230,33 @@ bool loadPxcSlot(const uint64_t cacheHash, HalFile& cacheFile, const uint16_t ca
   pxcSlotHash = cacheHash;
   pxcSlotWidth = cachedWidth;
   pxcSlotHeight = cachedHeight;
+  pxcSlot4Bit = levels4;
   return true;
 }
 
 void renderFromPxcSlot(GfxRenderer& renderer, const CachedImageClip& clip, const int x, const int y) {
-  const int bytesPerRow = (pxcSlotWidth + 3) / 4;
+  const bool levels4 = pxcSlot4Bit;
+  const int bytesPerRow = cacheBytesPerRow(pxcSlotWidth, levels4);
   uint8_t tempRow[PXC_MAX_BYTES_PER_ROW];
 
   DirectPixelWriter pw;
   pw.init(renderer);
+  pw.levels4Bit = levels4;
 
   for (int row = clip.y0; row < clip.y1; row++) {
     const uint8_t* rowBuffer = pxcRowPtr(static_cast<size_t>(row) * bytesPerRow, bytesPerRow, tempRow);
     pw.beginRow(y + row);
     for (int col = clip.x0; col < clip.x1; col++) {
-      const int byteIdx = col >> 2;            // col / 4
-      const int bitShift = 6 - (col & 3) * 2;  // MSB first within byte
-      pw.writePixel(x + col, (rowBuffer[byteIdx] >> bitShift) & 0x03);
+      pw.writePixel(x + col, cachePixelAt(rowBuffer, col, levels4));
     }
   }
 }
 
 bool renderFromCacheFile(GfxRenderer& renderer, const std::string& cachePath, uint64_t cacheHash, int x, int y,
-                         int expectedWidth, int expectedHeight);
+                         int expectedWidth, int expectedHeight, bool levels4);
 
 bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x, int y, int expectedWidth,
-                     int expectedHeight) {
+                     int expectedHeight, const bool levels4) {
   // A later pass of the same page render: the payload is already in RAM, so
   // skip the file entirely.
   const uint64_t cacheHash = imagePathHash(cachePath);
@@ -251,18 +266,18 @@ bool renderFromCache(GfxRenderer& renderer, const std::string& cachePath, int x,
     return true;
   }
 
-  return renderFromCacheFile(renderer, cachePath, cacheHash, x, y, expectedWidth, expectedHeight);
+  return renderFromCacheFile(renderer, cachePath, cacheHash, x, y, expectedWidth, expectedHeight, levels4);
 }
 
 bool renderFromCacheFile(GfxRenderer& renderer, const std::string& cachePath, const uint64_t cacheHash, int x, int y,
-                         int expectedWidth, int expectedHeight) {
+                         int expectedWidth, int expectedHeight, const bool levels4) {
   HalFile cacheFile;
   if (!Storage.openFileForRead("IMG", cachePath, cacheFile)) {
     return false;
   }
 
   uint16_t cachedWidth, cachedHeight;
-  if (!readValidCacheHeader(cacheFile, expectedWidth, expectedHeight, cachedWidth, cachedHeight)) {
+  if (!readValidCacheHeader(cacheFile, expectedWidth, expectedHeight, cachedWidth, cachedHeight, levels4)) {
     LOG_ERR("IMG", "Invalid image cache: %s", cachePath.c_str());
     return false;
   }
@@ -270,7 +285,7 @@ bool renderFromCacheFile(GfxRenderer& renderer, const std::string& cachePath, co
   // Cached dimensions are the actual decoded size; clip against those.
   const auto clip = cachedImageClip(renderer, x, y, cachedWidth, cachedHeight);
 
-  const int bytesPerRowForSlot = (cachedWidth + 3) / 4;
+  const int bytesPerRowForSlot = cacheBytesPerRow(cachedWidth, levels4);
 
   // First pass of a page render: try to pull the payload into the RAM slot so
   // the remaining ~12 passes skip SD entirely. Attempted even when this pass is
@@ -282,7 +297,7 @@ bool renderFromCacheFile(GfxRenderer& renderer, const std::string& cachePath, co
   // on every pass — all the SD traffic of streaming plus the allocation churn.
   // Later images simply take the streaming path, exactly as before.
   if (pxcSlotAllowed && pxcSlotHash == 0 &&
-      loadPxcSlot(cacheHash, cacheFile, cachedWidth, cachedHeight, bytesPerRowForSlot)) {
+      loadPxcSlot(cacheHash, cacheFile, cachedWidth, cachedHeight, bytesPerRowForSlot, levels4)) {
     LOG_DBG("IMG", "Cached payload now in RAM: %s (%dx%d)", cachePath.c_str(), cachedWidth, cachedHeight);
     if (!clip.empty()) renderFromPxcSlot(renderer, clip, x, y);
     return true;
@@ -299,7 +314,7 @@ bool renderFromCacheFile(GfxRenderer& renderer, const std::string& cachePath, co
   // cachedHeight (~728) tiny reads through the storage mutex + SdFat each time —
   // the dominant cost of displaying an image page. Batching rows into a ~4KB
   // buffer cuts that to ~20 reads per pass without holding the whole image.
-  const int bytesPerRow = (cachedWidth + 3) / 4;  // 2 bits per pixel, 4 pixels per byte
+  const int bytesPerRow = cacheBytesPerRow(cachedWidth, levels4);
   const int rowsToRender = clip.y1 - clip.y0;
   int rowsPerRead = 4096 / bytesPerRow;
   if (rowsPerRead < 1) rowsPerRead = 1;
@@ -327,6 +342,7 @@ bool renderFromCacheFile(GfxRenderer& renderer, const std::string& cachePath, co
 
   DirectPixelWriter pw;
   pw.init(renderer);
+  pw.levels4Bit = levels4;
 
   int rowsInBuffer = 0;
   int bufferRow = 0;
@@ -348,11 +364,7 @@ bool renderFromCacheFile(GfxRenderer& renderer, const std::string& cachePath, co
 
     pw.beginRow(y + row);
     for (int col = clip.x0; col < clip.x1; col++) {
-      const int byteIdx = col >> 2;            // col / 4
-      const int bitShift = 6 - (col & 3) * 2;  // MSB first within byte
-      uint8_t pixelValue = (rowBuffer[byteIdx] >> bitShift) & 0x03;
-
-      pw.writePixel(x + col, pixelValue);
+      pw.writePixel(x + col, cachePixelAt(rowBuffer, col, levels4));
     }
   }
 
@@ -363,17 +375,19 @@ bool renderFromCacheFile(GfxRenderer& renderer, const std::string& cachePath, co
 
 }  // namespace
 
-bool ImageBlock::hasValidCache() const {
+bool ImageBlock::hasValidCache(const bool levels4) const {
   HalFile cacheFile;
-  if (!Storage.openFileForRead("IMG", getCachePath(imagePath), cacheFile)) {
+  if (!Storage.openFileForRead("IMG", getCachePath(imagePath, levels4), cacheFile)) {
     return false;
   }
 
   uint16_t cachedWidth, cachedHeight;
-  return readValidCacheHeader(cacheFile, width, height, cachedWidth, cachedHeight);
+  return readValidCacheHeader(cacheFile, width, height, cachedWidth, cachedHeight, levels4);
 }
 
-bool ImageBlock::needsDecode() const { return !imageFailedThisRender(imagePath) && !hasValidCache(); }
+bool ImageBlock::needsDecode(const bool levels4) const {
+  return !imageFailedThisRender(imagePath) && !hasValidCache(levels4);
+}
 
 void ImageBlock::clearRenderFailures() { failedImageCount = 0; }
 
@@ -424,10 +438,13 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   // Layout already reserved this space at build time, so the page is unchanged
   // apart from the image itself being blank.
   if (renderer.areImagesSuppressed()) return;
-  // 16-level plane passes: the picture is painted afterwards in 8 bits
-  // (renderGray16); a 2-bit draw here would only be overwritten, and an
-  // uncached one would cost a decode per plane.
-  if (renderer.getRenderMode() == GfxRenderer::GRAY16_PLANE) return;
+  // 16-level plane passes on a board with a page buffer (Picco): the picture is
+  // painted afterwards in 8 bits (renderGray16); a 2-bit draw here would only
+  // be overwritten, and an uncached one would cost a decode per plane. The X3
+  // has no such buffer: every plane draws the picture's 4-bit ink levels from
+  // its .px4 cache (decoded once, by the first plane that finds none).
+  if (renderer.getRenderMode() == GfxRenderer::GRAY16_PLANE && renderer.gray16ImagesDeferred()) return;
+  const bool levels4 = renderer.getRenderMode() == GfxRenderer::GRAY16_PLANE;
 
   LOG_DBG("IMG", "Rendering image at %d,%d: %s (%dx%d)", x, y, imagePath.c_str(), width, height);
 
@@ -473,8 +490,8 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   }
 
   // Try to render from cache first
-  std::string cachePath = getCachePath(imagePath);
-  if (renderFromCache(renderer, cachePath, x, y, width, height)) {
+  std::string cachePath = getCachePath(imagePath, levels4);
+  if (renderFromCache(renderer, cachePath, x, y, width, height, levels4)) {
     renderer.preserveImagePolarity(x, y, width, height);
     return;  // Successfully rendered from cache
   }
@@ -509,6 +526,7 @@ void ImageBlock::render(GfxRenderer& renderer, const int x, const int y) {
   config.useDithering = true;
   config.performanceMode = false;
   config.useExactDimensions = true;  // Use pre-calculated dimensions to avoid rounding mismatches
+  config.levels4Bit = levels4;
   if (fullyOnScreen) {
     config.cachePath = cachePath;  // Enable caching during decode
   }

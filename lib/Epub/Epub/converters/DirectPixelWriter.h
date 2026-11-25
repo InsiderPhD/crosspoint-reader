@@ -42,6 +42,13 @@ struct DirectPixelWriter {
   int rowPhyXBase, rowPhyYBase;
   int logicalRow = 0;  // current row, for the B/W dither phase
   bool bwDither = false;
+  // GRAY16_PLANE: the plane's level mask (GfxRenderer::setGray16LevelMask); a
+  // pixel's four cached tones sit on Gray16Planes.h's ink anchors.
+  uint16_t gray16Mask = 0;
+  // Set by the caller after init(): pixel values are 4-bit ink levels (0 white
+  // .. 15 black, the .px4 cache / RenderConfig::levels4Bit) rather than 2-bit
+  // tones (0 black .. 3 white).
+  bool levels4Bit = false;
 
   void init(GfxRenderer& renderer) {
     fb = renderer.getWriteTarget();
@@ -50,6 +57,7 @@ struct DirectPixelWriter {
     mode = renderer.getRenderMode();
     absolute = renderer.grayPlanesAreAbsolute();
     bwDither = renderer.areImagesBwDithered();
+    gray16Mask = renderer.getGray16LevelMask();
     displayWidthBytes = renderer.getDisplayWidthBytes();
 
     const int phyW = renderer.getDisplayWidth();
@@ -152,12 +160,20 @@ struct DirectPixelWriter {
     if (colStart > colEnd) colStart = colEnd;
   }
 
-  // Write a single 2-bit dithered pixel value to the framebuffer.
-  // Must be called after beginRow() for the current row.
+  // Write a single cached pixel value (a 2-bit tone or, with levels4Bit, a 4-bit
+  // ink level) to the framebuffer. Must be called after beginRow() for the current row.
   // No bounds checking — caller guarantees coordinates are valid.
   // writeWhiteInBw makes the B/W pass paint white pixels too, instead of
   // leaving them as whatever was underneath. Needed when an image is composed
   // over existing content rather than onto a cleared page.
+  // The B/W dither: a pixel's whiteness 0..255 against a Bayer threshold whose
+  // phase shifts every 4 px so it cannot beat against the pattern the cache was
+  // itself quantised with.
+  inline int lightness(const uint8_t pixelValue) const { return levels4Bit ? (15 - pixelValue) * 17 : pixelValue * 85; }
+  inline int bwThreshold(const int logicalX) const {
+    return bayer4x4[(logicalRow + (logicalX >> 2)) & 3][(logicalX + (logicalRow >> 2)) & 3] * 16 + 8;
+  }
+
   inline void writePixel(int logicalX, uint8_t pixelValue, bool writeWhiteInBw = false) const {
     // Determine whether to draw based on render mode
     bool draw;
@@ -169,18 +185,30 @@ struct DirectPixelWriter {
         // off), ordered-dither the same four cached levels instead. The phase
         // shifts every 4 px so it cannot beat against the Bayer pattern the
         // four-level cache was itself quantised with.
-        state = bwDither ? pixelValue * 85 <
-                               bayer4x4[(logicalRow + (logicalX >> 2)) & 3][(logicalX + (logicalRow >> 2)) & 3] * 16 + 8
-                         : pixelValue < 3;
+        state =
+            bwDither ? lightness(pixelValue) < bwThreshold(logicalX) : (levels4Bit ? pixelValue != 0 : pixelValue < 3);
         draw = writeWhiteInBw || state;
         break;
       case GfxRenderer::GRAYSCALE_MSB:
       case GfxRenderer::GRAYSCALE_LSB: {
         // Shared with text and bitmap rendering so a single pass cannot mix
-        // plane encodings.
-        const auto pixel = grayPlanePixel(pixelValue, mode == GfxRenderer::GRAYSCALE_MSB, absolute);
+        // plane encodings. A 4-bit level folds onto the four tones.
+        const uint8_t tone = levels4Bit ? static_cast<uint8_t>((15 - pixelValue) >> 2) : pixelValue;
+        const auto pixel = grayPlanePixel(tone, mode == GfxRenderer::GRAYSCALE_MSB, absolute);
         draw = pixel.write;
         state = pixel.black;
+        break;
+      }
+      case GfxRenderer::GRAY16_PLANE: {
+        // The X3's two-pass planes: the pixel's level (its .px4 ink level, a
+        // 2-bit tone's split-rail anchor, or the B/W dither's black 15 / white 0
+        // when Image Grayscale is off) is ink where this plane's mask has it.
+        // White pixels follow the B/W rule.
+        const uint8_t level = bwDither     ? (lightness(pixelValue) < bwThreshold(logicalX) ? 15 : 0)
+                              : levels4Bit ? pixelValue
+                                           : gray16planes::kImage2BitInk[pixelValue & 3];
+        state = (gray16Mask >> level) & 1;
+        draw = writeWhiteInBw || state;
         break;
       }
       default:
@@ -222,13 +250,15 @@ struct DirectCacheWriter {
   int bytesPerRow;
   int bandRows;
   int originX;
+  bool nibbles;     // 4-bit values, two per byte, high nibble first (the .px4)
   uint8_t* rowPtr;  // Pre-computed for current row; nullptr if row is out of band
 
-  void init(uint8_t* cacheBuffer, int cacheBytesPerRow, int cacheBandRows, int cacheOriginX) {
+  void init(uint8_t* cacheBuffer, int cacheBytesPerRow, int cacheBandRows, int cacheOriginX, int bitsPerPixel = 2) {
     buffer = cacheBuffer;
     bytesPerRow = cacheBytesPerRow;
     bandRows = cacheBandRows;
     originX = cacheOriginX;
+    nibbles = bitsPerPixel == 4;
     rowPtr = nullptr;
   }
 
@@ -240,11 +270,18 @@ struct DirectCacheWriter {
                  : nullptr;
   }
 
-  // Write a 2-bit pixel value. Drops the write if the row is out of band or the
-  // column is out of range.
+  // Write a 2-bit (or, with nibbles, 4-bit) pixel value. Drops the write if the
+  // row is out of band or the column is out of range.
   inline void writePixel(int screenX, uint8_t value) const {
     if (!rowPtr) return;
     const int localX = screenX - originX;
+    if (nibbles) {
+      const int nibbleIdx = localX >> 1;
+      if (static_cast<unsigned>(nibbleIdx) >= static_cast<unsigned>(bytesPerRow)) return;
+      rowPtr[nibbleIdx] = (localX & 1) ? static_cast<uint8_t>((rowPtr[nibbleIdx] & 0xF0) | (value & 0x0F))
+                                       : static_cast<uint8_t>((rowPtr[nibbleIdx] & 0x0F) | (value << 4));
+      return;
+    }
     const int byteIdx = localX >> 2;  // localX / 4
     if (static_cast<unsigned>(byteIdx) >= static_cast<unsigned>(bytesPerRow)) return;
     const int bitShift = 6 - (localX & 3) * 2;  // MSB first: pixel 0 at bits 6-7

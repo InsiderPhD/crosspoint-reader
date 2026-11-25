@@ -11,13 +11,16 @@
 #include <GfxRenderer.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
-#if FREEINK_DEVICE_PICCO
+#if CROSSPOINT_GRAY16_IMAGE
 #include <GrayLevelQuantizer.h>
 #include <TtfEpdFont.h>
 #include <esp_heap_caps.h>
 
 #include "Epub/converters/ImageToFramebufferDecoder.h"
 #include "platform/Gray16Levels.h"
+#endif
+#if CROSSPOINT_GRAY16_PLANES
+#include <Gray16Planes.h>
 #endif
 #include <I18n.h>
 #include <InflateReader.h>
@@ -719,7 +722,7 @@ void EpubReaderActivity::rememberBookOnceRendered(const bool renderLockHeld) {
 void EpubReaderActivity::onExit() {
   Activity::onExit();
   clearQueuedPageTurns();
-#if FREEINK_DEVICE_PICCO
+#if CROSSPOINT_GRAY16_IMAGE
   // Leave the rest of the UI on its usual paths: 2-bit TrueType glyphs, no
   // fast 16-level turns. The next screen's redraw gives a 16-level page its
   // drive back and clears it (Ssd2677Driver::exitGray16).
@@ -2813,10 +2816,11 @@ void EpubReaderActivity::computeOrientedMargins(int& orientedMarginTop, int& ori
 }
 
 void EpubReaderActivity::render(RenderLock&& lock) {
-#if FREEINK_DEVICE_PICCO && CROSSPOINT_VECTOR_FONTS
+#if CROSSPOINT_GRAY16_IMAGE && CROSSPOINT_VECTOR_FONTS
   // 16-level text keeps 16 coverage levels in TrueType glyphs. A no-op unless
-  // the setting changed, when the glyph caches are dropped and refilled.
-  TtfEpdFont::setGray16Glyphs(SETTINGS.textGray16 && display.supportsGray16Image());
+  // the setting changed, when the glyph caches are dropped and refilled. Only
+  // where the panel has the text turn (the X4 Pro's UC8179 draws pictures only).
+  TtfEpdFont::setGray16Glyphs(SETTINGS.textGray16 && display.supportsGray16Image() && display.gray16DeepLevels() != 0);
 #endif
   if (!epub) {
     return;
@@ -3720,9 +3724,16 @@ bool EpubReaderActivity::runAutosyncNow() {
   return true;
 }
 
-#if FREEINK_DEVICE_PICCO
+#if CROSSPOINT_GRAY16_IMAGE
 bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginLeft, const int orientedMarginTop,
                                            const int viewportBottom, const int viewportWidth, const bool withPictures) {
+  // A text page needs the two-step text turn (beginGray16Text); a driver with
+  // only displayGray16Image (the X4 Pro's UC8179) shows picture pages, as one
+  // clean draw, and nothing else.
+  if (!withPictures && display.gray16DeepLevels() == 0) return false;
+  // The pictures are painted below in 8 bits from the 4 bpp page, not drawn
+  // into the planes (ImageBlock::render).
+  renderer.setGray16ImagesDeferred(true);
   const uint16_t w = display.getDisplayWidth(), h = display.getDisplayHeight();
   const size_t levelBytes = static_cast<size_t>(w / 2) * h;  // 192 KB at 800x480
   const size_t frameBytes = display.getBufferSize();         // 48 KB
@@ -3759,15 +3770,21 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
   if (!coverageReady) {
     const int16_t* lstarX10 = display.gray16LevelLstar();
     const uint16_t deep = display.gray16DeepLevels();
-    if (!lstarX10 || !deep) {
-      LOG_ERR("ERS", "16-level text: no measured tones or deep levels from the driver");
+    if (!lstarX10) {
+      LOG_ERR("ERS", "16-level text: no measured tones from the driver");
       return false;
     }
     float lstar[16];
     for (int l = 0; l < 16; ++l) lstar[l] = lstarX10[l] / 10.0f;
     const int softLevel = display.gray16TextSoftLevel();  // -1: these paths pull every deep level back in the passes
-    gray16::textCoverageLevels(coverage, lstar, deep);
-    gray16::textCoverageLevels8(coverage8, lstar, deep);
+    if (deep) {
+      gray16::textCoverageLevels(coverage, lstar, deep);
+      gray16::textCoverageLevels8(coverage8, lstar, deep);
+    } else {
+      // No text turn: the glyph tones go in a clean image draw, nearest level each.
+      gray16::coverageLevels(coverage, lstar);
+      gray16::coverageLevels8(coverage8, lstar);
+    }
     deepLevels = deep;
     textSoftLevel = softLevel;
     uint8_t lightness[16];  // whole L*, as GrayLevelQuantizer takes them
@@ -3851,6 +3868,20 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
       LOG_DBG("ERS", "16-level pictures: none decoded, the page goes out as usual");
       return false;
     }
+    if (!deepLevels) {
+      // No text turn on this panel (the X4 Pro's UC8179): the composed page as
+      // one clean 16-level image draw, a flash like the sleep cover's; the
+      // driver makes the next frame a full one.
+      const bool ok = display.displayGray16Image(levels, HalDisplay::HALF_REFRESH, true);
+      memcpy(fb, bwFrame, frameBytes);  // menus and overlays draw over the B/W page
+      if (!ok) {
+        LOG_ERR("ERS", "16-level pictures: image draw refused; normal page instead");
+        return false;
+      }
+      LOG_INF("ERS", "16-level picture page (image draw): %d picture(s), composed %lu ms, drawn %lu ms", painted,
+              tComposed - t0, millis() - tComposed);
+      return true;
+    }
     // Base (and soft plane, for paths that have a soft level) from the levels:
     // 1 bpp panel-native, cleared bit = ink.
     uint8_t* soft = nullptr;
@@ -3912,6 +3943,99 @@ bool EpubReaderActivity::presentGray16Page(Page& page, const int orientedMarginL
   display.finishGray16Text(levels, true);
   LOG_INF("ERS", "16-level page: base at %lu ms, planes %lu ms, gray passes %lu ms", tBase - t0, tPlanes - tBase,
           millis() - tPlanes);
+  return true;
+}
+#endif
+
+#if CROSSPOINT_GRAY16_PLANES
+bool EpubReaderActivity::presentGray16PlanesPage(Page& page, const int orientedMarginLeft, const int orientedMarginTop,
+                                                 const int viewportBottom, const int viewportWidth) {
+  // The UC8253 X3's two-pass 16-level planes (freeink-sdk PR #220) without a
+  // page buffer: the page is rendered once per plane into the one framebuffer
+  // (Gray16Planes.h) and each plane goes to the controller as it is done. Six
+  // renders a page against the B/W reader's one, hence the "(test)" toggle;
+  // zuyan9's reader hides that behind RLE-compressed planes staged while idle,
+  // the next step if the turns feel slow.
+  const unsigned long t0 = millis();
+  // Glyph coverage -> level: a 4-bit font's coverage is its level; the 2-bit
+  // fonts' quarter and three-quarter tones sit on PR #220's calibrated
+  // split-rail anchors 6 and 9, as the pictures' do.
+  static constexpr uint8_t kCoverageLevels[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+  static constexpr uint8_t kCoverageLevels2Bit[4] = {0, 6, 9, 15};
+  renderer.setGray16Levels(kCoverageLevels);
+  renderer.setGray16Levels2Bit(kCoverageLevels2Bit);
+#if CROSSPOINT_VECTOR_FONTS
+  {
+    uint8_t levels8[256];
+    for (int c = 0; c < 256; ++c) levels8[c] = static_cast<uint8_t>((c * 15 + 127) / 255);
+    renderer.setGray16Levels8(levels8);
+  }
+#endif
+  renderer.setGray16ImagesDeferred(false);  // every plane draws the pictures' 4-bit .px4 levels (ImageBlock)
+
+  // One plane: the page in GRAY16_PLANE mode, ink where `mask` has the pixel's
+  // level. A pass plane is then inverted whole: 1 where the mask has the
+  // level, 0 elsewhere, white and black included (no drive on either).
+  const auto renderPlane = [&](const uint16_t mask, const bool passPlane) {
+    renderer.clearScreen();
+    renderer.setRenderMode(GfxRenderer::GRAY16_PLANE);
+    renderer.setGray16LevelMask(mask);
+    page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
+    if (ReaderUtils::footnotesOnPage())
+      page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth,
+                           SETTINGS.readerTextLayout());
+    drawClippingHighlights();
+    renderStatusBar();
+    renderer.setRenderMode(GfxRenderer::BW);
+    if (passPlane) renderer.invertScreen();
+  };
+
+  // 1. The base: levels 8..15 black, on the one-pass cross-dissolve (FAST) or,
+  //    every refresh-frequency pages, the single bipolar scrub (HALF) that is
+  //    this path's periodic clean. It runs while the pass-1 planes render.
+  const bool scrub = pagesUntilFullRefresh <= 1;
+  renderPlane(gray16planes::kMaskBwClear, false);
+  renderer.displayGray16BaseAsync(scrub ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
+  pagesUntilFullRefresh = scrub ? SETTINGS.getRefreshFrequency() : pagesUntilFullRefresh - 1;
+  const unsigned long tBase = millis();
+  // A turn queued meanwhile wants the next page, not this one's grey. The base
+  // is a complete B/W page and the controller holds it in both planes once the
+  // waveform ends, so the next turn is an ordinary differential one.
+  if (queuedPageTurns.load(std::memory_order_relaxed) != 0) {
+    LOG_DBG("ERS", "16-level planes skipped after the base: a page turn is waiting");
+    return true;
+  }
+
+  // 2. Pass 1, coarse: DTM1 then DTM2. The first copy waits the base out.
+  renderPlane(gray16planes::kMaskPass1Dtm1, true);
+  renderer.copyGrayscaleLsbBuffers();
+  renderPlane(gray16planes::kMaskPass1Dtm2, true);
+  renderer.copyGrayscaleMsbBuffers();
+  renderer.displayGray16Pass1Async();
+  const unsigned long tPass1 = millis();
+
+  // 3. Pass 2, fine.
+  renderPlane(gray16planes::kMaskPass2Dtm1, true);
+  renderer.copyGrayscaleLsbBuffers();
+  renderPlane(gray16planes::kMaskPass2Dtm2, true);
+  renderer.copyGrayscaleMsbBuffers();
+  renderer.displayGray16Pass2Async();
+  const unsigned long tPass2 = millis();
+
+  // 4. Cleanup: DTM1 holds every inked level as 0 ("prior ink"), so the next
+  //    FAST turn (a page, a menu, a popup) cross-dissolves in one pass. The
+  //    same plane is the B/W baseline put back in DTM2, and it stays in the
+  //    framebuffer as the page the menus and overlays draw over (the light AA
+  //    fringes read as ink there).
+  renderPlane(gray16planes::kMaskCleanupBlack, false);
+  renderer.beginGray16Cleanup();
+  renderer.copyGrayscaleLsbBuffers();
+  renderer.finishGray16Cleanup();
+  // The sunlight fading fix parks the rails after every page; the passes needed
+  // them up until here. Otherwise the driver's 1.2 s idle power-off takes them.
+  if (SETTINGS.fadingFix) renderer.powerOffScreen();
+  LOG_INF("ERS", "16-level planes: base at %lu ms, pass 1 %lu ms, pass 2 %lu ms, cleanup %lu ms (%s base)", tBase - t0,
+          tPass1 - tBase, tPass2 - tPass1, millis() - tPass2, scrub ? "scrub" : "dissolve");
   return true;
 }
 #endif
@@ -4011,7 +4135,14 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
   // intermediate display + re-render on the inverted framebuffer would cancel out
   // to a blank page (text and background both end up white).
   const bool pageHasImages = page.hasImages();
-  const bool imagesNeedDecode = pageHasImages && !renderer.areImagesSuppressed() && page.hasImagesNeedingDecode();
+#if CROSSPOINT_GRAY16_PLANES
+  // The 16-level planes draw pictures from their 4-bit .px4, not the .pxc.
+  const bool picturesIn4Bit = SETTINGS.textGray16 && display.supportsGray16Planes();
+#else
+  const bool picturesIn4Bit = false;
+#endif
+  const bool imagesNeedDecode =
+      pageHasImages && !renderer.areImagesSuppressed() && page.hasImagesNeedingDecode(picturesIn4Bit);
   // The cached-pixel RAM slot competes with the decoders for the same heap, and
   // the decoders lose badly (36KB for JPEG, 60KB for PNG, against a slot of up
   // to ~84KB). On a page that still has something to decode, skip the slot and
@@ -4074,6 +4205,19 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
     renderer.clearScreen();
   }
 
+#if CROSSPOINT_GRAY16_PLANES
+  // UC8253 X3, 16-Level Text on: any page that wants grey (anti-aliased text,
+  // pictures) through the two-pass planes, whose base is its own render of the
+  // page (levels 8..15 black), so the B/W render below is skipped. Footnote
+  // selection keeps the plain fast path. Refused (never on a UC8279-batch X3,
+  // or inverted) means the ordinary page below.
+  if (SETTINGS.textGray16 && needsAnyGrayscale && footnoteSelectIndex < 0 && display.supportsGray16Planes() &&
+      presentGray16PlanesPage(page, orientedMarginLeft, orientedMarginTop, viewportBottom, viewportWidth)) {
+    fcm->logStats("gray16_planes");
+    return;
+  }
+#endif
+
   page.render(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, orientedMarginTop);
   if (ReaderUtils::footnotesOnPage())
     page.renderFootnotes(renderer, SETTINGS.getReaderFontId(), orientedMarginLeft, viewportBottom, viewportWidth,
@@ -4093,7 +4237,7 @@ void EpubReaderActivity::renderContents(Page& page, const int orientedMarginTop,
     return;
   }
 
-#if FREEINK_DEVICE_PICCO
+#if CROSSPOINT_GRAY16_IMAGE
   // 16-level text: text pages (no images: those keep the planes below) in
   // light mode, through the panel's 16-level path with non-flashing turns.
   if (SETTINGS.textGray16 && needsTextGrayscale && !pageHasImages && display.supportsGray16Image() &&

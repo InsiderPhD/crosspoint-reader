@@ -144,6 +144,13 @@ typedef struct {
   /// GfxRenderer::getGlyphBitmap() to retrieve overflow bitmaps via SdCardFont.
   void* glyphMissCtx;
 
+  /// Glyph bitmaps are 4 bits per pixel (coverage 0 white .. 15 black, two
+  /// pixels per byte, high nibble first, rows bit-contiguous): a 4-bit .cpfont
+  /// (flags 0x0002) or a TtfEpdFont face kept for the 16-level display path.
+  /// Zero (false) for every built-in font and 2-bit SD font; the built-in
+  /// aggregate initialisers end before this member, so it is value-initialised.
+  bool is4Bit;
+
 #if CROSSPOINT_VECTOR_FONTS
   /// Runtime vector fonts (TtfEpdFont) only; nullptr for every built-in and SD
   /// font (aggregate initialisers zero it). Non-null means two things:
@@ -155,10 +162,6 @@ typedef struct {
   /// Compiled out on boards without PSRAM so the flash-resident built-in font
   /// tables do not grow there.
   int8_t (*kernHandler)(void* ctx, uint32_t leftCp, uint32_t rightCp);
-  /// TtfEpdFont only: glyph bitmaps are 4 bits per pixel (coverage 0..15) for
-  /// the 16-level display path, instead of the 2-bit format. Zero (false) for
-  /// every built-in and SD font.
-  bool is4Bit;
   /// TtfEpdFont only: glyph bitmaps are 8 bits per pixel (the rasteriser's
   /// coverage 0..255) for the 16-level display path. Zero for every other font.
   bool is8Bit;

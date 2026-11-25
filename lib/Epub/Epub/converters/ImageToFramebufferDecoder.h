@@ -36,6 +36,9 @@ struct RenderConfig {
   bool useExactDimensions = false;     // If true, use maxWidth/maxHeight as exact output size (no recalculation)
   std::string cachePath;               // If non-empty, decoder will write pixel cache to this path
   const Gray16Sink* gray16 = nullptr;  // Non-null: 8-bit gray to this sink only (cachePath ignored)
+  // 16-level planes (the X3): pixels are 4-bit ink levels (0 white .. 15 black)
+  // instead of 2-bit tones, to the framebuffer writer and to a .px4 cache.
+  bool levels4Bit = false;
 };
 
 class ImageToFramebufferDecoder {

@@ -474,7 +474,14 @@ bool SdCardFont::load(const char* path) {
   // Begin content hash: accumulate global header
   uint32_t hash = fnv1a(headerBuf, HEADER_SIZE);
 
-  bool is2Bit = (readU16(headerBuf + 10) & 1) != 0;
+  const uint16_t flags = readU16(headerBuf + 10);
+  if ((flags & ~(CPFONT_FLAG_2BIT | CPFONT_FLAG_4BIT)) != 0 ||
+      (flags & (CPFONT_FLAG_2BIT | CPFONT_FLAG_4BIT)) == (CPFONT_FLAG_2BIT | CPFONT_FLAG_4BIT)) {
+    LOG_ERR("SDCF", "Unsupported flags 0x%04X", flags);
+    return false;
+  }
+  const bool is2Bit = (flags & CPFONT_FLAG_2BIT) != 0;
+  const bool is4Bit = (flags & CPFONT_FLAG_4BIT) != 0;
 
   uint8_t styleCount = headerBuf[12];
   if (styleCount == 0 || styleCount > MAX_STYLES) {
@@ -531,6 +538,7 @@ bool SdCardFont::load(const char* path) {
     s.header.kernRightClassCount = tocBuf[22];
     s.header.ligaturePairCount = tocBuf[23];
     s.header.is2Bit = is2Bit;
+    s.header.is4Bit = is4Bit;
 
     // Sanity-check counts to reject malformed files before allocating.
     // Kern class counts are uint8 (bounded by type). Entry counts are uint16
@@ -680,6 +688,7 @@ bool SdCardFont::load(const char* path) {
     s.stubData.ascender = s.header.ascender;
     s.stubData.descender = s.header.descender;
     s.stubData.is2Bit = s.header.is2Bit;
+    s.stubData.is4Bit = s.header.is4Bit;
 
     s.epdFont.data = &s.stubData;
     applyGlyphMissCallback(i);
@@ -719,7 +728,7 @@ int32_t SdCardFont::findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) 
 
 bool SdCardFont::glyphEntryValid(const PerStyle& s, const EpdGlyph& glyph, const uint32_t codepoint) {
   const uint32_t pixels = static_cast<uint32_t>(glyph.width) * glyph.height;
-  const uint32_t packed = s.header.is2Bit ? (pixels + 3) / 4 : (pixels + 7) / 8;
+  const uint32_t packed = s.header.is4Bit ? (pixels + 1) / 2 : s.header.is2Bit ? (pixels + 3) / 4 : (pixels + 7) / 8;
   const uint64_t end = static_cast<uint64_t>(s.bitmapFileOffset) + glyph.dataOffset + glyph.dataLength;
   if (glyph.dataLength == packed && end <= fileSize_) return true;
   if (corruptGlyphsLogged_ == 0) corruptGlyphNotice_ = true;
@@ -1027,6 +1036,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   s.miniData.ascender = s.header.ascender;
   s.miniData.descender = s.header.descender;
   s.miniData.is2Bit = s.header.is2Bit;
+  s.miniData.is4Bit = s.header.is4Bit;
   if (ligaturesOk) {
     // A failed kern build leaves the mini kern empty (freeStyleMiniKern nulls the
     // matrix, so getKerning() returns 0): the page keeps its ligatures.

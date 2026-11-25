@@ -81,6 +81,7 @@ void SettingsActivity::onEnter() {
   // visited, never stored, so it is not resident once this returns.
   auto addRow = [this](const SettingInfo& setting) {
     if (setting.category == StrId::STR_NONE_OPT) return;
+    if (setting.visibleIf && !setting.visibleIf()) return;
     // Device-only override: hide the built-in fontFamily Enum so the FontFamily
     // Action (appended below) is the single picker entry. Web UI still sees the
     // Enum because CrossPointWebServer visits the same list itself.

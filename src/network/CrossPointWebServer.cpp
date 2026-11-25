@@ -1575,6 +1575,7 @@ void CrossPointWebServer::handleGetSettings() const {
     // Mirror the device UI (SettingsActivity.cpp): entries with STR_NONE_OPT category are
     // legacy/hidden/round-trip-only and must not surface as a bogus "None" group on the web.
     if (s.category == StrId::STR_NONE_OPT) return;
+    if (s.visibleIf && !s.visibleIf()) return;
 
     doc.clear();
     doc["key"] = s.key;

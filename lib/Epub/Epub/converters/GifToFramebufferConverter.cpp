@@ -66,6 +66,7 @@ void renderCanvasRow(const uint8_t* grayRow, const int srcY, GifContext& ctx) {
 
   DirectPixelWriter pw;
   pw.init(*ctx.renderer);
+  pw.levels4Bit = ctx.config->levels4Bit;
 
   for (int dstY = firstDstY; dstY < endDstY; ++dstY) {
     ctx.lastDstY = dstY;
@@ -83,7 +84,7 @@ void renderCanvasRow(const uint8_t* grayRow, const int srcY, GifContext& ctx) {
         caching = false;
         ctx.caching = false;
       } else {
-        cw.init(ctx.cache.buffer, ctx.cache.bytesPerRow, ctx.cache.bandRows, ctx.cache.originX);
+        cw.init(ctx.cache.buffer, ctx.cache.bytesPerRow, ctx.cache.bandRows, ctx.cache.originX, ctx.cache.bitsPerPixel);
         cw.beginRow(outY, ctx.config->y + ctx.cache.bandStart);
       }
     }
@@ -92,18 +93,13 @@ void renderCanvasRow(const uint8_t* grayRow, const int srcY, GifContext& ctx) {
     int error = 0;
     const int outXBase = ctx.config->x;
     const bool useDithering = ctx.config->useDithering;
+    const bool levels4 = ctx.config->levels4Bit;  // 4-bit ink levels to the writer and the .px4
 
     for (int dstX = 0; dstX < ctx.dstWidth; ++dstX) {
       const int outX = outXBase + dstX;
       if (outX >= 0 && outX < ctx.screenWidth) {
         const uint8_t gray = grayRow[srcX];
-        uint8_t ditheredGray;
-        if (useDithering) {
-          ditheredGray = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          ditheredGray = gray / 85;
-          if (ditheredGray > 3) ditheredGray = 3;
-        }
+        const uint8_t ditheredGray = quantizeImagePixel(gray, outX, outY, useDithering, levels4);
         pw.writePixel(outX, ditheredGray);
         if (caching) cw.writePixel(outX, ditheredGray);
       }
@@ -315,7 +311,8 @@ bool GifToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
 
   // Stream the pixel cache to disk: one output row per callback, so the band needs one row.
   ctx.caching = !config.cachePath.empty();
-  if (ctx.caching && !ctx.cache.begin(config.cachePath, ctx.dstWidth, ctx.dstHeight, config.x, config.y, 1)) {
+  if (ctx.caching && !ctx.cache.begin(config.cachePath, ctx.dstWidth, ctx.dstHeight, config.x, config.y, 1,
+                                      config.levels4Bit ? 4 : 2)) {
     LOG_ERR("GIF", "Failed to start cache stream, continuing without caching");
     ctx.caching = false;
   }

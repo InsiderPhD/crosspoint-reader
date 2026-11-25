@@ -1,6 +1,6 @@
 #include "SleepGray16.h"
 
-#if FREEINK_DEVICE_PICCO
+#if CROSSPOINT_GRAY16_IMAGE
 
 #include <Bitmap.h>
 #include <GfxRenderer.h>
@@ -177,7 +177,7 @@ bool present(GfxRenderer& renderer, const SleepThemeRenderer::GreyPlan& plan) {
   if (!loadLevelLstar()) return false;       // keep the 4-shade passes
   const uint16_t w = display.getDisplayWidth(), h = display.getDisplayHeight();
   const size_t levelBytes = static_cast<size_t>(w / 2) * h;  // 192 KB
-  const size_t frameBytes = renderer.getBufferSize();          // 48 KB
+  const size_t frameBytes = renderer.getBufferSize();        // 48 KB
   auto* buf = static_cast<uint8_t*>(psram(levelBytes + frameBytes));
   if (!buf) {
     LOG_ERR("SG16", "no PSRAM for the 16-level sleep screen");
@@ -257,6 +257,7 @@ bool showImage(GfxRenderer& renderer, const std::string& bmpPath) {
 void saveOwedDrive() {
   if (!shown) return;
   const size_t size = display.gray16StateSize();
+  if (size == 0) return;  // this driver owes nothing after its draw (UC8179: every pass powers off)
   // ~192 KB (the screen's levels plus a 58-byte header): PSRAM, freed below.
   auto* state = size ? static_cast<uint8_t*>(psram(size)) : nullptr;
   if (!state) {

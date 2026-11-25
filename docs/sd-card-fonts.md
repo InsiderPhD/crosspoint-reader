@@ -77,6 +77,26 @@ To convert your own TrueType/OpenType fonts:
       --name MyFont \
       --output-dir ./MyFont/
 
+### 16-level (4-bit) fonts
+
+Add `--4bit` to either command to store 16 coverage levels per glyph pixel
+instead of four (header flags `0x0002` instead of `0x0001`). With "16-Level
+Text" on, the Xteink X3 and the Picco draw these at all sixteen tones; every
+other board, and the X3 with the setting off, folds them onto the usual four.
+A 4-bit family's glyph bitmaps are twice the size of a 2-bit one, so expect
+twice the SD bytes and twice the glyph RAM per page; give it its own family
+name (for example `MyFont16`) so it can sit beside the 2-bit build.
+`--gamma 1.1` thickens light edge pixels slightly if the result looks thin.
+
+    python3 lib/EpdFont/scripts/fontconvert_sdcard.py \
+      --regular MyFont-Regular.ttf --bold MyFont-Bold.ttf \
+      --italic MyFont-Italic.ttf --bolditalic MyFont-BoldItalic.ttf \
+      --intervals latin-ext --sizes 12,14,16,18 \
+      --name MyFont16 --4bit --output-dir ./MyFont16/
+
+`build-sd-fonts.py` takes the same `--4bit` / `--gamma` switches, or per
+family `four_bit: true` and `gamma:` keys in `sd-fonts.yaml`.
+
 ### Available Unicode interval presets
 
 | Preset | Coverage |

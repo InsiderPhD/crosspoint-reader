@@ -231,13 +231,13 @@ class Page {
                        [](const std::unique_ptr<PageElement>& el) { return el->getTag() == TAG_PageImage; });
   }
 
-  // True when at least one image still has to be decoded (no usable .pxc yet),
-  // i.e. this page view will pay a multi-second decode and is worth showing
-  // placeholders for first. Touches the SD once per image, so call it once per
-  // page render, not per pass.
-  bool hasImagesNeedingDecode() const {
-    return std::any_of(elements.begin(), elements.end(), [](const std::unique_ptr<PageElement>& el) {
-      return el->getTag() == TAG_PageImage && static_cast<const PageImage&>(*el).getImageBlock().needsDecode();
+  // True when at least one image still has to be decoded (no usable .pxc yet,
+  // or .px4 when the 16-level planes will draw the page), i.e. this page view
+  // will pay a multi-second decode and is worth showing placeholders for first.
+  // Touches the SD once per image, so call it once per page render, not per pass.
+  bool hasImagesNeedingDecode(const bool levels4 = false) const {
+    return std::any_of(elements.begin(), elements.end(), [levels4](const std::unique_ptr<PageElement>& el) {
+      return el->getTag() == TAG_PageImage && static_cast<const PageImage&>(*el).getImageBlock().needsDecode(levels4);
     });
   }
 

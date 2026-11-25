@@ -68,6 +68,9 @@ struct SettingInfo {
   const char* key = nullptr;             // JSON API key (nullptr for ACTION types)
   StrId category = StrId::STR_NONE_OPT;  // Category for web UI grouping
   bool obfuscated = false;               // Save/load via base64 obfuscation (passwords)
+  // Runtime hide (nullptr = shown): for a row whose feature depends on which
+  // panel the boot probe found, in an image that serves more than one board.
+  bool (*visibleIf)() = nullptr;
 
   // Direct char[] string fields (for settings stored in CrossPointSettings)
   size_t stringOffset = 0;
@@ -81,6 +84,10 @@ struct SettingInfo {
 
   SettingInfo& withObfuscated() {
     obfuscated = true;
+    return *this;
+  }
+  SettingInfo& withVisibleIf(bool (*predicate)()) {
+    visibleIf = predicate;
     return *this;
   }
 

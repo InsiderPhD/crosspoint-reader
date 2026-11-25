@@ -6,6 +6,7 @@
 
 #include "../Activity.h"
 #include "MappedInputManager.h"
+#include "platform/Gray16Support.h"
 
 // Full-screen image viewer for the file browser: BMP, JPEG and PNG. (The name
 // predates the other two formats.)
@@ -37,7 +38,7 @@ class BmpViewerActivity final : public Activity {
   bool swallowBackRelease = false;
   // JPEG/PNG: streamed decode straight into the framebuffer, scaled to fit.
   bool renderDecodedImage();
-#if FREEINK_DEVICE_PICCO
+#if CROSSPOINT_GRAY16_IMAGE
   // JPEG, PNG or BMP at the panel's 16 levels. False when unavailable; nothing shown.
   bool showGray16(bool hasPrevious, bool hasNext);
 #endif

@@ -2,8 +2,11 @@
 """Generate .cpfont binary files for SD card font loading.
 
 Outputs binary .cpfont files containing glyph metadata and uncompressed
-2-bit bitmaps, matching the EpdFontData/EpdGlyph/EpdUnicodeInterval struct
-layout on the ESP32-C3 (little-endian, RISC-V).
+2-bit (default, flags=0x0001) or 4-bit (--4bit, flags=0x0002) bitmaps,
+matching the EpdFontData/EpdGlyph/EpdUnicodeInterval struct layout on the
+ESP32-C3 (little-endian, RISC-V). 4-bit files carry 16 coverage levels per
+pixel for the 16-level text path (UC8253 X3 planes, Picco); every board
+still draws them, folded onto the four 2-bit tones elsewhere.
 
 Usage:
     # Single file with specific presets
@@ -33,6 +36,43 @@ from collections import namedtuple
 from fontTools.ttLib import TTFont
 
 from cpfont_version import CPFONT_VERSION
+
+CPFONT_FLAG_2BIT = 0x0001
+CPFONT_FLAG_4BIT = 0x0002
+
+
+def build_quant_lut16(gamma=1.0):
+    """256-entry LUT from 8-bit FreeType coverage to a 4-bit level (0 white .. 15 black).
+
+    gamma != 1.0 maps in reflectance space, 1 - (1 - a/255)**gamma: above 1.0
+    thickens light edge pixels (zuyan9's 4-bit builds use 1.10), below 1.0 thins them.
+    """
+    if gamma <= 0.0:
+        raise ValueError(f"gamma must be > 0, got {gamma}")
+    lut = bytearray(256)
+    for a in range(256):
+        cov = 1.0 - ((1.0 - a / 255.0) ** gamma) if gamma != 1.0 else a / 255.0
+        lut[a] = min(15, max(0, int(round(15.0 * cov))))
+    return bytes(lut)
+
+
+def pack_bitmap_4bit(bitmap, lut16):
+    """Pack a FreeType 8-bit gray bitmap as 4-bit levels, two pixels per byte, high
+    nibble first, rows bit-contiguous (the layout GlyphBitmap::valueAt() reads)."""
+    w, h, pitch = bitmap.width, bitmap.rows, bitmap.pitch
+    buf = bitmap.buffer
+    out = bytearray((w * h + 1) // 2)
+    i = 0
+    for y in range(h):
+        row = y * pitch
+        for x in range(w):
+            level = lut16[buf[row + x]]
+            if i & 1:
+                out[i >> 1] |= level
+            else:
+                out[i >> 1] = level << 4
+            i += 1
+    return bytes(out)
 
 # --- Unicode interval presets ---
 
@@ -462,7 +502,8 @@ def extract_ligatures_fonttools(font_path, codepoints):
     return pairs
 
 
-def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=False):
+def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=False,
+                         four_bit=False, gamma=1.0):
     """Rasterize all glyphs for one font style. Returns StyleRasterData."""
     style_names = {0: "regular", 1: "bold", 2: "italic", 3: "bolditalic"}
     style_label = style_names.get(style_id, str(style_id))
@@ -503,6 +544,7 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=F
     # Rasterize all glyphs
     total_bitmap_size = 0
     all_glyphs = []
+    lut16 = build_quant_lut16(gamma) if four_bit else None
 
     for i_start, i_end in intervals:
         for code_point in range(i_start, i_end + 1):
@@ -513,6 +555,22 @@ def rasterize_font_style(fontfile, size, intervals, style_id=0, force_autohint=F
                 continue
 
             bitmap = f.glyph.bitmap
+
+            if four_bit:
+                packed = pack_bitmap_4bit(bitmap, lut16)
+                glyph = GlyphProps(
+                    width=bitmap.width,
+                    height=bitmap.rows,
+                    advance_x=fp4_from_ft16_16(f.glyph.linearHoriAdvance),
+                    left=f.glyph.bitmap_left,
+                    top=f.glyph.bitmap_top,
+                    data_length=len(packed),
+                    data_offset=total_bitmap_size,
+                    code_point=code_point,
+                )
+                total_bitmap_size += len(packed)
+                all_glyphs.append((glyph, packed))
+                continue
 
             # Build 4-bit greyscale bitmap (same logic as fontconvert.py)
             pixels4g = []
@@ -673,7 +731,7 @@ def style_sections_total_size(sections):
 # --- File writers ---
 
 def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
-                               force_autohint=False):
+                               force_autohint=False, four_bit=False, gamma=1.0):
     """Generate a multi-style v4 .cpfont file.
 
     style_fonts: dict of {style_id: fontfile_path} e.g. {0: "Regular.ttf", 2: "Italic.ttf"}
@@ -681,7 +739,7 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
     MAGIC = b"CPFONT\x00\x00"
     HEADER_SIZE = 32
     STYLE_TOC_ENTRY_SIZE = 32
-    flags = 1  # always 2-bit greyscale
+    flags = CPFONT_FLAG_4BIT if four_bit else CPFONT_FLAG_2BIT
     style_count = len(style_fonts)
 
     # Rasterize each style
@@ -691,7 +749,7 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
         print(f"  Rasterizing style {style_id}...", file=sys.stderr)
         raster_data[style_id] = rasterize_font_style(
             fontfile, size, intervals, style_id=style_id,
-            force_autohint=force_autohint)
+            force_autohint=force_autohint, four_bit=four_bit, gamma=gamma)
 
     # Pack binary sections for each style
     packed_sections = {}  # style_id -> tuple of section bytearrays
@@ -749,7 +807,7 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
         total_file_size = f.tell()
 
     # Print summary
-    print(f"  Output: {output_path} (v4, {style_count} styles)", file=sys.stderr)
+    print(f"  Output: {output_path} (v4, {style_count} styles, {'4-bit' if four_bit else '2-bit'})", file=sys.stderr)
     print(f"    Header+TOC: {HEADER_SIZE + len(toc_data)} bytes", file=sys.stderr)
     for style_id in sorted(raster_data.keys()):
         sd = raster_data[style_id]
@@ -786,6 +844,12 @@ def main():
                         help="Font family name for output filenames (default: derived from font filename).")
     parser.add_argument("--force-autohint", dest="force_autohint", action="store_true",
                         help="Force FreeType auto-hinter instead of native font hinting.")
+    parser.add_argument("-4", "--4bit", dest="four_bit", action="store_true",
+                        help="Emit 4-bit (16-level, flags=0x0002) glyph bitmaps for the 16-level "
+                             "text path; twice the glyph bytes of the default 2-bit output.")
+    parser.add_argument("--gamma", type=float, default=1.0,
+                        help="4-bit only: reflectance-space coverage gamma (default 1.0; "
+                             "1.10 thickens light edge pixels slightly).")
     parser.add_argument("-o", "--output", dest="output",
                         help="Output file path (for single-size mode).")
     parser.add_argument("--output-dir", dest="output_dir",
@@ -890,7 +954,7 @@ def main():
         print(f"Generating {output_path} (size {sz}, {len(style_fonts)} style(s), v4)...", file=sys.stderr)
         total_size += generate_cpfont_multistyle(
             style_fonts, sz, intervals, output_path,
-            force_autohint=args.force_autohint)
+            force_autohint=args.force_autohint, four_bit=args.four_bit, gamma=args.gamma)
     print(f"\nTotal: {len(sizes)} files, {total_size / 1024 / 1024:.2f} MB", file=sys.stderr)
 
 

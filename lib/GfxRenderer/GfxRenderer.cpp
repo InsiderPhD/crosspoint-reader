@@ -9,6 +9,19 @@
 #include "../Memory/Memory.h"
 #include "BitmapHelpers.h"
 #include "FontCacheManager.h"
+
+#if __has_include(<GrayscaleCapabilities.h>)
+// Gray16Planes.h mirrors the SDK's plane masks for lib/ and the simulator; they must not drift.
+#include <GrayscaleCapabilities.h>
+static_assert(gray16planes::kMaskBwClear == freeink::gray16::kMaskBwClear);
+static_assert(gray16planes::kMaskPass1Dtm1 == freeink::gray16::kMaskPass1Dtm1);
+static_assert(gray16planes::kMaskPass1Dtm2 == freeink::gray16::kMaskPass1Dtm2);
+static_assert(gray16planes::kMaskPass2Dtm1 == freeink::gray16::kMaskPass2Dtm1);
+static_assert(gray16planes::kMaskPass2Dtm2 == freeink::gray16::kMaskPass2Dtm2);
+static_assert(gray16planes::kMaskCleanupBlack == freeink::gray16::kMaskCleanupBlack);
+static_assert(gray16planes::kImage2BitInk[1] == freeink::gray16::image2BitToInk4(1) &&
+              gray16planes::kImage2BitInk[2] == freeink::gray16::image2BitToInk4(2));
+#endif
 #include "GlyphBitmap.h"
 
 namespace {
@@ -180,13 +193,13 @@ enum class TextRotation { None, Rotated90CW };
 // The advance width is scaled the same way in drawText() so layout reserves exactly the
 // right horizontal space for the scaled glyph.
 namespace {
-// Bits per glyph pixel: 4 for TrueType glyphs kept for the 16-level path,
-// otherwise the font's 2-bit or 1-bit format.
+// Bits per glyph pixel: 8 for TrueType glyphs kept at full coverage, 4 for a
+// 4-bit .cpfont or TrueType face, otherwise the font's 2-bit or 1-bit format.
 uint8_t glyphBits(const EpdFontData* data) {
 #if CROSSPOINT_VECTOR_FONTS
   if (data->is8Bit) return 8;
-  if (data->is4Bit) return 4;
 #endif
+  if (data->is4Bit) return 4;
   return data->is2Bit ? 2 : 1;
 }
 }  // namespace
@@ -333,21 +346,23 @@ namespace {
 // drift: BW paints every non-white value with `state`; the gray planes ask
 // grayPlanePixel(), which owns the overlay-mask vs absolute-plane difference.
 glyphBitmap::Levels glyphLevels(const uint8_t bits, const GfxRenderer::RenderMode mode, const bool state,
-                                const bool absolutePlanes, const uint8_t plane, const uint8_t* gray16Level) {
+                                const bool absolutePlanes, const uint16_t planeMask, const uint8_t* gray16Level,
+                                const uint8_t* gray16Level2Bit) {
   glyphBitmap::Levels levels{0, 0};
   if (mode == GfxRenderer::GRAY16_PLANE && state) {
-    // Ink where the pixel's level has this plane's bit; white stays untouched.
+    // Ink where the plane's mask has the pixel's level; the others stay untouched.
     const int values = 1 << bits;
     for (int v = 1; v < values; v++) {
-      const uint8_t level = bits == 4 ? gray16Level[v] : bits == 2 ? gray16Level[v * 5] : 15;
-      if ((level >> plane) & 1) levels.clearBits |= static_cast<uint16_t>(1u << v);
+      const uint8_t level = bits == 4 ? gray16Level[v] : bits == 2 ? gray16Level2Bit[v] : 15;
+      if ((planeMask >> level) & 1) levels.clearBits |= static_cast<uint16_t>(1u << v);
     }
     return levels;
   }
   if (bits == 4) {
     // Outside the 16-level planes a 4-bit glyph behaves like a 2-bit one:
     // fold coverage 0..15 onto white / light / dark / black.
-    const glyphBitmap::Levels two = glyphLevels(2, mode, state, absolutePlanes, plane, gray16Level);
+    const glyphBitmap::Levels two =
+        glyphLevels(2, mode, state, absolutePlanes, planeMask, gray16Level, gray16Level2Bit);
     for (int v = 1; v < 16; v++) {
       const uint16_t from = static_cast<uint16_t>(1u << ((v + 2) / 5));  // 0..15 -> 0..3
       const uint16_t to = static_cast<uint16_t>(1u << v);
@@ -386,16 +401,17 @@ glyphBitmap::Levels glyphLevels(const uint8_t bits, const GfxRenderer::RenderMod
 // 2-bit format with the converter's 25/50/75% thresholds, so B/W frames and
 // the 4-shade planes draw these glyphs at the 2-bit stroke weight.
 const uint8_t* GfxRenderer::glyphActions8(const RenderMode mode, const bool state) const {
-  const uint32_t key = static_cast<uint32_t>(mode) | (state ? 0x10u : 0u) | (absoluteGrayPlanes ? 0x20u : 0u) |
-                       (static_cast<uint32_t>(gray16Plane) << 6) | (static_cast<uint32_t>(gray16Level8Gen) << 8);
+  const uint64_t key = static_cast<uint64_t>(mode) | (state ? 0x10u : 0u) | (absoluteGrayPlanes ? 0x20u : 0u) |
+                       (static_cast<uint64_t>(gray16Mask) << 6) | (static_cast<uint64_t>(gray16Level8Gen) << 22);
   if (key == glyphAction8Key) return glyphAction8;
   glyphAction8Key = key;
   if (mode == GRAY16_PLANE && state) {
     glyphAction8[0] = 0;
-    for (int v = 1; v < 256; v++) glyphAction8[v] = ((gray16Level8[v] >> gray16Plane) & 1) ? 2 : 0;
+    for (int v = 1; v < 256; v++) glyphAction8[v] = ((gray16Mask >> gray16Level8[v]) & 1) ? 2 : 0;
     return glyphAction8;
   }
-  const glyphBitmap::Levels two = glyphLevels(2, mode, state, absoluteGrayPlanes, gray16Plane, gray16Level);
+  const glyphBitmap::Levels two =
+      glyphLevels(2, mode, state, absoluteGrayPlanes, gray16Mask, gray16Level, gray16Level2Bit);
   for (int v = 0; v < 256; v++) {
     const uint16_t bit = static_cast<uint16_t>(1u << (v < 64 ? 0 : v < 128 ? 1 : v < 192 ? 2 : 3));
     glyphAction8[v] = (two.clearBits & bit) ? 2 : (two.setBits & bit) ? 1 : 0;
@@ -419,8 +435,9 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
 #else
   const uint8_t* const action8 = nullptr;
 #endif
-  const glyphBitmap::Levels levels = action8 ? glyphBitmap::Levels{0, 0}
-                                             : glyphLevels(bits, mode, state, absoluteGrayPlanes, gray16Plane, gray16Level);
+  const glyphBitmap::Levels levels =
+      action8 ? glyphBitmap::Levels{0, 0}
+              : glyphLevels(bits, mode, state, absoluteGrayPlanes, gray16Mask, gray16Level, gray16Level2Bit);
 
   // Rotate the glyph origin once, then derive the two physical axes by
   // rotating its neighbours along each logical axis. rotateCoordinates() is an
@@ -479,11 +496,22 @@ void GfxRenderer::drawGlyphBitmap(const uint8_t* bitmap, const int width, const 
 
 void GfxRenderer::setGray16Levels(const uint8_t levels[16]) {
   for (int i = 0; i < 16; i++) gray16Level[i] = levels[i] & 15;
+  for (int v = 0; v < 4; v++) gray16Level2Bit[v] = gray16Level[v * 5];
+}
+
+void GfxRenderer::setGray16Levels2Bit(const uint8_t levels[4]) {
+  for (int v = 0; v < 4; v++) gray16Level2Bit[v] = levels[v] & 15;
 }
 
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and
 // efficient as possible.
 void GfxRenderer::drawPixel(const int x, const int y, const bool state) const {
+  // In a 16-level plane a black pixel is level 15 and a white one level 0; the
+  // plane's mask decides whether either is ink here.
+  drawPixelRaw(x, y, renderMode == GRAY16_PLANE ? gray16PlaneInk(state ? 15 : 0) : state);
+}
+
+void GfxRenderer::drawPixelRaw(const int x, const int y, const bool state) const {
   int phyX = 0;
   int phyY = 0;
 
@@ -856,16 +884,20 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
 
   if constexpr (C == Color::Black || C == Color::White) {
     // Framebuffer polarity: 0 = black, 1 = white (drawPixel(true) clears the bit).
+    // A 16-level plane inks black (level 15) or white (level 0) only where its
+    // mask has that level, so the ink is decided once per fill here.
+    const bool paintBlack =
+        renderMode == GRAY16_PLANE ? gray16PlaneInk(C == Color::Black ? 15 : 0) : (C == Color::Black);
     for (int py = phyY0; py <= phyY1; ++py) {
       uint8_t* row = target + static_cast<size_t>(py - originY) * stride;
       if (byteStart == byteEnd) {
         const uint8_t mask = headMask & tailMask;
-        if constexpr (C == Color::Black) {
+        if (paintBlack) {
           row[byteStart] &= static_cast<uint8_t>(~mask);
         } else {
           row[byteStart] |= mask;
         }
-      } else if constexpr (C == Color::Black) {
+      } else if (paintBlack) {
         row[byteStart] &= static_cast<uint8_t>(~headMask);
         if (middleBytes) memset(row + byteStart + 1, 0x00, middleBytes);
         row[byteEnd] &= static_cast<uint8_t>(~tailMask);
@@ -919,6 +951,8 @@ void GfxRenderer::fillRectImpl(const int x, const int y, const int width, const 
         } else {
           isBlack = (((lx + ly) & 1) == 0);  // drawPixelDither<DarkGray>
         }
+        // A 16-level plane: the lattice's black pixels are level 15, the rest level 0.
+        if (renderMode == GRAY16_PLANE) isBlack = gray16PlaneInk(isBlack ? 15 : 0);
         if (isBlack) blackMask |= static_cast<uint8_t>(0x80u >> b);
       }
       whiteMasks[samplePy & 1] = static_cast<uint8_t>(~blackMask);
@@ -1187,8 +1221,9 @@ void GfxRenderer::drawImage(const uint8_t bitmap[], const int x, const int y, co
 
 void GfxRenderer::drawIcon(const uint8_t bitmap[], const int x, const int y, const int width, const int height) const {
   // Icon bitmaps are stored pre-rotated for Portrait: `width` panel rows of
-  // `height` pixels each, a clear bit = ink. Portrait blits them straight in.
-  if (orientation == Portrait) {
+  // `height` pixels each, a clear bit = ink. Portrait blits them straight in,
+  // except into a 16-level plane, where ink is the plane mask's call (drawPixel).
+  if (orientation == Portrait && renderMode != GRAY16_PLANE) {
     display.drawImageTransparent(bitmap, y, getScreenWidth() - width - x, height, width);
     return;
   }
@@ -1326,6 +1361,10 @@ void GfxRenderer::drawBitmap(const Bitmap& bitmap, const int x, const int y, con
       } else if (renderMode == GRAYSCALE_LSB || renderMode == GRAYSCALE_MSB) {
         const auto pixel = grayPlanePixel(val, renderMode == GRAYSCALE_MSB, absoluteGrayPlanes);
         if (pixel.write) drawPixel(screenX, screenY, pixel.black);
+      } else if (renderMode == GRAY16_PLANE) {
+        // The four cached tones on the split-rail anchors; every pixel written,
+        // as the planes carry the whole image.
+        drawPixelRaw(screenX, screenY, gray16PlaneInk(gray16planes::kImage2BitInk[val]));
       }
     }
   }
@@ -2440,6 +2479,23 @@ void GfxRenderer::cleanupGrayscaleWithFrameBuffer() const {
     display.cleanupGrayscaleBuffers(frameBuffer);
   }
 }
+
+bool GfxRenderer::supportsGray16Planes() const { return display.supportsGray16Planes(); }
+
+bool GfxRenderer::displayGray16BaseAsync(const HalDisplay::RefreshMode fallback) const {
+  absoluteGrayPlanes = false;
+  return display.displayGray16BaseAsync(fallback);
+}
+
+bool GfxRenderer::displayGray16Pass1Async() const { return display.displayGray16Pass1Async(); }
+
+bool GfxRenderer::displayGray16Pass2Async() const { return display.displayGray16Pass2Async(false); }
+
+void GfxRenderer::beginGray16Cleanup() const { display.beginGray16Cleanup(frameBuffer); }
+
+void GfxRenderer::finishGray16Cleanup() const { display.finishGray16Cleanup(); }
+
+bool GfxRenderer::prewarmPowerOn() const { return display.prewarmPowerOn(); }
 
 void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const {
   switch (orientation) {

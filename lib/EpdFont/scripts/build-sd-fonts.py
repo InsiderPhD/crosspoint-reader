@@ -127,8 +127,12 @@ def resolve_font_path(style_spec: dict, family_name: str, style_name: str) -> Pa
     return resolved
 
 
-def build_family(family: dict, output_base: Path) -> tuple[str, bool, str]:
-    """Build a single font family. Returns (name, success, message)."""
+def build_family(family: dict, output_base: Path, four_bit: bool = False,
+                 gamma: float | None = None) -> tuple[str, bool, str]:
+    """Build a single font family. Returns (name, success, message).
+
+    four_bit / gamma (CLI) override the family's own `four_bit` / `gamma` keys.
+    """
     name = family["name"]
     output_dir = output_base / name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -169,6 +173,11 @@ def build_family(family: dict, output_base: Path) -> tuple[str, bool, str]:
 
     if family.get("force_autohint", False):
         cmd.append("--force-autohint")
+    if four_bit or family.get("four_bit", False):
+        cmd.append("--4bit")
+        eff_gamma = gamma if gamma is not None else family.get("gamma")
+        if eff_gamma is not None:
+            cmd.extend(["--gamma", str(eff_gamma)])
 
     # Run fontconvert_sdcard.py
     try:
@@ -228,6 +237,10 @@ def main():
         "--output-dir", default=str(DEFAULT_OUTPUT), help="Output directory for .cpfont files"
     )
     parser.add_argument("--only", help="Comma-separated family names to build (default: all)")
+    parser.add_argument("-4", "--4bit", dest="four_bit", action="store_true",
+                        help="Emit 4-bit (16-level) glyph bitmaps for every family built")
+    parser.add_argument("--gamma", type=float, default=None,
+                        help="4-bit only: coverage gamma passed to fontconvert_sdcard.py")
     parser.add_argument("--manifest", action="store_true", help="Also generate fonts.json manifest")
     parser.add_argument("--base-url", default="", help="Base URL for manifest (required with --manifest)")
     parser.add_argument(
@@ -294,7 +307,7 @@ def main():
     failed = []
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(build_family, family, output_base): family["name"]
+            executor.submit(build_family, family, output_base, args.four_bit, args.gamma): family["name"]
             for family in families
         }
         for future in as_completed(futures):

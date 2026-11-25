@@ -1,6 +1,8 @@
 #pragma once
 
-#if FREEINK_DEVICE_PICCO
+#include "platform/Gray16Support.h"
+
+#if CROSSPOINT_GRAY16_IMAGE
 
 #include <string>
 
@@ -9,8 +11,9 @@ namespace SleepThemeRenderer {
 struct GreyPlan;
 }
 
-// Picco SE0400NQW47: a greyscale sleep theme's images at the panel's 16 levels
-// instead of the 4-shade plane passes. The theme's B/W frame (already in the
+// Picco SE0400NQW47 and the UC8179 X4 Pro (jpirnay's calibration): a greyscale
+// sleep theme's images at the panel's 16 levels instead of the 4-shade plane
+// passes. The theme's B/W frame (already in the
 // framebuffer) supplies black and white; each grey image is placed exactly as
 // GfxRenderer::drawBitmap places it and dithered to the measured levels. The
 // open book's cover comes from its 8-bit cached twin when it has one, so the

@@ -77,6 +77,34 @@ void HalDisplay::applyRefreshPolicy(HalDisplay::RefreshMode mode) {
   }
 }
 
+bool HalDisplay::displayGray16BaseAsync(const HalDisplay::RefreshMode mode) {
+  // The gray16 HALF base is the driver's history-independent bipolar scrub, so
+  // it is the reader's periodic scrub in its own right: no requestResync() here
+  // (that would route it through the slow multi-pass full sync), but it does
+  // end a FAST streak like any other scrub.
+  if (mode != RefreshMode::FAST_REFRESH) _fastRefreshStreak = 0;
+  const bool started = einkDisplay.displayGray16BaseAsync(convertRefreshMode(mode));
+  _lastRefreshMs = millis();
+  return started;
+}
+
+bool HalDisplay::displayGray16Pass1Async() {
+  const bool started = einkDisplay.displayGray16Pass1Async();
+  _lastRefreshMs = millis();
+  return started;
+}
+
+bool HalDisplay::displayGray16Pass2Async(const bool turnOffScreen) {
+  const bool started = einkDisplay.displayGray16Pass2Async(turnOffScreen);
+  _lastRefreshMs = millis();
+  return started;
+}
+
+void HalDisplay::finishGray16Cleanup() {
+  einkDisplay.finishGray16Cleanup();
+  _lastRefreshMs = millis();
+}
+
 bool HalDisplay::displayGray16Image(const uint8_t* levels, HalDisplay::RefreshMode mode, bool turnOffScreen) {
   const bool ok = einkDisplay.displayGray16Image(levels, convertRefreshMode(mode), turnOffScreen);
   if (ok) _lastRefreshMs = millis();

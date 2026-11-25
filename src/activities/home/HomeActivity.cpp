@@ -743,10 +743,10 @@ void HomeActivity::activateSelectedTile() {
     int menuSelectedIndex = selectorIndex - coverSlotsUsed;
     const int libraryIdx = idx++;
     const int fileBrowserIdx = idx++;
-    const int fileTransferIdx = idx++;
+    const int clippingsIdx = idx++;
     const int statsIdx = idx++;
-    const int settingsIdx = idx++;
-    const int clippingsIdx = idx;
+    const int fileTransferIdx = idx++;
+    const int settingsIdx = idx;
 
     if (selectorIndex < static_cast<int>(recentBooks.size())) {
       onSelectBook(recentBooks[selectorIndex].path);
@@ -793,9 +793,9 @@ void HomeActivity::render(RenderLock&&) {
                           bufferRestored, std::bind(&HomeActivity::storeCoverBuffer, this));
 
   // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_LIBRARY),       tr(STR_BROWSE_FILES),   tr(STR_FILE_TRANSFER),
-                                        tr(STR_READING_STATS), tr(STR_SETTINGS_TITLE), tr(STR_CLIPPINGS)};
-  std::vector<UIIcon> menuIcons = {Library, Folder, Transfer, Stats, Settings, Clippings};
+  std::vector<const char*> menuItems = {tr(STR_LIBRARY),       tr(STR_BROWSE_FILES),  tr(STR_CLIPPINGS),
+                                        tr(STR_READING_STATS), tr(STR_FILE_TRANSFER), tr(STR_SETTINGS_TITLE)};
+  std::vector<UIIcon> menuIcons = {Library, Folder, Clippings, Stats, Transfer, Settings};
 
   const int menuOffset = getCoverSlotsUsed();
   GUI.drawButtonMenu(

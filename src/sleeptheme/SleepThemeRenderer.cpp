@@ -272,8 +272,9 @@ void rasterLine(const GfxRenderer& renderer, const int fontId, const EpdFontFami
         if (tx < 0 || tx >= w) continue;
         const int pos = gy * glyph->width + gx;
         // Any non-white level is ink, as drawText does in BW mode.
-        const bool ink = data->is2Bit ? ((bitmap[pos >> 2] >> ((3 - (pos & 3)) * 2)) & 0x3) != 0
-                                      : ((bitmap[pos >> 3] >> (7 - (pos & 7))) & 0x1) != 0;
+        const bool ink = data->is4Bit   ? ((bitmap[pos >> 1] >> ((pos & 1) ? 0 : 4)) & 0xF) != 0
+                         : data->is2Bit ? ((bitmap[pos >> 2] >> ((3 - (pos & 3)) * 2)) & 0x3) != 0
+                                        : ((bitmap[pos >> 3] >> (7 - (pos & 7))) & 0x1) != 0;
         if (ink) bits[ty * rowBytes + (tx >> 3)] &= static_cast<uint8_t>(~(0x80u >> (tx & 7)));
       }
     }

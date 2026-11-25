@@ -8,8 +8,9 @@
 #include <cstring>
 #include <string>
 
-// Streaming cache writer for 2-bit pixels (4 levels). Packs 4 pixels per byte,
-// MSB first.
+// Streaming cache writer for 2-bit pixels (4 levels, 4 per byte, MSB first: the
+// .pxc) or, for the 16-level planes, 4-bit ink levels (2 per byte, high nibble
+// first: the .px4).
 //
 // The .pxc file is written incrementally in small row bands rather than holding
 // the whole decoded image in one heap buffer. A full-page image (e.g. 482x728)
@@ -31,6 +32,7 @@ struct PixelCache {
   int width;
   int height;
   int bytesPerRow;
+  int bitsPerPixel;  // 2 (.pxc tones) or 4 (.px4 ink levels)
   int originX;       // config.x - to convert screen coords to cache coords
   int originY;       // config.y
   int bandRows;      // rows held in the band buffer
@@ -47,6 +49,7 @@ struct PixelCache {
         width(0),
         height(0),
         bytesPerRow(0),
+        bitsPerPixel(2),
         originX(0),
         originY(0),
         bandRows(0),
@@ -62,12 +65,13 @@ struct PixelCache {
 
   // Open the cache file, write the header, and allocate a band buffer big enough
   // to hold the tallest single decode block (maxBlockDstRows output rows).
-  bool begin(const std::string& cachePath, int w, int h, int ox, int oy, int maxBlockDstRows) {
+  bool begin(const std::string& cachePath, int w, int h, int ox, int oy, int maxBlockDstRows, int bpp = 2) {
     width = w;
     height = h;
     originX = ox;
     originY = oy;
-    bytesPerRow = (w + 3) / 4;  // 2 bits per pixel, 4 pixels per byte
+    bitsPerPixel = bpp;
+    bytesPerRow = bpp == 4 ? (w + 1) / 2 : (w + 3) / 4;
     bandStart = 0;
     flushedRows = 0;
     ok = false;

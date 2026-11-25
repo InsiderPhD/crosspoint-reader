@@ -18,6 +18,12 @@
 // Reader enforcement: SdCardFont::load().
 #define CPFONT_VERSION 4
 
+// Global header flags (uint16 at offset 10): the glyph bitmap depth. Exactly
+// one is set; 4-bit (16 coverage levels, two pixels per byte, high nibble
+// first) is what the 16-level text path draws from.
+#define CPFONT_FLAG_2BIT 0x0001
+#define CPFONT_FLAG_4BIT 0x0002
+
 class SdCardFont {
  public:
   static constexpr uint16_t MAX_PAGE_GLYPHS = 512;
@@ -130,6 +136,7 @@ class SdCardFont {
     int16_t ascender = 0;
     int16_t descender = 0;
     bool is2Bit = false;
+    bool is4Bit = false;
     uint16_t kernLeftEntryCount = 0;
     uint16_t kernRightEntryCount = 0;
     uint8_t kernLeftClassCount = 0;

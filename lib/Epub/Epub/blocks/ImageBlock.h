@@ -19,12 +19,13 @@ class ImageBlock final : public Block {
 
   bool imageExists() const;
 
-  // Cheap probe: is there a .pxc whose header matches this block's dimensions?
-  // Opens the cache file but never reads the payload.
-  bool hasValidCache() const;
+  // Cheap probe: is there a .pxc (or, with levels4, the 16-level planes' 4-bit
+  // .px4) whose header matches this block's dimensions? Opens the cache file but
+  // never reads the payload.
+  bool hasValidCache(bool levels4 = false) const;
   // True when rendering this image will cost a decode rather than a cache read,
   // i.e. it is worth showing a placeholder first.
-  bool needsDecode() const;
+  bool needsDecode(bool levels4 = false) const;
 
   // Outline box in the image's reserved space. Drawn before a decode so the
   // page is readable while it runs, and again in place of any image that failed.
@@ -50,9 +51,12 @@ class ImageBlock final : public Block {
   BlockType getType() override { return IMAGE_BLOCK; }
   bool isEmpty() override { return false; }
 
+  // The picture from its pixel cache, decoding (and caching) it when there is
+  // none: the 2-bit .pxc, or in a GRAY16_PLANE pass the 4-bit .px4 whose ink
+  // levels the plane's mask selects from.
   void render(GfxRenderer& renderer, const int x, const int y);
   // The picture in 8-bit gray into a 16-level buffer (Gray16Sink), decoded from
-  // the source file every time: the pixel cache holds 2 bits. False (nothing
+  // the source file every time (the Picco's page buffer). False (nothing
   // written) when it cannot be decoded; the caller keeps what it drew.
   bool renderGray16(GfxRenderer& renderer, int x, int y, const Gray16Sink& sink) const;
   bool serialize(Print& file);

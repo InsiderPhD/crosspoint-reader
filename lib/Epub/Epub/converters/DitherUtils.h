@@ -25,3 +25,25 @@ inline uint8_t applyBayerDither4Level(uint8_t gray, int x, int y) {
   if (adjusted < 192) return 2;
   return 3;
 }
+
+// Bayer-dithered 4-bit ink level (0 white .. 15 black) for the 16-level planes'
+// .px4 cache: floor(ink * 15 / 255 + (t + 0.5) / 16) with t the 0..15 matrix
+// entry, in 1/4080ths so it stays integer. A flat tone lands on its level; a
+// tone between two levels mixes them in the Bayer pattern.
+inline uint8_t applyBayerDither16Level(uint8_t gray, int x, int y) {
+  const int ink = 255 - gray;
+  const int t = bayer4x4[y & 3][x & 3];
+  const int level = (ink * 240 + (2 * t + 1) * 128) / 4080;
+  return level > 15 ? 15 : static_cast<uint8_t>(level);
+}
+
+// A decoded pixel's cache value: the 2-bit tone (0 black .. 3 white) of the
+// .pxc, or with levels4 the 4-bit ink level of the .px4.
+inline uint8_t quantizeImagePixel(uint8_t gray, int x, int y, bool useDithering, bool levels4) {
+  if (levels4) {
+    return useDithering ? applyBayerDither16Level(gray, x, y) : static_cast<uint8_t>(((255 - gray) * 15 + 127) / 255);
+  }
+  if (useDithering) return applyBayerDither4Level(gray, x, y);
+  const uint8_t tone = gray / 85;
+  return tone > 3 ? 3 : tone;
+}

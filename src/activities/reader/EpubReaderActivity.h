@@ -16,6 +16,7 @@
 #include "EpubReaderMenuActivity.h"
 #include "ReaderActivity.h"
 #include "activities/Activity.h"
+#include "platform/Gray16Support.h"
 #include "util/DictionaryLookup.h"
 #include "util/ProgressAutoSync.h"
 #include "util/ReaderCombos.h"
@@ -30,7 +31,7 @@ class EpubReaderActivity final : public Activity {
   // Cleared on the next render after the new section loads and resolves it to a page.
   std::string pendingAnchor;
   int pagesUntilFullRefresh = 0;
-#if FREEINK_DEVICE_PICCO
+#if CROSSPOINT_GRAY16_IMAGE
   // 16-level text (SETTINGS.textGray16): the page's 4 bpp levels followed by a
   // copy of its B/W frame (what menus and overlays draw over afterwards).
   // PSRAM, allocated on the first 16-level page, freed in onExit.
@@ -39,9 +40,19 @@ class EpubReaderActivity final : public Activity {
   // carries on with the normal display.
   // withPictures: a page with pictures (jpirnay's approach, witchhunt-reader
   // ReaderGrayCanvas): the text's levels, each picture's own grays over its box
-  // (decoded again in 8 bits, ordered-dithered), up on the 16-level text turn.
+  // (decoded again in 8 bits, ordered-dithered), up on the 16-level text turn
+  // (Picco), or as one clean 16-level image draw on a panel whose driver has
+  // only displayGray16Image (UC8179 X4 Pro: gray16DeepLevels() == 0).
   bool presentGray16Page(Page& page, int orientedMarginLeft, int orientedMarginTop, int viewportBottom,
                          int viewportWidth, bool withPictures = false);
+#endif
+#if CROSSPOINT_GRAY16_PLANES
+  // UC8253 X3 (SETTINGS.textGray16): the page through the two-pass 16-level
+  // planes, rendered once per plane into the one framebuffer (no page buffer).
+  // Text and the cached 2-bit pictures together. True once the page is on the
+  // panel; false = not taken, the caller carries on with the normal display.
+  bool presentGray16PlanesPage(Page& page, int orientedMarginLeft, int orientedMarginTop, int viewportBottom,
+                               int viewportWidth);
 #endif
   // Late "Loading" popup for a cached open that turns out slow (see the class).
   // Checked between onEnter()'s stages and the first render()'s; finished by

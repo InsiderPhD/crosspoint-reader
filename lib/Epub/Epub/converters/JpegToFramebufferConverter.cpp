@@ -136,6 +136,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   if (stride <= 0 || blockH <= 0 || validW <= 0) return 1;
 
   const bool useDithering = ctx->config->useDithering;
+  const bool levels4 = ctx->config->levels4Bit;  // 4-bit ink levels to the writer and the .px4
   bool caching = ctx->caching;
   const Gray16Sink* const gray16 = ctx->config->gray16;  // 8-bit gray to the 16-level buffer only
   const int32_t fineScaleFPX = ctx->fineScaleFPX;
@@ -173,6 +174,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
   // Pre-compute orientation and render-mode state once per callback invocation
   DirectPixelWriter pw;
   pw.init(renderer);
+  pw.levels4Bit = levels4;
 
   // The cache streams to disk one MCU-row band at a time. Flushing rows below
   // this block (raster order guarantees they are final) repositions the band;
@@ -186,7 +188,8 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
       caching = false;
       ctx->caching = false;
     } else {
-      cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.bandRows, ctx->cache.originX);
+      cw.init(ctx->cache.buffer, ctx->cache.bytesPerRow, ctx->cache.bandRows, ctx->cache.originX,
+              ctx->cache.bitsPerPixel);
       cacheOriginY = ctx->config->y + ctx->cache.bandStart;
     }
   }
@@ -205,13 +208,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
           gray16->write(outX, outY, gray);
           continue;
         }
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
+        const uint8_t dithered = quantizeImagePixel(gray, outX, outY, useDithering, levels4);
         pw.writePixel(outX, dithered);
         if (caching) cw.writePixel(outX, dithered);
       }
@@ -273,13 +270,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
           continue;
         }
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
+        const uint8_t dithered = quantizeImagePixel(gray, outX, outY, useDithering, levels4);
         pw.writePixel(outX, dithered);
         if (caching) cw.writePixel(outX, dithered);
       }
@@ -301,13 +292,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
           continue;
         }
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
+        const uint8_t dithered = quantizeImagePixel(gray, outX, outY, useDithering, levels4);
         pw.writePixel(outX, dithered);
         if (caching) cw.writePixel(outX, dithered);
       }
@@ -332,13 +317,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
           continue;
         }
 
-        uint8_t dithered;
-        if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
-        } else {
-          dithered = gray / 85;
-          if (dithered > 3) dithered = 3;
-        }
+        const uint8_t dithered = quantizeImagePixel(gray, outX, outY, useDithering, levels4);
         pw.writePixel(outX, dithered);
         if (caching) cw.writePixel(outX, dithered);
       }
@@ -370,13 +349,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         continue;
       }
 
-      uint8_t dithered;
-      if (useDithering) {
-        dithered = applyBayerDither4Level(gray, outX, outY);
-      } else {
-        dithered = gray / 85;
-        if (dithered > 3) dithered = 3;
-      }
+      const uint8_t dithered = quantizeImagePixel(gray, outX, outY, useDithering, levels4);
       pw.writePixel(outX, dithered);
       if (caching) cw.writePixel(outX, dithered);
     }
@@ -514,7 +487,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   ctx.caching = !config.cachePath.empty() && !config.gray16;
   if (ctx.caching) {
     const int maxBlockDstRows = (int)(((int64_t)16 * ctx.fineScaleFPY) >> FP_SHIFT) + 2;
-    if (!ctx.cache.begin(config.cachePath, destWidth, destHeight, config.x, config.y, maxBlockDstRows)) {
+    if (!ctx.cache.begin(config.cachePath, destWidth, destHeight, config.x, config.y, maxBlockDstRows,
+                         config.levels4Bit ? 4 : 2)) {
       LOG_ERR("JPG", "Failed to start cache stream, continuing without caching");
       ctx.caching = false;
     }

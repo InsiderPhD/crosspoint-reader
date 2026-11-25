@@ -1,6 +1,7 @@
 #pragma once
 
 #include <HalClock.h>
+#include <HalDisplay.h>
 #include <HalFrontlight.h>
 #include <HalTiltSensor.h>
 #include <I18n.h>
@@ -12,6 +13,7 @@
 #include "HardcoverTokenStore.h"
 #include "KOReaderCredentialStore.h"
 #include "activities/settings/SettingsActivity.h"
+#include "platform/Gray16Support.h"
 
 // Shared settings list used by both the device settings UI and the web settings API.
 // Each entry has a key (for JSON API) and category (for grouping).
@@ -250,14 +252,17 @@ inline void appendReaderBehaviourSettings(SettingSink& v) {
                                   "extraParagraphSpacing", StrId::STR_CAT_READER));
   v.push_back(SettingInfo::Toggle(StrId::STR_TEXT_AA, &CrossPointSettings::textAntiAliasing, "textAntiAliasing",
                                   StrId::STR_CAT_READER));
-  v.push_back(SettingInfo::Toggle(StrId::STR_TEXT_GRAY16, &CrossPointSettings::textGray16, "textGray16"
-#if FREEINK_DEVICE_PICCO
-                                  // Picco only: keep the JSON key round-tripping elsewhere, hidden
-                                  // (no category = hidden from UI).
-                                  ,
-                                  StrId::STR_CAT_READER
+#if CROSSPOINT_GRAY16_PLANES || FREEINK_DEVICE_PICCO
+  // 16-level text: the X3's two-pass planes (shown only once the boot probe has
+  // found that panel: the C3 image also serves the X4) and the Picco's text
+  // turn. The X4 Pro draws 16-level pictures only, so the row stays hidden
+  // there (no category = hidden from UI) and the key keeps round-tripping.
+  v.push_back(
+      SettingInfo::Toggle(StrId::STR_TEXT_GRAY16, &CrossPointSettings::textGray16, "textGray16", StrId::STR_CAT_READER)
+          .withVisibleIf([] { return display.supportsGray16Planes() || display.gray16DeepLevels() != 0; }));
+#else
+  v.push_back(SettingInfo::Toggle(StrId::STR_TEXT_GRAY16, &CrossPointSettings::textGray16, "textGray16"));
 #endif
-                                  ));
   v.push_back(SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                                 {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
                                 "imageRendering", StrId::STR_CAT_READER));
